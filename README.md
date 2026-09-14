@@ -53,6 +53,18 @@ The first run fetches the plugin (and a matching `graph-engine` binary for your 
 - The Web UI is a local, single-user tool with no login -- it only listens on your own machine unless you deliberately widen that in App Settings.
 - Data (tickets, execution graphs, artifacts) is stored locally by default, with no setup required. Everything above works with the defaults; the App Settings tab exists for cases that need something different (a shared database, a custom port, etc.) and can be left alone otherwise. Artifacts land under `$HOME/.graph-ops/artifacts` (or wherever App Settings points), never in a repo-root `artifacts/` directory -- if one shows up there, it's stray output and safe to delete.
 
+### Troubleshooting
+
+- **"Launch Claude" / "Create" / "Run" / "Refine" doesn't seem to open a terminal**: these buttons open an external terminal by auto-detecting your environment (an active `tmux` session, or `open -a Terminal` on macOS). If neither applies -- notably **on Windows, which has no built-in launcher yet** (tracked as DFLT-00065) -- the launch fails and the Web UI shows a brief error toast that auto-clears after a few seconds, which can look like nothing happened. Set `terminalCommand` in `graph-config.json` (found in your project directory or `$HOME/.graph-ops/graph-config.json`; or set the `TERMINAL_COMMAND` env var) to a shell template using `{cwd}` and `{command}` placeholders. For example, on Windows with Windows Terminal:
+  ```json
+  { "terminalCommand": "wt.exe -d {cwd} cmd /k {command}" }
+  ```
+  or with `cmd.exe` directly:
+  ```json
+  { "terminalCommand": "cmd /c start cmd /k \"cd /d {cwd} && {command}\"" }
+  ```
+  The same setting also covers terminal emulators auto-detection doesn't try on macOS/Linux, such as iTerm, wezterm, kitty, or a VS Code integrated terminal.
+
 ---
 
 <a id="japanese"></a>
@@ -105,6 +117,18 @@ The first run fetches the plugin (and a matching `graph-engine` binary for your 
 
 - Web UIはログイン不要のローカル・単一ユーザー向けツールで、App Settingsで明示的に範囲を広げない限り自分のマシンからのみアクセスできます。
 - チケット・実行グラフ・成果物などのデータは、特別な設定なしに既定でローカルに保存されます。ここまでの内容はすべて既定設定のまま動作します。App Settingsタブは共有データベースやポート変更など特別な要件がある場合のためのもので、それ以外では触らなくて構いません。成果物の保存先は既定で `$HOME/.graph-ops/artifacts`（またはApp Settingsで指定した場所）であり、リポジトリ直下の `artifacts/` ディレクトリではありません。もし直下に生成されていた場合は混入した不要なファイルなので削除して構いません。
+
+### トラブルシューティング
+
+- **「Claude 起動」「作成」「実行」「リファイン」ボタンを押してもターミナルが開かないように見える**: これらのボタンは、実行環境を自動判定して外部ターミナルを開きます（`tmux` セッション内で実行中の場合はそのウィンドウ、macOSでは `open -a Terminal`）。どちらにも該当しない場合 -- 特に **Windowsには現時点で組み込みの起動方法が用意されていません**（DFLT-00065 で追跡中）-- 起動に失敗し、Web UIには数秒で自動的に消えるエラートーストが表示されるだけなので、何も起きていないように見えることがあります。`graph-config.json`（プロジェクトディレクトリ、または `$HOME/.graph-ops/graph-config.json` に置く。もしくは環境変数 `TERMINAL_COMMAND`）に `terminalCommand` を設定してください。値は `{cwd}` と `{command}` のプレースホルダーを使ったシェルコマンドのテンプレートです。例えば、Windows Terminal を使う場合:
+  ```json
+  { "terminalCommand": "wt.exe -d {cwd} cmd /k {command}" }
+  ```
+  `cmd.exe` を直接使う場合:
+  ```json
+  { "terminalCommand": "cmd /c start cmd /k \"cd /d {cwd} && {command}\"" }
+  ```
+  同じ設定で、macOS/Linuxで自動判定の対象外のターミナル（iTerm、wezterm、kitty、VS Codeの統合ターミナルなど）を使いたい場合にも対応できます。
 
 ---
 
