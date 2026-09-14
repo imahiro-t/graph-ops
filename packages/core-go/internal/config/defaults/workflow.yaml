@@ -46,7 +46,7 @@ workflow:
   # default document, only -- see its doc comment -- and
   # handlePutSettingsCatalog rejects a submitted document that sets either
   # field). Names below are English only: DFLT-00051 replaced the old
-  # hardcoded bilingual ("English / 日本語") names with a language-file
+  # hardcoded bilingual ("English / Japanese") names with a language-file
   # mechanism (see internal/config/locale.go and defaults/locales/*.yaml) --
   # when the resolved language (user/team Document.Language, or an explicit
   # --language override) has a matching locale file, LoadWithRoots/
