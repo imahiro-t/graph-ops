@@ -1,0 +1,36 @@
+# Japanese locale for the fixed workflow skeleton's node names and the
+# default review gates' names (see packages/core-go/internal/config/locale.go
+# -- LoadLocale/ApplyLocale). This file is the canonical, hand-edited source;
+# packages/core-go/internal/config/defaults/locales/ja.yaml is a generated
+# mirror kept in sync by `npm run sync:defaults` (see that script's entry in
+# the repo root package.json), exactly like defaults/workflow.yaml and
+# defaults/node-types/*.md.
+#
+# Only display names are covered here -- review gate `criteria` text is out
+# of scope (see the execution plan, section 1.2). The strings below are the
+# same Japanese text that used to be hardcoded as the " / 日本語" half of
+# each bilingual workflow.yaml node name (pre-DFLT-00051), reused verbatim
+# rather than retranslated, and they match the onboarding skill's own
+# Japanese translations for the six review gates.
+version: 1
+language: ja
+nodes:
+  plan: "計画作成"
+  plan_review: "計画レビュー"
+  plan_approval: "計画承認"
+  gherkin_spec: "Gherkin仕様作成"
+  gherkin_review: "Gherkin仕様レビュー"
+  impl: "実装"
+  gherkin_test: "Gherkinテスト実行"
+  test_review: "テスト結果レビュー"
+  report: "テストレポート作成（HTML/キャプチャ）"
+  report_review: "レポートレビュー"
+  release_approval: "リリース承認"
+  release: "リリース・デプロイ（手動）"
+review_gates:
+  code_review: "コードレビュー"
+  qa_review: "QAレビュー"
+  security_review: "セキュリティレビュー"
+  non_functional_review: "非機能レビュー"
+  investigation_review: "調査レビュー"
+  accessibility_review: "アクセシビリティレビュー"

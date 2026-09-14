@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en" data-report-template="graph-ops-default" data-report-version="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REPLACE_WITH_TICKET_ID -- REPLACE_WITH_TICKET_TITLE</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f8;
+    --panel: #ffffff;
+    --text: #1f2328;
+    --muted: #59636e;
+    --border: #d8dee4;
+    --accent: #6e5494;
+    --pass: #1a7f37;
+    --fail: #cf222e;
+    --pass-bg: #dafbe1;
+    --fail-bg: #ffebe9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --text: #e6edf3;
+      --muted: #9198a1;
+      --border: #30363d;
+      --pass-bg: #113321;
+      --fail-bg: #3c1618;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+  }
+  .report-shell { max-width: 860px; margin: 0 auto; padding: 32px 20px 64px; }
+  section, header, footer { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; margin-bottom: 20px; }
+  header[data-report-section="header"] { display: flex; flex-direction: column; gap: 4px; }
+  header[data-report-section="header"] h1 { margin: 0; font-size: 1.4rem; }
+  header[data-report-section="header"] .meta { color: var(--muted); font-size: 0.9rem; display: flex; gap: 16px; flex-wrap: wrap; }
+  section[data-report-section="summary"] h2, section[data-report-section="results"] h2 { margin-top: 0; font-size: 1.1rem; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  .status-badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.8rem; font-weight: 600; }
+  .status-badge.pass { color: var(--pass); background: var(--pass-bg); }
+  .status-badge.fail { color: var(--fail); background: var(--fail-bg); }
+  table.results-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+  table.results-table th, table.results-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.results-table th { color: var(--muted); font-weight: 600; }
+  footer[data-report-section="footer"] { color: var(--muted); font-size: 0.85rem; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  code { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 0.9em; }
+</style>
+</head>
+<body>
+<div class="report-shell">
+
+  <!--
+    FIXED STRUCTURE -- do not remove sections or the data-report-* markers.
+    Fill in the placeholder text (REPLACE_WITH_*) with real content; keep the
+    four sections in this order (header, summary, results, footer) and keep
+    every data-report-section value exactly as shown. See
+    packages/core-go/internal/config/defaults/node-types/deliverable.md (the
+    "report" node type's default instructions, resolvable via
+    `graph-engine get-node-type-context report`) for how this gets filled
+    in and validated by `add-artifact`.
+  -->
+
+  <header data-report-section="header">
+    <h1>REPLACE_WITH_TICKET_ID -- REPLACE_WITH_TICKET_TITLE</h1>
+    <div class="meta">
+      <span>Generated: REPLACE_WITH_ISO_DATE</span>
+      <span>Overall status: <span class="status-badge pass">REPLACE_WITH_PASS_OR_FAIL</span></span>
+    </div>
+  </header>
+
+  <section data-report-section="summary">
+    <h2>Summary</h2>
+    <p>REPLACE_WITH_ONE_TO_THREE_SENTENCE_SUMMARY of what was implemented/tested and the overall outcome.</p>
+  </section>
+
+  <section data-report-section="results">
+    <h2>Results</h2>
+    <table class="results-table">
+      <thead>
+        <tr><th>Check</th><th>Status</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>REPLACE_WITH_CHECK_NAME (e.g. Gherkin scenario, review gate, test suite)</td>
+          <td><span class="status-badge pass">PASS</span></td>
+          <td>REPLACE_WITH_NOTES_OR_EVIDENCE</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer data-report-section="footer">
+    <span>graph-ops test report</span>
+    <span>Template: graph-ops-default v1</span>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,219 @@
+package store
+
+import (
+	"os"
+	"testing"
+
+	"github.com/graph-ops/core-go/internal/domain"
+)
+
+// mysqlTestConfig builds a store.Config from GRAPH_TEST_MYSQL_* env vars.
+// MySQLRepository can only be exercised against a real MySQL server (there
+// is no pure-Go in-memory MySQL the way modernc.org/sqlite gives SQLite),
+// so -- per DFLT-00020's execution plan -- these tests skip entirely unless
+// a real server is configured for them to run against; the corresponding
+// manual test checklist (see the ticket's Gherkin/plan artifacts) is the
+// fallback verification path when no such server is available (e.g. in
+// this sandbox/CI environment).
+func mysqlTestConfig(t *testing.T) Config {
+	t.Helper()
+	host := os.Getenv("GRAPH_TEST_MYSQL_HOST")
+	if host == "" {
+		t.Skip("GRAPH_TEST_MYSQL_HOST not set; skipping MySQLRepository tests (see mysqlTestConfig's doc comment)")
+	}
+	port := 3306
+	if p := os.Getenv("GRAPH_TEST_MYSQL_PORT"); p != "" {
+		var err error
+		if port, err = parsePort(p); err != nil {
+			t.Fatalf("invalid GRAPH_TEST_MYSQL_PORT %q: %v", p, err)
+		}
+	}
+	return Config{
+		Backend:       "mysql",
+		MySQLHost:     host,
+		MySQLPort:     port,
+		MySQLDatabase: os.Getenv("GRAPH_TEST_MYSQL_DATABASE"),
+		MySQLUser:     os.Getenv("GRAPH_TEST_MYSQL_USER"),
+		MySQLPassword: os.Getenv("GRAPH_TEST_MYSQL_PASSWORD"),
+		// Deliberately no test-only lenient default: an unset
+		// GRAPH_TEST_MYSQL_TLS normalizes to verify-full (the same
+		// default production gets), matching this ticket's execution
+		// plan (T-5) that the test suite must exercise the same secure
+		// default a real deployment gets, not a separately relaxed one.
+		MySQLTLSMode:   os.Getenv("GRAPH_TEST_MYSQL_TLS"),
+		MySQLTLSCAFile: os.Getenv("GRAPH_TEST_MYSQL_TLS_CA"),
+	}
+}
+
+func parsePort(s string) (int, error) {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, os.ErrInvalid
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n, nil
+}
+
+// newTestMySQLRepo opens (and initializes) a fresh MySQLRepository against
+// the configured test server, and truncates every table first so each test
+// starts from an empty database -- unlike SQLite's newTestRepo, there is no
+// t.TempDir() to isolate a MySQL test into its own file.
+func newTestMySQLRepo(t *testing.T) *MySQLRepository {
+	t.Helper()
+	cfg := mysqlTestConfig(t)
+	repo, err := NewMySQLRepository(cfg)
+	if err != nil {
+		t.Fatalf("NewMySQLRepository: %v", err)
+	}
+	if err := repo.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	for _, table := range []string{"artifacts", "edges", "nodes", "tickets", "app_state", "projects"} {
+		if _, err := repo.db.Exec("DELETE FROM " + table); err != nil {
+			t.Fatalf("cleaning table %s before test: %v", table, err)
+		}
+	}
+	t.Cleanup(func() { repo.db.Close() })
+	return repo
+}
+
+// TestMySQLRepository_InitIsIdempotent covers the Gherkin scenarios "テーブ
+// ルが存在しないMySQLに対して起動すると、スキーマが自動作成される" and "既に
+// テーブルが存在するMySQLに対して再起動しても、既存データは壊れない": calling
+// Init twice in a row must succeed both times, against both an empty
+// database and one that already has the schema.
+func TestMySQLRepository_InitIsIdempotent(t *testing.T) {
+	cfg := mysqlTestConfig(t)
+	repo, err := NewMySQLRepository(cfg)
+	if err != nil {
+		t.Fatalf("NewMySQLRepository: %v", err)
+	}
+	defer repo.db.Close()
+
+	if err := repo.Init(); err != nil {
+		t.Fatalf("first Init: %v", err)
+	}
+	if err := repo.Init(); err != nil {
+		t.Fatalf("second Init should be idempotent: %v", err)
+	}
+}
+
+// TestMySQLRepository_ProjectTicketNodeEdgeArtifactCRUD exercises the same
+// CRUD contract SQLiteRepository's tests do for every entity the Gherkin
+// Scenario Outline ("MySQLRepositoryはGraphRepositoryの主要CRUD操作を
+// SQLiteRepositoryと同等に行える") lists: Project, Ticket, Node, Edge,
+// Artifact.
+func TestMySQLRepository_ProjectTicketNodeEdgeArtifactCRUD(t *testing.T) {
+	repo := newTestMySQLRepo(t)
+
+	proj, err := repo.CreateProject("MySQL Test Project", "MYSQ", t.TempDir())
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if got, err := repo.GetProject(proj.ID); err != nil || got == nil || got.Name != proj.Name {
+		t.Fatalf("GetProject: %v, %+v", err, got)
+	}
+
+	ticket, err := repo.CreateTicket(proj.ID, domain.Ticket{Title: "t", Description: "d", Status: domain.TicketTODO, AutoExecutable: true})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if ticket.ID != proj.Prefix+"-00001" {
+		t.Errorf("expected ticket ID %s-00001, got %q", proj.Prefix, ticket.ID)
+	}
+	newTitle := "updated"
+	updatedTicket, err := repo.UpdateTicket(ticket.ID, TicketPatch{Title: &newTitle})
+	if err != nil || updatedTicket.Title != newTitle {
+		t.Fatalf("UpdateTicket: %v, %+v", err, updatedTicket)
+	}
+
+	// DFLT-00048: priority round-trips through set/change/clear the same way
+	// on MySQL as on SQLite (see TestTicketPriorityCRUD).
+	if ticket.Priority != nil {
+		t.Errorf("a newly created ticket should have no priority set, got %+v", ticket.Priority)
+	}
+	high := domain.TicketPriorityHigh
+	highPtr := &high
+	updatedTicket, err = repo.UpdateTicket(ticket.ID, TicketPatch{Priority: &highPtr})
+	if err != nil || updatedTicket.Priority == nil || *updatedTicket.Priority != domain.TicketPriorityHigh {
+		t.Fatalf("UpdateTicket(priority=HIGH): %v, %+v", err, updatedTicket)
+	}
+	var clearedPtr *domain.TicketPriority
+	updatedTicket, err = repo.UpdateTicket(ticket.ID, TicketPatch{Priority: &clearedPtr})
+	if err != nil || updatedTicket.Priority != nil {
+		t.Fatalf("UpdateTicket(priority=nil): %v, %+v", err, updatedTicket)
+	}
+
+	node, err := repo.CreateNode(domain.GraphNode{TicketID: ticket.ID, Name: "n", Type: domain.NodeTypePlan, Status: domain.NodeTODO, MaxIterations: 3})
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if node.ID != ticket.ID+"-01" {
+		t.Errorf("expected node ID %s-01, got %q", ticket.ID, node.ID)
+	}
+	node2, err := repo.CreateNode(domain.GraphNode{TicketID: ticket.ID, Name: "n2", Type: domain.NodeTypeReview, Status: domain.NodeTODO, MaxIterations: 3})
+	if err != nil {
+		t.Fatalf("CreateNode 2: %v", err)
+	}
+
+	edge, err := repo.CreateEdge(domain.GraphEdge{ID: "e-" + node.ID, TicketID: ticket.ID, FromNodeID: node.ID, ToNodeID: node2.ID})
+	if err != nil {
+		t.Fatalf("CreateEdge: %v", err)
+	}
+	if edge.Condition != domain.EdgeAlways {
+		t.Errorf("expected default condition %q, got %q", domain.EdgeAlways, edge.Condition)
+	}
+	edges, err := repo.ListEdgesByTicket(ticket.ID)
+	if err != nil || len(edges) != 1 {
+		t.Fatalf("ListEdgesByTicket: %v, len=%d", err, len(edges))
+	}
+
+	content := "artifact body"
+	art, err := repo.CreateArtifact(domain.Artifact{ID: "a-" + node.ID, TicketID: ticket.ID, NodeID: node.ID, Name: "x", Type: domain.ArtifactText, Content: &content})
+	if err != nil {
+		t.Fatalf("CreateArtifact: %v", err)
+	}
+	if art.Content == nil || *art.Content != content {
+		t.Errorf("artifact content mismatch: %+v", art)
+	}
+
+	detail, err := repo.GetTicketDetail(ticket.ID)
+	if err != nil || detail == nil || len(detail.Nodes) != 2 || len(detail.Edges) != 1 || len(detail.Artifacts) != 1 {
+		t.Fatalf("GetTicketDetail: %v, %+v", err, detail)
+	}
+
+	if err := repo.SetCurrentProjectID(proj.ID); err != nil {
+		t.Fatalf("SetCurrentProjectID: %v", err)
+	}
+	if cur, err := repo.GetCurrentProjectID(); err != nil || cur != proj.ID {
+		t.Fatalf("GetCurrentProjectID: %v, got %q want %q", err, cur, proj.ID)
+	}
+	// Upsert path (ON DUPLICATE KEY UPDATE): setting it again must update
+	// in place, not fail on a duplicate primary key.
+	proj2, err := repo.CreateProject("Second", "SCND", t.TempDir())
+	if err != nil {
+		t.Fatalf("CreateProject 2: %v", err)
+	}
+	if err := repo.SetCurrentProjectID(proj2.ID); err != nil {
+		t.Fatalf("SetCurrentProjectID (upsert): %v", err)
+	}
+	if cur, err := repo.GetCurrentProjectID(); err != nil || cur != proj2.ID {
+		t.Fatalf("GetCurrentProjectID after upsert: %v, got %q want %q", err, cur, proj2.ID)
+	}
+
+	if err := repo.DeleteNode(node2.ID); err != nil {
+		t.Fatalf("DeleteNode: %v", err)
+	}
+	if got, err := repo.GetNode(node2.ID); err != nil || got != nil {
+		t.Errorf("expected node deleted, got %+v (err=%v)", got, err)
+	}
+
+	if err := repo.DeleteProject(proj.ID); err != nil {
+		t.Fatalf("DeleteProject: %v", err)
+	}
+	if got, err := repo.GetTicket(ticket.ID); err != nil || got != nil {
+		t.Errorf("expected ticket cascaded away with its project, got %+v (err=%v)", got, err)
+	}
+}

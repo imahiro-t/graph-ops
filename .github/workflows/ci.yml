@@ -1,0 +1,126 @@
+name: CI
+
+# Builds and tests every push to the default branch and every pull request
+# targeting it. Release builds (release.yml) are tag-triggered and do not run
+# the test suite, so this is the only place the tree is verified before a tag
+# is cut.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# A second push to the same PR makes the in-flight run obsolete, so cancel it.
+# Pushes to the default branch are NOT cancelled: this workflow is the only
+# place the tree is verified before a tag is cut, so every commit that lands on
+# the default branch has to be verified on its own, even when several land in a
+# row.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    # The whole job takes a couple of minutes; anything beyond this is a hang
+    # (a wedged `npm ci`, a test waiting on something that never arrives) and
+    # should fail fast rather than hold a runner for GitHub's 6 hour default.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/core-go/go.mod
+          cache-dependency-path: packages/core-go/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Vet Go sources
+        working-directory: packages/core-go
+        run: go vet ./...
+
+      # `npm test` runs sync:defaults, then the Go test suite, then each
+      # workspace's own tests.
+      - name: Test
+        run: npm test
+
+      # Deliberately a separate step, and not merged into `npm test`: `vitest`
+      # (run as part of `npm test` above, now that the web workspace has a
+      # test script -- see the web-unit-test job below) does not type-check
+      # anything -- it's Vite's esbuild transform, not tsc. This step's
+      # `tsc && vite build` remains the only thing that catches a TypeScript
+      # error in packages/web at all.
+      - name: Type-check and build web
+        run: npm run build --workspace=@graph-ops/web
+
+      # sync:defaults (run by `npm test` above) regenerates the committed
+      # mirror under packages/core-go/internal/config/defaults/ from
+      # packages/plugin/defaults/. If that leaves the tree dirty, the mirror
+      # was committed stale and the built binary would embed outdated node
+      # type instructions.
+      #
+      # `git status --porcelain`, not `git diff`: release.yml builds the binary
+      # straight from a clean checkout, so the committed mirror is what gets
+      # embedded, and the most likely way for it to go stale is a NEW default
+      # file that was never added to the index. `git diff` only reports tracked
+      # paths, so it would report a clean tree for exactly that case and ship a
+      # binary missing the new node type's instructions. --porcelain lists
+      # untracked files too (additions, modifications and deletions alike).
+      - name: Check the embedded defaults mirror is in sync
+        run: |
+          out="$(git status --porcelain -- packages/core-go/internal/config/defaults)"
+          if [ -n "$out" ]; then
+            echo "packages/core-go/internal/config/defaults is out of sync with packages/plugin/defaults." >&2
+            echo "Run 'npm run sync:defaults' and commit the result." >&2
+            echo "$out" >&2
+            exit 1
+          fi
+
+  web-lint:
+    name: Web lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint web
+        run: npm run lint --workspace=@graph-ops/web
+
+  web-unit-test:
+    name: Web unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test web
+        run: npm run test --workspace=@graph-ops/web

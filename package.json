@@ -1,0 +1,26 @@
+{
+  "name": "graph-ops",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "workspaces": [
+    "packages/plugin",
+    "packages/web"
+  ],
+  "scripts": {
+    "build:web": "npm run build --workspace=@graph-ops/web",
+    "embed:web": "rm -rf packages/core-go/internal/httpserver/webdist/* && cp -r packages/web/dist/. packages/core-go/internal/httpserver/webdist/",
+    "sync:defaults": "rm -rf packages/core-go/internal/config/defaults/node-types/*.md packages/core-go/internal/config/defaults/report/template.html packages/core-go/internal/config/defaults/plan/template.md packages/core-go/internal/config/defaults/review/template.md packages/core-go/internal/config/defaults/workflow.yaml packages/core-go/internal/config/defaults/locales && cp packages/plugin/defaults/node-types/*.md packages/core-go/internal/config/defaults/node-types/ && cp packages/plugin/defaults/report/template.html packages/core-go/internal/config/defaults/report/template.html && mkdir -p packages/core-go/internal/config/defaults/plan && cp packages/plugin/defaults/plan/template.md packages/core-go/internal/config/defaults/plan/template.md && mkdir -p packages/core-go/internal/config/defaults/review && cp packages/plugin/defaults/review/template.md packages/core-go/internal/config/defaults/review/template.md && cp packages/plugin/defaults/workflow.yaml packages/core-go/internal/config/defaults/workflow.yaml && mkdir -p packages/core-go/internal/config/defaults/locales && cp -r packages/plugin/defaults/locales/. packages/core-go/internal/config/defaults/locales/",
+    "build:go": "npm run sync:defaults && cd packages/core-go && go build -o graph-engine ./cmd/graph-engine && cd ../.. && npm run copy:bin",
+    "copy:bin": "mkdir -p packages/plugin/bin && cp packages/core-go/graph-engine packages/plugin/bin/graph-engine && node -e \"const v=require('./packages/plugin/.claude-plugin/plugin.json').version; require('fs').writeFileSync('packages/plugin/bin/.version', v + '\\n')\"",
+    "dev:server": "npm run build:go && packages/core-go/graph-engine serve",
+    "dev:web": "npm run dev --workspace=@graph-ops/web",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:web\"",
+    "build": "npm run build:web && npm run embed:web && npm run build:go && npm run build --workspace=@graph-ops/plugin --if-present",
+    "start": "npm run build && packages/core-go/graph-engine serve",
+    "test": "npm run sync:defaults && cd packages/core-go && go test ./... && cd ../.. && npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

@@ -1,0 +1,1485 @@
+import React, { useLayoutEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  ChevronDown,
+  ChevronRight,
+  GitBranch,
+  Play,
+  FileCode,
+  Globe,
+  FileText,
+  ExternalLink,
+  Download,
+  Send,
+  Loader2,
+  Layers,
+  ClipboardEdit,
+  Check,
+  X,
+  Trash2,
+  History,
+  UserPlus,
+  Archive,
+  RotateCcw
+} from 'lucide-react';
+import { TicketDetail, TicketPriority, TICKET_PRIORITIES } from '../types';
+import { getStatusMeta, TODO_META } from '../statusMeta';
+import { getPriorityMeta } from '../priorityMeta';
+import { GherkinViewer } from './GherkinViewer';
+import { MarkdownViewer } from './MarkdownViewer';
+import { NodeTypeBadge } from './NodeTypeBadge';
+import { StatusLiveRegion } from './StatusLiveRegion';
+import { useClaudeLaunch } from '../hooks/useClaudeLaunch';
+import { formatDateTime, formatTime } from '../i18n/formatDate';
+import { localizedApiErrorMessage, errorMessage } from '../lib/apiError';
+import { apiFetch } from '../lib/apiFetch';
+import { isSubmitShortcut } from '../lib/keyboardShortcuts';
+
+interface Props {
+  ticket: TicketDetail;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  onRefresh: () => void | Promise<void>;
+  // The viewer's own display name (from "全体設定", GET /api/settings/app's
+  // "myName"). Powers the "assign to me"/"unassign" action buttons below; an
+  // empty string hides only those actions (there is no "me" to act as), not
+  // the read-only assignee chip -- that chip must stay visible to every
+  // viewer regardless of whether they've configured their own name
+  // (completion criterion 5: assignee must be identifiable to any viewer).
+  myName: string;
+}
+
+export const TicketItem: React.FC<Props> = ({
+  ticket,
+  isExpanded,
+  onToggleExpand,
+  onRefresh,
+  myName
+}) => {
+  const { t, i18n } = useTranslation();
+  const [promptText, setPromptText] = useState('');
+  const [activeTab, setActiveTab] = useState<'nodes' | 'gherkin' | 'html' | 'artifacts'>('nodes');
+  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
+  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
+  const { isLaunching: isRunning, lastMessage: statusMessage, launch: handleRunClaude } = useClaudeLaunch(onRefresh);
+
+  // The execution graph panel must never scroll -- it always renders in
+  // full, growing past the default height when the graph has many nodes
+  // (see graphPanelRef's min-h-[32rem] below). The node/artifact panel on
+  // the right is allowed to scroll internally, but its *card* height should
+  // track the graph panel's rendered height once that exceeds the default,
+  // rather than the two drifting apart or the page having to reconcile two
+  // independently auto-sized columns. A ResizeObserver on the graph panel
+  // (rather than relying on CSS grid's default stretch-to-tallest-item
+  // behavior) is what makes this a one-way match: stretch would also let an
+  // unusually long *node list* balloon the graph panel's height even though
+  // the graph itself doesn't need it, which is exactly the mismatch this is
+  // meant to avoid.
+  const graphPanelRef = useRef<HTMLDivElement>(null);
+  const [nodeListCardHeight, setNodeListCardHeight] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    if (!isExpanded) return;
+    const el = graphPanelRef.current;
+    if (!el) return;
+    const updateHeight = () => setNodeListCardHeight(el.getBoundingClientRect().height);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isExpanded, ticket.nodes.length, ticket.edges.length]);
+
+  const handleSendPrompt = async () => {
+    if (isRunning || !promptText.trim()) return;
+    // Only clear the free-text prompt on a successful send -- a failed one
+    // should keep the text so it can be retried without retyping it.
+    const succeeded = await handleRunClaude(promptText, ticket.id);
+    if (succeeded) setPromptText('');
+  };
+
+  // Self-assign ("assign to me" / "unassign") -- the ticket's only form of
+  // assignment; see ticket.assignee and Props.myName's doc comments.
+  //
+  // ticket.assignee is the server-recorded name of whoever last assigned
+  // themselves, not a viewer-local flag (DFLT-00047), so this button only
+  // ever acts when the ticket is unassigned or already assigned to *this*
+  // viewer (isAssignedToMe below) -- someone else's assignment is shown
+  // read-only elsewhere and can't be taken over or cleared from here.
+  const isAssignedToMe = !!ticket.assignee && ticket.assignee === myName;
+  const [assignToMeSaving, setAssignToMeSaving] = useState(false);
+  const [assignToMeError, setAssignToMeError] = useState('');
+
+  const handleToggleAssignedToMe = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (assignToMeSaving) return;
+    setAssignToMeSaving(true);
+    setAssignToMeError('');
+    try {
+      const res = await apiFetch(`/api/tickets/${ticket.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignee: isAssignedToMe ? null : myName })
+      });
+      if (!res.ok) throw new Error(await localizedApiErrorMessage(t, res));
+      await onRefresh();
+    } catch (err) {
+      setAssignToMeError(errorMessage(err, t('errors.UNKNOWN')));
+    } finally {
+      setAssignToMeSaving(false);
+    }
+  };
+
+  // Priority (DFLT-00048): set/changed/cleared from the detail view via
+  // PATCH /api/tickets/{id}'s "priority" field, the same nullableString
+  // mechanism the assignee PATCH above uses -- `null` explicitly clears it
+  // back to unset, distinct from omitting the field entirely.
+  const [prioritySaving, setPrioritySaving] = useState(false);
+  const [priorityError, setPriorityError] = useState('');
+
+  const handleChangePriority = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    e.stopPropagation();
+    const value = e.target.value;
+    const nextPriority: TicketPriority | null = value === '' ? null : (value as TicketPriority);
+    if (prioritySaving || nextPriority === (ticket.priority ?? null)) return;
+    setPrioritySaving(true);
+    setPriorityError('');
+    try {
+      const res = await apiFetch(`/api/tickets/${ticket.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ priority: nextPriority })
+      });
+      if (!res.ok) throw new Error(await localizedApiErrorMessage(t, res));
+      await onRefresh();
+    } catch (err) {
+      setPriorityError(errorMessage(err, t('errors.UNKNOWN')));
+    } finally {
+      setPrioritySaving(false);
+    }
+  };
+
+  // approval_gate approve/reject (DFLT-00012). Keyed by node id (rather than
+  // one flat flag) so an in-flight decision on one approval_gate node
+  // doesn't disable the buttons on another one in the same ticket.
+  const [approvalPendingNodeId, setApprovalPendingNodeId] = useState<string | null>(null);
+  const [approvalErrors, setApprovalErrors] = useState<Record<string, string>>({});
+  // DFLT-00016: rejecting an approval_gate now requires a free-text reason
+  // (no more window.confirm -- the reason input itself, plus a distinctly
+  // labeled confirm button, is the confirmation step). rejectingNodeId
+  // tracks which node's reason prompt is currently open; at most one at a
+  // time keeps this simple and matches approvalPendingNodeId's one-in-flight
+  // assumption.
+  const [rejectingNodeId, setRejectingNodeId] = useState<string | null>(null);
+  const [rejectReasonDraft, setRejectReasonDraft] = useState('');
+
+  // Ticket deletion. A confirm dialog gates it (this is unrecoverable --
+  // there's no undo/trash), same pattern as the approval_gate reject
+  // confirmation below.
+  const [isDeletingTicket, setIsDeletingTicket] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+
+  const handleDeleteTicket = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm(t('ticketItem.delete.confirm', { id: ticket.id, title: ticket.title }))) {
+      return;
+    }
+    setIsDeletingTicket(true);
+    setDeleteError('');
+    try {
+      const res = await apiFetch(`/api/tickets/${ticket.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        throw new Error(await localizedApiErrorMessage(t, res));
+      }
+      await onRefresh();
+    } catch (err) {
+      setDeleteError(errorMessage(err, t('errors.UNKNOWN')));
+    } finally {
+      setIsDeletingTicket(false);
+    }
+  };
+
+  // Close/reopen (DFLT-00043). Closing takes an optional free-text reason,
+  // via the same inline-prompt pattern as the approval_gate reject reason
+  // below -- but unlike rejecting, the reason is optional here (closing works
+  // from any status, with or without an explanation), so the confirm button
+  // is never disabled by empty text. Reopening needs no reason and no
+  // confirmation prompt: it just moves the ticket back into the normal
+  // status flow, the same one-click pattern as the self-assign toggle above.
+  const [isClosePromptOpen, setIsClosePromptOpen] = useState(false);
+  const [closeReasonDraft, setCloseReasonDraft] = useState('');
+  const [isClosingTicket, setIsClosingTicket] = useState(false);
+  const [closeError, setCloseError] = useState('');
+  const [isReopeningTicket, setIsReopeningTicket] = useState(false);
+  const [reopenError, setReopenError] = useState('');
+
+  const handleCloseTicket = async () => {
+    setIsClosingTicket(true);
+    setCloseError('');
+    try {
+      const res = await apiFetch(`/api/tickets/${ticket.id}/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: closeReasonDraft })
+      });
+      if (!res.ok) throw new Error(await localizedApiErrorMessage(t, res));
+      setIsClosePromptOpen(false);
+      setCloseReasonDraft('');
+      await onRefresh();
+    } catch (err) {
+      setCloseError(errorMessage(err, t('errors.UNKNOWN')));
+    } finally {
+      setIsClosingTicket(false);
+    }
+  };
+
+  const handleReopenTicket = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsReopeningTicket(true);
+    setReopenError('');
+    try {
+      const res = await apiFetch(`/api/tickets/${ticket.id}/reopen`, { method: 'POST' });
+      if (!res.ok) throw new Error(await localizedApiErrorMessage(t, res));
+      await onRefresh();
+    } catch (err) {
+      setReopenError(errorMessage(err, t('errors.UNKNOWN')));
+    } finally {
+      setIsReopeningTicket(false);
+    }
+  };
+
+  // DFLT-00016: rejecting an approval_gate now requires a non-empty free-text
+  // reason, sent as a "rejection_reason" text artifact in the same request
+  // (the same convention the CLI's `complete-node --reason` flag uses --
+  // see engine.CompleteNode's doc comment and handleCompleteNode). Approving
+  // never takes a reason. reason is validated by the caller (the reject
+  // button is disabled while empty, see the reason-prompt JSX below) rather
+  // than here, so this function has one job: send the request.
+  const handleApprovalDecision = async (nodeId: string, passed: boolean, reason?: string) => {
+    setApprovalPendingNodeId(nodeId);
+    setApprovalErrors(prev => {
+      if (!(nodeId in prev)) return prev;
+      const next = { ...prev };
+      delete next[nodeId];
+      return next;
+    });
+    try {
+      const body: { passed: boolean; artifacts?: Array<{ name: string; type: string; content: string }> } = { passed };
+      if (!passed) {
+        body.artifacts = [{ name: 'rejection_reason', type: 'text', content: reason || '' }];
+      }
+      const res = await apiFetch(`/api/nodes/${nodeId}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) {
+        throw new Error(await localizedApiErrorMessage(t, res));
+      }
+      setRejectingNodeId(prev => (prev === nodeId ? null : prev));
+      setRejectReasonDraft('');
+      await onRefresh();
+    } catch (err) {
+      setApprovalErrors(prev => ({ ...prev, [nodeId]: errorMessage(err, t('errors.UNKNOWN')) }));
+    } finally {
+      setApprovalPendingNodeId(null);
+    }
+  };
+
+  // Opens the reject-with-reason prompt for nodeId, closing it for whatever
+  // other node had it open (only one at a time -- see rejectingNodeId).
+  const startRejecting = (nodeId: string) => {
+    setRejectingNodeId(nodeId);
+    setRejectReasonDraft('');
+  };
+  const cancelRejecting = () => {
+    setRejectingNodeId(null);
+    setRejectReasonDraft('');
+  };
+
+  const toggleNodeExpand = (nodeId: string) => {
+    setExpandedNodeIds(prev => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  };
+
+  // Node status badges. Label and colors come from statusMeta.ts, shared
+  // with the ticket status badge (DFLT-00030); only the node badge's own
+  // look (smaller size, pulse dot while IN PROGRESS, medium weight for
+  // not-yet-started) is decided here.
+  const getNodeBadge = (status: string) => {
+    const meta = getStatusMeta(status);
+    const isInProgress = status === 'IN PROGRESS';
+    const isNotStarted = meta === TODO_META;
+    return (
+      <span className={`text-[11px] px-2 py-0.5 rounded-full ${isNotStarted ? 'font-medium' : 'font-bold'} ${meta.chip.bg} ${meta.chip.text}${isInProgress ? ' flex items-center gap-1' : ''}`}>
+        {isInProgress && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />}
+        {t(meta.labelKey)}
+      </span>
+    );
+  };
+
+  // "Open in new tab" link. gherkin/text/html all open /artifacts/{id}/preview,
+  // a small client-side page (see ArtifactPreviewPage) rather than
+  // /api/artifacts/{id}/content directly. For gherkin/text that page fetches
+  // the same raw content and renders it with the same
+  // GherkinViewer/MarkdownViewer the inline preview uses -- .../content
+  // deliberately never serves those two types as HTML (see
+  // internal/artifactcontent/content.go's contentTypeFor), so linking
+  // straight to it would only ever show raw text in the new tab. For html,
+  // linking straight to .../content used to render agent-authored HTML as a
+  // same-origin top-level document with no isolation (DFLT-00053); the
+  // preview page instead embeds it in the same sandbox="allow-scripts"
+  // <iframe> the inline preview below already uses, so a new tab never opens
+  // artifact HTML with the app's own origin.
+  const openInNewTabLink = (artifact: {
+    id: string;
+    type: string;
+    name: string;
+    content?: string | null;
+    file_path?: string | null;
+    has_content?: boolean;
+  }) => {
+    if (!(artifact.content || artifact.file_path || artifact.has_content)) return null;
+    const href = `/artifacts/${artifact.id}/preview?type=${artifact.type}&name=${encodeURIComponent(artifact.name)}`;
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 text-[11px]"
+      >
+        <ExternalLink className="w-3 h-3" />
+        {t('ticketItem.openInNewTab')}
+      </a>
+    );
+  };
+
+  // Individual-artifact download: GET /api/artifacts/{id}/content?download=1
+  // serves the exact same bytes openInNewTabLink/the inline preview do, but
+  // with Content-Disposition: attachment and a guaranteed filename (see
+  // artifactDownloadFilename in internal/httpserver/tickets.go) so the
+  // browser always saves it instead of trying to render it in place.
+  const downloadLink = (artifact: {
+    id: string;
+    content?: string | null;
+    file_path?: string | null;
+    has_content?: boolean;
+  }) => {
+    if (!(artifact.content || artifact.file_path || artifact.has_content)) return null;
+    return (
+      <a
+        href={`/api/artifacts/${artifact.id}/content?download=1`}
+        className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1 text-[11px]"
+      >
+        <Download className="w-3 h-3" />
+        {t('ticketItem.download')}
+      </a>
+    );
+  };
+
+  const description = ticket.description || '';
+
+  const totalNodes = ticket.nodes.length;
+  const doneNodes = ticket.nodes.filter(n => n.status === 'DONE').length;
+  const progressPercent = totalNodes > 0 ? Math.round((doneNodes / totalNodes) * 100) : 0;
+  // A ticket sitting at an approval_gate must never be mistaken for finished
+  // or otherwise overlooked -- an is_manual node like this never advances on
+  // its own, and the ticket-level status badge can still say things like
+  // "IN PROGRESS" while it waits. Rather than a separate badge, the node's
+  // own status tick (see the per-node ticks below) blinks yellow while
+  // pending -- pendingApprovalNodeIds is just the lookup set for that.
+  //
+  // All of a ticket's nodes are persisted up front (see persistPlan), so a
+  // downstream approval_gate (e.g. release_approval) sits at status TODO
+  // from creation, long before the ticket actually reaches it -- filtering
+  // on status alone made every approval_gate in the graph blink at once.
+  // What actually determines whether a gate is the one the ticket is
+  // currently stuck on is the same prerequisite check the engine itself
+  // uses to decide what's executable (see GetExecutableNodes in
+  // packages/core-go/internal/engine/engine.go): every non-loop edge
+  // feeding into it must come from a DONE node.
+  const nodeById = new Map(ticket.nodes.map(n => [n.id, n]));
+  const isNodeReached = (nodeId: string) =>
+    ticket.edges.every(e => {
+      if (e.to_node_id !== nodeId || e.condition === 'iteration_loop') return true;
+      return nodeById.get(e.from_node_id)?.status === 'DONE';
+    });
+  const pendingApprovalNodeIds = new Set(
+    ticket.nodes
+      .filter(n => n.type === 'approval_gate' && n.status === 'TODO' && isNodeReached(n.id))
+      .map(n => n.id)
+  );
+  // DFLT-00016: a REJECTED approval_gate is a materially different state
+  // from a never-judged one -- it's not waiting on a human clicking
+  // approve/reject here, it's waiting on process-ticket's triage (deciding
+  // whether to reopen specific nodes or report back that a requirements-level
+  // rethink is needed). Surfaced separately, read-only, so it isn't confused
+  // with pendingApprovalNodeIds' actionable approve/reject state.
+  const rejectedApprovalNodes = ticket.nodes.filter(n => n.type === 'approval_gate' && n.status === 'REJECTED');
+  const loopEdges = ticket.edges.filter(e => e.condition === 'iteration_loop');
+  const gherkinArtifacts = ticket.artifacts.filter(a => a.type === 'gherkin');
+  const htmlArtifacts = ticket.artifacts.filter(a => a.type === 'html');
+
+  // SVG mini-graph preview: layered DAG layout. Nodes are grouped into rows
+  // ("levels") by longest path from a source node, using only forward edges
+  // -- iteration_loop edges point backward and would break a forward
+  // topological layering, so they're excluded here and drawn separately
+  // below. Nodes that land on the same level ran (or will run) in parallel,
+  // so they're spread across columns on that row instead of every node
+  // sharing one column top-to-bottom, which made parallel and serial graphs
+  // look identical.
+  const forwardEdges = ticket.edges.filter(e => e.condition !== 'iteration_loop');
+  const adjacency = new Map<string, string[]>();
+  const indegree = new Map<string, number>();
+  ticket.nodes.forEach(n => {
+    adjacency.set(n.id, []);
+    indegree.set(n.id, 0);
+  });
+  forwardEdges.forEach(e => {
+    if (!adjacency.has(e.from_node_id) || !indegree.has(e.to_node_id)) return;
+    adjacency.get(e.from_node_id)!.push(e.to_node_id);
+    indegree.set(e.to_node_id, (indegree.get(e.to_node_id) || 0) + 1);
+  });
+  const level = new Map<string, number>();
+  const remainingIndegree = new Map(indegree);
+  const levelQueue: string[] = [];
+  ticket.nodes.forEach(n => {
+    level.set(n.id, 0);
+    if ((indegree.get(n.id) || 0) === 0) levelQueue.push(n.id);
+  });
+  for (let qi = 0; qi < levelQueue.length; qi++) {
+    const cur = levelQueue[qi];
+    const curLevel = level.get(cur) || 0;
+    for (const next of adjacency.get(cur) || []) {
+      if (curLevel + 1 > (level.get(next) || 0)) level.set(next, curLevel + 1);
+      const rem = (remainingIndegree.get(next) || 0) - 1;
+      remainingIndegree.set(next, rem);
+      if (rem <= 0) levelQueue.push(next);
+    }
+  }
+
+  const levelGroups = new Map<number, string[]>();
+  ticket.nodes.forEach(n => {
+    const lvl = level.get(n.id) || 0;
+    if (!levelGroups.has(lvl)) levelGroups.set(lvl, []);
+    levelGroups.get(lvl)!.push(n.id);
+  });
+  const maxLevel = Math.max(0, ...Array.from(levelGroups.keys()));
+  const maxPerLevel = Math.max(1, ...Array.from(levelGroups.values()).map(g => g.length));
+  const hasParallelRows = maxPerLevel > 1;
+
+  const colSpacing = 78;
+  const rowSpacing = 52;
+  const svgWidth = Math.max(300, maxPerLevel * colSpacing + 60);
+  const svgHeight = Math.max(180, (maxLevel + 1) * rowSpacing + 46);
+
+  const nodePos = new Map<string, { x: number; y: number }>();
+  levelGroups.forEach((ids, lvl) => {
+    const rowWidth = (ids.length - 1) * colSpacing;
+    const startX = (svgWidth - rowWidth) / 2;
+    ids.forEach((id, i) => {
+      nodePos.set(id, { x: startX + i * colSpacing, y: 26 + lvl * rowSpacing });
+    });
+  });
+
+  // The backend claims every review/review_gate node as IN REVIEW the moment
+  // it starts running (there's no separate "reviewer is working" status --
+  // see engine.go's GetExecutableNodes). For display we flip that: the
+  // reviewer's own circle reads as IN PROGRESS (it's the one doing work),
+  // while whichever node(s) it depends on -- the actual artifact under
+  // review, otherwise stuck showing a stale DONE -- read as IN REVIEW
+  // instead. This is purely a display transform; the underlying node.status
+  // used for progress counts, prereq checks, etc. is untouched.
+  const isReviewType = (type: string) => type === 'review' || type === 'review_gate';
+  const reviewedNodeIds = new Set<string>();
+  ticket.nodes.forEach(n => {
+    if (isReviewType(n.type) && n.status === 'IN REVIEW') {
+      ticket.edges.forEach(e => {
+        if (e.to_node_id === n.id && e.condition !== 'iteration_loop') {
+          reviewedNodeIds.add(e.from_node_id);
+        }
+      });
+    }
+  });
+  // A reviewer that looped back is stored as AWAITING FIX by the engine
+  // (DFLT-00042) and passes through unchanged, so no display-only guess
+  // based on the loop target's iteration_count is needed any more.
+  const getDisplayStatus = (n: { id: string; type: string; status: string }): string => {
+    if (isReviewType(n.type) && n.status === 'IN REVIEW') return 'IN PROGRESS';
+    if (n.status === 'DONE' && reviewedNodeIds.has(n.id)) return 'IN REVIEW';
+    return n.status;
+  };
+
+  const ticketStatusMeta = getStatusMeta(ticket.status);
+  const ticketPriorityMeta = getPriorityMeta(ticket.priority);
+
+  return (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs transition-all overflow-clip mb-4">
+      {/* Header Row */}
+      <div
+        onClick={onToggleExpand}
+        className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition select-none"
+      >
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <button className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 shrink-0">
+            {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+          </button>
+
+          <span className="font-mono text-xs font-bold px-2 py-1 rounded bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0 whitespace-nowrap">
+            {ticket.id}
+          </span>
+
+          {/* Label/colors shared with the node badge via statusMeta.ts
+              (DFLT-00030). No `uppercase`/`tracking-wider`: English labels
+              are uppercase in the translation data itself, and the extra
+              letter-spacing looked broken on Japanese labels. */}
+          <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold shrink-0 whitespace-nowrap ${ticketStatusMeta.chip.bg} ${ticketStatusMeta.chip.text}`}>
+            {t(ticketStatusMeta.labelKey)}
+          </span>
+
+          {/* Priority badge/selector (DFLT-00048). A native <select> rather
+              than a custom dropdown so it stays keyboard/screen-reader
+              operable for free (Tab, arrow keys, typeahead) -- it is styled
+              to read as a colored chip like the status badge above, using
+              the same getPriorityMeta colors the list's priority filter
+              uses, but is always an actual <select> underneath. The visually
+              hidden <label> gives it an accessible name without adding
+              visible text next to every ticket's badge row. */}
+          <span className="shrink-0" onClick={e => e.stopPropagation()}>
+            <label htmlFor={`priority-select-${ticket.id}`} className="sr-only">
+              {t('ticketItem.priority.label')}
+            </label>
+            <select
+              id={`priority-select-${ticket.id}`}
+              value={ticket.priority ?? ''}
+              onChange={handleChangePriority}
+              disabled={prioritySaving}
+              className={`text-xs pl-2.5 pr-1.5 py-0.5 rounded-full font-bold whitespace-nowrap border-0 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-blue-500 ${ticketPriorityMeta.chip.bg} ${ticketPriorityMeta.chip.text}`}
+            >
+              <option value="">{t('priority.unset')}</option>
+              {TICKET_PRIORITIES.map(p => (
+                <option key={p} value={p}>
+                  {t(getPriorityMeta(p).labelKey)}
+                </option>
+              ))}
+            </select>
+          </span>
+          {priorityError && (
+            <span className="text-red-600 dark:text-red-400 font-medium text-xs shrink-0" onClick={e => e.stopPropagation()}>
+              {priorityError}
+            </span>
+          )}
+
+          {/* min-w-0 (alongside truncate) is required for this flex item to
+              actually shrink below its own text's natural width -- without
+              it, a long title would instead push the id/status badges (and
+              the right-hand action area) to wrap/overflow. This is the one
+              element in the row meant to give up space first. */}
+          <span className="font-bold text-slate-900 dark:text-slate-100 text-sm truncate min-w-0">
+            {ticket.title}
+          </span>
+
+          {rejectedApprovalNodes.length > 0 && (
+            <span
+              className="flex items-center gap-1.5 pl-2 pr-2 py-0.5 rounded-full bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-[11px] font-bold shrink-0"
+              onClick={e => e.stopPropagation()}
+              title={t('ticketItem.approvalGate.rejectedHint')}
+            >
+              <X className="w-3 h-3 shrink-0" />
+              <span className="truncate max-w-[12rem]">
+                {rejectedApprovalNodes.length === 1
+                  ? t('ticketItem.approvalGate.rejectedBadgeOne', { name: rejectedApprovalNodes[0].name })
+                  : t('ticketItem.approvalGate.rejectedBadgeMany', { count: rejectedApprovalNodes.length })}
+              </span>
+            </span>
+          )}
+        </div>
+
+        {/* Right Info: Self-assign chip, Progress Pill. shrink-0 keeps this whole
+            group (and everything inside it) at its natural width -- the
+            ticket title above is the only thing that gives up space when
+            the row is too narrow. */}
+        <div className="flex items-center gap-4 text-xs shrink-0">
+          {/* Assignee chip. The read-only "someone else has this" chip must
+              stay visible regardless of whether the viewer has configured a
+              "全体設定" myName -- it conveys who has the ticket, which has
+              nothing to do with the viewer's own identity (completion
+              criterion 5: any viewer must be able to tell who a ticket's
+              assignee is, not only ones who've set myName). Only the
+              *action* buttons (assign to me / unassign), which do depend on
+              knowing who "me" is, stay gated behind myName. So the whole
+              block renders whenever there is something to show: either an
+              existing assignee (chip, any viewer) or a configured myName
+              (assign button on an unassigned ticket). */}
+          {(ticket.assignee || myName) && (
+            <span className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+              {myName && isAssignedToMe ? (
+                <span className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-[11px] font-semibold">
+                  {ticket.assignee}
+                  <button
+                    type="button"
+                    onClick={handleToggleAssignedToMe}
+                    disabled={assignToMeSaving}
+                    title={t('ticketItem.selfAssign.unassign')}
+                    className="p-0.5 text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-200 disabled:opacity-50 rounded-full"
+                  >
+                    {assignToMeSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
+                  </button>
+                </span>
+              ) : ticket.assignee ? (
+                // Someone else already has this ticket (or the viewer hasn't
+                // configured myName yet, so we can't tell if it's "them") --
+                // shown read-only so it can never be mistaken for (or, by
+                // clicking, silently taken over from) the viewer's own
+                // assignment. Deliberately not gated on myName: this is the
+                // one piece of assignee UI every viewer needs to see, with
+                // or without their own name configured.
+                <span
+                  className="inline-flex items-center gap-1 pl-2 pr-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold"
+                  title={t('ticketItem.selfAssign.assignedToOther', { name: ticket.assignee })}
+                >
+                  {ticket.assignee}
+                </span>
+              ) : myName ? (
+                <button
+                  type="button"
+                  onClick={handleToggleAssignedToMe}
+                  disabled={assignToMeSaving}
+                  className="px-2 py-0.5 rounded-full border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 disabled:opacity-50 text-[11px] font-semibold flex items-center gap-1 transition"
+                >
+                  {assignToMeSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3 h-3" />}
+                  {t('ticketItem.selfAssign.assign')}
+                </button>
+              ) : null}
+              {assignToMeError && (
+                <span className="text-red-600 dark:text-red-400 font-medium">{assignToMeError}</span>
+              )}
+            </span>
+          )}
+
+          {totalNodes > 0 && (
+            <div className="flex items-center gap-2">
+              <div className="flex gap-0.5">
+                {ticket.nodes.map(n => {
+                  const displayStatus = getDisplayStatus(n);
+                  const isPendingApproval = pendingApprovalNodeIds.has(n.id);
+                  return (
+                    <div
+                      key={n.id}
+                      title={isPendingApproval ? `${n.name} (${t('ticketItem.approvalGate.pendingStatus')})` : `${n.name} (${t(getStatusMeta(displayStatus).labelKey)})`}
+                      className={`w-2.5 h-3.5 rounded-xs ${
+                        isPendingApproval
+                          ? 'bg-amber-400 animate-pulse'
+                          : displayStatus === 'DONE'
+                          ? 'bg-emerald-500'
+                          : displayStatus === 'IN PROGRESS'
+                          ? 'bg-blue-500 animate-pulse'
+                          : displayStatus === 'IN REVIEW'
+                          ? 'bg-purple-500'
+                          : displayStatus === 'AWAITING FIX'
+                          ? 'bg-orange-500'
+                          : 'bg-slate-200 dark:bg-slate-700'
+                      }`}
+                    />
+                  );
+                })}
+              </div>
+              <span className="font-mono text-slate-600 dark:text-slate-400 font-semibold">
+                {doneNodes}/{totalNodes}
+              </span>
+            </div>
+          )}
+
+          {closeError && (
+            <span className="text-red-600 dark:text-red-400 font-medium" onClick={e => e.stopPropagation()}>
+              {closeError}
+            </span>
+          )}
+          {reopenError && (
+            <span className="text-red-600 dark:text-red-400 font-medium" onClick={e => e.stopPropagation()}>
+              {reopenError}
+            </span>
+          )}
+
+          {/* Close/reopen (DFLT-00043): a CLOSED ticket shows the reopen
+              button only, everything else shows the close button (which
+              opens the optional-reason prompt below, rendered outside this
+              clickable header row). */}
+          {ticket.status === 'CLOSED' ? (
+            <button
+              type="button"
+              onClick={handleReopenTicket}
+              disabled={isReopeningTicket}
+              title={t('ticketItem.reopen.button')}
+              className="text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
+            >
+              {isReopeningTicket ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={e => {
+                e.stopPropagation();
+                setIsClosePromptOpen(v => !v);
+              }}
+              title={t('ticketItem.close.button')}
+              className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 transition p-1 -m-1 rounded"
+            >
+              <Archive className="w-4 h-4" />
+            </button>
+          )}
+
+          {deleteError && (
+            <span className="text-red-600 dark:text-red-400 font-medium" onClick={e => e.stopPropagation()}>
+              {deleteError}
+            </span>
+          )}
+
+          <button
+            type="button"
+            onClick={handleDeleteTicket}
+            disabled={isDeletingTicket}
+            title={t('ticketItem.delete.button')}
+            className="text-slate-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
+          >
+            {isDeletingTicket ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Close-with-reason prompt (DFLT-00043). Reason is optional -- closing
+          works from any ticket status, with or without an explanation -- so
+          the confirm button is never disabled by empty text (unlike the
+          approval_gate reject prompt below). Kept outside the clickable
+          header row, as a sibling, so it stays visible whether or not the
+          ticket is expanded (matching where the close button itself lives). */}
+      {isClosePromptOpen && (
+        <div
+          className="px-4 pb-3 pt-1 border-t border-slate-200 dark:border-slate-800 flex items-center gap-2"
+          onClick={e => e.stopPropagation()}
+        >
+          <input
+            type="text"
+            autoFocus
+            value={closeReasonDraft}
+            onChange={e => setCloseReasonDraft(e.target.value)}
+            placeholder={t('ticketItem.close.reasonPlaceholder')}
+            className="flex-1 text-xs border border-slate-300 dark:border-slate-700 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          />
+          <button
+            type="button"
+            onClick={handleCloseTicket}
+            disabled={isClosingTicket}
+            className="px-2 py-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-xs font-bold flex items-center gap-1 transition shrink-0"
+          >
+            {isClosingTicket ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />}
+            {t('ticketItem.close.confirm')}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setIsClosePromptOpen(false);
+              setCloseReasonDraft('');
+            }}
+            disabled={isClosingTicket}
+            className="px-2 py-1 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-50 text-xs font-semibold shrink-0"
+          >
+            {t('ticketItem.close.cancel')}
+          </button>
+        </div>
+      )}
+
+      {/* Expanded Ticket Details */}
+      {isExpanded && (
+        <div className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 space-y-6">
+          {/* Metadata Bar */}
+          <div className="flex flex-wrap items-center gap-y-2 gap-x-6 text-xs text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800 pb-3">
+            <div>
+              {t('ticketItem.nodeCount')}: <span className="font-semibold text-slate-800 dark:text-slate-200">{totalNodes}</span>
+            </div>
+            {loopEdges.length > 0 && (
+              <div className="text-amber-600 dark:text-amber-400 font-medium">
+                {t('ticketItem.loopEdges', { count: loopEdges.length })}
+              </div>
+            )}
+            <div>
+              {t('ticketItem.createdAt')}: <span className="font-mono text-slate-700 dark:text-slate-300">{formatDateTime(ticket.created_at, i18n.language)}</span>
+            </div>
+            {ticket.closed_reason && (
+              <div className="flex items-center gap-1 text-slate-700 dark:text-slate-300">
+                <Archive className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
+                {t('ticketItem.close.reasonLabel')}: <span className="font-medium">{ticket.closed_reason}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Description Card -- always visible (not tabbed) so the ticket's
+              description has a permanent place to be checked. */}
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-indigo-500" />
+                {t('ticketItem.description.title')}
+              </span>
+              <div className="flex items-center gap-3">
+                {ticket.refined_at && (
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
+                    <History className="w-3 h-3" />
+                    {t('ticketItem.description.refinedAt', { time: formatDateTime(ticket.refined_at, i18n.language) })}
+                  </span>
+                )}
+                {description.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setIsDescriptionExpanded(v => !v)}
+                    className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold"
+                  >
+                    {isDescriptionExpanded ? t('ticketItem.description.collapse') : t('ticketItem.description.expand')}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {description.length === 0 ? (
+              <div className="text-slate-400 dark:text-slate-500 italic text-xs">{t('ticketItem.description.empty')}</div>
+            ) : (
+              <div className={isDescriptionExpanded ? '' : 'max-h-56 overflow-y-auto'}>
+                <MarkdownViewer content={description} />
+              </div>
+            )}
+          </div>
+
+          {/* Graph + Nodes List Split View. items-start (rather than the
+              grid default of stretch) is deliberate -- the two columns'
+              heights are synced explicitly via nodeListCardHeight/
+              graphPanelRef above, not by letting grid stretch the shorter
+              one to match the row's auto-computed height (which would also
+              let an unusually long node list balloon the graph panel). */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left Graph Diagram (SVG) - Return edges routed on the LEFT.
+                min-h-[32rem] is a floor (the default height reserved when
+                there's no execution graph yet), never a cap -- this panel
+                always renders its full content with no scrollbar. When it
+                grows past that floor, nodeListCardHeight (measured via
+                ResizeObserver above) carries the same height over to the
+                node/artifact panel on the right. */}
+            <div ref={graphPanelRef} className="lg:col-span-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col min-h-[32rem]">
+              <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 w-full text-left flex items-center justify-between shrink-0">
+                <span>{t('ticketItem.graphTitle')}</span>
+                <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold">{t('ticketItem.progress', { percent: progressPercent })}</span>
+              </div>
+              <div className="flex-1 flex flex-col items-center justify-center">
+              <svg className="w-full max-w-[340px] shrink-0" height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
+                {/* 1. Forward edges -- straight lines between each node's actual
+                    (level, column) position, so a fan-out to several nodes on
+                    the same row reads as a fork instead of a straight line down. */}
+                {ticket.edges.map(e => {
+                  const from = nodePos.get(e.from_node_id);
+                  const to = nodePos.get(e.to_node_id);
+                  if (!from || !to) return null;
+
+                  const isLoop = e.condition === 'iteration_loop';
+                  if (isLoop) return null; // Drawn separately on the left below
+
+                  return (
+                    <line
+                      key={e.id}
+                      x1={from.x}
+                      y1={from.y}
+                      x2={to.x}
+                      y2={to.y}
+                      className="stroke-slate-300 dark:stroke-slate-600"
+                      strokeWidth="2"
+                    />
+                  );
+                })}
+
+                {/* 2. Return loop edges (routed to the LEFT of whichever of the
+                    two nodes is further left, so they never cross a parallel
+                    sibling in between) */}
+                {ticket.edges.map(e => {
+                  const from = nodePos.get(e.from_node_id);
+                  const to = nodePos.get(e.to_node_id);
+                  if (!from || !to) return null;
+
+                  const isLoop = e.condition === 'iteration_loop';
+                  if (!isLoop) return null;
+
+                  const curveX = Math.max(12, Math.min(from.x, to.x) - 24);
+
+                  return (
+                    <g key={e.id}>
+                      <path
+                        d={`M ${from.x - 6} ${from.y} C ${curveX} ${from.y}, ${curveX} ${to.y}, ${to.x - 6} ${to.y}`}
+                        fill="none"
+                        stroke="#f59e0b"
+                        strokeWidth="2"
+                        strokeDasharray="4,4"
+                      />
+                      {/* Arrowhead pointing to target node */}
+                      <polygon
+                        points={`${to.x - 6},${to.y} ${to.x - 12},${to.y - 3} ${to.x - 12},${to.y + 3}`}
+                        fill="#f59e0b"
+                      />
+                    </g>
+                  );
+                })}
+
+                {/* 3. Nodes and labels -- labels sit below each node (centered)
+                    rather than to the right, since a row can hold several
+                    nodes side by side. */}
+                {ticket.nodes.map(n => {
+                  const pos = nodePos.get(n.id);
+                  if (!pos) return null;
+                  const displayStatus = getDisplayStatus(n);
+                  const isDone = displayStatus === 'DONE';
+                  const isInProgress = displayStatus === 'IN PROGRESS';
+                  const isInReview = displayStatus === 'IN REVIEW';
+
+                  let fill = '#94a3b8';
+                  if (isDone) fill = '#10b981';
+                  else if (isInProgress) fill = '#3b82f6';
+                  else if (isInReview) fill = '#a855f7';
+                  // REJECTED (DFLT-00016, approval_gate only): distinct from
+                  // the default TODO gray, since it's not merely unstarted.
+                  else if (displayStatus === 'REJECTED') fill = '#ef4444';
+                  // AWAITING FIX (DFLT-00042): orange-500, same hue as its badge.
+                  else if (displayStatus === 'AWAITING FIX') fill = '#f97316';
+
+                  // A halo ring drawn around the status circle marks gate
+                  // node types. Every review-performing node is a gate --
+                  // there's no such thing as a review node that can't be
+                  // sent back -- so both 'review' and 'review_gate' get the
+                  // same purple ring (matching the IN REVIEW purple, since
+                  // it's conceptually a review step). approval_gate gets its
+                  // own pink so the two gate kinds stay visually distinct.
+                  // Plain nodes get no ring.
+                  const gateRingColor =
+                    n.type === 'approval_gate' ? '#ec4899' :
+                    isReviewType(n.type) ? '#a855f7' :
+                    null;
+                  const outerR = isInProgress ? 8 : 6;
+
+                  return (
+                    <g key={n.id}>
+                      {gateRingColor && (
+                        <circle
+                          cx={pos.x}
+                          cy={pos.y}
+                          r={outerR + 3}
+                          fill="none"
+                          stroke={gateRingColor}
+                          strokeWidth="1.5"
+                        />
+                      )}
+                      <circle
+                        cx={pos.x}
+                        cy={pos.y}
+                        r={outerR}
+                        fill={fill}
+                        className={isInProgress ? 'animate-ping opacity-75' : ''}
+                        style={isInProgress ? { transformBox: 'fill-box', transformOrigin: 'center' } : undefined}
+                      />
+                      <circle
+                        cx={pos.x}
+                        cy={pos.y}
+                        r="6"
+                        fill={fill}
+                        stroke="#ffffff"
+                        strokeWidth="2"
+                      />
+                      <text
+                        x={pos.x}
+                        y={pos.y + 18}
+                        fontSize="9"
+                        fontWeight="600"
+                        textAnchor="middle"
+                        className="select-none fill-slate-700 dark:fill-slate-300"
+                      >
+                        {n.name.length > 12 ? n.name.slice(0, 12) + '…' : n.name}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+              {hasParallelRows && (
+                <div className="w-full mt-2 text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold flex items-center gap-1 shrink-0">
+                  <Layers className="w-3 h-3" />
+                  {t('ticketItem.parallelHint')}
+                </div>
+              )}
+              </div>
+              <div className="w-full mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400 shrink-0">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> {t('ticketItem.legend.done')}</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> {t('ticketItem.legend.inProgress')}</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500" /> {t('ticketItem.legend.review')}</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 border-dashed border-2 border-amber-500" /> {t('ticketItem.legend.loopBack')}</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full border-[1.5px] border-purple-500" /> {t('ticketItem.legend.reviewGate')}</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full border-[1.5px] border-pink-500" /> {t('ticketItem.legend.approvalGate')}</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500" /> {t('ticketItem.legend.awaitingFix')}</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /> {t('ticketItem.legend.rejected')}</span>
+              </div>
+            </div>
+
+            {/* Right Node & Artifact Detail Tabs. Height is pinned to the
+                graph panel's own rendered height (nodeListCardHeight, kept
+                in sync by the ResizeObserver above) so it never exceeds a
+                default floor of min-h-[32rem] unless the graph itself is
+                taller -- this panel's content can still scroll internally
+                within that height (flex-1 min-h-0 overflow-y-auto below);
+                only the graph on the left must never scroll. */}
+            <div
+              className="lg:col-span-8 flex flex-col bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs lg:sticky lg:top-20 min-h-[32rem]"
+              style={nodeListCardHeight ? { height: nodeListCardHeight } : undefined}
+            >
+              {/* Tab Navigation */}
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-4 bg-slate-50 dark:bg-slate-800 shrink-0">
+              <div className="flex">
+                <button
+                  onClick={() => setActiveTab('nodes')}
+                  className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition ${
+                    activeTab === 'nodes'
+                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <GitBranch className="w-4 h-4" />
+                  {t('ticketItem.tabs.nodes', { count: totalNodes })}
+                </button>
+                <button
+                  onClick={() => setActiveTab('gherkin')}
+                  className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition ${
+                    activeTab === 'gherkin'
+                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <FileCode className="w-4 h-4 text-amber-500" />
+                  {t('ticketItem.tabs.gherkin', { count: gherkinArtifacts.length })}
+                </button>
+                <button
+                  onClick={() => setActiveTab('html')}
+                  className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition ${
+                    activeTab === 'html'
+                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <Globe className="w-4 h-4 text-cyan-500" />
+                  {t('ticketItem.tabs.html', { count: htmlArtifacts.length })}
+                </button>
+                <button
+                  onClick={() => setActiveTab('artifacts')}
+                  className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition ${
+                    activeTab === 'artifacts'
+                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <FileText className="w-4 h-4 text-emerald-500" />
+                  {t('ticketItem.tabs.artifacts', { count: ticket.artifacts.length })}
+                </button>
+              </div>
+              {ticket.artifacts.length > 0 && (
+                <a
+                  href={`/api/tickets/${ticket.id}/artifacts/download`}
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:border-indigo-400 dark:hover:border-indigo-500 transition"
+                  title={t('ticketItem.downloadAllArtifacts')}
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  {t('ticketItem.downloadAllArtifacts')}
+                </a>
+              )}
+              </div>
+
+              {/* Tab Contents */}
+              <div className="p-4 flex-1 min-h-0 overflow-y-auto">
+                {/* 1. Nodes with Expandable Artifacts */}
+                {activeTab === 'nodes' && (
+                  <div className="space-y-2">
+                    {ticket.nodes.map((node, index) => {
+                      const nodeArtifacts = ticket.artifacts.filter(a => a.node_id === node.id);
+                      const isNodeExpanded = expandedNodeIds.has(node.id);
+
+                      return (
+                        <div
+                          key={node.id}
+                          className="rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 overflow-hidden text-xs transition"
+                        >
+                          <div
+                            onClick={() => toggleNodeExpand(node.id)}
+                            className="flex items-center justify-between p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none"
+                          >
+                            {/* flex-1 min-w-0 lets node.name (below) shrink
+                                and truncate first -- everything else in this
+                                row is shrink-0 so the id/type/retry/manual/
+                                artifact badges never wrap. */}
+                            <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                              <button className="text-slate-400 dark:text-slate-500 shrink-0">
+                                {isNodeExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                              </button>
+                              <span className="font-mono text-slate-400 dark:text-slate-500 w-4 shrink-0">{index + 1}</span>
+                              <span className="font-mono font-bold text-slate-600 dark:text-slate-400 shrink-0 whitespace-nowrap">
+                                {node.id}
+                              </span>
+                              <NodeTypeBadge type={node.type} theme="light" className="shrink-0" />
+                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate min-w-0">
+                                {node.name}
+                              </span>
+                              {node.iteration_count > 0 && (
+                                <span className="text-amber-600 dark:text-amber-400 font-mono text-[11px] shrink-0 whitespace-nowrap">
+                                  {t('ticketItem.retryCount', { count: node.iteration_count })}
+                                </span>
+                              )}
+                              {/* approval_gate already identifies itself as a
+                                  human-only node via its type badge above, so
+                                  this generic is_manual badge is reserved for
+                                  other manual node types (e.g. release) to
+                                  avoid showing two overlapping badges. */}
+                              {node.is_manual && node.type !== 'approval_gate' && (
+                                <span className="text-pink-600 dark:text-pink-400 font-bold text-[10px] px-1.5 py-0.2 border border-pink-300 dark:border-pink-800 bg-pink-50 dark:bg-pink-950 rounded shrink-0 whitespace-nowrap">
+                                  {t('ticketItem.manualApproval')}
+                                </span>
+                              )}
+                              {nodeArtifacts.length > 0 && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold border border-indigo-200 dark:border-indigo-800 flex items-center gap-1 shrink-0 whitespace-nowrap">
+                                  <Layers className="w-3 h-3" />
+                                  {t('ticketItem.artifactsCount', { count: nodeArtifacts.length })}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-3 shrink-0">
+                              {/* Approve/Reject show up for whichever
+                                  approval_gate the ticket is actually
+                                  stuck on (pendingApprovalNodeIds), even
+                                  without expanding the node's row -- see
+                                  DFLT ticket for blinking-gate fix. */}
+                              {pendingApprovalNodeIds.has(node.id) && rejectingNodeId !== node.id && (
+                                <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApprovalDecision(node.id, true)}
+                                    disabled={approvalPendingNodeId === node.id}
+                                    className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition"
+                                  >
+                                    {approvalPendingNodeId === node.id ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <Check className="w-3 h-3" />
+                                    )}
+                                    {t('ticketItem.approvalGate.approve')}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => startRejecting(node.id)}
+                                    disabled={approvalPendingNodeId === node.id}
+                                    className="px-2 py-1 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50 disabled:cursor-not-allowed text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800 rounded text-[11px] font-bold flex items-center gap-1 transition"
+                                  >
+                                    <X className="w-3 h-3" />
+                                    {t('ticketItem.approvalGate.reject')}
+                                  </button>
+                                </div>
+                              )}
+                              {getNodeBadge(getDisplayStatus(node))}
+                              <span className="text-[11px] text-slate-400 dark:text-slate-500 font-mono">
+                                {formatTime(node.updated_at, i18n.language)}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Reject-with-reason prompt (DFLT-00016). A free-
+                              text reason is required -- the confirm button
+                              stays disabled until it's non-empty, which is
+                              this flow's confirmation step (no window.confirm
+                              dialog). Kept outside the clickable header row
+                              so typing/clicking here doesn't toggle the
+                              artifacts accordion. */}
+                          {rejectingNodeId === node.id && (
+                            <div className="px-3 pb-3 -mt-1 flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                              <input
+                                type="text"
+                                autoFocus
+                                value={rejectReasonDraft}
+                                onChange={e => setRejectReasonDraft(e.target.value)}
+                                placeholder={t('ticketItem.approvalGate.reasonPlaceholder')}
+                                className="flex-1 text-[11px] border border-red-300 dark:border-red-800 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-red-400"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleApprovalDecision(node.id, false, rejectReasonDraft)}
+                                disabled={approvalPendingNodeId === node.id || rejectReasonDraft.trim() === ''}
+                                className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition shrink-0"
+                              >
+                                {approvalPendingNodeId === node.id ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <X className="w-3 h-3" />
+                                )}
+                                {t('ticketItem.approvalGate.confirmReject')}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={cancelRejecting}
+                                disabled={approvalPendingNodeId === node.id}
+                                className="px-2 py-1 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-50 text-[11px] font-semibold shrink-0"
+                              >
+                                {t('ticketItem.approvalGate.cancelReject')}
+                              </button>
+                            </div>
+                          )}
+
+                          {/* approval_gate approve/reject error (kept outside
+                              the clickable header row so it doesn't toggle
+                              the artifacts accordion when clicked/read). */}
+                          {approvalErrors[node.id] && (
+                            <div className="px-3 pb-2 -mt-1 text-[11px] text-red-600 dark:text-red-400 font-medium">
+                              {approvalErrors[node.id]}
+                            </div>
+                          )}
+
+                          {/* Node artifacts accordion body */}
+                          {isNodeExpanded && (
+                            <div className="border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 space-y-3">
+                              {nodeArtifacts.length === 0 ? (
+                                <div className="text-slate-400 dark:text-slate-500 italic text-[11px]">
+                                  {t('ticketItem.noArtifactsForNode')}
+                                </div>
+                              ) : (
+                                nodeArtifacts.map(art => (
+                                  <div key={art.id} className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 space-y-2">
+                                    <div className="flex items-center justify-between font-bold text-slate-700 dark:text-slate-300 text-xs">
+                                      <span className="flex items-center gap-1.5">
+                                        {art.type === 'gherkin' && <FileCode className="w-3.5 h-3.5 text-amber-500" />}
+                                        {art.type === 'html' && <Globe className="w-3.5 h-3.5 text-cyan-500" />}
+                                        {art.type === 'text' && <FileText className="w-3.5 h-3.5 text-indigo-500" />}
+                                        {art.name}
+                                      </span>
+                                      <span className="flex items-center gap-2">
+                                        {downloadLink(art)}
+                                        <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded">
+                                          {art.type}
+                                        </span>
+                                      </span>
+                                    </div>
+
+                                    {/* Inline display based on type */}
+                                    {art.type === 'gherkin' && art.content && (
+                                      <div className="space-y-1">
+                                        <div className="flex justify-end">{openInNewTabLink(art)}</div>
+                                        <GherkinViewer content={art.content} />
+                                      </div>
+                                    )}
+
+                                    {art.type === 'html' && (
+                                      <div className="space-y-1">
+                                        <div className="flex justify-end">{openInNewTabLink(art)}</div>
+                                        <iframe
+                                          src={(art.content || art.file_path || art.has_content) ? `/api/artifacts/${art.id}/content` : undefined}
+                                          title={art.name}
+                                          sandbox="allow-scripts"
+                                          className="w-full h-48 bg-white rounded border border-slate-300 dark:border-slate-600"
+                                        />
+                                      </div>
+                                    )}
+
+                                    {art.type === 'text' && art.content && (
+                                      <div className="space-y-1">
+                                        <div className="flex justify-end">{openInNewTabLink(art)}</div>
+                                        <MarkdownViewer content={art.content} />
+                                      </div>
+                                    )}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* 2. Gherkin Tab with Syntax Highlighting */}
+                {activeTab === 'gherkin' && (
+                  <div className="space-y-4">
+                    {gherkinArtifacts.length === 0 ? (
+                      <div className="text-slate-400 dark:text-slate-500 text-center py-8 text-xs">{t('ticketItem.noGherkinYet')}</div>
+                    ) : (
+                      gherkinArtifacts.map(g => (
+                        <div key={g.id} className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50/40 dark:bg-amber-950/20 p-4">
+                          <div className="font-bold text-amber-900 dark:text-amber-300 text-xs mb-2 flex items-center justify-between">
+                            <span>{g.name}</span>
+                            <span className="flex items-center gap-3">
+                              {openInNewTabLink(g)}
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400">{formatDateTime(g.created_at, i18n.language)}</span>
+                            </span>
+                          </div>
+                          {g.content && <GherkinViewer content={g.content} />}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {/* 3. HTML Tab */}
+                {activeTab === 'html' && (
+                  <div className="space-y-4">
+                    {htmlArtifacts.length === 0 ? (
+                      <div className="text-slate-400 dark:text-slate-500 text-center py-8 text-xs">{t('ticketItem.noHtmlYet')}</div>
+                    ) : (
+                      htmlArtifacts.map(h => (
+                        <div key={h.id} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 bg-white dark:bg-slate-800 shadow-xs">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-bold text-xs text-cyan-700 dark:text-cyan-400">{h.name}</span>
+                            {/* Served from the DB via
+                                GET /api/artifacts/{id}/content, not a local
+                                file path, so this preview works the same
+                                from any machine (DFLT-00006). Uses the same
+                                sandboxed-preview-page link as every other tab
+                                (openInNewTabLink) rather than a duplicate
+                                inline implementation -- see DFLT-00053. */}
+                            {openInNewTabLink(h)}
+                          </div>
+                          <iframe
+                            src={(h.content || h.file_path || h.has_content) ? `/api/artifacts/${h.id}/content` : undefined}
+                            title={h.name}
+                            sandbox="allow-scripts"
+                            className="w-full h-64 bg-white rounded border border-slate-300 dark:border-slate-600"
+                          />
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {/* 4. All Artifacts Tab */}
+                {activeTab === 'artifacts' && (
+                  <div className="space-y-2">
+                    {ticket.artifacts.length === 0 ? (
+                      <div className="text-slate-400 dark:text-slate-500 text-center py-8 text-xs">{t('ticketItem.noArtifactsYet')}</div>
+                    ) : (
+                      ticket.artifacts.map(a => (
+                        <div
+                          key={a.id}
+                          className="p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs"
+                        >
+                          <div className="flex items-center justify-between font-semibold text-slate-800 dark:text-slate-200 mb-1">
+                            <span className="flex items-center gap-2">
+                              <FileText className="w-4 h-4 text-indigo-500" />
+                              {a.name}
+                            </span>
+                            <span className="flex items-center gap-2">
+                              {downloadLink(a)}
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 uppercase font-mono">
+                                {a.type}
+                              </span>
+                            </span>
+                          </div>
+                          {a.type === 'gherkin' && a.content ? (
+                            <div className="space-y-1">
+                              <div className="flex justify-end">{openInNewTabLink(a)}</div>
+                              <GherkinViewer content={a.content} />
+                            </div>
+                          ) : a.type === 'text' && a.content ? (
+                            <div className="space-y-1">
+                              <div className="flex justify-end">{openInNewTabLink(a)}</div>
+                              <MarkdownViewer content={a.content} />
+                            </div>
+                          ) : a.type === 'image' ? (
+                            // Served from the DB via
+                            // GET /api/artifacts/{id}/content -- a.content
+                            // here is base64 image data, never meant to be
+                            // dumped as text (DFLT-00006).
+                            (a.content || a.file_path || a.has_content) ? (
+                              <img
+                                src={`/api/artifacts/${a.id}/content`}
+                                alt={a.name}
+                                className="max-h-40 rounded border border-slate-200 dark:border-slate-700 mt-2"
+                              />
+                            ) : null
+                          ) : a.type === 'html' ? (
+                            <div className="mt-2">{openInNewTabLink(a)}</div>
+                          ) : a.content ? (
+                            <pre className="font-mono text-[11px] text-slate-700 dark:text-slate-300 max-h-32 overflow-y-auto whitespace-pre-wrap mt-2 p-2 bg-white dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-700">
+                              {a.content}
+                            </pre>
+                          ) : null}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Action Footer: Claude Execution Panel */}
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('ticketItem.actions.label')}</span>
+                <button
+                  onClick={() => handleRunClaude(t('claudePrompts.refineTicket', { ticketId: ticket.id }), ticket.id)}
+                  disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
+                  className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
+                >
+                  {isRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ClipboardEdit className="w-3.5 h-3.5 text-indigo-600" />}
+                  {t('ticketItem.actions.refine')}
+                </button>
+                <button
+                  onClick={() => handleRunClaude(`/process-ticket ${ticket.id}`, ticket.id)}
+                  disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                >
+                  {isRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                  {t('ticketItem.actions.run')}
+                </button>
+              </div>
+            </div>
+
+            {/* Custom Prompt Box */}
+            <div className="flex gap-2">
+              <textarea
+                rows={2}
+                value={promptText}
+                onChange={e => setPromptText(e.target.value)}
+                onKeyDown={e => {
+                  if (isSubmitShortcut(e)) {
+                    e.preventDefault();
+                    handleSendPrompt();
+                  }
+                }}
+                placeholder={t('ticketItem.promptPlaceholder')}
+                className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-800 resize-none font-sans"
+              />
+              <button
+                onClick={handleSendPrompt}
+                disabled={isRunning || !promptText.trim()}
+                className="px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition"
+              >
+                {isRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {t('ticketItem.send')}
+              </button>
+            </div>
+
+            {/* Launch status: the actual session runs in an external terminal now.
+                読み上げは常時マウントの live region が担当する（SC 4.1.3）。 */}
+            <StatusLiveRegion message={statusMessage || ''} />
+            {statusMessage && (
+              <div
+                aria-hidden="true"
+                className="mt-3 p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] rounded-lg border border-slate-200 dark:border-slate-700"
+              >
+                {statusMessage}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

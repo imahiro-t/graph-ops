@@ -1,0 +1,407 @@
+{
+  "common": {
+    "justNow": "たった今"
+  },
+  "header": {
+    "subtitle": "チケット・実行グラフ管理",
+    "launchClaude": "Claude 起動",
+    "newTicket": "新規チケット",
+    "settings": "設定",
+    "theme": {
+      "light": "ライトモード",
+      "dark": "ダークモード",
+      "system": "システム設定に合わせる",
+      "toggleTitle": "テーマ: {{mode}}（クリックで切替）"
+    },
+    "language": {
+      "ja": "日本語",
+      "en": "English",
+      "toggleTitle": "言語: {{lang}}（クリックで切替）"
+    }
+  },
+  "toolbar": {
+    "searchPlaceholder": "チケット検索 (ID・タイトル)...",
+    "statusAll": "ステータス: すべて",
+    "statusNone": "ステータス: 未選択",
+    "statusSelected": "ステータス: {{count}}件選択",
+    "statusGroupLabel": "ステータスで絞り込む",
+    "assigneeAll": "担当者: すべて",
+    "assigneeSelected": "担当者: {{name}}",
+    "assigneeGroupLabel": "担当者で絞り込む",
+    "priorityAll": "優先度: すべて",
+    "priorityNone": "優先度: 未選択",
+    "prioritySelected": "優先度: {{count}}件選択",
+    "priorityGroupLabel": "優先度で絞り込む",
+    "refreshTitle": "最新の状態に更新",
+    "updatedAt": "{{time}} 更新"
+  },
+  "summary": {
+    "title": "全チケット概要",
+    "subtitle": "（クリックで展開してグラフとノード毎の成果物を確認できます）",
+    "total": "総チケット",
+    "inProgress": "進行中",
+    "inReview": "レビュー中",
+    "done": "完了",
+    "nodeProgress": "ノード進捗"
+  },
+  "emptyState": {
+    "noTicketsMatch": "条件に一致するチケットがありません"
+  },
+  "pagination": {
+    "range": "{{total}}件中 {{from}}〜{{to}}件を表示",
+    "pageOf": "{{page}} / {{total}}"
+  },
+  "projectSwitcher": {
+    "noProject": "プロジェクトを選択",
+    "empty": "プロジェクトがありません",
+    "createNew": "新規プロジェクト...",
+    "selectFirst": "先にプロジェクトを作成または選択してください",
+    "noProjectYet": "まだプロジェクトが作成されていません。作成するとチケットの管理を始められます。"
+  },
+  "createProjectModal": {
+    "title": "新規プロジェクト作成",
+    "description": "プロジェクトごとにチケット一覧・作業フォルダ・チケット/ノードIDのプレフィックスが分離されます。",
+    "nameLabel": "プロジェクト名 *",
+    "namePlaceholder": "例: 決済サービス",
+    "prefixLabel": "IDプレフィックス（任意、英数字5文字以内）",
+    "prefixPlaceholder": "省略時はプロジェクト名から自動生成",
+    "workDirLabel": "作業フォルダ（絶対パス） *",
+    "workDirPlaceholder": "例: /Users/me/dev/payments-service"
+  },
+  "createModal": {
+    "title": "新規チケット作成",
+    "descriptionPrefix": "入力内容は",
+    "descriptionSuffix": "スキルに渡され、Claude Codeがチケットを作成します（グラフはまだ作られません）。",
+    "titleLabel": "タイトル *",
+    "titlePlaceholder": "例: ログイン失敗時のアカウントロック解除フローを見直す",
+    "descriptionLabel": "説明",
+    "descriptionPlaceholder": "要件や背景を記述...",
+    "close": "閉じる",
+    "cancel": "キャンセル",
+    "submit": "作成"
+  },
+  "ticketItem": {
+    "selfAssign": {
+      "assign": "担当する",
+      "unassign": "担当を外す",
+      "assignedToOther": "{{name}} が担当しています"
+    },
+    "priority": {
+      "label": "優先度"
+    },
+    "nodeCount": "ノード数",
+    "loopEdges": "差し戻し・戻りの辺: {{count}}本 (左側の破線で表示)",
+    "createdAt": "作成日時",
+    "description": {
+      "title": "説明",
+      "empty": "説明はまだありません",
+      "refinedAt": "{{time}} にリファイン",
+      "expand": "すべて表示",
+      "collapse": "折りたたむ"
+    },
+    "graphTitle": "実行グラフ (DAG / ループ)",
+    "progress": "進捗 {{percent}}%",
+    "parallelHint": "同じ行のノードは並列実行されます",
+    "legend": {
+      "done": "完了",
+      "inProgress": "進行中",
+      "review": "レビュー",
+      "loopBack": "戻りループ(左)",
+      "reviewGate": "レビューゲート",
+      "approvalGate": "承認ゲート",
+      "rejected": "却下済み",
+      "awaitingFix": "修正待ち"
+    },
+    "tabs": {
+      "nodes": "ノード一覧・成果物展開 ({{count}})",
+      "gherkin": "Gherkin 仕様 ({{count}})",
+      "html": "HTML成果物 ({{count}})",
+      "artifacts": "全成果物 ({{count}})"
+    },
+    "retryCount": "(再試行: {{count}}回)",
+    "manualApproval": "手動承認",
+    "approvalGate": {
+      "approve": "承認",
+      "reject": "却下",
+      "reasonPlaceholder": "却下理由（必須）",
+      "confirmReject": "却下を確定",
+      "cancelReject": "キャンセル",
+      "pendingStatus": "承認待ち",
+      "rejectedHint": "却下済み。process-ticketが却下理由をトリアージし（対象ノードを再実行するか）、または人手で解決するまでブロックされたままです。",
+      "rejectedBadgeOne": "却下済み: {{name}}",
+      "rejectedBadgeMany": "却下済み {{count}}件"
+    },
+    "artifactsCount": "成果物 {{count}}",
+    "noArtifactsForNode": "このノードに紐付く成果物はまだありません",
+    "openInNewTab": "別タブで開く",
+    "download": "ダウンロード",
+    "downloadAllArtifacts": "成果物を一括ダウンロード",
+    "noGherkinYet": "Gherkin テスト仕様はまだ登録されていません",
+    "noHtmlYet": "HTML 成果物はまだ登録されていません",
+    "noArtifactsYet": "成果物はまだ登録されていません",
+    "delete": {
+      "button": "チケットを削除",
+      "confirm": "チケット {{id}}「{{title}}」を削除します。この操作は取り消せません。本当に削除しますか？"
+    },
+    "close": {
+      "button": "クローズ（対応せず終了）",
+      "reasonPlaceholder": "理由（任意）",
+      "confirm": "クローズする",
+      "cancel": "キャンセル",
+      "reasonLabel": "クローズ理由"
+    },
+    "reopen": {
+      "button": "再オープン"
+    },
+    "actions": {
+      "label": "実行アクション:",
+      "refine": "リファイン",
+      "run": "実行する"
+    },
+    "promptPlaceholder": "例: リリースしたので残りの工程を進めてステータスをレビュー中にしてください (改行できます。送信は「実行」ボタン、または Cmd/Ctrl+Enter)",
+    "send": "送信"
+  },
+  "artifactModal": {
+    "title": "成果物ビューアー",
+    "emptyGherkin": "# 空のGherkinファイル",
+    "openInNewWindow": "別ウィンドウで全画面表示",
+    "emptyHtml": "HTML成果物が空です",
+    "noImagePath": "画像パスが指定されていません",
+    "noArtifactData": "成果物データなし",
+    "noArtifactsRegistered": "登録されている成果物はありません",
+    "selectArtifact": "成果物を選択してください"
+  },
+  "claudeRunnerModal": {
+    "title": "Claude Code を起動",
+    "descriptionPrefix": "入力したプロンプトで、外部ターミナルに",
+    "descriptionSuffix": "が対話起動します。権限確認や以降のやり取りはそちらのターミナルで行ってください。",
+    "placeholder": "Claude Code に送信するコマンドやプロンプト...",
+    "launch": "起動"
+  },
+  "claudeLaunch": {
+    "started": "ターミナルを起動しました。続きはそちらでご確認ください。",
+    "failed": "ターミナルの起動に失敗しました: {{message}}",
+    "unknownReason": "原因を特定できませんでした"
+  },
+  "claudePrompts": {
+    "executeIncompleteNodes": "チケット {{ticketId}} の未完了ノードを実行してください",
+    "refineTicket": "/refine-ticket {{ticketId}} のスキルを使って、完了条件とWhy（背景・目的）を詰めてください",
+    "createTicket": "/create-ticket のスキルを使って、タイトル「{{title}}」、説明「{{description}}」でチケットを作成してください。"
+  },
+  "graphViewer": {
+    "manualNode": "手動操作ノード",
+    "loopBackLabel": "差し戻しループ"
+  },
+  "artifactPreview": {
+    "loading": "読み込み中...",
+    "loadError": "成果物の読み込みに失敗しました: {{message}}"
+  },
+  "nodeType": {
+    "plan": "計画",
+    "review": "レビュー",
+    "gherkinSpec": "Gherkin仕様",
+    "implementation": "実装",
+    "reviewGate": "レビューゲート",
+    "approvalGate": "承認ゲート",
+    "gherkinTest": "Gherkinテスト",
+    "report": "レポート",
+    "release": "リリース",
+    "investigation": "調査",
+    "documentation": "ドキュメント",
+    "custom": "カスタム"
+  },
+  "status": {
+    "todo": "未着手",
+    "refined": "リファイン済み",
+    "inProgress": "進行中",
+    "inReview": "レビュー中",
+    "inRelease": "リリース中",
+    "done": "完了",
+    "rejected": "却下済み",
+    "awaitingFix": "修正待ち",
+    "closed": "クローズ"
+  },
+  "priority": {
+    "high": "高",
+    "medium": "中",
+    "low": "低",
+    "unset": "未設定"
+  },
+  "settings": {
+    "modalTitle": "設定",
+    "scope": {
+      "label": "スコープ",
+      "global": "全体設定",
+      "project": "プロジェクト単位設定",
+      "projectPlaceholder": "プロジェクトを選択",
+      "noProjectSelected": "アプリ全体でプロジェクトが選択されていません。プロジェクト単位設定を編集するには、先にプロジェクトスイッチャーからプロジェクトを選択してください。"
+    },
+    "tabs": {
+      "nodeTypes": "ノード種別",
+      "reviewGates": "レビューゲート",
+      "skills": "スキル",
+      "reportTemplate": "レポートテンプレート",
+      "appSettings": "アプリ設定"
+    },
+    "unsavedChanges": {
+      "confirmMessage": "未保存の変更があります。このまま続けると変更内容は失われます。続けますか？"
+    },
+    "common": {
+      "save": "保存",
+      "saving": "保存中...",
+      "saveSuccess": "保存しました。",
+      "noChangesToSave": "保存する変更はありません。",
+      "loading": "読み込み中...",
+      "inheritedFromDefault": "プラグイン既定を継承",
+      "yes": "はい",
+      "no": "いいえ",
+      "none": "（なし）"
+    },
+    "nodeTypes": {
+      "listTitle": "ノード種別一覧",
+      "overrideBadge": "このスコープで上書きあり",
+      "mergedPreviewLabel": "継承後のプレビュー（エージェントが実際に見る内容）",
+      "tierTextLabel": "このスコープでの上書き",
+      "tierTextPlaceholder": "このスコープで継承内容の後に追記される指示文を入力...",
+      "emptyOverrideHint": "空にして保存すると上書きが解除され、下位層の内容にフォールバックします。",
+      "addType": "ノード種別を追加",
+      "newTypePlaceholder": "例: custom_lint",
+      "invalidTypeName": "「/」「\\」「.」「..」を含まない名前を入力してください。",
+      "deleteType": "このノード種別の上書きを削除",
+      "defaultBadge": "既定",
+      "defaultBadgeHint": "このスコープでまだ上書きされていない、プラグイン既定のノード種別です。下の欄に入力すると上書きされます。",
+      "cannotDeleteDefaultHint": "プラグイン既定のノード種別のため削除できません（上書き、またはそのままにすることのみ可能です）。"
+    },
+    "reviewGates": {
+      "intro": "review_gate ノードが gate id で参照するレビューゲート定義です。",
+      "addGate": "レビューゲートを追加",
+      "idLabel": "ゲートID",
+      "nameLabel": "名前",
+      "criteriaLabel": "合格基準（criteria、継承内容を置き換え）",
+      "additionalCriteriaLabel": "追加合格基準（additional_criteria、継承内容に追記）",
+      "maxIterationsLabel": "最大イテレーション数",
+      "enabledLabel": "有効",
+      "deleteGate": "削除",
+      "defaultBadge": "既定",
+      "defaultBadgeHint": "このスコープでまだ上書きされていない、プラグイン既定のレビューゲートです。いずれかの項目を編集すると上書きされます。",
+      "cannotDeleteDefaultHint": "プラグイン既定であり、このスコープでの上書きではないため削除できません。先にいずれかの項目を編集して上書きしてください。",
+      "cannotRenameDefaultHint": "プラグイン既定のレビューゲートのため名前は変更できません。ロケール切り替えで翻訳された名前が表示されるよう、名前は固定されています。",
+      "tableEmpty": "このスコープにはまだレビューゲートが定義されていません。",
+      "mergedPreviewLabel": "継承後のプレビュー（エージェントが実際に見る内容）",
+      "mergedCriteriaLabel": "合成後の合格基準",
+      "mergedMaxIterationsLabel": "合成後の最大イテレーション数",
+      "mergedEnabledLabel": "合成後の有効状態",
+      "previewUnavailableHint": "このゲートを保存すると、プレビューが表示されます。"
+    },
+    "skills": {
+      "listTitle": "スキル一覧",
+      "overrideBadge": "このスコープで上書きあり",
+      "mergedPreviewLabel": "継承後のプレビュー（エージェントが実際に見る内容）",
+      "tierTextLabel": "このスコープでの上書き",
+      "tierTextPlaceholder": "このスコープで継承内容の後に追記される補足指示を入力...",
+      "emptyOverrideHint": "空にして保存すると上書きが解除され、下位層の内容にフォールバックします。",
+      "emptyMergedHint": "このスキルには既定の補足指示はありません。",
+      "names": {
+        "createTicket": "create-ticket（チケット作成）",
+        "refineTicket": "refine-ticket（チケット精緻化）",
+        "processTicket": "process-ticket（チケット処理）",
+        "onboarding": "onboarding（初回セットアップ）"
+      }
+    },
+    "reportTemplate": {
+      "intro": "レポート成果物に使われる固定HTMLテンプレートです。保存すると内容が丸ごと置き換わります（追記ではありません）。空にして保存すると、下位層（チーム上書き→ユーザー上書き→プラグイン既定）にフォールバックします。",
+      "tierTextLabel": "このスコープでの上書き（HTML全文）",
+      "tierTextPlaceholder": "置き換え後のHTMLテンプレート全文を貼り付け（固定構造については get-report-template を参照）...",
+      "mergedPreviewLabel": "継承後のプレビュー（エージェントが実際に穴埋めするHTMLソース）",
+      "emptyOverrideHint": "空にして保存すると上書きが解除され、下位層の内容にフォールバックします。"
+    },
+    "appSettings": {
+      "globalOnly": "この設定は全体設定でのみ編集できます。上のスコープ切り替えで「全体設定」を選択してください。",
+      "restartNote": "この項目の変更は、次回サーバー起動時に反映されます（保存先: {{path}}）。",
+      "currentlyInEffect": "現在有効な値: {{value}}",
+      "storage": {
+        "title": "データ保存先",
+        "dbBackendLabel": "DB種別",
+        "dbBackendSqlite": "SQLite",
+        "dbBackendMysql": "MySQL",
+        "dbBackendSwitchHint": "切り替えはどちらのDBに接続するかを変更するだけで、データの移行は行われません。各DBは自分のデータをそのまま保持します。",
+        "dbPathLabel": "DBファイルパス",
+        "artifactsDirLabel": "作業ファイル置き場",
+        "artifactsDirHint": "調査資料や一時ファイルを置くための共有ディレクトリです。成果物そのものはDBに保存されるため、ここに置くかどうかは任意です。html/image の成果物をファイルパスで登録する場合は、このディレクトリ配下のファイルのみ読み込めます。",
+        "mysqlHostLabel": "ホスト",
+        "mysqlPortLabel": "ポート",
+        "mysqlDatabaseLabel": "DB名",
+        "mysqlUserLabel": "ユーザー名",
+        "mysqlPasswordLabel": "パスワード",
+        "mysqlPasswordFromEnvHint": "環境変数 \"{{envVar}}\" から読み込まれます（平文では保存されません）。",
+        "mysqlPasswordPlaintextHint": "この値はgraph-config.jsonに平文で保存されます。環境変数から読み込むには \"${ENV_VAR_NAME}\" の形式で入力してください。",
+        "mysqlPasswordSavedPlaceholder": "（保存済み）",
+        "mysqlPasswordSavedHint": "パスワードは保存済みです。サーバーはこの画面に値を返さないため、変更しない場合は空欄のままにしてください。変更する場合のみ新しい値を入力します。",
+        "mysqlRequiredFieldsHint": "MySQLを選択する場合、ホスト・DB名・ユーザー名は必須です。TLSモードが「CA証明書のみ検証」の場合はCA証明書のパスも必須です。",
+        "mysqlPasswordRetypeHint": "接続先（ホスト・ポート・DB名・ユーザー名・TLS設定）が変更されています。保存済みのパスワード（または \"${ENV_VAR}\" 参照）は保存時の接続先にのみ使われるため、接続テスト・保存の前に再入力してください。同じ環境変数参照を新しい接続先で使い回したい場合は、一度パスワード欄を空にして接続先だけを保存し、その後もう一度同じ参照を入力して保存してください。",
+        "mysqlPasswordRetypeOtherBackendHint": "MySQLの接続先（ホスト・ポート・DB名・ユーザー名・TLS設定）が変更されています。保存済みのパスワード（または \"${ENV_VAR}\" 参照）は保存時の接続先にのみ使われるため、ストレージでMySQLを選び直して再入力するか、接続先を元に戻してから保存してください。",
+        "mysqlTlsLabel": "TLS設定",
+        "mysqlTlsVerifyFull": "証明書とホスト名を検証（既定・推奨）",
+        "mysqlTlsVerifyFullHint": "サーバー証明書のチェーンとホスト名の両方を検証します。既定はこのモードです。TLSに対応していないサーバー、または自己署名・自動生成の証明書（MySQLの初期状態など）を使うサーバーには接続できません。その場合は「CA証明書のみ検証」を使用してください。",
+        "mysqlTlsVerifyCa": "CA証明書のみ検証",
+        "mysqlTlsVerifyCaHint": "証明書のチェーンをCA証明書に対して検証しますが、ホスト名は検証しません。MySQLの自動生成証明書（ホスト名を含まない）など、証明書とホスト名の対応を保証できない場合に使用します。下記のCA証明書ファイルの指定が必須です。",
+        "mysqlTlsDisabled": "TLSを無効化（平文接続）",
+        "mysqlTlsDisabledWarning": "警告: この接続は暗号化されません。パスワードを含む通信内容が経路上で読み取り・改ざんされる可能性があります。TLSに対応していないサーバーに接続する場合以外は選択しないでください。",
+        "mysqlTlsCaLabel": "CA証明書ファイルのパス",
+        "mysqlTlsCaHint": "PEM形式のCA証明書ファイルへの絶対パスです。「証明書とホスト名を検証」で空欄の場合はOSの信頼済みルート証明書が使われます。指定した場合、信頼するCAはこのファイルのみになります（OSの信頼済みルートは使われません）。",
+        "mysqlTlsCaRequiredHint": "TLSモードが「CA証明書のみ検証」の場合、CA証明書ファイルのパスは必須です。",
+        "testConnection": "接続テスト",
+        "testingConnection": "接続確認中...",
+        "testConnectionSuccess": "接続に成功しました。",
+        "testConnectionFailure": "接続に失敗しました: {{error}}"
+      },
+      "myProfile": {
+        "title": "自分の情報",
+        "description": "各チケットの「担当する」ボタンで使われる表示名です。保存すると即座に反映されます（サーバー再起動は不要）。空欄のままにすると、そのボタン自体が表示されなくなります。",
+        "nameLabel": "名前",
+        "namePlaceholder": "例: 山田太郎"
+      },
+      "pagination": {
+        "title": "ページング",
+        "pageSizeLabel": "チケット一覧の1ページあたりの最大件数",
+        "invalidPageSize": "1以上の整数を指定してください。"
+      },
+      "extensionsDir": {
+        "title": "ノード/ワークフロー設定ディレクトリ",
+        "description": "ノード種別・ワークフロー・レビューゲートの「全体設定」を読み書きするディレクトリです。空欄の場合は既定のディレクトリ（全体設定のディレクトリ、~/.graph-ops）が使われます。"
+      },
+      "projects": {
+        "title": "プロジェクト管理",
+        "description": "各プロジェクトの名前や作業ディレクトリ（Claude Codeを起動する対象フォルダ）の編集、プロジェクトの削除ができます。",
+        "empty": "プロジェクトがまだありません。",
+        "delete": "プロジェクトを削除",
+        "nameLabel": "プロジェクト名",
+        "workDirLabel": "作業ディレクトリ",
+        "confirmDelete": "プロジェクト「{{name}}」（{{id}}）を削除します。このプロジェクトに属するすべてのチケット・ノード・成果物が完全に削除され、この操作は取り消せません。本当に削除しますか？"
+      }
+    }
+  },
+  "errors": {
+    "TITLE_REQUIRED": "タイトルは必須です。",
+    "TICKET_NOT_FOUND": "対象のチケットが見つかりませんでした。",
+    "NODE_NOT_FOUND": "対象のノードが見つかりませんでした。",
+    "VALIDATION_ERROR": "入力内容に誤りがあります。ご確認のうえ再度お試しください。",
+    "INTERNAL_ERROR": "サーバー側でエラーが発生しました。しばらくしてから再度お試しください。",
+    "INVALID_PREFIX": "プレフィックスは英数字1〜5文字で指定してください。",
+    "PREFIX_TAKEN": "そのプレフィックスは他のプロジェクトで既に使用されています。",
+    "PROJECT_NOT_FOUND": "対象のプロジェクトが見つかりませんでした。",
+    "NO_CURRENT_PROJECT": "プロジェクトが選択されていません。先にプロジェクトを作成または選択してください。",
+    "CSRF_HEADER_REQUIRED": "セキュリティ上の理由によりリクエストがブロックされました。ページを再読み込みしてから再度お試しください。",
+    "MYSQL_PASSWORD_RETYPE_REQUIRED": "保存済みのMySQLパスワードは別の接続先には使用できません。ホスト・ポート・DB名・ユーザー名を変更した場合はパスワードを再入力してください。",
+    "HOST_NOT_ALLOWED": "サーバーが応答する対象ではないアドレスへのリクエストのため、ブロックされました。サーバー起動時に表示されるアドレス（既定では localhost）でUIを開いてください。",
+    "INVALID_SETTINGS_SCOPE": "有効なスコープ（プロジェクト単位設定の場合はプロジェクトも）を選択してから編集してください。",
+    "CATALOG_CYCLE_DETECTED": "この変更を保存するとノード間で循環依存が発生します。depends_on / loop_back_to の関係を見直してください。",
+    "CATALOG_UNKNOWN_REFERENCE": "存在しないノードIDまたはレビューゲートIDが参照されています。",
+    "CATALOG_DUPLICATE_NODE_ID": "同じIDのノードが複数存在します。ノードIDは一意にしてください。",
+    "CATALOG_INVALID_DOCUMENT": "ワークフロー定義が不正です。ノード・ゲートの定義を確認してください。",
+    "INVALID_MAX_ITERATIONS": "最大イテレーション数は1以上の整数で指定してください。",
+    "WORKFLOW_NODES_LOCKED": "ワークフローのノード構成（骨格）はプラグイン既定でのみ定義され、上書きできません。レビューゲートの追加・編集はレビューゲートタブから行ってください。",
+    "INVALID_REPORT_TEMPLATE": "レポートテンプレートに必要な構造マーカーが含まれていません。",
+    "UNKNOWN": "予期しないエラーが発生しました。再度お試しください。"
+  }
+}

@@ -1,0 +1,157 @@
+version: 1
+
+review_gates:
+  code_review:
+    name: "Code Review"
+    criteria: |
+      Review for code quality, soundness of the design, naming/readability, and any unnecessary duplication or complexity.
+    max_iterations: 3
+  qa_review:
+    name: "QA Review"
+    criteria: |
+      Review whether the requirements and Gherkin scenarios are satisfied, and whether any edge cases have been overlooked, from a QA perspective.
+    max_iterations: 3
+  security_review:
+    name: "Security Review"
+    criteria: |
+      Review authentication/authorization, input validation, handling of sensitive data, and any vulnerabilities corresponding to the OWASP Top 10.
+    max_iterations: 3
+  non_functional_review:
+    name: "Non-functional Review"
+    criteria: |
+      Review performance, scalability, availability, and logging/monitoring for any issues.
+    max_iterations: 3
+  # Not part of the default `nodes` template below -- used only when
+  # process-ticket decides a ticket is investigation-only (no implementation,
+  # no Gherkin testing) and builds a custom expand-graph patch referencing it.
+  investigation_review:
+    name: "Investigation Review"
+    criteria: |
+      Confirm the investigation is accurate, covers the necessary points, and that its conclusions/recommendations are well-founded.
+    max_iterations: 3
+  # Also not part of the default `nodes` template below. Most tickets don't
+  # touch anything a user interacts with, so this isn't wired in
+  # unconditionally alongside code/qa/security/non_functional -- process-ticket
+  # includes it (via gate_ref in an expand-graph patch) only for tickets whose
+  # implementation actually changes UI/user-facing behavior.
+  accessibility_review:
+    name: "Accessibility Review"
+    criteria: |
+      Review UI changes for accessibility: WCAG conformance, keyboard operability, screen-reader/semantic markup correctness, color contrast, and focus management.
+    max_iterations: 3
+
+workflow:
+  # Fixed skeleton: unlike review_gates, this Nodes/Seed pair is no longer
+  # overridable at any tier (config.Merge takes it from this, the plugin
+  # default document, only -- see its doc comment -- and
+  # handlePutSettingsCatalog rejects a submitted document that sets either
+  # field). Names below are English only: DFLT-00051 replaced the old
+  # hardcoded bilingual ("English / 日本語") names with a language-file
+  # mechanism (see internal/config/locale.go and defaults/locales/*.yaml) --
+  # when the resolved language (user/team Document.Language, or an explicit
+  # --language override) has a matching locale file, LoadWithRoots/
+  # LocalizedDefault substitute that locale's translations for these Name
+  # fields before Merge ever runs, so the skeleton stays structurally locked
+  # while its display names still localize. process-ticket still writes its
+  # own patch-invented node names in the user's configured language directly
+  # (see the onboarding skill) since those nodes have no fixed id a locale
+  # file could key off of.
+  #
+  # process-ticket creates only the seed nodes at first; once every one of
+  # them is DONE, the engine generates the rest of the nodes below and
+  # attaches them to these.
+  seed: [plan, plan_review]
+  # This is the maximal reference shape (always exactly 4 parallel review
+  # gates, no documentation/runbook node) -- process-ticket now always
+  # expands the graph via an explicit expand-graph --patch that judges, per
+  # ticket, which review_gates entries actually apply (2 vs 5+, including
+  # optional ones like accessibility_review) and whether a documentation node
+  # is needed, rather than using this template as-is. See the process-ticket
+  # skill (packages/plugin/skills/process-ticket/SKILL.md) for that judgment.
+  # This list still matters as: (a) the source of the seed nodes above, and
+  # (b) the ExpandGraph(patch=nil) fallback for any caller that skips the
+  # patch step entirely.
+  nodes:
+    - id: plan
+      name: "Plan Creation"
+      type: plan
+    - id: plan_review
+      name: "Plan Review"
+      type: review
+      depends_on: [plan]
+      loop_back_to: plan
+    # Human approval gate, not an automated review: plan_review's PASS
+    # verdict alone no longer opens the door to implementation/Gherkin work.
+    # DFLT-00016 -- see internal/config/defaults/node-types/approval_gate.md
+    # for the approve/reject-with-reason contract; buildPlanFromNodeDefs
+    # (internal/engine/dag.go) forces is_manual=true for this type
+    # regardless of what's written here.
+    - id: plan_approval
+      name: "Plan Approval"
+      type: approval_gate
+      depends_on: [plan_review]
+    - id: gherkin_spec
+      name: "Gherkin Spec Creation"
+      type: gherkin_spec
+      depends_on: [plan_approval]
+    - id: gherkin_review
+      name: "Gherkin Spec Review"
+      type: review
+      depends_on: [gherkin_spec]
+      loop_back_to: gherkin_spec
+    - id: impl
+      name: "Implementation"
+      type: implementation
+      depends_on: [gherkin_review]
+    - id: code_review
+      type: review_gate
+      gate: code_review
+      depends_on: [impl]
+      loop_back_to: impl
+    - id: qa_review
+      type: review_gate
+      gate: qa_review
+      depends_on: [impl]
+      loop_back_to: impl
+    - id: security_review
+      type: review_gate
+      gate: security_review
+      depends_on: [impl]
+      loop_back_to: impl
+    - id: non_functional_review
+      type: review_gate
+      gate: non_functional_review
+      depends_on: [impl]
+      loop_back_to: impl
+    - id: gherkin_test
+      name: "Gherkin Test Execution"
+      type: gherkin_test
+      depends_on: [code_review, qa_review, security_review, non_functional_review]
+    - id: test_review
+      name: "Test Result Review"
+      type: review
+      depends_on: [gherkin_test]
+      loop_back_to: impl
+    - id: report
+      name: "Test Report Creation (HTML/Captures)"
+      type: report
+      depends_on: [test_review]
+    - id: report_review
+      name: "Report Review"
+      type: review
+      depends_on: [report]
+      loop_back_to: report
+    # Second human approval gate, immediately before release/deployment.
+    # release now depends solely on this node, not on report_review directly
+    # -- see node-types/release.md and node-types/release_approval.md for the
+    # resulting split of responsibilities (approve/reject-with-reason here,
+    # carrying out the already-approved release/deployment there).
+    - id: release_approval
+      name: "Release Approval"
+      type: approval_gate
+      depends_on: [report_review]
+    - id: release
+      name: "Release & Deployment (Manual)"
+      type: release
+      depends_on: [release_approval]
+      is_manual: true

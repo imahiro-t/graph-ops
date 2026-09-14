@@ -1,0 +1,407 @@
+{
+  "common": {
+    "justNow": "just now"
+  },
+  "header": {
+    "subtitle": "Ticket & Execution Graph Management",
+    "launchClaude": "Launch Claude",
+    "newTicket": "New Ticket",
+    "settings": "Settings",
+    "theme": {
+      "light": "Light mode",
+      "dark": "Dark mode",
+      "system": "Match system setting",
+      "toggleTitle": "Theme: {{mode}} (click to switch)"
+    },
+    "language": {
+      "ja": "日本語",
+      "en": "English",
+      "toggleTitle": "Language: {{lang}} (click to switch)"
+    }
+  },
+  "toolbar": {
+    "searchPlaceholder": "Search tickets (ID / title)...",
+    "statusAll": "Status: All",
+    "statusNone": "Status: None",
+    "statusSelected": "Status: {{count}} selected",
+    "statusGroupLabel": "Filter by status",
+    "assigneeAll": "Assignee: All",
+    "assigneeSelected": "Assignee: {{name}}",
+    "assigneeGroupLabel": "Filter by assignee",
+    "priorityAll": "Priority: All",
+    "priorityNone": "Priority: None selected",
+    "prioritySelected": "Priority: {{count}} selected",
+    "priorityGroupLabel": "Filter by priority",
+    "refreshTitle": "Refresh to the latest state",
+    "updatedAt": "Updated {{time}}"
+  },
+  "summary": {
+    "title": "All Tickets Overview",
+    "subtitle": "(Click to expand and view the graph and each node's artifacts)",
+    "total": "Total Tickets",
+    "inProgress": "In Progress",
+    "inReview": "In Review",
+    "done": "Done",
+    "nodeProgress": "Node Progress"
+  },
+  "emptyState": {
+    "noTicketsMatch": "No tickets match the current filters"
+  },
+  "pagination": {
+    "range": "Showing {{from}}-{{to}} of {{total}}",
+    "pageOf": "{{page}} / {{total}}"
+  },
+  "projectSwitcher": {
+    "noProject": "Select a project",
+    "empty": "No projects yet",
+    "createNew": "New project...",
+    "selectFirst": "Create or select a project first",
+    "noProjectYet": "No project has been created yet. Create one to start managing tickets."
+  },
+  "createProjectModal": {
+    "title": "Create New Project",
+    "description": "A project scopes its own ticket list, working directory, and ticket/node ID prefix.",
+    "nameLabel": "Name *",
+    "namePlaceholder": "e.g. Payments Service",
+    "prefixLabel": "ID prefix (optional, up to 5 alphanumeric characters)",
+    "prefixPlaceholder": "Auto-generated from the name if left blank",
+    "workDirLabel": "Working folder (absolute path) *",
+    "workDirPlaceholder": "e.g. /Users/me/dev/payments-service"
+  },
+  "createModal": {
+    "title": "Create New Ticket",
+    "descriptionPrefix": "The input is passed to the",
+    "descriptionSuffix": "skill, and Claude Code creates the ticket (no graph is built yet).",
+    "titleLabel": "Title *",
+    "titlePlaceholder": "e.g. Revisit the account-unlock flow after a failed login",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "Describe the requirements and background...",
+    "close": "Close",
+    "cancel": "Cancel",
+    "submit": "Create"
+  },
+  "ticketItem": {
+    "selfAssign": {
+      "assign": "Assign to me",
+      "unassign": "Unassign",
+      "assignedToOther": "Assigned to {{name}}"
+    },
+    "priority": {
+      "label": "Priority"
+    },
+    "nodeCount": "Nodes",
+    "loopEdges": "Loop-back edges: {{count}} (shown as dashed lines on the left)",
+    "createdAt": "Created",
+    "description": {
+      "title": "Description",
+      "empty": "No description yet",
+      "refinedAt": "Refined {{time}}",
+      "expand": "Show all",
+      "collapse": "Collapse"
+    },
+    "graphTitle": "Execution Graph (DAG / Loops)",
+    "progress": "Progress {{percent}}%",
+    "parallelHint": "Nodes on the same row run in parallel",
+    "legend": {
+      "done": "Done",
+      "inProgress": "In Progress",
+      "review": "Review",
+      "loopBack": "Loop back (left)",
+      "reviewGate": "Review gate",
+      "approvalGate": "Approval gate",
+      "rejected": "Rejected",
+      "awaitingFix": "Awaiting Fix"
+    },
+    "tabs": {
+      "nodes": "Nodes & Artifacts ({{count}})",
+      "gherkin": "Gherkin Spec ({{count}})",
+      "html": "HTML Artifacts ({{count}})",
+      "artifacts": "All Artifacts ({{count}})"
+    },
+    "retryCount": "(Retry: {{count}})",
+    "manualApproval": "Manual Approval",
+    "approvalGate": {
+      "approve": "Approve",
+      "reject": "Reject",
+      "reasonPlaceholder": "Reason for rejection (required)",
+      "confirmReject": "Confirm rejection",
+      "cancelReject": "Cancel",
+      "pendingStatus": "Awaiting approval",
+      "rejectedHint": "Rejected -- blocked until process-ticket triages the rejection reason (reopening specific nodes) or a human resolves it.",
+      "rejectedBadgeOne": "Rejected: {{name}}",
+      "rejectedBadgeMany": "{{count}} rejected"
+    },
+    "artifactsCount": "Artifacts {{count}}",
+    "noArtifactsForNode": "No artifacts linked to this node yet",
+    "openInNewTab": "Open in new tab",
+    "download": "Download",
+    "downloadAllArtifacts": "Download all artifacts",
+    "noGherkinYet": "No Gherkin test spec registered yet",
+    "noHtmlYet": "No HTML artifacts registered yet",
+    "noArtifactsYet": "No artifacts registered yet",
+    "delete": {
+      "button": "Delete ticket",
+      "confirm": "This will delete ticket {{id}} \"{{title}}\". This action cannot be undone. Are you sure you want to delete it?"
+    },
+    "close": {
+      "button": "Close (withdraw without completing)",
+      "reasonPlaceholder": "Reason (optional)",
+      "confirm": "Close",
+      "cancel": "Cancel",
+      "reasonLabel": "Closed reason"
+    },
+    "reopen": {
+      "button": "Reopen"
+    },
+    "actions": {
+      "label": "Actions:",
+      "refine": "Refine",
+      "run": "Run"
+    },
+    "promptPlaceholder": "e.g. Now that it's released, move the remaining steps forward and set the status to in review (newlines allowed; press Send, or Cmd/Ctrl+Enter, to submit)",
+    "send": "Send"
+  },
+  "artifactModal": {
+    "title": "Artifact Viewer",
+    "emptyGherkin": "# Empty Gherkin file",
+    "openInNewWindow": "Open fullscreen in a new window",
+    "emptyHtml": "This HTML artifact is empty",
+    "noImagePath": "No image path specified",
+    "noArtifactData": "No artifact data",
+    "noArtifactsRegistered": "No artifacts registered",
+    "selectArtifact": "Select an artifact"
+  },
+  "claudeRunnerModal": {
+    "title": "Launch Claude Code",
+    "descriptionPrefix": "The prompt you enter starts",
+    "descriptionSuffix": "interactively in an external terminal. Handle permission prompts and any further interaction there.",
+    "placeholder": "Command or prompt to send to Claude Code...",
+    "launch": "Launch"
+  },
+  "claudeLaunch": {
+    "started": "Terminal launched. Continue there to check progress.",
+    "failed": "Failed to launch the terminal: {{message}}",
+    "unknownReason": "the reason could not be determined"
+  },
+  "claudePrompts": {
+    "executeIncompleteNodes": "Please execute the incomplete nodes of ticket {{ticketId}}.",
+    "refineTicket": "Use the /refine-ticket skill on {{ticketId}} to pin down the completion criteria and the Why (background and purpose).",
+    "createTicket": "Use the /create-ticket skill to create a ticket with title \"{{title}}\", description \"{{description}}\"."
+  },
+  "graphViewer": {
+    "manualNode": "Manual operation node",
+    "loopBackLabel": "Loop-back"
+  },
+  "artifactPreview": {
+    "loading": "Loading...",
+    "loadError": "Failed to load the artifact: {{message}}"
+  },
+  "nodeType": {
+    "plan": "Plan",
+    "review": "Review",
+    "gherkinSpec": "Gherkin Spec",
+    "implementation": "Implementation",
+    "reviewGate": "Review Gate",
+    "approvalGate": "Approval Gate",
+    "gherkinTest": "Gherkin Test",
+    "report": "Report",
+    "release": "Release",
+    "investigation": "Investigation",
+    "documentation": "Documentation",
+    "custom": "Custom"
+  },
+  "status": {
+    "todo": "TODO",
+    "refined": "REFINED",
+    "inProgress": "IN PROGRESS",
+    "inReview": "IN REVIEW",
+    "inRelease": "IN RELEASE",
+    "done": "DONE",
+    "rejected": "REJECTED",
+    "awaitingFix": "AWAITING FIX",
+    "closed": "CLOSED"
+  },
+  "priority": {
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low",
+    "unset": "Unset"
+  },
+  "settings": {
+    "modalTitle": "Settings",
+    "scope": {
+      "label": "Scope",
+      "global": "Global Settings",
+      "project": "Project Settings",
+      "projectPlaceholder": "Select a project",
+      "noProjectSelected": "No project is selected in the app. Select a project from the switcher first to edit project-scoped settings."
+    },
+    "tabs": {
+      "nodeTypes": "Node Types",
+      "reviewGates": "Review Gates",
+      "skills": "Skills",
+      "reportTemplate": "Report Template",
+      "appSettings": "App Settings"
+    },
+    "unsavedChanges": {
+      "confirmMessage": "You have unsaved changes. They will be lost if you continue. Continue anyway?"
+    },
+    "common": {
+      "save": "Save",
+      "saving": "Saving...",
+      "saveSuccess": "Saved successfully.",
+      "noChangesToSave": "No changes to save.",
+      "loading": "Loading...",
+      "inheritedFromDefault": "Inherited from the plugin default",
+      "yes": "Yes",
+      "no": "No",
+      "none": "(none)"
+    },
+    "nodeTypes": {
+      "listTitle": "Node Types",
+      "overrideBadge": "Overridden in this scope",
+      "mergedPreviewLabel": "Merged preview (what an agent actually sees)",
+      "tierTextLabel": "Override in this scope",
+      "tierTextPlaceholder": "Add instructions appended after the inherited content for this scope...",
+      "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the layer below.",
+      "addType": "Add Node Type",
+      "newTypePlaceholder": "e.g. custom_lint",
+      "invalidTypeName": "Enter a name with no \"/\", \"\\\", \".\" or \"..\".",
+      "deleteType": "Delete this node type's override",
+      "defaultBadge": "Default",
+      "defaultBadgeHint": "This is a plugin-default node type that hasn't been overridden in this scope. Edit the text below to override it.",
+      "cannotDeleteDefaultHint": "This is a plugin-default node type -- it can't be removed, only overridden (or left as-is)."
+    },
+    "reviewGates": {
+      "intro": "Review gates referenced by review_gate nodes (via their gate id).",
+      "addGate": "Add Review Gate",
+      "idLabel": "Gate ID",
+      "nameLabel": "Name",
+      "criteriaLabel": "Criteria (replaces the inherited criteria)",
+      "additionalCriteriaLabel": "Additional criteria (appended to the inherited criteria)",
+      "maxIterationsLabel": "Max Iterations",
+      "enabledLabel": "Enabled",
+      "deleteGate": "Delete",
+      "defaultBadge": "Default",
+      "defaultBadgeHint": "This is a plugin-default review gate that hasn't been overridden in this scope. Edit any field to override it.",
+      "cannotDeleteDefaultHint": "This is a plugin default, not an override in this scope -- there's nothing to remove. Edit a field first to override it, then it can be deleted.",
+      "cannotRenameDefaultHint": "This is a plugin-default review gate -- its name can't be changed. The name stays tied to the locale so translated names keep showing up when the locale is switched.",
+      "tableEmpty": "No review gates defined in this scope yet.",
+      "mergedPreviewLabel": "Merged preview (what an agent actually sees)",
+      "mergedCriteriaLabel": "Merged criteria",
+      "mergedMaxIterationsLabel": "Merged max iterations",
+      "mergedEnabledLabel": "Merged enabled",
+      "previewUnavailableHint": "The preview appears after this gate has been saved."
+    },
+    "skills": {
+      "listTitle": "Skills",
+      "overrideBadge": "Overridden in this scope",
+      "mergedPreviewLabel": "Merged preview (what an agent actually sees)",
+      "tierTextLabel": "Override in this scope",
+      "tierTextPlaceholder": "Add supplementary instructions appended after the inherited content for this scope...",
+      "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the layer below.",
+      "emptyMergedHint": "This skill has no supplementary instructions in effect.",
+      "names": {
+        "createTicket": "create-ticket",
+        "refineTicket": "refine-ticket",
+        "processTicket": "process-ticket",
+        "onboarding": "onboarding"
+      }
+    },
+    "reportTemplate": {
+      "intro": "The fixed HTML template used for report artifacts. Saving replaces the whole template (it does not append). Leaving it empty falls back to the layer below (team override, then user override, then the plugin default).",
+      "tierTextLabel": "Override in this scope (full HTML)",
+      "tierTextPlaceholder": "Paste a full replacement HTML template (see `get-report-template` for the fixed structure)...",
+      "mergedPreviewLabel": "Merged preview (the HTML source an agent actually fills in)",
+      "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the layer below."
+    },
+    "appSettings": {
+      "globalOnly": "This setting can only be edited in Global Settings. Switch the scope above to \"Global Settings\".",
+      "restartNote": "Changes here take effect the next time the server starts (saved to: {{path}}).",
+      "currentlyInEffect": "Currently in effect: {{value}}",
+      "storage": {
+        "title": "Data Storage",
+        "dbBackendLabel": "Database backend",
+        "dbBackendSqlite": "SQLite",
+        "dbBackendMysql": "MySQL",
+        "dbBackendSwitchHint": "Switching only changes which database is used -- no data is migrated. Each backend keeps its own data as-is.",
+        "dbPathLabel": "Database file path",
+        "artifactsDirLabel": "Working files directory",
+        "artifactsDirHint": "A shared directory for investigation material and temporary files. Artifacts themselves are stored in the database, so putting files here is optional. When an html/image artifact is registered by file path, only files under this directory can be read.",
+        "mysqlHostLabel": "Host",
+        "mysqlPortLabel": "Port",
+        "mysqlDatabaseLabel": "Database name",
+        "mysqlUserLabel": "User",
+        "mysqlPasswordLabel": "Password",
+        "mysqlPasswordFromEnvHint": "Loaded from the environment variable \"{{envVar}}\" (not stored in plaintext).",
+        "mysqlPasswordPlaintextHint": "This value is stored in plaintext in graph-config.json. To load it from an environment variable instead, enter it as \"${ENV_VAR_NAME}\".",
+        "mysqlPasswordSavedPlaceholder": "(saved)",
+        "mysqlPasswordSavedHint": "A password is already saved. The server never sends it back to this screen, so leave this field empty to keep it, or type a new value to replace it.",
+        "mysqlRequiredFieldsHint": "Host, database name and user are required when MySQL is selected. The CA certificate path is also required when the TLS mode is \"Verify CA only\".",
+        "mysqlPasswordRetypeHint": "You have changed the connection (host, port, database name, user or TLS setting). The saved password (or \"${ENV_VAR}\" reference) is only ever used for the connection it was saved for, so enter it again before testing or saving. To reuse the same environment variable reference for a new connection, first save the connection change with the password field left empty, then enter the same reference again and save once more.",
+        "mysqlPasswordRetypeOtherBackendHint": "The MySQL connection (host, port, database name, user or TLS setting) has been changed, and the saved password (or \"${ENV_VAR}\" reference) is only ever used for the connection it was saved for. Select MySQL as the storage backend and enter it again, or put the connection back the way it was, before saving.",
+        "mysqlTlsLabel": "TLS setting",
+        "mysqlTlsVerifyFull": "Verify certificate and hostname (default, recommended)",
+        "mysqlTlsVerifyFullHint": "Verifies both the server certificate's chain and its hostname. This is the default. It cannot connect to a server that does not support TLS, or one using a self-signed/auto-generated certificate (such as MySQL's own out-of-the-box certificate) -- use \"Verify CA only\" for those.",
+        "mysqlTlsVerifyCa": "Verify CA only",
+        "mysqlTlsVerifyCaHint": "Verifies the certificate's chain against the CA certificate below, but not the hostname. Use this when the certificate and hostname cannot be expected to match, such as MySQL's auto-generated certificate (which carries no hostname). The CA certificate file below is required.",
+        "mysqlTlsDisabled": "Disable TLS (plaintext connection)",
+        "mysqlTlsDisabledWarning": "Warning: this connection is not encrypted. Traffic, including the password, can be read or tampered with in transit. Only choose this for a server that does not support TLS.",
+        "mysqlTlsCaLabel": "CA certificate file path",
+        "mysqlTlsCaHint": "An absolute path to a PEM-format CA certificate file. Left empty under \"Verify certificate and hostname\", the OS's trusted root certificates are used instead. When set, this CA is the only one trusted (the OS trust store is not also consulted).",
+        "mysqlTlsCaRequiredHint": "The CA certificate file path is required when the TLS mode is \"Verify CA only\".",
+        "testConnection": "Test Connection",
+        "testingConnection": "Testing connection...",
+        "testConnectionSuccess": "Connection succeeded.",
+        "testConnectionFailure": "Connection failed: {{error}}"
+      },
+      "myProfile": {
+        "title": "My Profile",
+        "description": "Your display name, used by the \"Assign to me\" button on each ticket. Takes effect immediately -- no restart needed. Leave blank to hide that button entirely.",
+        "nameLabel": "Your name",
+        "namePlaceholder": "e.g. Taro Yamada"
+      },
+      "pagination": {
+        "title": "Pagination",
+        "pageSizeLabel": "Maximum tickets per page",
+        "invalidPageSize": "Enter an integer of 1 or greater."
+      },
+      "extensionsDir": {
+        "title": "Node/Workflow Config Directory",
+        "description": "The directory the \"Global Settings\" node types/workflow/review gates are read from and written to. Leave blank to use the default directory (the global settings directory, ~/.graph-ops)."
+      },
+      "projects": {
+        "title": "Project Management",
+        "description": "Edit each project's name and working directory (where Claude Code is launched), or delete a project.",
+        "empty": "No projects yet.",
+        "delete": "Delete project",
+        "nameLabel": "Project name",
+        "workDirLabel": "Working directory",
+        "confirmDelete": "This will delete project \"{{name}}\" ({{id}}). Every ticket, node, and artifact under this project will be permanently deleted, and this action cannot be undone. Are you sure you want to delete it?"
+      }
+    }
+  },
+  "errors": {
+    "TITLE_REQUIRED": "A title is required.",
+    "TICKET_NOT_FOUND": "That ticket could not be found.",
+    "NODE_NOT_FOUND": "That node could not be found.",
+    "VALIDATION_ERROR": "The request was invalid. Please check your input and try again.",
+    "INTERNAL_ERROR": "Something went wrong on the server. Please try again.",
+    "INVALID_PREFIX": "The prefix must be 1-5 alphanumeric characters.",
+    "PREFIX_TAKEN": "That prefix is already used by another project.",
+    "PROJECT_NOT_FOUND": "That project could not be found.",
+    "NO_CURRENT_PROJECT": "No project is selected. Create or select a project first.",
+    "CSRF_HEADER_REQUIRED": "The request was blocked for security reasons. Please reload the page and try again.",
+    "MYSQL_PASSWORD_RETYPE_REQUIRED": "The saved MySQL password cannot be used for a different connection. Enter the password again after changing the host, port, database name or user.",
+    "HOST_NOT_ALLOWED": "The request was blocked because this address is not one the server answers to. Open the UI at the address the server prints on startup (localhost by default).",
+    "INVALID_SETTINGS_SCOPE": "Select a valid scope (and project, for project settings) before editing.",
+    "CATALOG_CYCLE_DETECTED": "This change would create a circular dependency between nodes. Please fix the depends_on/loop_back_to relationships.",
+    "CATALOG_UNKNOWN_REFERENCE": "This change references a node ID or review gate ID that doesn't exist.",
+    "CATALOG_DUPLICATE_NODE_ID": "Two nodes have the same ID. Node IDs must be unique.",
+    "CATALOG_INVALID_DOCUMENT": "This workflow definition is invalid. Please check the node/gate definitions.",
+    "INVALID_MAX_ITERATIONS": "Max iterations must be an integer of 1 or greater.",
+    "WORKFLOW_NODES_LOCKED": "The workflow's node structure (skeleton) is defined by the plugin default only and can't be overridden. Add or edit review gates from the Review Gates tab instead.",
+    "INVALID_REPORT_TEMPLATE": "The report template is missing required structural markers.",
+    "UNKNOWN": "An unexpected error occurred. Please try again."
+  }
+}

@@ -1,0 +1,27 @@
+node_modules/
+dist/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+packages/core-go/graph-engine
+packages/core-go/graph-engine.exe
+packages/core-go/*.db*
+packages/core-go/internal/httpserver/webdist/*
+!packages/core-go/internal/httpserver/webdist/.gitkeep
+packages/plugin/bin/
+# Reports/artifacts occasionally get generated or copy-pasted into a
+# repo-root artifacts/ directory by mistake. The engine's actual default
+# artifacts directory is $HOME/.graph-ops/artifacts (outside the repo), so
+# anything under a repo-root artifacts/ is stray output, not real data.
+/artifacts/
+# Per-machine Claude Code settings: the local dev marketplace entry pins an
+# absolute path (/Users/<name>/.../packages/plugin) that is meaningless --
+# and needlessly identifying -- on anyone else's machine. Keep it local; see
+# README's "Publishing / installing outside this monorepo" for the entry to
+# recreate by hand.
+.claude/settings.json
+# CLAUDE.md is configured by each project that uses the plugin. This
+# repository doubles as such a user project during development, so its own
+# CLAUDE.md stays local rather than shipping as part of the plugin.
+CLAUDE.md

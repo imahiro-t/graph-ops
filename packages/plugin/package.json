@@ -1,0 +1,15 @@
+{
+  "name": "@graph-ops/plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Claude Code Plugin for GraphOps",
+  "main": "scripts/claude-plugin-path.js",
+  "scripts": {
+    "test": "node --test test/marketplace-command.test.js test/prune-plugin-cache.test.js"
+  },
+  "keywords": ["claude-plugin", "graph-ops", "dag"],
+  "author": { "name": "Takashi Imahiro", "email": "imahiro-t@users.noreply.github.com" },
+  "homepage": "https://github.com/imahiro-t/graph-ops",
+  "repository": "https://github.com/imahiro-t/graph-ops",
+  "license": "MIT"
+}

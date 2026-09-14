@@ -1,0 +1,12 @@
+{
+  "name": "graph-ops-local",
+  "description": "Local-only dev/test marketplace: loads this monorepo checkout directly via a \"./\" path source, so it only works when packages/core-go is present alongside this package. For the production marketplace (fetches a prebuilt graph-engine binary via the `command` source, no packages/core-go required) see /.claude-plugin/marketplace.json at the repo root.",
+  "owner": { "name": "local-dev" },
+  "plugins": [
+    {
+      "name": "graph-ops",
+      "source": "./",
+      "description": "GraphOps ticket/graph workflow plugin (local dev build)"
+    }
+  ]
+}
