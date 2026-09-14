@@ -89,6 +89,12 @@ jobs:
             exit 1
           fi
 
+      # The version is hardcoded in 5 places (see scripts/check-versions.js);
+      # this catches an update to one location that missed the others before
+      # a release tag is ever cut.
+      - name: Verify version consistency across 5 locations
+        run: npm run check:versions
+
   web-lint:
     name: Web lint
     runs-on: ubuntu-latest

@@ -18,7 +18,8 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:web\"",
     "build": "npm run build:web && npm run embed:web && npm run build:go && npm run build --workspace=@graph-ops/plugin --if-present",
     "start": "npm run build && packages/core-go/graph-engine serve",
-    "test": "npm run sync:defaults && cd packages/core-go && go test ./... && cd ../.. && npm run test --workspaces --if-present"
+    "check:versions": "node scripts/check-versions.js",
+    "test": "npm run sync:defaults && cd packages/core-go && go test ./... && cd ../.. && node --test scripts/*.test.js && npm run test --workspaces --if-present"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
