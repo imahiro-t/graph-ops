@@ -1,26 +1,3 @@
-<!--
-LOCALE OVERRIDE -- this file is used in place of
-packages/plugin/defaults/plan/template.md (the English default) only when
-`language: ja` resolves (see packages/core-go/internal/config/locale.go --
-LoadLocaleTemplate/ResolvePlanTemplate). It is paired with that English
-default file: when the English default's steps/structure change (beyond the
-four fixed headings themselves), update this file to match.
-
-FIXED STRUCTURE -- do not remove, reorder, or rename these headings, and do
-not add headings beyond the four below. Fill in each REPLACE_WITH_*
-placeholder with real content. These four heading words (目的, 手順, 影響範囲,
-リスク・留意事項) are a fixed structural marker -- like the report template's
-section names -- and stay in Japanese regardless of any language setting;
-only the content written under them follows the ticket's language. This
-comment block itself, however, is not one of those four headings and is not
-template content -- it is an instruction to whichever agent fills in this
-template, and must not be copied into the saved artifact; the saved plan
-starts at the first heading below (`# 目的`). See
-packages/core-go/internal/config/defaults/node-types/plan.md (the "plan" node
-type's default instructions, resolvable via
-`graph-engine get-node-type-context plan`) for how this gets filled in.
--->
-
 # 目的
 
 REPLACE_WITH_PURPOSE -- このチケットで何を達成するのか、完了条件との対応関係を簡潔に書く。

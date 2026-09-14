@@ -22,11 +22,20 @@ var defaultLocaleFS embed.FS
 // packages/plugin/defaults/locales/<code>/{plan,review}/template.md, kept in
 // sync the same way as defaultLocaleFS above. Unlike the Nodes/ReviewGates
 // display-name maps in defaultLocaleFS, a plan/review template is a
-// multi-line Markdown document (guide prose and an HTML comment alongside
-// its headings), so a locale override for it is a whole replacement file
-// under its own subtree rather than another key in <code>.yaml -- see the
-// execution plan's section on why this is a separate mechanism from
-// LoadLocale/ApplyLocale.
+// multi-line Markdown document (its fixed headings, each followed by a
+// REPLACE_WITH_* placeholder with guide prose), so a locale override for it
+// is a whole replacement file under its own subtree rather than another key
+// in <code>.yaml -- see the execution plan's section on why this is a
+// separate mechanism from LoadLocale/ApplyLocale.
+//
+// Each locale template is paired with its English default
+// (packages/plugin/defaults/{plan,review}/template.md): when the English
+// default's structure or guide prose changes, update every locale's
+// counterpart to match, keeping that locale's own translated headings and
+// verdict words. The templates deliberately carry no HTML comment (an agent
+// filling one in tended to copy it into the saved artifact); the
+// instructions for filling them in live in the node-type defaults instead
+// (defaults/node-types/plan.md, review.md, review_gate.md).
 //
 //go:embed defaults/locales/*/plan/template.md defaults/locales/*/review/template.md
 var defaultLocaleTemplateFS embed.FS

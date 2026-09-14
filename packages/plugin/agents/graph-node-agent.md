@@ -29,7 +29,7 @@ If `content` comes back empty, you're on a custom node type nobody has documente
   ```bash
   graph-engine get-plan-template
   ```
-  Keep the four headings (目的 / 手順 / 影響範囲 / リスク・留意事項) exactly as given; they are a fixed structural marker, not something to translate or reword.
+  Keep the template's headings exactly as it gives them -- same wording, same order, no additions. The template can come back in a language other than English depending on the language setting; whichever language it comes back in, its headings are a fixed structural marker, not something to translate or reword.
 - **`review` / `review_gate`**: also fetch the actual pass/fail criteria and judge against that (not just the prose from step 2):
   ```bash
   graph-engine get-review-criteria "<nodeId>"
@@ -38,7 +38,7 @@ If `content` comes back empty, you're on a custom node type nobody has documente
   ```bash
   graph-engine get-review-template
   ```
-  Keep the four headings exactly as given, and write your verdict under 判定 as exactly one of 承認 / 条件付き承認 / 差し戻し -- these are fixed structural markers, not something to translate or reword.
+  Keep the template's headings exactly as it gives them, and under its first heading (the verdict section) write exactly one of the verdict words the template lists there, spelled exactly as the template spells it -- these are fixed structural markers, not something to translate or reword. The template can come back in a language other than English depending on the language setting; use whichever headings and verdict words it gives.
 - **`report`**: fetch the fixed HTML template and fill in its sections -- do not free-form the HTML structure:
   ```bash
   graph-engine get-report-template

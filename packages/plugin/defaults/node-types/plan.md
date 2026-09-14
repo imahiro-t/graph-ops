@@ -8,17 +8,20 @@ carrying it out is the job of the nodes that come after it.
 2. Fetch the fixed template by running `get-plan-template`.
 3. Work out the steps needed to satisfy what the ticket asks for, in the
    order they must happen.
-4. Fill in the template's four headings -- 目的, 手順, 影響範囲, リスク・留意事項, in
-   that order -- with real content in place of the REPLACE_WITH_* placeholders.
-   Do not delete, reorder, rename, or add headings: those four words are a
-   fixed structural marker (like the report template's section names) and
-   stay in Japanese regardless of any language setting -- only the content
-   you write under them follows the ticket's language.
-5. Before saving, drop the template's leading `<!-- ... -->` comment block
-   entirely. It is a meta-instruction to you, not one of the four headings
-   referred to in step 4, and it is not part of the plan's content -- do not
-   copy it into the saved artifact. The saved plan begins at the first
-   heading, `# 目的`.
+4. Fill in the template's headings, using each one exactly as the fetched
+   template spells it -- same wording, same order, same number of headings.
+   The template can come back in a language other than English depending on
+   the language setting; whichever language it comes back in, its headings
+   are that template's fixed structural marker (like the report template's
+   section names), so do not translate, paraphrase, delete, reorder, rename,
+   or add headings.
+5. Replace each `REPLACE_WITH_*` placeholder with real content, following the
+   guide text that comes right after it. Neither the placeholder name nor that
+   guide text belongs in the saved plan. Only the content you write under the
+   headings follows the ticket's language.
+6. The template is the shape of the output itself: start the saved plan at
+   the template's first heading, and add no preamble or meta information that
+   the template does not have.
 
 ## Artifacts
 

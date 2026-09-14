@@ -1,31 +1,3 @@
-<!--
-FIXED STRUCTURE -- do not remove, reorder, or rename these headings, and do
-not add headings beyond the four below. Shared by the "review" and
-"review_gate" node types (see
-packages/core-go/internal/config/defaults/node-types/review.md and
-review_gate.md, resolvable via `graph-engine get-node-type-context review` /
-`review_gate`). Fill in each REPLACE_WITH_* placeholder with real content.
-
-The Verdict section's value must be exactly one of the three words below --
-Approved / Conditionally Approved / Rejected -- and nothing else: no
-translation, no paraphrasing, no additional wording in that section. Like the
-report template's PASS/FAIL badge, these three words (and the four heading
-words themselves: Verdict, Findings, Rationale, Conditions (if Conditionally
-Approved)) are this file's own fixed structural marker, so a pass/fail can be
-read off at a glance. This comment block itself, however, is not one of
-those four headings and is not template content -- it is an instruction to
-whichever agent fills in this template, and must not be copied into the
-saved artifact; the saved review starts at the first heading below
-(`# Verdict`). This file is the English default; when `language: ja`
-resolves, packages/plugin/defaults/locales/ja/review/template.md is used in
-its place instead (see packages/core-go/internal/config/locale.go --
-LoadLocaleTemplate/ResolveReviewTemplate), with the same four headings and
-three verdict words translated to Japanese. Whichever file resolves, its
-headings and verdict words are fixed for that language and stay as they are
-regardless of the ticket's own language; only the content written under the
-other headings follows the ticket's language.
--->
-
 # Verdict
 
 REPLACE_WITH_VERDICT -- exactly one of: Approved / Conditionally Approved /
