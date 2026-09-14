@@ -19,6 +19,11 @@ import (
 // can fake a different platform.
 var goos = runtime.GOOS
 
+// lookPath is a package variable (not a direct exec.LookPath reference) so
+// tests can fake whether Windows Terminal is installed without depending on
+// the actual PATH of the machine running the test.
+var lookPath = exec.LookPath
+
 // Config carries the one user-configurable override: an arbitrary shell
 // command template for terminal emulators auto-detection doesn't cover
 // (iTerm, wezterm, kitty, VS Code, cmux, Windows Terminal, ...).
@@ -64,6 +69,19 @@ type Config struct {
 // passed there as a single argv element and only a plain executable name or
 // path works. Changing any of this changes existing users' configs, so it
 // is a deliberate spec decision, not an oversight.
+//
+// The windows path preserves the fragment contract the same way darwin
+// does: claudeBin is written raw into a generated PowerShell script for
+// PowerShell to word-split, not passed as a literal argv element. It uses
+// PowerShell rather than a cmd.exe batch script specifically because
+// PowerShell's single-quoted string literals -- like POSIX sh's -- may
+// contain a literal newline and are still parsed as one token; cmd.exe's
+// batch parser is line-oriented and has no such construct; a quoted
+// argument that contains an embedded "\n" or "\r\n" (prompt text routinely
+// does -- see withTicketContext in claude_launch.go) is parsed by cmd.exe as
+// the end of the current command and the start of a new one, silently
+// truncating the argument and letting the remainder run as unrelated
+// command lines. See TestWriteWindowsCommandScript_PreservesEmbeddedNewline.
 func Launch(cfg Config, workDir, claudeBin, prompt string) error {
 	name, args, err := buildLaunchArgv(cfg, workDir, claudeBin, prompt)
 	if err != nil {
@@ -86,8 +104,9 @@ func Launch(cfg Config, workDir, claudeBin, prompt string) error {
 
 // buildLaunchArgv picks the launch strategy and returns the argv to run it.
 // Kept separate from Launch so the selection logic is unit-testable; the
-// darwin branch has the one unavoidable side effect of writing a small
-// script file (see writeCommandScript).
+// darwin and windows branches each have the one unavoidable side effect of
+// writing a small script file (see writeCommandScript and
+// writeWindowsCommandScript).
 func buildLaunchArgv(cfg Config, workDir, claudeBin, prompt string) (string, []string, error) {
 	if cfg.TerminalCommand != "" {
 		// claudeBin unquoted on purpose -- see Launch's doc comment
@@ -115,6 +134,37 @@ func buildLaunchArgv(cfg Config, workDir, claudeBin, prompt string) (string, []s
 			return "", nil, fmt.Errorf("preparing terminal launch script: %w", err)
 		}
 		return "open", []string{"-a", "Terminal", scriptPath}, nil
+	}
+
+	if goos == "windows" {
+		scriptPath, err := writeWindowsCommandScript(workDir, claudeBin, prompt)
+		if err != nil {
+			return "", nil, fmt.Errorf("preparing terminal launch script: %w", err)
+		}
+		// -NoExit keeps the PowerShell session interactive after the
+		// script's claude invocation returns, mirroring the darwin script's
+		// behaviour of leaving the window open rather than closing it out
+		// from under the user. -NoProfile skips the user's profile script
+		// (faster startup, and one less place for unrelated user
+		// configuration to interfere). -ExecutionPolicy Bypass overrides
+		// only this one process's policy so the generated, unsigned script
+		// runs regardless of the machine's default (commonly Restricted),
+		// without touching that machine-wide setting.
+		psArgs := []string{"-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath}
+		if _, err := lookPath("wt.exe"); err == nil {
+			// Windows Terminal is on PATH: open a new tab/window running
+			// PowerShell with the script.
+			return "wt.exe", append([]string{"powershell"}, psArgs...), nil
+		}
+		// No Windows Terminal on PATH: fall back to a plain console host.
+		// cmd.exe itself has no "open a new window" flag -- running it
+		// directly would inherit this process's (invisible) console -- so
+		// its own `start` builtin is used to spawn a detached window
+		// running PowerShell with the script. `start` treats its first
+		// quoted argument as the new window's title when more arguments
+		// follow, hence the explicit "Claude Code" title rather than an
+		// empty one.
+		return "cmd.exe", append([]string{"/c", "start", "Claude Code", "powershell"}, psArgs...), nil
 	}
 
 	return "", nil, fmt.Errorf(
@@ -163,4 +213,67 @@ func writeCommandScript(workDir, claudeBin, prompt string) (string, error) {
 // regardless of s's contents.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// writeWindowsCommandScript writes a small PowerShell (.ps1) script that cds
+// into workDir and runs claudeBin with prompt, for PowerShell to execute when
+// opened via wt.exe or cmd.exe's `start` (see buildLaunchArgv). It is the
+// windows counterpart to writeCommandScript and is left in place for the
+// same reason: PowerShell/wt.exe read and run it asynchronously, and there
+// is no reliable signal here for when it is safe to delete.
+//
+// A PowerShell script is used here rather than a cmd.exe batch script
+// because cmd.exe's batch parser is line-oriented: a quoted token can never
+// contain a literal newline, no matter how it's quoted, because the parser
+// treats every physical line break as the end of the current command. Since
+// prompt text routinely contains newlines (see withTicketContext in
+// claude_launch.go), a batch script broke on exactly the input this
+// function most needs to handle correctly -- see
+// TestWriteWindowsCommandScript_PreservesEmbeddedNewline. PowerShell's
+// single-quoted string literals, like POSIX sh's, may span multiple
+// physical lines and are still parsed as one token, so this problem does
+// not exist for the .ps1 form.
+//
+// Unlike writeCommandScript, the file's permissions are not tightened after
+// creation: Go's os.CreateTemp on Windows has no POSIX mode bits to narrow,
+// and ACLs are not touched here either -- os.CreateTemp under the per-user
+// %TEMP% directory already inherits that directory's (owner-only-by-default)
+// ACL, so no additional narrowing is done. Locking this down further would
+// require an explicit ACL call (e.g. via golang.org/x/sys/windows), which is
+// treated as out of scope for this change; the script body embeds the
+// prompt (ticket text) in plaintext the same way the darwin script does, so
+// this is a known, accepted gap rather than an oversight.
+func writeWindowsCommandScript(workDir, claudeBin, prompt string) (string, error) {
+	f, err := os.CreateTemp("", "graph-engine-launch-*.ps1")
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	// Same split as buildLaunchArgv: workDir and prompt are quoted (via
+	// powershellQuote), claudeBin is interpolated raw so PowerShell
+	// word-splits it (DFLT-00023 C-8). -LiteralPath (rather than the
+	// positional form) tells Set-Location to treat workDir as a literal
+	// path with no wildcard expansion, and switches drives automatically if
+	// workDir is on a different drive than the one PowerShell started on.
+	script := fmt.Sprintf("Set-Location -LiteralPath %s\r\n%s %s\r\n", powershellQuote(workDir), claudeBin, powershellQuote(prompt))
+	if _, err := f.WriteString(script); err != nil {
+		return "", err
+	}
+	return filepath.Clean(f.Name()), nil
+}
+
+// powershellQuote wraps s in single quotes, escaping any embedded single
+// quote by doubling it, producing a token that is safe to embed in a
+// generated PowerShell script regardless of s's contents. It plays the same
+// role shellQuote plays for the POSIX script, and for the same reason: a
+// PowerShell single-quoted string is fully literal -- no character (not '%',
+// '"', '&', '|', '<', '>', '^', '!', '$', a backtick, nor a literal newline)
+// has any special meaning inside one, and the only escape rule is that a
+// single quote is written as two. This is also why PowerShell was chosen
+// over a cmd.exe batch script for this file: cmd.exe has no quoting
+// construct that survives an embedded newline (see
+// writeWindowsCommandScript's doc comment), while this one does.
+func powershellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }

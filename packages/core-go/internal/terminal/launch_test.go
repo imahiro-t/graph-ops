@@ -84,6 +84,107 @@ func TestBuildLaunchArgv_DarwinUsesOpenNotAppleEvents(t *testing.T) {
 	}
 }
 
+func TestBuildLaunchArgv_WindowsUsesWtExeWhenAvailable(t *testing.T) {
+	t.Setenv("TMUX", "")
+	oldGoos, oldLookPath := goos, lookPath
+	goos = "windows"
+	lookPath = func(file string) (string, error) {
+		if file == "wt.exe" {
+			return `C:\Program Files\WindowsApps\wt.exe`, nil
+		}
+		return "", exec.ErrNotFound
+	}
+	defer func() { goos, lookPath = oldGoos, oldLookPath }()
+
+	name, args, err := buildLaunchArgv(Config{}, `C:\proj`, "claude", `say "hi" for me`)
+	if err != nil {
+		t.Fatalf("buildLaunchArgv: %v", err)
+	}
+	wantPrefix := []string{"powershell", "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"}
+	if name != "wt.exe" || len(args) != len(wantPrefix)+1 {
+		t.Fatalf("expected wt.exe powershell ... -File <script>, got %s %v", name, args)
+	}
+	for i := range wantPrefix {
+		if args[i] != wantPrefix[i] {
+			t.Errorf("args[%d] = %q, want %q", i, args[i], wantPrefix[i])
+		}
+	}
+	scriptPath := args[len(args)-1]
+	defer os.Remove(scriptPath)
+
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("reading generated script: %v", err)
+	}
+	got := string(content)
+	if !strings.Contains(got, `Set-Location -LiteralPath 'C:\proj'`) {
+		t.Errorf("script missing quoted cwd: %q", got)
+	}
+	if !strings.Contains(got, `claude 'say "hi" for me'`) {
+		t.Errorf("script missing quoted claude invocation: %q", got)
+	}
+}
+
+func TestBuildLaunchArgv_WindowsFallsBackToCmdExeWithoutWtExe(t *testing.T) {
+	t.Setenv("TMUX", "")
+	oldGoos, oldLookPath := goos, lookPath
+	goos = "windows"
+	lookPath = func(file string) (string, error) { return "", exec.ErrNotFound }
+	defer func() { goos, lookPath = oldGoos, oldLookPath }()
+
+	name, args, err := buildLaunchArgv(Config{}, `C:\proj`, "claude", "do the thing")
+	if err != nil {
+		t.Fatalf("buildLaunchArgv: %v", err)
+	}
+	if name != "cmd.exe" {
+		t.Fatalf("expected cmd.exe, got %s", name)
+	}
+	want := []string{"/c", "start", "Claude Code", "powershell", "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"}
+	if len(args) != len(want)+1 {
+		t.Fatalf("args = %v, want %d elements", args, len(want)+1)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Errorf("args[%d] = %q, want %q", i, args[i], want[i])
+		}
+	}
+	scriptPath := args[len(args)-1]
+	defer os.Remove(scriptPath)
+	if _, err := os.Stat(scriptPath); err != nil {
+		t.Fatalf("expected generated script to exist: %v", err)
+	}
+}
+
+func TestBuildLaunchArgv_WindowsDoesNotOverrideTerminalCommand(t *testing.T) {
+	oldGoos := goos
+	goos = "windows"
+	defer func() { goos = oldGoos }()
+	cfg := Config{TerminalCommand: "wt.exe -d {cwd} -- cmd /k {command}"}
+
+	name, args, err := buildLaunchArgv(cfg, `C:\proj`, "claude", "hello")
+	if err != nil {
+		t.Fatalf("buildLaunchArgv: %v", err)
+	}
+	if name != "sh" || len(args) != 2 || args[0] != "-c" {
+		t.Fatalf("expected terminalCommand to take precedence via sh -c wrapper, got %s %v", name, args)
+	}
+}
+
+func TestBuildLaunchArgv_WindowsDoesNotOverrideTmux(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-1/default,123,0")
+	oldGoos := goos
+	goos = "windows"
+	defer func() { goos = oldGoos }()
+
+	name, args, err := buildLaunchArgv(Config{}, "/proj", "claude", "do the thing")
+	if err != nil {
+		t.Fatalf("buildLaunchArgv: %v", err)
+	}
+	if name != "tmux" {
+		t.Fatalf("expected tmux to take precedence over the windows branch, got %s %v", name, args)
+	}
+}
+
 func TestBuildLaunchArgv_NoStrategyAvailable(t *testing.T) {
 	t.Setenv("TMUX", "")
 	old := goos
@@ -163,5 +264,93 @@ func TestWriteCommandScript_IsOwnerOnly(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0o700 {
 		t.Errorf("expected mode 0700 (owner only), got %#o", got)
+	}
+}
+
+// TestPowershellQuote_EscapesSpecialCharacters checks powershellQuote's
+// escaping rule in isolation (there is no PowerShell available in this
+// dev/CI environment to round-trip through, unlike TestShellQuote's
+// real-shell check): a PowerShell single-quoted string is fully literal, so
+// the only character that needs escaping is an embedded single quote
+// (doubled); everything else -- including '%', '"', '&', '|', '^', '!', a
+// backtick, and a literal embedded newline -- must survive unescaped.
+func TestPowershellQuote_EscapesSpecialCharacters(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"hello", `'hello'`},
+		{`say "hi" for me`, `'say "hi" for me'`},
+		{"it's a test", `'it''s a test'`},
+		{"100%", `'100%'`},
+		{"a & b | c ^ d < e > f ! g $h `i", "'a & b | c ^ d < e > f ! g $h `i'"},
+		{"line1\nline2", "'line1\nline2'"},
+		{"", `''`},
+		{"'''", `''''''''`},
+	}
+	for _, c := range cases {
+		if got := powershellQuote(c.in); got != c.want {
+			t.Errorf("powershellQuote(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestWriteWindowsCommandScript_ContentAndLineEndings verifies the generated
+// PowerShell script cds into workDir and runs claudeBin with the
+// (powershell-quoted) prompt.
+func TestWriteWindowsCommandScript_ContentAndLineEndings(t *testing.T) {
+	path, err := writeWindowsCommandScript(`C:\proj`, "claude", `say "hi" for me`)
+	if err != nil {
+		t.Fatalf("writeWindowsCommandScript: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(path) })
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading generated script: %v", err)
+	}
+	got := string(content)
+	if !strings.Contains(got, `Set-Location -LiteralPath 'C:\proj'`) {
+		t.Errorf("script missing quoted cwd: %q", got)
+	}
+	if !strings.Contains(got, `claude 'say "hi" for me'`) {
+		t.Errorf("script missing quoted claude invocation: %q", got)
+	}
+}
+
+// TestWriteWindowsCommandScript_PreservesEmbeddedNewline is the regression
+// test for the QA/security review finding on this ticket (art-2ec8a62a,
+// art-33fee083): a prompt containing a newline -- the normal shape of a
+// ticket-derived prompt via withTicketContext in claude_launch.go, not an
+// edge case -- must survive as a single argument to claudeBin instead of
+// being split across cmd.exe batch "lines" (which, unlike a PowerShell
+// single-quoted string, has no way to keep a quoted token intact across a
+// line break, letting the remainder run as unrelated, attacker-influenced
+// commands -- OWASP A03 Injection).
+func TestWriteWindowsCommandScript_PreservesEmbeddedNewline(t *testing.T) {
+	prompt := "This instruction concerns ticket DFLT-00099.\n\nFix the bug."
+	path, err := writeWindowsCommandScript(`C:\proj`, "claude", prompt)
+	if err != nil {
+		t.Fatalf("writeWindowsCommandScript: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(path) })
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading generated script: %v", err)
+	}
+	got := string(content)
+
+	// The whole multi-line prompt must appear intact, still wrapped in the
+	// single quotes that make it one PowerShell token, immediately after the
+	// claude invocation -- not truncated at the first embedded newline.
+	wantInvocation := "claude '" + prompt + "'"
+	if !strings.Contains(got, wantInvocation) {
+		t.Errorf("script does not contain the embedded-newline prompt as one quoted token.\ngot:\n%s\nwant substring:\n%s", got, wantInvocation)
+	}
+
+	// A single quote is the only character powershellQuote escapes, so the
+	// total count of "'" in the script must be even -- an odd count would
+	// mean some quote in the prompt (there are none here) or in the
+	// generated script broke out of the intended single-quoted token.
+	if n := strings.Count(got, "'"); n%2 != 0 {
+		t.Errorf("script has an unbalanced number of single quotes (%d), suggesting the prompt broke out of its quoted token:\n%s", n, got)
 	}
 }
