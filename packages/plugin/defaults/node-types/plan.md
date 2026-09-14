@@ -14,6 +14,11 @@ carrying it out is the job of the nodes that come after it.
    fixed structural marker (like the report template's section names) and
    stay in Japanese regardless of any language setting -- only the content
    you write under them follows the ticket's language.
+5. Before saving, drop the template's leading `<!-- ... -->` comment block
+   entirely. It is a meta-instruction to you, not one of the four headings
+   referred to in step 4, and it is not part of the plan's content -- do not
+   copy it into the saved artifact. The saved plan begins at the first
+   heading, `# 目的`.
 
 ## Artifacts
 

@@ -3,7 +3,11 @@ FIXED STRUCTURE -- do not remove, reorder, or rename these headings, and do
 not add headings beyond the four below. Fill in each REPLACE_WITH_*
 placeholder with real content. These four heading words (Purpose, Steps,
 Impact, Risks / Notes) are this file's own fixed structural marker -- like
-the report template's section names. This file is the English default; when
+the report template's section names. This comment block itself, however, is
+not one of those four headings and is not template content -- it is an
+instruction to whichever agent fills in this template, and must not be
+copied into the saved artifact; the saved plan starts at the first heading
+below (`# Purpose`). This file is the English default; when
 `language: ja` resolves, packages/plugin/defaults/locales/ja/plan/template.md
 is used in its place instead (see packages/core-go/internal/config/locale.go
 -- LoadLocaleTemplate/ResolvePlanTemplate), with the same four headings

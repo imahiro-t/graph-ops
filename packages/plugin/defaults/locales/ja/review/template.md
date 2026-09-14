@@ -21,7 +21,11 @@ template's PASS/FAIL badge, these three words (and the four heading words
 themselves: 判定, 指摘事項, 判断理由, 条件付き承認の場合の条件) are a fixed
 structural marker and stay in Japanese regardless of any language setting, so
 a pass/fail can be read off at a glance; only the content written under the
-other headings follows the ticket's language.
+other headings follows the ticket's language. This comment block itself,
+however, is not one of those four headings and is not template content -- it
+is an instruction to whichever agent fills in this template, and must not be
+copied into the saved artifact; the saved review starts at the first heading
+below (`# 判定`).
 -->
 
 # 判定
