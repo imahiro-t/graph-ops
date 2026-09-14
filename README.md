@@ -21,7 +21,15 @@ A ticket management and execution platform for AI-driven development, built arou
 /plugin marketplace add imahiro-t/graph-ops
 /plugin install graph-ops@graph-ops
 ```
-The first run fetches the plugin (and a matching `graph-engine` binary for your OS/architecture) into a per-user cache, so it needs network access and `git` on your `PATH` the first time; later runs reuse the cache. To move to a new release later, run `claude plugin update graph-ops@graph-ops` and approve it.
+The first run fetches the plugin (and a matching `graph-engine` binary for your OS/architecture) into a per-user cache, so it needs network access and `git` on your `PATH` the first time; later runs reuse the cache.
+
+**Updating to a new release**, from a regular terminal (not the `/plugin` menu):
+```sh
+claude plugin update graph-ops@graph-ops
+```
+Each release changes the plugin's fetch command (it pins the release tag), and Claude Code only runs a fetch command you have approved. The update prints the new command and asks you to approve it -- once approved, you're on the new release. No uninstall/reinstall is needed.
+- Updating from the `/plugin` menu, or waiting for Claude Code's automatic background refresh, **cannot** approve a new command, so it leaves you on the old release (the `/plugin` Errors tab shows the new command waiting for approval).
+- In a non-interactive shell (scripts, CI, provisioning), add `--yes` to accept the printed command: `claude plugin update graph-ops@graph-ops --yes`.
 
 **First steps after installing:**
 1. Run `/onboarding` once to choose the language the plugin should use for node names and everything it generates (plans, Gherkin specs/tests, implementation notes, review findings, reports). This persists as a `language:` setting (editable later by re-running `/onboarding`, or in config.yaml directly -- there is no Web UI control for it); for a language with a built-in language file (currently Japanese), the fixed workflow skeleton's node names and the default review gates' names switch automatically -- no per-gate translation to maintain yourself. Other languages still get the review gates translated individually, same as before. Re-run `/onboarding` any time to change the language.
@@ -55,6 +63,7 @@ The first run fetches the plugin (and a matching `graph-engine` binary for your 
 
 ### Troubleshooting
 
+- **Plugin update fails, or stays on the old release, saying the command changed since install**: expected on every release -- the new release's fetch command has to be approved. Run `claude plugin update graph-ops@graph-ops` from a regular terminal and approve it (see "Updating to a new release" above); no uninstall/reinstall needed.
 - **"Launch Claude" / "Create" / "Run" / "Refine" doesn't seem to open a terminal**: these buttons open an external terminal by auto-detecting your environment (an active `tmux` session, or `open -a Terminal` on macOS). If neither applies -- notably **on Windows, which has no built-in launcher yet** (tracked as DFLT-00065) -- the launch fails and the Web UI shows a brief error toast that auto-clears after a few seconds, which can look like nothing happened. Set `terminalCommand` in `graph-config.json` (found in your project directory or `$HOME/.graph-ops/graph-config.json`; or set the `TERMINAL_COMMAND` env var) to a shell template using `{cwd}` and `{command}` placeholders. For example, on Windows with Windows Terminal:
   ```json
   { "terminalCommand": "wt.exe -d {cwd} cmd /k {command}" }
@@ -86,7 +95,15 @@ The first run fetches the plugin (and a matching `graph-engine` binary for your 
 /plugin marketplace add imahiro-t/graph-ops
 /plugin install graph-ops@graph-ops
 ```
-初回実行時に、プラグイン本体（とお使いのOS/アーキテクチャ向けの `graph-engine` バイナリ）がユーザーごとのキャッシュへ取得されるため、初回のみネットワークアクセスと `PATH` 上の `git` が必要です。以降の実行はこのキャッシュを再利用します。新しいバージョンへ更新したくなったら `claude plugin update graph-ops@graph-ops` を実行して承認してください。
+初回実行時に、プラグイン本体（とお使いのOS/アーキテクチャ向けの `graph-engine` バイナリ）がユーザーごとのキャッシュへ取得されるため、初回のみネットワークアクセスと `PATH` 上の `git` が必要です。以降の実行はこのキャッシュを再利用します。
+
+**新しいバージョンへの更新**（`/plugin` メニューではなく、通常のターミナルで実行）:
+```sh
+claude plugin update graph-ops@graph-ops
+```
+リリースごとにプラグインの取得コマンドが変わり（リリースタグを固定しているため）、Claude Code はユーザーが承認した取得コマンドしか実行しません。更新時に新しいコマンドが表示されるので、承認すると新しいバージョンに切り替わります。アンインストール・再インストールは不要です。
+- `/plugin` メニューからの更新や、Claude Code による自動のバックグラウンド更新では新しいコマンドを承認できないため、古いバージョンのまま据え置かれます（`/plugin` の Errors タブに承認待ちの新しいコマンドが表示されます）。
+- 対話できないシェル（スクリプト・CI・プロビジョニングなど）では、`--yes` を付けて表示されたコマンドを承認します: `claude plugin update graph-ops@graph-ops --yes`
 
 **インストール後、最初にやること:**
 1. `/onboarding` を一度実行し、プラグインが使う言語（ノード名や、生成される成果物の言語）を選択します。選択内容は `language:` 設定として保存され（後から変更する場合は `/onboarding` を再実行するか、config.yaml を直接編集してください。Web UIの設定画面には言語の編集項目はありません）、言語ファイルが用意されている言語（現時点では日本語）であれば固定のワークフロー骨格ノード名・標準レビューゲート名が自動的にその言語になり、レビューゲートごとに個別翻訳を用意する必要はありません。言語ファイルが無い言語では、従来どおりレビューゲート名のみ個別に翻訳されます。いつでも再実行して変更できます。
@@ -120,6 +137,7 @@ The first run fetches the plugin (and a matching `graph-engine` binary for your 
 
 ### トラブルシューティング
 
+- **プラグインの更新が「インストール時とコマンドが変わった」として失敗する／古いバージョンのままになる**: リリースのたびに起きる想定内の挙動で、新しいリリースの取得コマンドを承認する必要があります。通常のターミナルで `claude plugin update graph-ops@graph-ops` を実行して承認してください（上記「新しいバージョンへの更新」を参照）。アンインストール・再インストールは不要です。
 - **「Claude 起動」「作成」「実行」「リファイン」ボタンを押してもターミナルが開かないように見える**: これらのボタンは、実行環境を自動判定して外部ターミナルを開きます（`tmux` セッション内で実行中の場合はそのウィンドウ、macOSでは `open -a Terminal`）。どちらにも該当しない場合 -- 特に **Windowsには現時点で組み込みの起動方法が用意されていません**（DFLT-00065 で追跡中）-- 起動に失敗し、Web UIには数秒で自動的に消えるエラートーストが表示されるだけなので、何も起きていないように見えることがあります。`graph-config.json`（プロジェクトディレクトリ、または `$HOME/.graph-ops/graph-config.json` に置く。もしくは環境変数 `TERMINAL_COMMAND`）に `terminalCommand` を設定してください。値は `{cwd}` と `{command}` のプレースホルダーを使ったシェルコマンドのテンプレートです。例えば、Windows Terminal を使う場合:
   ```json
   { "terminalCommand": "wt.exe -d {cwd} cmd /k {command}" }
