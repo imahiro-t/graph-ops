@@ -8,7 +8,7 @@
       "description": "GraphOps ticket/graph workflow plugin",
       "source": {
         "source": "command",
-        "command": "node -e \"f=require('fs');v='v0.1.0';d=require('os').homedir()+'/.cache/graph-ops/'+v;t=d+'~'+process.pid;e=process.env;e.GIT_TERMINAL_PROMPT=0;e.GIT_ASKPASS='';e.GIT_HTTP_LOW_SPEED_LIMIT=1;e.GIT_HTTP_LOW_SPEED_TIME=30;if(!f.existsSync(d)){try{require('child_process').execFileSync('git',['-c','credential.helper=','clone','--depth=1','-b',v,'https://github.com/imahiro-t/graph-ops',t],{stdio:[0,2,2]});f.renameSync(t,d)}catch{}f.rmSync(t,{recursive:!0,force:!0})}require(d+'/packages/plugin')\"",
+        "command": "node -e \"f=require('fs');v='v0.2.0';d=require('os').homedir()+'/.cache/graph-ops/'+v;t=d+'~'+process.pid;e=process.env;e.GIT_TERMINAL_PROMPT=0;e.GIT_ASKPASS='';e.GIT_HTTP_LOW_SPEED_LIMIT=1;e.GIT_HTTP_LOW_SPEED_TIME=30;if(!f.existsSync(d)){try{require('child_process').execFileSync('git',['-c','credential.helper=','clone','--depth=1','-b',v,'https://github.com/imahiro-t/graph-ops',t],{stdio:[0,2,2]});f.renameSync(t,d)}catch{}f.rmSync(t,{recursive:!0,force:!0})}require(d+'/packages/plugin')\"",
         "mode": "copy",
         "timeout": 300
       }
