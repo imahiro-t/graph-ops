@@ -60,7 +60,11 @@
     FIXED STRUCTURE -- do not remove sections or the data-report-* markers.
     Fill in the placeholder text (REPLACE_WITH_*) with real content; keep the
     four sections in this order (header, summary, results, footer) and keep
-    every data-report-section value exactly as shown. See
+    every data-report-section value exactly as shown. This comment block
+    itself, however, is not one of those four sections -- it is an
+    instruction to whichever agent fills in this template, and must not be
+    copied into the saved artifact; the saved report starts at the
+    `<header data-report-section="header">` tag below. See
     packages/core-go/internal/config/defaults/node-types/deliverable.md (the
     "report" node type's default instructions, resolvable via
     `graph-engine get-node-type-context report`) for how this gets filled

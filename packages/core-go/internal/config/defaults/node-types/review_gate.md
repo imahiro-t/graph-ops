@@ -23,6 +23,11 @@ its own; a single-artifact checkpoint without them is a `review`.
    条件付き承認 for pass, depending on whether you are attaching conditions
    (and if 条件付き承認, fill in those conditions under the last heading
    rather than leaving it as "該当なし").
+6. Before saving, drop the template's leading `<!-- ... -->` comment block
+   entirely. It is a meta-instruction to you, not one of the four headings
+   referred to in step 4, and it is not part of the review's content -- do
+   not copy it into the saved artifact. The saved review begins at the first
+   heading, `# 判定`.
 
 ## Artifacts
 

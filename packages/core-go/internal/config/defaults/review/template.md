@@ -12,7 +12,11 @@ translation, no paraphrasing, no additional wording in that section. Like the
 report template's PASS/FAIL badge, these three words (and the four heading
 words themselves: Verdict, Findings, Rationale, Conditions (if Conditionally
 Approved)) are this file's own fixed structural marker, so a pass/fail can be
-read off at a glance. This file is the English default; when `language: ja`
+read off at a glance. This comment block itself, however, is not one of
+those four headings and is not template content -- it is an instruction to
+whichever agent fills in this template, and must not be copied into the
+saved artifact; the saved review starts at the first heading below
+(`# Verdict`). This file is the English default; when `language: ja`
 resolves, packages/plugin/defaults/locales/ja/review/template.md is used in
 its place instead (see packages/core-go/internal/config/locale.go --
 LoadLocaleTemplate/ResolveReviewTemplate), with the same four headings and

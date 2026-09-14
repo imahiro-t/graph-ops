@@ -12,6 +12,11 @@ diffable and comparable across tickets.
 4. Keep the template's structural markers intact -- `data-report-template`,
    `data-report-version`, and the `data-report-section` values `header`,
    `summary`, `results`, and `footer`.
+5. Before saving, drop the template's leading `<!-- ... -->` comment block
+   entirely. It is a meta-instruction to you, not one of the four sections
+   referred to in step 4, and it is not part of the report's content -- do
+   not copy it into the saved artifact. The saved report begins at the
+   `<header data-report-section="header">` tag.
 
 ## Artifacts
 
