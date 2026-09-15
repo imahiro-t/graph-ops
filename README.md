@@ -5,148 +5,270 @@
 <a id="english"></a>
 ## English
 
-A ticket management and execution platform for AI-driven development, built around execution graphs (DAG / parallel / loops). Install it as a Claude Code plugin and drive it entirely through slash commands and the Web UI -- no local build required.
+GraphOps is a ticket management and execution platform for AI-driven development, built around execution graphs (DAG / parallel / loops). You install it as a Claude Code plugin and use it through slash commands and a local Web UI. No local build is required.
+
+![Execution graph of a ticket, with its node list](docs/images/execution-graph.png)
+
+> The screenshots in this README show the Web UI in English with sample data. You can switch the UI language (English / 日本語) from the header.
 
 ### What GraphOps Does
 
-- **Execution-graph-driven ticket management**: every ticket gets its own execution graph (a DAG of nodes such as `plan`, `review`, `implementation`, `review_gate`, `approval_gate`, `release`, ...). Nodes run sequentially or in parallel according to their dependencies, and a failing review can loop a node back for rework automatically.
-- **Review gates and approval gates**: `review_gate` nodes judge pass/fail automatically against configurable criteria until the graph converges. `approval_gate` nodes always wait for an explicit decision from you -- approve with one click, or reject with a required reason.
-- **Web UI visualization**: an interactive view of each ticket's execution graph (parallel nodes, loop-back edges, a ring around review/approval-gate nodes, live progress), a searchable/filterable/paginated ticket list, formatted previews for every artifact type (Gherkin, Markdown/text, HTML), and one-click approve/reject on pending approval gates.
-- **Config-file driven and extensible**: what each review gate checks for, and how nodes/skills behave, can be customized per user or per team via config files, without touching the plugin itself. See the Web UI's Settings screen for what's editable.
+- **One execution graph per ticket**: each ticket gets a DAG of nodes such as `plan`, `review`, `gherkin_spec`, `implementation`, `review_gate`, `approval_gate`, `report`, and `release`. Nodes run in order or in parallel according to their dependencies. When a review fails, the graph loops back to the node that needs rework.
+- **Review gates and approval gates**: a `review_gate` node judges pass/fail automatically against configurable criteria (code, QA, security, non-functional, ...). An `approval_gate` node always waits for a human decision in the Web UI.
+- **Web UI**: a ticket list with search, filters, and paging; an interactive view of each ticket's execution graph; formatted previews of every artifact (Markdown, Gherkin, HTML); approve/reject buttons; and buttons that launch Claude Code for you.
+- **Customizable without editing the plugin**: node-type instructions, review-gate criteria, skill instructions, and the plan / review / report templates can be extended globally (per user) or per project (shared with your team), from the Web UI's Settings screen.
+
+### Requirements
+
+- [Claude Code](https://docs.claude.com/en/docs/claude-code)
+- `git` and `node` on your `PATH`, and network access for the first install (the plugin is fetched with `git` by a `node` one-liner)
+- macOS (Apple silicon / Intel), Linux (x86_64), or Windows (x86_64)
 
 ### Installation & Getting Started
 
-**Add and install the plugin**, from inside Claude Code:
+#### Install
+
+Run the following inside Claude Code:
 ```
 /plugin marketplace add imahiro-t/graph-ops
 /plugin install graph-ops@graph-ops
 ```
-The first run fetches the plugin (and a matching `graph-engine` binary for your OS/architecture) into a per-user cache, so it needs network access and `git` on your `PATH` the first time; later runs reuse the cache.
+The first run downloads the plugin and a `graph-engine` binary for your OS/architecture into a per-user cache. Later runs reuse the cache.
 
-**Updating to a new release**, from a regular terminal (not the `/plugin` menu):
+#### Quick start
+
+1. **Choose the plugin's language**: run `/graph-ops:onboarding` once. It asks which language the plugin should use for node names and generated content (plans, Gherkin specs, implementation notes, review results, reports). You can re-run it any time.
+2. **Register your project**: `cd` into your project's working directory, start Claude Code, and run `/graph-ops:ui`. The Web UI opens in your browser. If the directory is not registered yet, the "Create New Project" dialog opens with that directory filled in.
+3. **Create a ticket**: run `/graph-ops:create-ticket` and describe what you want. Claude talks the request through with you (scope, affected areas, edge cases) before it registers the ticket. You can also start from the Web UI's "New Ticket" button.
+4. **Refine the ticket (optional)**: run `/graph-ops:refine-ticket` to pin down the completion criteria and the "why". The ticket's description is rewritten around them.
+5. **Run the ticket**: run `/graph-ops:process-ticket` (or press "Run" on the ticket in the Web UI). It builds the execution graph, runs each node with a subagent (in parallel where possible), saves artifacts, and repeats reviews until they pass.
+6. **Follow progress in the Web UI**: open it any time with `/graph-ops:ui` to see the graph, read artifacts, and approve or reject approval gates.
+
+#### Updating to a new release
+
+Run the following in a regular terminal (not the `/plugin` menu):
 ```sh
 claude plugin update graph-ops@graph-ops
 ```
-Each release changes the plugin's fetch command (it pins the release tag), and Claude Code only runs a fetch command you have approved. The update prints the new command and asks you to approve it -- once approved, you're on the new release. No uninstall/reinstall is needed.
-- Updating from the `/plugin` menu, or waiting for Claude Code's automatic background refresh, **cannot** approve a new command, so it leaves you on the old release (the `/plugin` Errors tab shows the new command waiting for approval).
-- In a non-interactive shell (scripts, CI, provisioning), add `--yes` to accept the printed command: `claude plugin update graph-ops@graph-ops --yes`.
+Each release pins a new release tag in the plugin's fetch command, and Claude Code only runs a fetch command you have approved. The update shows the new command and asks you to approve it. Once you approve it, you are on the new release. You don't need to uninstall or reinstall.
+- Updating from the `/plugin` menu, or Claude Code's automatic background refresh, can't approve a new command, so you stay on the old release (the `/plugin` Errors tab shows the command waiting for approval).
+- In a non-interactive shell (scripts, CI, provisioning), add `--yes` to accept the command: `claude plugin update graph-ops@graph-ops --yes`.
 
-**First steps after installing:**
-1. Run `/onboarding` once to choose the language the plugin should use for node names and everything it generates (plans, Gherkin specs/tests, implementation notes, review findings, reports). This persists as a `language:` setting (editable later by re-running `/onboarding`, or in config.yaml directly -- there is no Web UI control for it); for a language with a built-in language file (currently Japanese), the fixed workflow skeleton's node names and the default review gates' names switch automatically -- no per-gate translation to maintain yourself. Other languages still get the review gates translated individually, same as before. Re-run `/onboarding` any time to change the language.
-2. Register your project: `cd` into your project's working directory and run `/ui` -- if the directory isn't registered yet, the Web UI opens straight to a "new project" dialog with that directory pre-filled.
-3. Run `/create-ticket` and describe what you want; it talks the request through with you (scope, affected area, edge cases) before registering the ticket, rather than creating one from your first message verbatim.
-4. Optionally, run `/refine-ticket` to pin down the ticket's completion criteria and the "why" before work starts; it rewrites the ticket's description around them.
-5. Run `/process-ticket` to build and drive the ticket's execution graph: it decides the graph's shape from the ticket's content, dispatches a subagent per node (in parallel where the graph allows), and manages review convergence and artifact storage.
-6. Use `/ui` any time to open the local Web UI for whichever project matches your current directory -- it starts the UI server automatically if it isn't already running.
+### Commands
 
-**What each command does:**
-- `/onboarding` -- first-time setup; asks which language the plugin should work in and persists the choice.
-- `/create-ticket` -- creates a new ticket in the DB from a request that has been talked through first. Does not create an execution graph.
-- `/refine-ticket` -- nails down completion criteria and the "why", then rewrites the ticket's description around them. Does not create an execution graph.
-- `/process-ticket` -- decides the execution graph's shape, then drives it via parallel subagent execution, handling artifact storage and review convergence.
-- `/ui` -- opens the local Web UI in your browser for the project matching your current directory, auto-starting the UI server if needed.
+| Command | What it does |
+| --- | --- |
+| `/graph-ops:onboarding` | First-time setup. Asks which language the plugin should work in and saves the choice. |
+| `/graph-ops:create-ticket` | Talks a request through with you, then creates a ticket. Does not build an execution graph. |
+| `/graph-ops:refine-ticket` | Pins down a ticket's completion criteria and "why", and rewrites its description. Does not build an execution graph. |
+| `/graph-ops:process-ticket` | Decides the shape of the ticket's execution graph, then runs it with subagents, saving artifacts and repeating reviews until they converge. |
+| `/graph-ops:ui` | Opens the local Web UI for the project that matches the current directory, starting the UI server if needed. |
 
 ### Using the Web UI
 
-- **Projects**: the top of the page has a project switcher for moving between registered projects, and a "new project" dialog (name, optional ID prefix, working-directory path) for registering another one.
-- **Ticket list**: paginated, searchable, and filterable by status/assignee/priority. Each ticket shows its current status (`TODO` / `IN PROGRESS` / `IN REVIEW` / `IN RELEASE` / `DONE` / `CLOSED`), derived automatically from its execution graph. Tickets can be deleted (behind a confirmation dialog), withdrawn without doing the work, and reopened later.
-- **Execution graph view**: open a ticket to see its graph -- parallel branches, loop-back edges for rework, a ring marking review/approval-gate nodes, and live progress as nodes complete. Every node's artifact (plan, Gherkin spec, implementation notes, review findings, report, ...) has a formatted preview.
-- **Approving/rejecting**: a pending `approval_gate` can be approved directly from the ticket list with one click; rejecting it requires a free-text reason, entered from that node in the graph view. A rejection blocks the ticket until you act on it.
-- **Launching Claude Code**: "Create", "Launch Claude", "Run", and "Refine" buttons each open an external, interactive terminal running `claude` for you to drive -- Cmd+Enter (Mac) / Ctrl+Enter (Windows) submits a prompt without leaving the keyboard.
-- **Settings**: a Settings screen lets you edit node types, review-gate criteria, skill instructions, and the plan / review / report templates (under its "Templates" tab) -- scoped globally or per project. App-wide runtime settings (data storage location, MySQL connection, etc.) live under its "App Settings" tab; the defaults work out of the box, so most users won't need to touch this.
-- **Theme**: toggle between light, dark, and system theme from the header.
+#### Projects
 
-### Notes for Normal Use
+Switch between registered projects from the project menu in the header. Choose "New project..." to register another one (name, optional ID prefix, and the working folder as an absolute path). Tickets and their IDs (for example `SHOP-00001`) belong to a project.
 
-- The Web UI is a local, single-user tool with no login -- it only listens on your own machine unless you deliberately widen that in App Settings.
-- Data (tickets, execution graphs, artifacts) is stored locally by default, with no setup required. Everything above works with the defaults; the App Settings tab exists for cases that need something different (a shared database, a custom port, etc.) and can be left alone otherwise. Artifacts land under `$HOME/.graph-ops/artifacts` (or wherever App Settings points), never in a repo-root `artifacts/` directory -- if one shows up there, it's stray output and safe to delete.
+#### Ticket list
+
+![Ticket list with the overview and filters](docs/images/ticket-list.png)
+
+- "All Tickets Overview" shows the total number of tickets, how many are in progress, in review, and done, and the node progress.
+- Search by ticket ID or title, filter by status, assignee, and priority, and page through the list.
+- A ticket's status (`TODO` / `REFINED` / `IN PROGRESS` / `IN REVIEW` / `IN RELEASE` / `DONE` / `CLOSED`) is derived automatically from its execution graph.
+- You can change a ticket's priority, assign it to yourself with "Assign to me", close it without completing it (with an optional reason), reopen it, or delete it (after a confirmation).
+- "Assign to me" appears once you set your name under Settings > App Settings > "My Profile".
+
+#### Execution graph and artifacts
+
+Click a ticket to expand it. The left side shows the execution graph: nodes on the same row run in parallel, dashed lines are loop-back edges for rework, and rings mark review gates and approval gates. The right side lists the nodes with their status and retry count.
+
+![Formatted preview of a plan artifact](docs/images/artifact-preview.png)
+
+- Click a node to preview its artifacts: Markdown, Gherkin, and HTML are shown formatted.
+- Each artifact can be opened in a new tab or downloaded. "Download all artifacts" downloads every artifact of the ticket at once.
+- The "Gherkin Spec", "HTML Artifacts", and "All Artifacts" tabs collect artifacts of each kind across the ticket.
+
+#### Approving and rejecting
+
+When a ticket reaches a pending `approval_gate`, open the ticket: "Approve" and "Reject" buttons appear on that node's row. Rejecting requires a reason. A rejected ticket is blocked until `/graph-ops:process-ticket` handles the rejection reason (by reopening the nodes that need rework) or a person resolves it.
+
+#### Launching Claude Code
+
+The following buttons open an external, interactive terminal running `claude`. You handle permission prompts and any further conversation in that terminal.
+
+- "Launch Claude" in the header opens a dialog where you can type any prompt and press "Launch".
+- "New Ticket" in the header opens a form (title and description). "Create" starts `claude` with a request to create that ticket.
+- "Refine" and "Run" on an expanded ticket start `claude` to refine or run that ticket.
+- The prompt box on an expanded ticket sends any instruction about that ticket with "Send".
+
+The prompt fields accept multiple lines: press Enter for a new line, and press "Launch"/"Send" or Cmd+Enter (macOS) / Ctrl+Enter to submit. A prompt with only spaces or blank lines is not sent.
+
+#### Settings
+
+![Settings screen (Review Gates tab)](docs/images/settings.png)
+
+Open Settings with the gear button in the header.
+
+- **Scope**: "Global Settings" apply to you on every project (stored in `$HOME/.graph-ops` by default). "Project Settings" apply to one project and are stored in the `.graph-ops/` directory of its working folder, so you can commit and share them with your team. Project settings take precedence over global settings.
+- **Node Types / Review Gates / Skills / Templates**: add instructions for each node type, change or add review-gate criteria, add instructions to each skill, and replace the execution-plan, review, and HTML report templates (the Templates tab's left-hand list switches between the three). Each screen also shows a merged preview of what an agent actually sees.
+- **App Settings** (Global Settings only): data storage (SQLite database file or MySQL connection, including TLS), "My Profile" (your name for "Assign to me"), the number of tickets per page, the node/workflow config directory, and project management (rename a project, change its working directory, or delete it). Storage changes take effect the next time the server starts. The defaults work as they are, so most users don't need to change anything here.
+
+#### Theme and language
+
+Use the header buttons to switch the theme (light / dark / match system) and the Web UI language (English / 日本語).
+
+### Notes
+
+- **Local, single-user tool**: the Web UI has no login. By default, the server listens only on `127.0.0.1` (port `49173`). To change this, set `host` / `port` in `graph-config.json`, or the `GRAPH_HOST` / `PORT` environment variables. Only open it to other machines on a network you trust.
+- **Where data is stored**: tickets, execution graphs, and artifacts are stored in a database, by default the SQLite file `$HOME/.graph-ops/graph.db`. `$HOME/.graph-ops/artifacts` is a working-files directory for investigation material and temporary files. When an HTML or image artifact is registered from a file path, only files under this directory can be read. If an `artifacts/` directory appears at the root of your repository, it is stray output and safe to delete.
+- **Configuration file**: runtime settings are read from `graph-config.json` in the directory the server or CLI starts from, or else from `$HOME/.graph-ops/config.json`. App Settings writes to that same file. Environment variables take precedence over the file.
+- **Two separate language settings**: `/graph-ops:onboarding` sets the language of the content the plugin generates (saved as `language:` in `$HOME/.graph-ops/config.yaml`). The header's language button only changes the Web UI's display language.
 
 ### Troubleshooting
 
-- **Plugin update fails, or stays on the old release, saying the command changed since install**: expected on every release -- the new release's fetch command has to be approved. Run `claude plugin update graph-ops@graph-ops` from a regular terminal and approve it (see "Updating to a new release" above); no uninstall/reinstall needed.
-- **"Launch Claude" / "Create" / "Run" / "Refine" doesn't seem to open a terminal**: these buttons open an external terminal by auto-detecting your environment (an active `tmux` session, or `open -a Terminal` on macOS). If neither applies -- notably **on Windows, which has no built-in launcher yet** (tracked as DFLT-00065) -- the launch fails and the Web UI shows a brief error toast that auto-clears after a few seconds, which can look like nothing happened. Set `terminalCommand` in `graph-config.json` (found in your project directory or `$HOME/.graph-ops/graph-config.json`; or set the `TERMINAL_COMMAND` env var) to a shell template using `{cwd}` and `{command}` placeholders. For example, on Windows with Windows Terminal:
+- **The plugin update fails or stays on the old release, saying the command changed since install**: this is expected on every release, because the new fetch command must be approved. Run `claude plugin update graph-ops@graph-ops` in a regular terminal and approve it (see "Updating to a new release"). You don't need to uninstall or reinstall.
+- **A button that launches Claude Code doesn't seem to open a terminal**: GraphOps picks the terminal automatically, in this order: a `terminalCommand` you configured; a new window in the current `tmux` session; Terminal.app on macOS; Windows Terminal (`wt.exe`) or, if it isn't installed, a PowerShell window on Windows. If none applies (for example on Linux outside `tmux`), the launch fails and a short error message appears in the Web UI and disappears after a few seconds. Set `terminalCommand` in `graph-config.json` (or the `TERMINAL_COMMAND` environment variable) to a shell command template that uses the `{cwd}` and `{command}` placeholders. For example, with WezTerm:
   ```json
-  { "terminalCommand": "wt.exe -d {cwd} cmd /k {command}" }
+  { "terminalCommand": "wezterm start --cwd {cwd} -- {command}" }
   ```
-  or with `cmd.exe` directly:
-  ```json
-  { "terminalCommand": "cmd /c start cmd /k \"cd /d {cwd} && {command}\"" }
-  ```
-  The same setting also covers terminal emulators auto-detection doesn't try on macOS/Linux, such as iTerm, wezterm, kitty, or a VS Code integrated terminal.
+  The same setting lets you use a terminal that auto-detection doesn't cover, such as iTerm2, kitty, or the VS Code integrated terminal.
 
 ---
 
 <a id="japanese"></a>
 ## 日本語
 
-実行グラフ（DAG／並列／ループ）を軸にした、AI駆動開発向けのチケット管理・実行基盤です。Claude Code のプラグインとしてインストールし、スラッシュコマンドと Web UI だけで操作します。手元でのビルドは不要です。
+GraphOps は、実行グラフ（DAG／並列／ループ）を軸にした、AI 駆動開発向けのチケット管理・実行基盤です。Claude Code のプラグインとしてインストールし、スラッシュコマンドとローカルの Web UI で操作します。手元でのビルドは不要です。
 
-### GraphOpsでできること
+![チケットの実行グラフとノード一覧](docs/images/execution-graph.png)
 
-- **実行グラフによるチケット管理**: チケットごとに専用の実行グラフ（`plan`／`review`／`implementation`／`review_gate`／`approval_gate`／`release` などのノードから成るDAG）を持ちます。ノードは依存関係に従って直列・並列に実行され、レビューに落ちたノードは自動的に差し戻し（ループ）で再実行されます。
-- **レビューゲート・承認ゲート**: `review_gate` ノードは設定可能な観点に基づき、グラフが収束するまで自動的に合否判定します。`approval_gate` ノードは常に人間による明示的な判断を待ちます -- ワンクリックで承認するか、理由を添えて却下できます。
-- **Web UIでの可視化**: 各チケットの実行グラフのインタラクティブな表示（並列ノード・差し戻しループ・レビュー/承認ゲートを示すリング・進捗のリアルタイム表示）、検索・フィルタ・ページングに対応したチケット一覧、Gherkin／Markdown・テキスト／HTMLいずれの成果物も整形済みで見られるプレビュー、承認待ちゲートのワンクリック承認/却下を提供します。
-- **設定ファイル駆動で拡張可能**: 各レビューゲートの審査観点や、ノード・スキルの挙動は、プラグイン本体に手を入れずユーザーごと・チームごとにカスタマイズできます。何が編集できるかはWeb UIの設定画面から確認できます。
+> この README のスクリーンショットは、サンプルデータを使った英語表示の Web UI です。UI の表示言語（English／日本語）はヘッダーから切り替えられます。
+
+### GraphOps でできること
+
+- **チケットごとの実行グラフ**: チケットごとに、`plan`／`review`／`gherkin_spec`／`implementation`／`review_gate`／`approval_gate`／`report`／`release` などのノードから成る DAG を持ちます。ノードは依存関係に従って直列・並列に実行されます。レビューに落ちると、手直しが必要なノードへ差し戻し（ループ）ます。
+- **レビューゲートと承認ゲート**: `review_gate` ノードは、設定した観点（コード、QA、セキュリティ、非機能など）で自動的に合否を判定します。`approval_gate` ノードは、必ず Web UI で人間の判断を待ちます。
+- **Web UI**: 検索・フィルタ・ページングに対応したチケット一覧、チケットごとの実行グラフのインタラクティブな表示、すべての成果物（Markdown／Gherkin／HTML）の整形プレビュー、承認・却下ボタン、Claude Code を起動するボタンを備えています。
+- **プラグインを編集せずにカスタマイズ**: ノード種別ごとの指示、レビューゲートの観点、スキルへの指示、レポートテンプレートを、全体（ユーザーごと）またはプロジェクト単位（チームで共有）で拡張できます。Web UI の設定画面から編集します。
+
+### 必要なもの
+
+- [Claude Code](https://docs.claude.com/en/docs/claude-code)
+- `PATH` 上の `git` と `node`、および初回インストール時のネットワーク接続（プラグインは `node` のワンライナーから `git` で取得されます）
+- macOS（Apple シリコン／Intel）、Linux（x86_64）、Windows（x86_64）
 
 ### インストールと使い始め方
 
-**プラグインの追加とインストール**（Claude Code内で実行）:
+#### インストール
+
+Claude Code 内で次を実行します。
 ```
 /plugin marketplace add imahiro-t/graph-ops
 /plugin install graph-ops@graph-ops
 ```
-初回実行時に、プラグイン本体（とお使いのOS/アーキテクチャ向けの `graph-engine` バイナリ）がユーザーごとのキャッシュへ取得されるため、初回のみネットワークアクセスと `PATH` 上の `git` が必要です。以降の実行はこのキャッシュを再利用します。
+初回実行時に、プラグイン本体と、お使いの OS／アーキテクチャ向けの `graph-engine` バイナリがユーザーごとのキャッシュにダウンロードされます。2 回目以降はこのキャッシュを使います。
 
-**新しいバージョンへの更新**（`/plugin` メニューではなく、通常のターミナルで実行）:
+#### クイックスタート
+
+1. **プラグインの言語を選ぶ**: `/graph-ops:onboarding` を一度実行します。ノード名や生成される内容（計画、Gherkin 仕様、実装メモ、レビュー結果、レポート）に使う言語を聞かれます。いつでも再実行できます。
+2. **プロジェクトを登録する**: プロジェクトの作業ディレクトリに `cd` して Claude Code を起動し、`/graph-ops:ui` を実行します。ブラウザで Web UI が開きます。未登録のディレクトリなら、そのディレクトリが入力済みの「新規プロジェクト作成」ダイアログが開きます。
+3. **チケットを作る**: `/graph-ops:create-ticket` を実行し、やりたいことを伝えます。Claude が範囲・影響箇所・エッジケースなどを対話で詰めてから、チケットを登録します。Web UI の「新規チケット」ボタンから始めることもできます。
+4. **チケットをリファインする（任意）**: `/graph-ops:refine-ticket` を実行すると、完了条件と「なぜやるか」を固め、その内容でチケットの説明を書き直します。
+5. **チケットを実行する**: `/graph-ops:process-ticket` を実行します（Web UI のチケットの「実行する」ボタンでも可）。実行グラフを組み立て、ノードごとにサブエージェントで（可能なところは並列に）作業し、成果物を保存し、レビューが通るまで繰り返します。
+6. **Web UI で進捗を確認する**: `/graph-ops:ui` でいつでも開けます。グラフの確認、成果物の閲覧、承認ゲートの承認・却下ができます。
+
+#### 新しいリリースへの更新
+
+通常のターミナル（`/plugin` メニューではなく）で次を実行します。
 ```sh
 claude plugin update graph-ops@graph-ops
 ```
-リリースごとにプラグインの取得コマンドが変わり（リリースタグを固定しているため）、Claude Code はユーザーが承認した取得コマンドしか実行しません。更新時に新しいコマンドが表示されるので、承認すると新しいバージョンに切り替わります。アンインストール・再インストールは不要です。
-- `/plugin` メニューからの更新や、Claude Code による自動のバックグラウンド更新では新しいコマンドを承認できないため、古いバージョンのまま据え置かれます（`/plugin` の Errors タブに承認待ちの新しいコマンドが表示されます）。
-- 対話できないシェル（スクリプト・CI・プロビジョニングなど）では、`--yes` を付けて表示されたコマンドを承認します: `claude plugin update graph-ops@graph-ops --yes`
+リリースのたびに、プラグインの取得コマンドに固定されるリリースタグが変わります。Claude Code は、承認済みの取得コマンドしか実行しません。更新時に新しいコマンドが表示され、承認を求められます。承認すれば新しいリリースに切り替わります。アンインストールや再インストールは不要です。
+- `/plugin` メニューからの更新や、Claude Code の自動バックグラウンド更新では新しいコマンドを承認できないため、古いリリースのままになります（`/plugin` の Errors タブに承認待ちのコマンドが表示されます）。
+- 対話できないシェル（スクリプト・CI・プロビジョニングなど）では、`--yes` を付けてコマンドを承認します: `claude plugin update graph-ops@graph-ops --yes`
 
-**インストール後、最初にやること:**
-1. `/onboarding` を一度実行し、プラグインが使う言語（ノード名や、生成される成果物の言語）を選択します。選択内容は `language:` 設定として保存され（後から変更する場合は `/onboarding` を再実行するか、config.yaml を直接編集してください。Web UIの設定画面には言語の編集項目はありません）、言語ファイルが用意されている言語（現時点では日本語）であれば固定のワークフロー骨格ノード名・標準レビューゲート名が自動的にその言語になり、レビューゲートごとに個別翻訳を用意する必要はありません。言語ファイルが無い言語では、従来どおりレビューゲート名のみ個別に翻訳されます。いつでも再実行して変更できます。
-2. プロジェクトを登録します。対象プロジェクトの作業ディレクトリで `cd` してから `/ui` を実行してください。未登録のディレクトリであれば、Web UIがそのディレクトリを初期値にした「新規プロジェクト作成」ダイアログを開きます。
-3. `/create-ticket` を実行し、やりたいことを伝えます。最初のメッセージをそのままチケットにするのではなく、範囲・対象箇所・エッジケースなどを対話で詰めてから登録します。
-4. 必要に応じて `/refine-ticket` を実行し、作業開始前に完了条件と「なぜやるか」を固めます。その内容に沿ってチケットの説明欄が書き換わります。
-5. `/process-ticket` を実行し、チケットの実行グラフを構築・実行します。チケットの内容からグラフの形を決め、ノードごとにサブエージェントを（グラフが許す範囲で並列に）走らせ、レビューの収束制御と成果物の保存を管理します。
-6. いつでも `/ui` を実行すれば、カレントディレクトリに対応するプロジェクトのローカルWeb UIが開きます（UIサーバーが未起動なら自動起動します）。
+### コマンド一覧
 
-**各コマンドの役割:**
-- `/onboarding` -- 初回セットアップ。プラグインが使う言語を確認し、設定として保存します。
-- `/create-ticket` -- 対話で内容を詰めたうえで新規チケットをDBに登録します。実行グラフは作りません。
-- `/refine-ticket` -- 完了条件と「なぜやるか」を詰め、その内容でチケットの説明欄を書き換えます。実行グラフは作りません。
-- `/process-ticket` -- 実行グラフの形を決めたうえで、サブエージェントによる並列実行・成果物保存・レビュー収束制御まで一貫して行います。
-- `/ui` -- カレントディレクトリに対応するプロジェクトのローカルWeb UIをブラウザで開きます（必要ならUIサーバーを自動起動します）。
+| コマンド | 役割 |
+| --- | --- |
+| `/graph-ops:onboarding` | 初回セットアップ。プラグインが使う言語を確認し、設定として保存します。 |
+| `/graph-ops:create-ticket` | 依頼内容を対話で詰めてから、チケットを作成します。実行グラフは作りません。 |
+| `/graph-ops:refine-ticket` | チケットの完了条件と「なぜやるか」を固め、説明を書き直します。実行グラフは作りません。 |
+| `/graph-ops:process-ticket` | チケットの実行グラフの形を決め、サブエージェントで実行します。成果物の保存と、レビューが収束するまでの繰り返しも行います。 |
+| `/graph-ops:ui` | カレントディレクトリに対応するプロジェクトのローカル Web UI を開きます。必要なら UI サーバーを起動します。 |
 
-### Web UIでできること
+### Web UI の使い方
 
-- **プロジェクト**: ページ上部のプロジェクト切替メニューで登録済みプロジェクトを切り替えられます。「新規プロジェクト作成」ダイアログ（名前・任意のIDプレフィックス・作業ディレクトリのパス）から別のプロジェクトを登録できます。
-- **チケット一覧**: ページング、検索・フィルタ（ステータス／担当者／優先度）に対応します。各チケットのステータス（`TODO`／`IN PROGRESS`／`IN REVIEW`／`IN RELEASE`／`DONE`／`CLOSED`）は実行グラフから自動的に導出されます。チケットは削除（確認ダイアログあり）、対応せずに取り下げ、後からの再オープンができます。
-- **実行グラフ表示**: チケットを開くとグラフが表示されます -- 並列分岐、差し戻しのループ辺、レビュー/承認ゲートを示すリング、ノード完了に応じたリアルタイムの進捗表示。各ノードの成果物（計画、Gherkin仕様、実装メモ、レビュー結果、レポートなど）は整形済みプレビューで確認できます。
-- **承認・却下**: 承認待ちの `approval_gate` はチケット一覧からワンクリックで承認できます。却下には自由記述の理由が必須で、グラフ表示内の当該ノードから入力します。却下するとチケットは対応するまでブロックされます。
-- **Claude Codeの起動**: 「作成」「Claude 起動」「実行」「リファイン」ボタンはいずれも外部の対話的ターミナルで `claude` を起動し、人間が操作する方式です。Cmd+Enter（Mac）/ Ctrl+Enter（Windows）でキーボードから離れずプロンプトを送信できます。
-- **設定**: 設定画面からノードタイプ、レビューゲートの審査観点、スキルへの追加指示、レポートテンプレートを編集できます（全体設定／プロジェクト単位設定を切り替え可能）。データ保存先やMySQL接続などアプリ全体の実行時設定は「App Settings」タブにまとまっており、既定値のままで問題なく動作するため、通常はほとんど触る必要はありません。
-- **テーマ**: ヘッダーからライト／ダーク／システム設定のテーマを切り替えられます。
+#### プロジェクト
 
-### 通常利用にあたっての補足
+ヘッダーのプロジェクトメニューで、登録済みのプロジェクトを切り替えます。「新規プロジェクト...」から別のプロジェクトを登録できます（名前、任意の ID プレフィックス、作業フォルダの絶対パス）。チケットとその ID（例: `SHOP-00001`）はプロジェクトに属します。
 
-- Web UIはログイン不要のローカル・単一ユーザー向けツールで、App Settingsで明示的に範囲を広げない限り自分のマシンからのみアクセスできます。
-- チケット・実行グラフ・成果物などのデータは、特別な設定なしに既定でローカルに保存されます。ここまでの内容はすべて既定設定のまま動作します。App Settingsタブは共有データベースやポート変更など特別な要件がある場合のためのもので、それ以外では触らなくて構いません。成果物の保存先は既定で `$HOME/.graph-ops/artifacts`（またはApp Settingsで指定した場所）であり、リポジトリ直下の `artifacts/` ディレクトリではありません。もし直下に生成されていた場合は混入した不要なファイルなので削除して構いません。
+#### チケット一覧
+
+![全チケット概要とフィルタを含むチケット一覧](docs/images/ticket-list.png)
+
+- 「全チケット概要」に、総チケット数、進行中・レビュー中・完了の件数、ノード進捗が表示されます。
+- チケット ID やタイトルで検索し、ステータス・担当者・優先度で絞り込み、ページを切り替えられます。
+- チケットのステータス（`TODO`／`REFINED`／`IN PROGRESS`／`IN REVIEW`／`IN RELEASE`／`DONE`／`CLOSED`）は、実行グラフから自動的に決まります。
+- チケットの優先度の変更、「担当する」での自分への割り当て、完了せずにクローズ（理由は任意）、再オープン、削除（確認あり）ができます。
+- 「担当する」ボタンは、設定 > アプリ設定 > 「自分の情報」で名前を設定すると表示されます。
+
+#### 実行グラフと成果物
+
+チケットをクリックすると展開されます。左側は実行グラフです。同じ行のノードは並列に実行され、破線は手直しのための差し戻し辺、リングはレビューゲートと承認ゲートを表します。右側にはノードの一覧が、ステータスと再実行回数とともに表示されます。
+
+![計画の成果物の整形プレビュー](docs/images/artifact-preview.png)
+
+- ノードをクリックすると成果物をプレビューできます。Markdown・Gherkin・HTML は整形して表示されます。
+- 成果物ごとに「別タブで開く」「ダウンロード」ができます。「成果物を一括ダウンロード」で、チケットのすべての成果物をまとめてダウンロードできます。
+- 「Gherkin 仕様」「HTML 成果物」「全成果物」タブには、チケット全体の成果物が種類ごとにまとまっています。
+
+#### 承認と却下
+
+チケットが承認待ちの `approval_gate` に達したら、チケットを開きます。そのノードの行に「承認」「却下」ボタンが表示されます。却下には理由の入力が必要です。却下されたチケットは、`/graph-ops:process-ticket` が却下理由を処理する（手直しが必要なノードを再開する）か、人が解決するまでブロックされます。
+
+#### Claude Code の起動
+
+次のボタンは、`claude` を実行する外部の対話型ターミナルを開きます。権限の確認やその後のやり取りは、そのターミナルで行います。
+
+- ヘッダーの「Claude 起動」は、任意のプロンプトを入力して「起動」を押すダイアログを開きます。
+- ヘッダーの「新規チケット」は、タイトルと説明の入力フォームを開きます。「作成」を押すと、そのチケットの作成を依頼する形で `claude` が起動します。
+- 展開したチケットの「リファイン」「実行する」は、そのチケットのリファインや実行のために `claude` を起動します。
+- 展開したチケットのプロンプト欄からは、そのチケットに関する任意の指示を「送信」で送れます。
+
+プロンプト欄は複数行に対応しています。Enter で改行し、「起動」／「送信」ボタンか、Cmd+Enter（macOS）／Ctrl+Enter で送信します。空白や空行だけのプロンプトは送信されません。
+
+#### 設定
+
+![設定画面（レビューゲートタブ）](docs/images/settings.png)
+
+ヘッダーの歯車ボタンで設定画面を開きます。
+
+- **スコープ**: 「全体設定」は、すべてのプロジェクトで自分に適用されます（既定の保存先は `$HOME/.graph-ops`）。「プロジェクト単位設定」は 1 つのプロジェクトに適用され、その作業フォルダの `.graph-ops/` ディレクトリに保存されるので、コミットしてチームで共有できます。プロジェクト単位設定は全体設定より優先されます。
+- **ノード種別／レビューゲート／スキル／レポートテンプレート**: ノード種別ごとの指示の追加、レビューゲートの観点の変更・追加、スキルごとの指示の追加、HTML レポートテンプレートの差し替えができます。どの画面にも、エージェントが実際に受け取る内容のマージ済みプレビューがあります。
+- **アプリ設定**（全体設定のみ）: データ保存先（SQLite のデータベースファイル、または TLS 設定を含む MySQL 接続）、「自分の情報」（「担当する」に使う名前）、1 ページあたりのチケット数、ノード／ワークフロー設定ディレクトリ、プロジェクト管理（名前や作業ディレクトリの変更、削除）。保存先の変更は、次にサーバーを起動したときに反映されます。既定値のままで動くので、ほとんどの場合は変更不要です。
+
+#### テーマと言語
+
+ヘッダーのボタンで、テーマ（ライト／ダーク／システム設定に合わせる）と Web UI の表示言語（English／日本語）を切り替えます。
+
+### 補足
+
+- **ローカル・単一ユーザー向けのツール**: Web UI にログインはありません。既定では、サーバーは `127.0.0.1`（ポート `49173`）でのみ待ち受けます。変更するには、`graph-config.json` の `host`／`port`、または環境変数 `GRAPH_HOST`／`PORT` を設定します。他のマシンに公開するのは、信頼できるネットワークの中だけにしてください。
+- **データの保存先**: チケット・実行グラフ・成果物はデータベースに保存されます。既定は SQLite ファイル `$HOME/.graph-ops/graph.db` です。`$HOME/.graph-ops/artifacts` は、調査資料や一時ファイルを置く作業ファイル置き場です。HTML や画像の成果物をファイルパスで登録するときは、このディレクトリ配下のファイルだけを読み込めます。リポジトリ直下に `artifacts/` ディレクトリができていたら、紛れ込んだ不要な出力なので削除してかまいません。
+- **設定ファイル**: 実行時の設定は、サーバーや CLI を起動したディレクトリの `graph-config.json`、なければ `$HOME/.graph-ops/config.json` から読み込まれます。アプリ設定もこのファイルに書き込みます。環境変数はファイルより優先されます。
+- **2 種類の言語設定**: `/graph-ops:onboarding` は、プラグインが生成する内容の言語を設定します（`$HOME/.graph-ops/config.yaml` に `language:` として保存）。ヘッダーの言語ボタンは、Web UI の表示言語だけを切り替えます。
 
 ### トラブルシューティング
 
-- **プラグインの更新が「インストール時とコマンドが変わった」として失敗する／古いバージョンのままになる**: リリースのたびに起きる想定内の挙動で、新しいリリースの取得コマンドを承認する必要があります。通常のターミナルで `claude plugin update graph-ops@graph-ops` を実行して承認してください（上記「新しいバージョンへの更新」を参照）。アンインストール・再インストールは不要です。
-- **「Claude 起動」「作成」「実行」「リファイン」ボタンを押してもターミナルが開かないように見える**: これらのボタンは、実行環境を自動判定して外部ターミナルを開きます（`tmux` セッション内で実行中の場合はそのウィンドウ、macOSでは `open -a Terminal`）。どちらにも該当しない場合 -- 特に **Windowsには現時点で組み込みの起動方法が用意されていません**（DFLT-00065 で追跡中）-- 起動に失敗し、Web UIには数秒で自動的に消えるエラートーストが表示されるだけなので、何も起きていないように見えることがあります。`graph-config.json`（プロジェクトディレクトリ、または `$HOME/.graph-ops/graph-config.json` に置く。もしくは環境変数 `TERMINAL_COMMAND`）に `terminalCommand` を設定してください。値は `{cwd}` と `{command}` のプレースホルダーを使ったシェルコマンドのテンプレートです。例えば、Windows Terminal を使う場合:
+- **プラグインの更新が「インストール時からコマンドが変わった」として失敗する、または古いリリースのままになる**: 新しい取得コマンドの承認が必要なため、リリースのたびに起きる想定どおりの動作です。通常のターミナルで `claude plugin update graph-ops@graph-ops` を実行し、承認してください（「新しいリリースへの更新」を参照）。アンインストールや再インストールは不要です。
+- **Claude Code を起動するボタンを押してもターミナルが開かないように見える**: GraphOps は次の順にターミナルを自動で選びます。設定済みの `terminalCommand`、実行中の `tmux` セッションの新しいウィンドウ、macOS の Terminal.app、Windows の Windows Terminal（`wt.exe`。未インストールなら PowerShell のウィンドウ）です。どれにも当てはまらない場合（Linux で `tmux` を使っていない場合など）は起動に失敗し、Web UI に短いエラーメッセージが表示され、数秒で消えます。`graph-config.json` の `terminalCommand`（または環境変数 `TERMINAL_COMMAND`）に、`{cwd}` と `{command}` のプレースホルダーを使ったシェルコマンドのテンプレートを設定してください。例えば WezTerm の場合:
   ```json
-  { "terminalCommand": "wt.exe -d {cwd} cmd /k {command}" }
+  { "terminalCommand": "wezterm start --cwd {cwd} -- {command}" }
   ```
-  `cmd.exe` を直接使う場合:
-  ```json
-  { "terminalCommand": "cmd /c start cmd /k \"cd /d {cwd} && {command}\"" }
-  ```
-  同じ設定で、macOS/Linuxで自動判定の対象外のターミナル（iTerm、wezterm、kitty、VS Codeの統合ターミナルなど）を使いたい場合にも対応できます。
+  同じ設定で、自動判定の対象外のターミナル（iTerm2、kitty、VS Code の統合ターミナルなど）も使えます。
 
 ---
 
