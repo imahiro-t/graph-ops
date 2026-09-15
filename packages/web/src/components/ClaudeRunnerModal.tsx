@@ -43,6 +43,10 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
   if (!isOpen) return null;
 
   const handleLaunch = async () => {
+    // The button's disabled state doesn't cover the Cmd/Ctrl+Enter path, so
+    // guard here too (same as TicketItem's handleSendPrompt) -- otherwise a
+    // whitespace/newline-only prompt could still be launched from the keyboard.
+    if (isLaunching || !prompt.trim()) return;
     const succeeded = await launch(prompt, ticketId, projectId);
     // Only clear the input and close on success -- a failed send should
     // keep the modal open with the text intact so the user can retry

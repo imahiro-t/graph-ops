@@ -94,5 +94,22 @@ describe('ClaudeRunnerModal', () => {
     await user.type(getPromptInput(), '  {Enter}  ');
 
     expect(getLaunchButton()).toBeDisabled();
+
+    // Once there is actual content, the button becomes enabled.
+    await user.type(getPromptInput(), 'a');
+    expect(getLaunchButton()).toBeEnabled();
+  });
+
+  it('does not launch on Ctrl/Cmd+Enter when the prompt is only whitespace and newlines', async () => {
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(<ClaudeRunnerModal isOpen onClose={onClose} projectId="proj-x" />);
+
+    await user.type(getPromptInput(), '  {Enter}  ');
+    await user.keyboard('{Control>}{Enter}{/Control}');
+    await user.keyboard('{Meta>}{Enter}{/Meta}');
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
