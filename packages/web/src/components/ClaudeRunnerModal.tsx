@@ -43,6 +43,10 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
   if (!isOpen) return null;
 
   const handleLaunch = async () => {
+    // The button's disabled state doesn't cover the Cmd/Ctrl+Enter path, so
+    // guard here too (same as TicketItem's handleSendPrompt) -- otherwise a
+    // whitespace/newline-only prompt could still be launched from the keyboard.
+    if (isLaunching || !prompt.trim()) return;
     const succeeded = await launch(prompt, ticketId, projectId);
     // Only clear the input and close on success -- a failed send should
     // keep the modal open with the text intact so the user can retry
@@ -72,10 +76,16 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
             {t('claudeRunnerModal.descriptionPrefix')} <span className="font-mono">claude</span> {t('claudeRunnerModal.descriptionSuffix')}
           </p>
 
-          <div className="flex gap-2">
-            <input
-              type="text"
-              className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition"
+          {/* Stacked rather than side-by-side: next to a 4-row textarea the
+              launch button would stretch to the textarea's full height. */}
+          <div className="flex flex-col gap-2">
+            {/* Plain Enter is left to the textarea's native newline insertion;
+                only Cmd/Ctrl+Enter launches (same as TicketItem's free-form
+                input). The value is passed to launch() untouched so newlines
+                survive. */}
+            <textarea
+              rows={4}
+              className="w-full resize-y font-sans bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition"
               placeholder={t('claudeRunnerModal.placeholder')}
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
@@ -90,7 +100,7 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
             <button
               onClick={handleLaunch}
               disabled={isLaunching || !prompt.trim()}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg flex items-center gap-2 shadow-sm transition"
+              className="self-end px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg flex items-center gap-2 shadow-sm transition"
             >
               {isLaunching ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
               {t('claudeRunnerModal.launch')}
