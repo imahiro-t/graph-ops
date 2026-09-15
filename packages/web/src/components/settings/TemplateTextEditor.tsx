@@ -8,7 +8,7 @@
 // validated server-side, the plan/review saves send `text` unchecked -- plus
 // the i18n key prefix for its labels. TemplatesEditor decides which one is
 // shown.
-import React, { useCallback, useEffect, useId, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Save, CheckCircle2 } from 'lucide-react';
@@ -65,6 +65,8 @@ export const TemplateTextEditor: React.FC<Props> = ({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [savedFlash, setSavedFlash] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
 
   const isDirty = canEdit && tierText !== savedTierText;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
@@ -87,6 +89,12 @@ export const TemplateTextEditor: React.FC<Props> = ({
   useEffect(() => { load(); }, [load]);
 
   const handleSave = async () => {
+    // The save button is disabled while saving and stays disabled after a
+    // successful save (nothing is dirty any more), and a disabled element
+    // loses focus. So if the save was started from the button, move focus to
+    // the textarea when the save settles, unless the user has already moved
+    // it somewhere else in the meantime (a11y F-2).
+    const startedFromButton = document.activeElement === saveButtonRef.current;
     setSaving(true);
     setError('');
     try {
@@ -100,6 +108,13 @@ export const TemplateTextEditor: React.FC<Props> = ({
       setError(errorMessage(e, t('errors.UNKNOWN')));
     } finally {
       setSaving(false);
+      const active = document.activeElement;
+      if (
+        startedFromButton &&
+        (active === null || active === document.body || active === saveButtonRef.current)
+      ) {
+        textareaRef.current?.focus();
+      }
     }
   };
 
@@ -112,7 +127,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
         </div>
       )}
       {loading ? (
-        <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 text-xs py-8 justify-center">
+        <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
           <Loader2 className="w-4 h-4 animate-spin" /> {t('settings.common.loading')}
         </div>
       ) : (
@@ -137,6 +152,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
               {t(`${i18nPrefix}.tierTextLabel`)}
             </label>
             <textarea
+              ref={textareaRef}
               id={textareaId}
               aria-describedby={hintId}
               value={tierText}
@@ -145,15 +161,16 @@ export const TemplateTextEditor: React.FC<Props> = ({
               placeholder={t(`${i18nPrefix}.tierTextPlaceholder`)}
               className="flex-1 min-h-[12rem] w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
             />
-            <p id={hintId} className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">{t(`${i18nPrefix}.emptyOverrideHint`)}</p>
+            <p id={hintId} className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">{t(`${i18nPrefix}.emptyOverrideHint`)}</p>
           </div>
           <div className="flex justify-end items-center gap-2">
             {savedFlash && (
-              <span role="status" className="text-emerald-600 text-xs flex items-center gap-1">
+              <span role="status" className="text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}
               </span>
             )}
             <button
+              ref={saveButtonRef}
               type="button"
               onClick={handleSave}
               disabled={!canEdit || saving || !isDirty}
