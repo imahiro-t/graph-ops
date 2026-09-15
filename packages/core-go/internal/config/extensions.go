@@ -170,23 +170,23 @@ func SkillTierText(root, skillName string) (string, bool) {
 }
 
 // ReportTemplateTierText returns just root's own report-template override
-// HTML (no merge/fallback) -- the settings UI's レポートテンプレート tab's
-// "このスコープでの上書き" pane, mirroring NodeTypeTierText.
+// HTML (no merge/fallback) -- the settings UI's テンプレート tab's レポート
+// entry's "このスコープでの上書き" pane, mirroring NodeTypeTierText.
 func ReportTemplateTierText(root string) (string, bool) {
 	return readExtensionText(root, ReportSubdir, ReportTemplateFile)
 }
 
 // PlanTemplateTierText returns just root's own plan-template override
-// Markdown (no merge/fallback), mirroring ReportTemplateTierText/
-// NodeTypeTierText. Not yet surfaced in the settings UI (no dedicated tab
-// exists for the plan/review templates), but kept for consistency with the
-// other TierText accessors and as groundwork for one.
+// Markdown (no merge/fallback) -- the settings UI's テンプレート tab's 実行計画
+// entry's "このスコープでの上書き" pane, mirroring ReportTemplateTierText/
+// NodeTypeTierText.
 func PlanTemplateTierText(root string) (string, bool) {
 	return readExtensionText(root, PlanSubdir, PlanTemplateFile)
 }
 
 // ReviewTemplateTierText returns just root's own review-template override
-// Markdown (no merge/fallback), mirroring ReportTemplateTierText/
+// Markdown (no merge/fallback) -- the settings UI's テンプレート tab's レビュー
+// entry's "このスコープでの上書き" pane, mirroring ReportTemplateTierText/
 // NodeTypeTierText. Shared by both the "review" and "review_gate" node
 // types -- there is exactly one review template, not one per node type.
 func ReviewTemplateTierText(root string) (string, bool) {
@@ -221,46 +221,33 @@ func ResolveReportTemplate(roots Roots) string {
 }
 
 // ResolvePlanTemplate returns the fixed Markdown plan template: the team
-// override if configured, else the user override, else -- if lang is
-// non-empty and has a matching locale template -- that locale's version of
-// the template (see LoadLocaleTemplate), else the plugin's English default.
-// Full replace, not append, mirroring ResolveReportTemplate -- exactly one
-// fixed template is in effect at any time. lang == "" or an
-// unrecognized/unsupported code both fall through to the English default,
-// silently, the same "leave the English default as-is" contract
-// LocalizedDefault uses for node/gate names.
-func ResolvePlanTemplate(roots Roots, lang string) string {
+// override if configured, else the user override, else the plugin's English
+// default. Full replace, not append, mirroring ResolveReportTemplate --
+// exactly one fixed template is in effect at any time. The language setting
+// plays no part here: a template in another language reaches an agent only
+// as a user/team override (e.g. the one onboarding copies into the user
+// tier), so what is in effect is always visible in the settings UI.
+func ResolvePlanTemplate(roots Roots) string {
 	if text, ok := readExtensionText(roots.TeamDir, PlanSubdir, PlanTemplateFile); ok {
 		return text
 	}
 	if text, ok := readExtensionText(roots.UserDir, PlanSubdir, PlanTemplateFile); ok {
 		return text
 	}
-	if lang != "" {
-		if text, ok := LoadLocaleTemplate(lang, PlanSubdir); ok {
-			return text
-		}
-	}
 	return strings.TrimSpace(string(defaultPlanTemplate))
 }
 
 // ResolveReviewTemplate returns the fixed Markdown review template, shared
 // by the "review" and "review_gate" node types: the team override if
-// configured, else the user override, else -- if lang is non-empty and has
-// a matching locale template -- that locale's version of the template (see
-// LoadLocaleTemplate), else the plugin's English default. Full replace, not
-// append, mirroring ResolveReportTemplate/ResolvePlanTemplate.
-func ResolveReviewTemplate(roots Roots, lang string) string {
+// configured, else the user override, else the plugin's English default.
+// Full replace, not append, and independent of the language setting,
+// mirroring ResolveReportTemplate/ResolvePlanTemplate.
+func ResolveReviewTemplate(roots Roots) string {
 	if text, ok := readExtensionText(roots.TeamDir, ReviewSubdir, ReviewTemplateFile); ok {
 		return text
 	}
 	if text, ok := readExtensionText(roots.UserDir, ReviewSubdir, ReviewTemplateFile); ok {
 		return text
-	}
-	if lang != "" {
-		if text, ok := LoadLocaleTemplate(lang, ReviewSubdir); ok {
-			return text
-		}
 	}
 	return strings.TrimSpace(string(defaultReviewTemplate))
 }

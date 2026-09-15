@@ -16,7 +16,7 @@ GraphOps is a ticket management and execution platform for AI-driven development
 - **One execution graph per ticket**: each ticket gets a DAG of nodes such as `plan`, `review`, `gherkin_spec`, `implementation`, `review_gate`, `approval_gate`, `report`, and `release`. Nodes run in order or in parallel according to their dependencies. When a review fails, the graph loops back to the node that needs rework.
 - **Review gates and approval gates**: a `review_gate` node judges pass/fail automatically against configurable criteria (code, QA, security, non-functional, ...). An `approval_gate` node always waits for a human decision in the Web UI.
 - **Web UI**: a ticket list with search, filters, and paging; an interactive view of each ticket's execution graph; formatted previews of every artifact (Markdown, Gherkin, HTML); approve/reject buttons; and buttons that launch Claude Code for you.
-- **Customizable without editing the plugin**: node-type instructions, review-gate criteria, skill instructions, and the report template can be extended globally (per user) or per project (shared with your team), from the Web UI's Settings screen.
+- **Customizable without editing the plugin**: node-type instructions, review-gate criteria, skill instructions, and the plan / review / report templates can be extended globally (per user) or per project (shared with your team), from the Web UI's Settings screen.
 
 ### Requirements
 
@@ -112,7 +112,7 @@ The prompt fields accept multiple lines: press Enter for a new line, and press "
 Open Settings with the gear button in the header.
 
 - **Scope**: "Global Settings" apply to you on every project (stored in `$HOME/.graph-ops` by default). "Project Settings" apply to one project and are stored in the `.graph-ops/` directory of its working folder, so you can commit and share them with your team. Project settings take precedence over global settings.
-- **Node Types / Review Gates / Skills / Report Template**: add instructions for each node type, change or add review-gate criteria, add instructions to each skill, and replace the HTML report template. Each screen also shows a merged preview of what an agent actually sees.
+- **Node Types / Review Gates / Skills / Templates**: add instructions for each node type, change or add review-gate criteria, add instructions to each skill, and replace the execution-plan, review, and HTML report templates (the Templates tab's left-hand list switches between the three). Each screen also shows a merged preview of what an agent actually sees.
 - **App Settings** (Global Settings only): data storage (SQLite database file or MySQL connection, including TLS), "My Profile" (your name for "Assign to me"), the number of tickets per page, the node/workflow config directory, and project management (rename a project, change its working directory, or delete it). Storage changes take effect the next time the server starts. The defaults work as they are, so most users don't need to change anything here.
 
 #### Theme and language

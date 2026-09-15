@@ -600,8 +600,8 @@ func (s *Server) handlePutSettingsSkill(w http.ResponseWriter, r *http.Request) 
 // handleGetSettingsReportTemplate returns this scope's own report-template
 // override HTML (tier_text, "" if unset) plus the merged/resolved template
 // (merged_text -- team override, else user override, else the plugin
-// default; see config.ResolveReportTemplate) -- the レポートテンプレート
-// tab's editor pane.
+// default; see config.ResolveReportTemplate) -- the editor pane for the
+// テンプレート tab's レポート entry.
 func (s *Server) handleGetSettingsReportTemplate(w http.ResponseWriter, r *http.Request) {
 	scopeStr, projectID := scopeAndProjectFromQuery(r)
 	sc, err := s.resolveSettingsScope(scopeStr, projectID)
@@ -660,5 +660,108 @@ func (s *Server) handlePutSettingsReportTemplate(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"tier_text":   tierText,
 		"merged_text": mergedText,
+	})
+}
+
+// markdownTemplateTarget describes one of the fixed Markdown templates (plan,
+// review) the settings UI's テンプレート tab edits. The two differ only in
+// where the override file lives and which config accessors read it back, so
+// one get/put handler pair serves both. The report template keeps its own
+// handlers above because it validates its content and names the body field
+// "html".
+type markdownTemplateTarget struct {
+	subdir   string
+	file     string
+	tierText func(root string) (string, bool)
+	resolve  func(roots config.Roots) string
+}
+
+var (
+	planTemplateTarget = markdownTemplateTarget{
+		subdir:   config.PlanSubdir,
+		file:     config.PlanTemplateFile,
+		tierText: config.PlanTemplateTierText,
+		resolve:  config.ResolvePlanTemplate,
+	}
+	reviewTemplateTarget = markdownTemplateTarget{
+		subdir:   config.ReviewSubdir,
+		file:     config.ReviewTemplateFile,
+		tierText: config.ReviewTemplateTierText,
+		resolve:  config.ResolveReviewTemplate,
+	}
+)
+
+// handleGetSettingsPlanTemplate returns this scope's own plan-template
+// override Markdown (tier_text, "" if unset) plus the resolved template
+// (merged_text -- team override, else user override, else the plugin's
+// English default; see config.ResolvePlanTemplate) -- the editor pane for
+// the テンプレート tab's 実行計画 entry. The same file get-plan-template reads.
+func (s *Server) handleGetSettingsPlanTemplate(w http.ResponseWriter, r *http.Request) {
+	s.getSettingsMarkdownTemplate(w, r, planTemplateTarget)
+}
+
+// handlePutSettingsPlanTemplate saves (or, given empty text, clears) this
+// scope's plan-template override. See putSettingsMarkdownTemplate.
+func (s *Server) handlePutSettingsPlanTemplate(w http.ResponseWriter, r *http.Request) {
+	s.putSettingsMarkdownTemplate(w, r, planTemplateTarget)
+}
+
+// handleGetSettingsReviewTemplate is handleGetSettingsPlanTemplate's
+// counterpart for the review template shared by the review/review_gate node
+// types (the テンプレート tab's レビュー entry; get-review-template).
+func (s *Server) handleGetSettingsReviewTemplate(w http.ResponseWriter, r *http.Request) {
+	s.getSettingsMarkdownTemplate(w, r, reviewTemplateTarget)
+}
+
+// handlePutSettingsReviewTemplate saves (or, given empty text, clears) this
+// scope's review-template override. See putSettingsMarkdownTemplate.
+func (s *Server) handlePutSettingsReviewTemplate(w http.ResponseWriter, r *http.Request) {
+	s.putSettingsMarkdownTemplate(w, r, reviewTemplateTarget)
+}
+
+func (s *Server) getSettingsMarkdownTemplate(w http.ResponseWriter, r *http.Request, target markdownTemplateTarget) {
+	scopeStr, projectID := scopeAndProjectFromQuery(r)
+	sc, err := s.resolveSettingsScope(scopeStr, projectID)
+	if err != nil {
+		writeError(w, statusForError(err, http.StatusBadRequest), err)
+		return
+	}
+	s.writeMarkdownTemplateState(w, sc, target)
+}
+
+// putSettingsMarkdownTemplate writes body.text as this scope's override for
+// target, as a full replace. Unlike the report template the content is not
+// validated -- any Markdown is accepted -- because nothing in the engine
+// parses a plan/review artifact's headings or verdict words. Empty text
+// deletes the override file so resolution falls back to the layer below.
+// The body field is "text", matching the node-type/skill PUTs.
+func (s *Server) putSettingsMarkdownTemplate(w http.ResponseWriter, r *http.Request, target markdownTemplateTarget) {
+	var body struct {
+		Scope     string `json:"scope"`
+		ProjectID string `json:"project_id"`
+		Text      string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	sc, err := s.resolveSettingsScope(body.Scope, body.ProjectID)
+	if err != nil {
+		writeError(w, statusForError(err, http.StatusBadRequest), err)
+		return
+	}
+
+	if err := config.WriteExtensionText(sc.tierExtensionRoot(), target.subdir, target.file, body.Text); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	s.writeMarkdownTemplateState(w, sc, target)
+}
+
+func (s *Server) writeMarkdownTemplateState(w http.ResponseWriter, sc settingsScope, target markdownTemplateTarget) {
+	tierText, _ := target.tierText(sc.tierExtensionRoot())
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tier_text":   tierText,
+		"merged_text": target.resolve(sc.mergeRoots()),
 	})
 }

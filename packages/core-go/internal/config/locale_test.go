@@ -1,7 +1,6 @@
 package config
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -55,36 +54,6 @@ func TestLoadLocale_EmptyCodeReturnsNotOK(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("expected ok=false for an empty locale code")
-	}
-}
-
-func TestLoadLocaleTemplate_JaPlanAndReviewFound(t *testing.T) {
-	plan, ok := LoadLocaleTemplate("ja", "plan")
-	if !ok {
-		t.Fatal("expected ok=true for ja/plan")
-	}
-	if !strings.Contains(plan, "# 目的") {
-		t.Errorf("expected ja plan template to contain the 目的 heading, got %q", plan)
-	}
-
-	review, ok := LoadLocaleTemplate("ja", "review")
-	if !ok {
-		t.Fatal("expected ok=true for ja/review")
-	}
-	if !strings.Contains(review, "# 判定") {
-		t.Errorf("expected ja review template to contain the 判定 heading, got %q", review)
-	}
-}
-
-func TestLoadLocaleTemplate_UnknownCodeOrKindReturnsNotOK(t *testing.T) {
-	if _, ok := LoadLocaleTemplate("xx-unsupported", "plan"); ok {
-		t.Error("expected ok=false for an unsupported language code")
-	}
-	if _, ok := LoadLocaleTemplate("ja", "report"); ok {
-		t.Error("expected ok=false for an unsupported kind")
-	}
-	if _, ok := LoadLocaleTemplate("", "plan"); ok {
-		t.Error("expected ok=false for an empty language code")
 	}
 }
 
