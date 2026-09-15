@@ -14,9 +14,9 @@ its own; a single-artifact checkpoint without them is a `review`.
 4. Judge pass or fail against both sets of criteria, and fill in the
    template's headings, using each one exactly as the fetched template spells
    it -- same wording, same order, same number of headings. The template can
-   come back in a language other than English depending on the language
-   setting; whichever language it comes back in, its headings are that
-   template's fixed structural marker, so do not translate, paraphrase,
+   differ from the plugin default when a user or team has overridden it (for
+   example, in another language); whatever it comes back as, its headings
+   are that template's fixed structural marker, so do not translate, paraphrase,
    delete, reorder, rename, or add headings. Replace each `REPLACE_WITH_*`
    placeholder with real content, following the guide text that comes right
    after it; neither the placeholder name nor that guide text belongs in the

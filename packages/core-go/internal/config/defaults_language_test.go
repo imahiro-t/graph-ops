@@ -23,7 +23,10 @@ func containsJapanese(s string) bool {
 // TestDefaults_NoJapaneseOutsideJaLocale keeps the English plugin defaults
 // free of Japanese text. `npm run sync:defaults` (run first by `npm test`)
 // mirrors packages/plugin/defaults into ./defaults, so walking the mirror
-// also checks the hand-edited source.
+// also checks the hand-edited source. The mirror carries only
+// locales/ja.yaml: the ja plan/review templates stay plugin-side (onboarding
+// copies them into the user tier), so the locales/ja directory skip below
+// only matters if a ja subtree is ever mirrored again.
 func TestDefaults_NoJapaneseOutsideJaLocale(t *testing.T) {
 	const root = "defaults"
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -65,16 +68,34 @@ func TestDefaults_NoJapaneseOutsideJaLocale(t *testing.T) {
 	}
 }
 
+// readJaLocaleTemplate reads the plugin's Japanese plan/review template
+// (kind is "plan" or "review") straight from the plugin source, trimmed like
+// readExtensionText does. It is neither mirrored into ./defaults nor
+// embedded -- onboarding copies it into the user tier as an override -- so
+// go test reads it relative to this package's directory, the same
+// assumption TestGraphNodeAgent_DoesNotHardcodeTemplateWords makes. A read
+// failure is fatal rather than a skip, so the guards below can never
+// silently stop checking it.
+func readJaLocaleTemplate(t *testing.T, kind string) string {
+	t.Helper()
+	path := filepath.Join("..", "..", "..", "plugin", "defaults", "locales", "ja", kind, "template.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading ja %s template at %s: %v", kind, path, err)
+	}
+	return strings.TrimSpace(string(data))
+}
+
 // TestPlanAndReviewTemplates_HaveNoHTMLComment guards against reintroducing
 // an instruction comment into the Markdown templates: agents copied such a
 // comment into saved artifacts, so a template must be the output's shape
 // itself, starting at its first heading.
 func TestPlanAndReviewTemplates_HaveNoHTMLComment(t *testing.T) {
 	cases := map[string]string{
-		"plan (default)":   ResolvePlanTemplate(Roots{}, ""),
-		"plan (ja)":        ResolvePlanTemplate(Roots{}, "ja"),
-		"review (default)": ResolveReviewTemplate(Roots{}, ""),
-		"review (ja)":      ResolveReviewTemplate(Roots{}, "ja"),
+		"plan (default)":   ResolvePlanTemplate(Roots{}),
+		"plan (ja)":        readJaLocaleTemplate(t, PlanSubdir),
+		"review (default)": ResolveReviewTemplate(Roots{}),
+		"review (ja)":      readJaLocaleTemplate(t, ReviewSubdir),
 	}
 	for name, tmpl := range cases {
 		if strings.Contains(tmpl, "<!--") {
@@ -99,7 +120,7 @@ func templateHeadings(tmpl string) []string {
 
 // forbiddenTemplateWords lists heading names and verdict words that belong to
 // a specific language's plan/review template and so must not be hardcoded in
-// agent-facing instructions. Headings are derived from the resolved templates
+// agent-facing instructions. Headings are derived from the templates
 // themselves so the list follows template changes; a heading is forbidden in
 // its "# X" form, and also bare when it cannot be mistaken for ordinary
 // English prose (non-ASCII text, or containing punctuation such as "/" or
@@ -109,10 +130,10 @@ func forbiddenTemplateWords(t *testing.T) []string {
 	t.Helper()
 	var words []string
 	for _, tmpl := range []string{
-		ResolvePlanTemplate(Roots{}, ""),
-		ResolvePlanTemplate(Roots{}, "ja"),
-		ResolveReviewTemplate(Roots{}, ""),
-		ResolveReviewTemplate(Roots{}, "ja"),
+		ResolvePlanTemplate(Roots{}),
+		readJaLocaleTemplate(t, PlanSubdir),
+		ResolveReviewTemplate(Roots{}),
+		readJaLocaleTemplate(t, ReviewSubdir),
 	} {
 		headings := templateHeadings(tmpl)
 		if len(headings) == 0 {
@@ -135,7 +156,7 @@ func forbiddenTemplateWords(t *testing.T) []string {
 // plan/review/review_gate node-type defaults language-neutral: they must tell
 // the agent to use whatever headings and verdict words the fetched template
 // gives, never name one language's words (which contradicts the template
-// whenever the other language resolves).
+// whenever a template in the other language is in effect).
 func TestNodeTypeDefaults_PlanAndReviewDoNotHardcodeTemplateWords(t *testing.T) {
 	forbidden := forbiddenTemplateWords(t)
 	for _, nodeType := range []string{"plan", "review", "review_gate"} {

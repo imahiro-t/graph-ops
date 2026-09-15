@@ -287,12 +287,9 @@ Commands:
   get-skill-context <skill-name>         (merged user/team extension text for a plugin skill)
   get-node-type-context <node-type>      (merged plugin-default + user + team agent instructions for a node type)
   get-report-template                    (resolved fixed HTML report template: team -> user -> plugin default)
-  get-plan-template                      (resolved fixed Markdown plan template: team -> user -> locale
-                                           template for the persistent language setting, if any -> plugin
-                                           English default)
+  get-plan-template                      (resolved fixed Markdown plan template: team -> user -> plugin default)
   get-review-template                    (resolved fixed Markdown review template, shared by the review/
-                                           review_gate node types: team -> user -> locale template for the
-                                           persistent language setting, if any -> plugin English default)
+                                           review_gate node types: team -> user -> plugin default)
   get-extension-roots                    ({"userDir","teamDir"} resolved paths, for a skill that needs to
                                            write into that tree directly, e.g. onboarding's language setup)
   get-language-settings [--project <id>] ({"resolved","source":"team"|"user"|"none","supported_locales"} --
@@ -1207,61 +1204,28 @@ func cmdGetReportTemplate(rc runtimeConfig) error {
 	return nil
 }
 
-// resolvePersistentLanguage resolves the persistent language setting (team
-// tier, else user tier -- never a call-scoped override, there is none here)
-// the same way cmdGetLanguageSettings does, for CLI commands like
-// cmdGetPlanTemplate/cmdGetReviewTemplate that need to pick a locale
-// template without taking a --language flag of their own.
-func resolvePersistentLanguage(roots config.Roots) (string, error) {
-	var userDoc, teamDoc config.Document
-	var err error
-	if roots.UserDir != "" {
-		userDoc, err = config.LoadDocumentAt(config.UserDocumentPath(roots.UserDir))
-		if err != nil {
-			return "", err
-		}
-	}
-	if roots.TeamDir != "" {
-		teamDoc, err = config.LoadDocumentAt(config.TeamDocumentPath(roots.TeamDir))
-		if err != nil {
-			return "", err
-		}
-	}
-	return config.ResolveLanguage("", userDoc, teamDoc), nil
-}
-
 // cmdGetPlanTemplate prints the resolved fixed Markdown plan template (team
-// override -> user override -> locale template for the persistent language
-// setting, if any -> plugin English default) directly to stdout, mirroring
-// cmdGetReportTemplate.
+// override -> user override -> plugin default) directly to stdout, mirroring
+// cmdGetReportTemplate. The language setting does not select a template.
 func cmdGetPlanTemplate(rc runtimeConfig) error {
 	roots, err := extensionRoots(rc)
 	if err != nil {
 		return err
 	}
-	lang, err := resolvePersistentLanguage(roots)
-	if err != nil {
-		return err
-	}
-	fmt.Println(config.ResolvePlanTemplate(roots, lang))
+	fmt.Println(config.ResolvePlanTemplate(roots))
 	return nil
 }
 
 // cmdGetReviewTemplate prints the resolved fixed Markdown review template
-// (team override -> user override -> locale template for the persistent
-// language setting, if any -> plugin English default), shared by the
+// (team override -> user override -> plugin default), shared by the
 // "review" and "review_gate" node types, directly to stdout, mirroring
-// cmdGetReportTemplate.
+// cmdGetReportTemplate. The language setting does not select a template.
 func cmdGetReviewTemplate(rc runtimeConfig) error {
 	roots, err := extensionRoots(rc)
 	if err != nil {
 		return err
 	}
-	lang, err := resolvePersistentLanguage(roots)
-	if err != nil {
-		return err
-	}
-	fmt.Println(config.ResolveReviewTemplate(roots, lang))
+	fmt.Println(config.ResolveReviewTemplate(roots))
 	return nil
 }
 

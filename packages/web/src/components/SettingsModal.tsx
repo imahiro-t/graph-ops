@@ -1,7 +1,8 @@
 // Top-level "設定" modal: lets the user switch between "全体設定" (global,
 // user tier) and "プロジェクト単位設定" (project, team tier resolved from
 // the selected Project's work_dir) and, within a scope, edit node-type
-// instructions / the workflow graph / review-gate configuration. See the
+// instructions / the workflow graph / review-gate configuration / the
+// plan, review and report templates. See the
 // execution plan (art-2aaa5d92 on DFLT-00010-00001) for the scope/tab
 // design rationale and packages/core-go/internal/httpserver/settings.go for
 // the backing API.
@@ -12,7 +13,7 @@ import { Project, SettingsScope } from '../types';
 import { NodeTypesEditor } from './settings/NodeTypesEditor';
 import { ReviewGatesEditor } from './settings/ReviewGatesEditor';
 import { SkillsEditor } from './settings/SkillsEditor';
-import { ReportTemplateEditor } from './settings/ReportTemplateEditor';
+import { TemplatesEditor } from './settings/TemplatesEditor';
 import { AppSettingsEditor } from './settings/AppSettingsEditor';
 
 interface Props {
@@ -29,7 +30,7 @@ interface Props {
   onMyNameChanged: (name: string) => void;
 }
 
-type Tab = 'nodeTypes' | 'reviewGates' | 'skills' | 'reportTemplate' | 'appSettings';
+type Tab = 'nodeTypes' | 'reviewGates' | 'skills' | 'templates' | 'appSettings';
 
 export const SettingsModal: React.FC<Props> = ({
   isOpen,
@@ -93,7 +94,7 @@ export const SettingsModal: React.FC<Props> = ({
     { key: 'nodeTypes', labelKey: 'settings.tabs.nodeTypes' },
     { key: 'reviewGates', labelKey: 'settings.tabs.reviewGates' },
     { key: 'skills', labelKey: 'settings.tabs.skills' },
-    { key: 'reportTemplate', labelKey: 'settings.tabs.reportTemplate' },
+    { key: 'templates', labelKey: 'settings.tabs.templates' },
     { key: 'appSettings', labelKey: 'settings.tabs.appSettings' }
   ];
 
@@ -181,8 +182,8 @@ export const SettingsModal: React.FC<Props> = ({
           {tab === 'skills' && (
             <SkillsEditor scope={scope} projectId={selectedProjectId} canEdit={canEdit} onDirtyChange={setDirty} />
           )}
-          {tab === 'reportTemplate' && (
-            <ReportTemplateEditor scope={scope} projectId={selectedProjectId} canEdit={canEdit} onDirtyChange={setDirty} />
+          {tab === 'templates' && (
+            <TemplatesEditor scope={scope} projectId={selectedProjectId} canEdit={canEdit} onDirtyChange={setDirty} />
           )}
           {tab === 'appSettings' && (
             <AppSettingsEditor

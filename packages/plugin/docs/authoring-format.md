@@ -323,7 +323,9 @@ Run through this for every file you touched:
 
 `packages/core-go/internal/config/defaults/` is a generated mirror of
 `packages/plugin/defaults/` (`go:embed` cannot reach outside its own package
-tree). After editing any `defaults/node-types/*.md`, run:
+tree). After editing any file `sync:defaults` copies -- `node-types/*.md`,
+`report/template.html`, `plan/template.md`, `review/template.md`,
+`workflow.yaml`, or `locales/*.yaml` -- run:
 
 ```bash
 npm run sync:defaults
@@ -332,7 +334,7 @@ npm run sync:defaults
 Verify the mirror with:
 
 ```bash
-diff -rq -x README.md packages/plugin/defaults packages/core-go/internal/config/defaults
+diff -rq -x README.md -x ja packages/plugin/defaults packages/core-go/internal/config/defaults
 ```
 
 `README.md` is excluded on purpose. It is not a sync target, and the two
@@ -340,6 +342,11 @@ README files differ by design -- the one under `packages/plugin/defaults/`
 describes the canonical content, the one under the mirror warns that the
 directory is generated. Never add `README.md` to `sync:defaults`, and never
 copy one over the other.
+
+`ja` is excluded for a similar reason. The translated plan/review templates
+under `locales/ja/` live in the plugin only: the engine does not embed them,
+and the onboarding skill copies them into the user tier as overrides. Editing
+them needs no sync step.
 
 Files under `docs/` (this document included) are not mirrored and need no
 sync step.

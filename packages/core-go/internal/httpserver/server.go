@@ -122,6 +122,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("PUT /api/settings/skills/{name}", s.handlePutSettingsSkill)
 	mux.HandleFunc("GET /api/settings/report-template", s.handleGetSettingsReportTemplate)
 	mux.HandleFunc("PUT /api/settings/report-template", s.handlePutSettingsReportTemplate)
+	mux.HandleFunc("GET /api/settings/plan-template", s.handleGetSettingsPlanTemplate)
+	mux.HandleFunc("PUT /api/settings/plan-template", s.handlePutSettingsPlanTemplate)
+	mux.HandleFunc("GET /api/settings/review-template", s.handleGetSettingsReviewTemplate)
+	mux.HandleFunc("PUT /api/settings/review-template", s.handlePutSettingsReviewTemplate)
 
 	mux.Handle("/artifacts-static/", http.StripPrefix("/artifacts-static/", http.FileServer(http.Dir(s.cfg.ArtifactsDir))))
 

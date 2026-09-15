@@ -53,7 +53,7 @@ Each release changes the plugin's fetch command (it pins the release tag), and C
 - **Execution graph view**: open a ticket to see its graph -- parallel branches, loop-back edges for rework, a ring marking review/approval-gate nodes, and live progress as nodes complete. Every node's artifact (plan, Gherkin spec, implementation notes, review findings, report, ...) has a formatted preview.
 - **Approving/rejecting**: a pending `approval_gate` can be approved directly from the ticket list with one click; rejecting it requires a free-text reason, entered from that node in the graph view. A rejection blocks the ticket until you act on it.
 - **Launching Claude Code**: "Create", "Launch Claude", "Run", and "Refine" buttons each open an external, interactive terminal running `claude` for you to drive -- Cmd+Enter (Mac) / Ctrl+Enter (Windows) submits a prompt without leaving the keyboard.
-- **Settings**: a Settings screen lets you edit node types, review-gate criteria, skill instructions, and the report template -- scoped globally or per project. App-wide runtime settings (data storage location, MySQL connection, etc.) live under its "App Settings" tab; the defaults work out of the box, so most users won't need to touch this.
+- **Settings**: a Settings screen lets you edit node types, review-gate criteria, skill instructions, and the plan / review / report templates (under its "Templates" tab) -- scoped globally or per project. App-wide runtime settings (data storage location, MySQL connection, etc.) live under its "App Settings" tab; the defaults work out of the box, so most users won't need to touch this.
 - **Theme**: toggle between light, dark, and system theme from the header.
 
 ### Notes for Normal Use

@@ -240,7 +240,7 @@
       "nodeTypes": "ノード種別",
       "reviewGates": "レビューゲート",
       "skills": "スキル",
-      "reportTemplate": "レポートテンプレート",
+      "templates": "テンプレート",
       "appSettings": "アプリ設定"
     },
     "unsavedChanges": {
@@ -313,6 +313,28 @@
       "tierTextLabel": "このスコープでの上書き（HTML全文）",
       "tierTextPlaceholder": "置き換え後のHTMLテンプレート全文を貼り付け（固定構造については get-report-template を参照）...",
       "mergedPreviewLabel": "継承後のプレビュー（エージェントが実際に穴埋めするHTMLソース）",
+      "emptyOverrideHint": "空にして保存すると上書きが解除され、下位層の内容にフォールバックします。"
+    },
+    "templates": {
+      "listTitle": "テンプレート",
+      "list": {
+        "plan": "実行計画",
+        "review": "レビュー",
+        "report": "レポート"
+      }
+    },
+    "planTemplate": {
+      "intro": "実行計画（plan）ノードのエージェントが穴埋めする Markdown テンプレートです。エージェントはこのテンプレートの見出しをそのまま使います。保存すると内容が丸ごと置き換わります（追記ではありません）。内容はチェックされないので、Markdown を自由に書けます。空にして保存すると、下位層（チーム上書き→ユーザー上書き→プラグイン既定）にフォールバックします。",
+      "tierTextLabel": "このスコープでの上書き（Markdown全文）",
+      "tierTextPlaceholder": "置き換え後の実行計画テンプレート全文を書く（いま使われているテンプレートは get-plan-template で確認できます）...",
+      "mergedPreviewLabel": "継承後のプレビュー（エージェントが実際に使う実行計画テンプレート）",
+      "emptyOverrideHint": "空にして保存すると上書きが解除され、下位層の内容にフォールバックします。"
+    },
+    "reviewTemplate": {
+      "intro": "レビュー（review / review_gate）ノードのエージェントが判定を書くときに使う Markdown テンプレートです。エージェントはこのテンプレートの見出しと判定語をそのまま使います。保存すると内容が丸ごと置き換わります（追記ではありません）。内容はチェックされないので、Markdown を自由に書けます。空にして保存すると、下位層（チーム上書き→ユーザー上書き→プラグイン既定）にフォールバックします。",
+      "tierTextLabel": "このスコープでの上書き（Markdown全文）",
+      "tierTextPlaceholder": "置き換え後のレビューテンプレート全文を書く（いま使われているテンプレートは get-review-template で確認できます）...",
+      "mergedPreviewLabel": "継承後のプレビュー（エージェントが実際に使うレビューテンプレート）",
       "emptyOverrideHint": "空にして保存すると上書きが解除され、下位層の内容にフォールバックします。"
     },
     "appSettings": {

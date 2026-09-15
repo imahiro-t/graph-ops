@@ -253,14 +253,19 @@ export interface SettingsSkillTextResponse {
   merged_text: string;
 }
 
-// GET/PUT /api/settings/report-template. tier_text is this scope's own
-// override HTML ("" if unset); merged_text is the fully-resolved template
-// (team override -> user override -> plugin default -- a full replace, not
-// an append, unlike node-type/skill context).
-export interface SettingsReportTemplateResponse {
+// GET/PUT /api/settings/{plan,review,report}-template. tier_text is this
+// scope's own override ("" if unset: Markdown for plan/review, HTML for
+// report); merged_text is the fully-resolved template (team override -> user
+// override -> plugin default -- a full replace, not an append, unlike
+// node-type/skill context).
+export interface SettingsTemplateTextResponse {
   tier_text: string;
   merged_text: string;
 }
+
+// The report template's response has the same shape; the name is kept for
+// existing references.
+export type SettingsReportTemplateResponse = SettingsTemplateTextResponse;
 
 // --- App settings (GET/PUT /api/settings/app) ---
 // The server/CLI's own operational settings (graph-config.json), edited from

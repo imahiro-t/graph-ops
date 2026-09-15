@@ -240,7 +240,7 @@
       "nodeTypes": "Node Types",
       "reviewGates": "Review Gates",
       "skills": "Skills",
-      "reportTemplate": "Report Template",
+      "templates": "Templates",
       "appSettings": "App Settings"
     },
     "unsavedChanges": {
@@ -313,6 +313,28 @@
       "tierTextLabel": "Override in this scope (full HTML)",
       "tierTextPlaceholder": "Paste a full replacement HTML template (see `get-report-template` for the fixed structure)...",
       "mergedPreviewLabel": "Merged preview (the HTML source an agent actually fills in)",
+      "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the layer below."
+    },
+    "templates": {
+      "listTitle": "Templates",
+      "list": {
+        "plan": "Execution Plan",
+        "review": "Review",
+        "report": "Report"
+      }
+    },
+    "planTemplate": {
+      "intro": "The Markdown template the plan node's agent fills in. The agent uses its headings exactly as written. Saving replaces the whole template (it does not append). The content is not checked, so you can write any Markdown. Leaving it empty falls back to the layer below (team override, then user override, then the plugin default).",
+      "tierTextLabel": "Override in this scope (full Markdown)",
+      "tierTextPlaceholder": "Write a full replacement plan template (see `get-plan-template` for the template currently in use)...",
+      "mergedPreviewLabel": "Merged preview (the plan template an agent actually uses)",
+      "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the layer below."
+    },
+    "reviewTemplate": {
+      "intro": "The Markdown template the review and review_gate nodes' agents use to write their verdicts. The agent uses its headings and verdict words exactly as written. Saving replaces the whole template (it does not append). The content is not checked, so you can write any Markdown. Leaving it empty falls back to the layer below (team override, then user override, then the plugin default).",
+      "tierTextLabel": "Override in this scope (full Markdown)",
+      "tierTextPlaceholder": "Write a full replacement review template (see `get-review-template` for the template currently in use)...",
+      "mergedPreviewLabel": "Merged preview (the review template an agent actually uses)",
       "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the layer below."
     },
     "appSettings": {

@@ -151,7 +151,7 @@ func TestValidateReportHTML_AcceptsConformingOverride(t *testing.T) {
 }
 
 func TestResolvePlanTemplate_DefaultHasFixedHeadings(t *testing.T) {
-	tmpl := ResolvePlanTemplate(Roots{}, "")
+	tmpl := ResolvePlanTemplate(Roots{})
 	for _, heading := range []string{"# Purpose", "# Steps", "# Impact", "# Risks / Notes"} {
 		if !strings.Contains(tmpl, heading) {
 			t.Errorf("expected default plan template to contain heading %q, got %q", heading, tmpl)
@@ -159,31 +159,12 @@ func TestResolvePlanTemplate_DefaultHasFixedHeadings(t *testing.T) {
 	}
 }
 
-func TestResolvePlanTemplate_JaLangUsesJapaneseLocaleTemplate(t *testing.T) {
-	tmpl := ResolvePlanTemplate(Roots{}, "ja")
-	for _, heading := range []string{"# 目的", "# 手順", "# 影響範囲", "# リスク・留意事項"} {
-		if !strings.Contains(tmpl, heading) {
-			t.Errorf("expected ja plan template to contain heading %q, got %q", heading, tmpl)
-		}
-	}
-	if strings.Contains(tmpl, "# Purpose") {
-		t.Errorf("did not expect the English default heading in the ja template, got %q", tmpl)
-	}
-}
-
-func TestResolvePlanTemplate_UnknownLangFallsBackToEnglishDefault(t *testing.T) {
-	tmpl := ResolvePlanTemplate(Roots{}, "xx-unsupported")
-	if !strings.Contains(tmpl, "# Purpose") {
-		t.Errorf("expected unknown lang to fall back to the English default, got %q", tmpl)
-	}
-}
-
-func TestResolvePlanTemplate_TeamOverridesUserOverridesLocaleOverridesDefault(t *testing.T) {
+func TestResolvePlanTemplate_TeamOverridesUserOverridesDefault(t *testing.T) {
 	userDir, teamDir := t.TempDir(), t.TempDir()
 	writeExtensionFile(t, userDir, PlanSubdir, PlanTemplateFile, "# user-custom-plan")
 	writeExtensionFile(t, teamDir, PlanSubdir, PlanTemplateFile, "# team-custom-plan")
 
-	got := ResolvePlanTemplate(Roots{UserDir: userDir, TeamDir: teamDir}, "ja")
+	got := ResolvePlanTemplate(Roots{UserDir: userDir, TeamDir: teamDir})
 	if !strings.Contains(got, "team-custom-plan") {
 		t.Errorf("expected team override to win, got %q", got)
 	}
@@ -191,21 +172,25 @@ func TestResolvePlanTemplate_TeamOverridesUserOverridesLocaleOverridesDefault(t 
 		t.Errorf("did not expect user override text, got %q", got)
 	}
 
-	userOnly := ResolvePlanTemplate(Roots{UserDir: userDir}, "ja")
+	userOnly := ResolvePlanTemplate(Roots{UserDir: userDir})
 	if !strings.Contains(userOnly, "user-custom-plan") {
 		t.Errorf("expected user override when no team override present, got %q", userOnly)
 	}
 
-	// With no team/user override, a supported lang wins over the English
-	// default.
-	localeOnly := ResolvePlanTemplate(Roots{}, "ja")
-	if !strings.Contains(localeOnly, "# 目的") {
-		t.Errorf("expected ja locale template when no team/user override present, got %q", localeOnly)
+	teamOnly := ResolvePlanTemplate(Roots{UserDir: t.TempDir(), TeamDir: teamDir})
+	if !strings.Contains(teamOnly, "team-custom-plan") {
+		t.Errorf("expected team override when no user override present, got %q", teamOnly)
+	}
+
+	// With no team/user override, the English plugin default applies.
+	defaultOnly := ResolvePlanTemplate(Roots{UserDir: t.TempDir(), TeamDir: t.TempDir()})
+	if !strings.HasPrefix(defaultOnly, "# Purpose") {
+		t.Errorf("expected the English default when no override is present, got %q", defaultOnly)
 	}
 }
 
 func TestResolveReviewTemplate_DefaultHasFixedHeadingsAndVerdictWords(t *testing.T) {
-	tmpl := ResolveReviewTemplate(Roots{}, "")
+	tmpl := ResolveReviewTemplate(Roots{})
 	for _, heading := range []string{"# Verdict", "# Findings", "# Rationale", "# Conditions (if Conditionally Approved)"} {
 		if !strings.Contains(tmpl, heading) {
 			t.Errorf("expected default review template to contain heading %q, got %q", heading, tmpl)
@@ -218,36 +203,12 @@ func TestResolveReviewTemplate_DefaultHasFixedHeadingsAndVerdictWords(t *testing
 	}
 }
 
-func TestResolveReviewTemplate_JaLangUsesJapaneseLocaleTemplate(t *testing.T) {
-	tmpl := ResolveReviewTemplate(Roots{}, "ja")
-	for _, heading := range []string{"# 判定", "# 指摘事項", "# 判断理由", "# 条件付き承認の場合の条件"} {
-		if !strings.Contains(tmpl, heading) {
-			t.Errorf("expected ja review template to contain heading %q, got %q", heading, tmpl)
-		}
-	}
-	for _, word := range []string{"承認", "条件付き承認", "差し戻し"} {
-		if !strings.Contains(tmpl, word) {
-			t.Errorf("expected ja review template to mention fixed verdict word %q, got %q", word, tmpl)
-		}
-	}
-	if strings.Contains(tmpl, "# Verdict") {
-		t.Errorf("did not expect the English default heading in the ja template, got %q", tmpl)
-	}
-}
-
-func TestResolveReviewTemplate_UnknownLangFallsBackToEnglishDefault(t *testing.T) {
-	tmpl := ResolveReviewTemplate(Roots{}, "xx-unsupported")
-	if !strings.Contains(tmpl, "# Verdict") {
-		t.Errorf("expected unknown lang to fall back to the English default, got %q", tmpl)
-	}
-}
-
-func TestResolveReviewTemplate_TeamOverridesUserOverridesLocaleOverridesDefault(t *testing.T) {
+func TestResolveReviewTemplate_TeamOverridesUserOverridesDefault(t *testing.T) {
 	userDir, teamDir := t.TempDir(), t.TempDir()
 	writeExtensionFile(t, userDir, ReviewSubdir, ReviewTemplateFile, "# user-custom-review")
 	writeExtensionFile(t, teamDir, ReviewSubdir, ReviewTemplateFile, "# team-custom-review")
 
-	got := ResolveReviewTemplate(Roots{UserDir: userDir, TeamDir: teamDir}, "ja")
+	got := ResolveReviewTemplate(Roots{UserDir: userDir, TeamDir: teamDir})
 	if !strings.Contains(got, "team-custom-review") {
 		t.Errorf("expected team override to win, got %q", got)
 	}
@@ -255,14 +216,19 @@ func TestResolveReviewTemplate_TeamOverridesUserOverridesLocaleOverridesDefault(
 		t.Errorf("did not expect user override text, got %q", got)
 	}
 
-	userOnly := ResolveReviewTemplate(Roots{UserDir: userDir}, "ja")
+	userOnly := ResolveReviewTemplate(Roots{UserDir: userDir})
 	if !strings.Contains(userOnly, "user-custom-review") {
 		t.Errorf("expected user override when no team override present, got %q", userOnly)
 	}
 
-	localeOnly := ResolveReviewTemplate(Roots{}, "ja")
-	if !strings.Contains(localeOnly, "# 判定") {
-		t.Errorf("expected ja locale template when no team/user override present, got %q", localeOnly)
+	teamOnly := ResolveReviewTemplate(Roots{UserDir: t.TempDir(), TeamDir: teamDir})
+	if !strings.Contains(teamOnly, "team-custom-review") {
+		t.Errorf("expected team override when no user override present, got %q", teamOnly)
+	}
+
+	defaultOnly := ResolveReviewTemplate(Roots{UserDir: t.TempDir(), TeamDir: t.TempDir()})
+	if !strings.HasPrefix(defaultOnly, "# Verdict") {
+		t.Errorf("expected the English default when no override is present, got %q", defaultOnly)
 	}
 }
 

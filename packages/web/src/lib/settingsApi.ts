@@ -1,5 +1,6 @@
 // Thin client for the settings UI's backend surface (GET/PUT
-// /api/settings/catalog, /api/settings/node-types(/{type})) -- see
+// /api/settings/catalog, /api/settings/node-types(/{type}), the skill and
+// template endpoints, ...) -- see
 // packages/core-go/internal/httpserver/settings.go for the actual contract.
 // Every call site (NodeTypesEditor/WorkflowEditor/ReviewGatesEditor) shares
 // this instead of re-building query strings/error handling independently.
@@ -15,6 +16,7 @@ import {
   SettingsScope,
   SettingsSkillInfo,
   SettingsSkillTextResponse,
+  SettingsTemplateTextResponse,
   TestMySQLConnectionResult
 } from '../types';
 import { apiFetch } from './apiFetch';
@@ -184,5 +186,50 @@ export async function saveSettingsReportTemplate(
     t,
     '/api/settings/report-template',
     jsonBody('PUT', { scope, project_id: projectId, html })
+  );
+}
+
+// GET/PUT /api/settings/plan-template and /api/settings/review-template --
+// the テンプレート tab's 実行計画 / レビュー entries. Unlike the report
+// template, the PUT body field is `text` and the content is not validated.
+export async function fetchSettingsPlanTemplate(
+  t: TFunction,
+  scope: SettingsScope,
+  projectId: string
+): Promise<SettingsTemplateTextResponse> {
+  return requestJSON(t, `/api/settings/plan-template?${scopeQuery(scope, projectId)}`);
+}
+
+export async function saveSettingsPlanTemplate(
+  t: TFunction,
+  scope: SettingsScope,
+  projectId: string,
+  text: string
+): Promise<SettingsTemplateTextResponse> {
+  return requestJSON(
+    t,
+    '/api/settings/plan-template',
+    jsonBody('PUT', { scope, project_id: projectId, text })
+  );
+}
+
+export async function fetchSettingsReviewTemplate(
+  t: TFunction,
+  scope: SettingsScope,
+  projectId: string
+): Promise<SettingsTemplateTextResponse> {
+  return requestJSON(t, `/api/settings/review-template?${scopeQuery(scope, projectId)}`);
+}
+
+export async function saveSettingsReviewTemplate(
+  t: TFunction,
+  scope: SettingsScope,
+  projectId: string,
+  text: string
+): Promise<SettingsTemplateTextResponse> {
+  return requestJSON(
+    t,
+    '/api/settings/review-template',
+    jsonBody('PUT', { scope, project_id: projectId, text })
   );
 }
