@@ -99,11 +99,11 @@ When a ticket reaches a pending `approval_gate`, open the ticket: "Approve" and 
 The following buttons open an external, interactive terminal running `claude`. You handle permission prompts and any further conversation in that terminal.
 
 - "Launch Claude" in the header opens a dialog where you can type any prompt and press "Launch".
-- "New Ticket" in the header opens a form (title and description). "Create" starts `claude` with a request to create that ticket.
+- "New Ticket" in the header opens a form with a single field where you describe the ticket you want. "Create" starts `claude`, which works out the title and description with the create-ticket skill and asks you to confirm them before creating the ticket.
 - "Refine" and "Run" on an expanded ticket start `claude` to refine or run that ticket.
 - The prompt box on an expanded ticket sends any instruction about that ticket with "Send".
 
-The prompt fields accept multiple lines: press Enter for a new line, and press "Launch"/"Send" or Cmd+Enter (macOS) / Ctrl+Enter to submit. A prompt with only spaces or blank lines is not sent.
+The prompt fields accept multiple lines: press Enter for a new line, and press "Launch"/"Send"/"Create" or Cmd+Enter (macOS) / Ctrl+Enter to submit. A prompt with only spaces or blank lines is not sent.
 
 #### Settings
 
@@ -234,11 +234,11 @@ claude plugin update graph-ops@graph-ops
 次のボタンは、`claude` を実行する外部の対話型ターミナルを開きます。権限の確認やその後のやり取りは、そのターミナルで行います。
 
 - ヘッダーの「Claude 起動」は、任意のプロンプトを入力して「起動」を押すダイアログを開きます。
-- ヘッダーの「新規チケット」は、タイトルと説明の入力フォームを開きます。「作成」を押すと、そのチケットの作成を依頼する形で `claude` が起動します。
+- ヘッダーの「新規チケット」は、作成したいチケットの内容を書く入力欄 1 つのフォームを開きます。「作成」を押すと `claude` が起動し、create-ticket スキルでタイトルと説明を考え、確認を取ってからチケットを登録します。
 - 展開したチケットの「リファイン」「実行する」は、そのチケットのリファインや実行のために `claude` を起動します。
 - 展開したチケットのプロンプト欄からは、そのチケットに関する任意の指示を「送信」で送れます。
 
-プロンプト欄は複数行に対応しています。Enter で改行し、「起動」／「送信」ボタンか、Cmd+Enter（macOS）／Ctrl+Enter で送信します。空白や空行だけのプロンプトは送信されません。
+プロンプト欄は複数行に対応しています。Enter で改行し、「起動」／「送信」／「作成」ボタンか、Cmd+Enter（macOS）／Ctrl+Enter で送信します。空白や空行だけのプロンプトは送信されません。
 
 #### 設定
 

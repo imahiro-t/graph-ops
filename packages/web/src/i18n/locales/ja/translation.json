@@ -71,11 +71,9 @@
   "createModal": {
     "title": "新規チケット作成",
     "descriptionPrefix": "入力内容は",
-    "descriptionSuffix": "スキルに渡され、Claude Codeがチケットを作成します（グラフはまだ作られません）。",
-    "titleLabel": "タイトル *",
-    "titlePlaceholder": "例: ログイン失敗時のアカウントロック解除フローを見直す",
-    "descriptionLabel": "説明",
-    "descriptionPlaceholder": "要件や背景を記述...",
+    "descriptionSuffix": "スキルに渡され、Claude Codeがタイトルと説明を考えて、確認のうえチケットを作成します（グラフはまだ作られません）。",
+    "requestLabel": "どのようなチケットを作成したいですか？ *",
+    "requestPlaceholder": "例: ログインに失敗したときのアカウントロック解除の流れを見直したい。今は解除にサポートへの問い合わせが必要で…",
     "close": "閉じる",
     "cancel": "キャンセル",
     "submit": "作成"
@@ -186,7 +184,7 @@
   "claudePrompts": {
     "executeIncompleteNodes": "チケット {{ticketId}} の未完了ノードを実行してください",
     "refineTicket": "/refine-ticket {{ticketId}} のスキルを使って、完了条件とWhy（背景・目的）を詰めてください",
-    "createTicket": "/create-ticket のスキルを使って、タイトル「{{title}}」、説明「{{description}}」でチケットを作成してください。"
+    "createTicket": "次の内容からタイトルと説明を考えて、/create-ticket のスキルを使ってチケットを作成してください。\n\n作成したいチケットの内容:\n{{request}}"
   },
   "graphViewer": {
     "manualNode": "手動操作ノード",

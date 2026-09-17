@@ -23,13 +23,12 @@ import { getPriorityMeta, normalizeTicketPriority } from './priorityMeta';
 import { TicketItem } from './components/TicketItem';
 import { ClaudeRunnerModal } from './components/ClaudeRunnerModal';
 import { SettingsModal } from './components/SettingsModal';
-import { StatusLiveRegion } from './components/StatusLiveRegion';
+import { CreateTicketModal } from './components/CreateTicketModal';
 import { useClaudeLaunch } from './hooks/useClaudeLaunch';
 import { useTheme, ThemePreference } from './hooks/useTheme';
 import { formatTime } from './i18n/formatDate';
 import { localizedApiErrorMessage, errorMessage } from './lib/apiError';
 import { apiFetch } from './lib/apiFetch';
-import { isSubmitShortcut } from './lib/keyboardShortcuts';
 import { fetchAppSettings } from './lib/settingsApi';
 import { useLatest } from './hooks/useLatest';
 
@@ -170,8 +169,6 @@ export const App: React.FC = () => {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isClaudeGlobalOpen, setIsClaudeGlobalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
-  const [newDesc, setNewDesc] = useState('');
 
   // Fetch tickets and their details
   const fetchAllTickets = async () => {
@@ -371,16 +368,17 @@ export const App: React.FC = () => {
   // those are separate, later steps in the ticket lifecycle now.
   const { isLaunching: isCreating, lastMessage: createStatus, launch: runCreateTicket, reset: resetCreateStatus } = useClaudeLaunch(fetchAllTickets);
 
-  const handleCreateTicket = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim()) return;
+  // Empty/whitespace-only requests never reach here: CreateTicketModal guards
+  // both the button and the Cmd/Ctrl+Enter path. Returns whether the launch
+  // succeeded so the modal keeps the request text after a failure.
+  const handleCreateTicket = async (request: string): Promise<boolean> => {
     // Assignment is deliberately never decided at creation time -- it's set
     // afterward via TicketItem's "assign to me" button (see
-    // ticket.assignee), so the prompt never mentions one.
-    const prompt = t('claudePrompts.createTicket', { title: newTitle, description: newDesc });
+    // ticket.assignee), so the prompt never mentions one. The title and
+    // description aren't decided here either: the create-ticket skill works
+    // them out from this free-form request and confirms them with the user.
+    const prompt = t('claudePrompts.createTicket', { request });
     const succeeded = await runCreateTicket(prompt, undefined, currentProject?.id);
-    setNewTitle('');
-    setNewDesc('');
     // Close automatically once the terminal has launched, instead of
     // leaving the user to hit the (now-relabeled) "close" button -- a
     // failed launch keeps the modal open so the status message is visible.
@@ -388,6 +386,7 @@ export const App: React.FC = () => {
       resetCreateStatus();
       setIsCreateOpen(false);
     }
+    return succeeded;
   };
 
   // Filter calculations
@@ -535,9 +534,9 @@ export const App: React.FC = () => {
             <button
               onClick={() => {
                 // Clear any leftover status message from a previous create
-                // attempt before the form reopens -- the form's own fields
-                // (newTitle/newDesc) are already reset to empty strings on
-                // submit, but createStatus otherwise persists
+                // attempt before the form reopens -- the form's own request
+                // field lives in CreateTicketModal and starts out empty on
+                // every open, but createStatus otherwise persists
                 // since this component stays mounted between opens.
                 resetCreateStatus();
                 setIsCreateOpen(true);
@@ -881,77 +880,15 @@ export const App: React.FC = () => {
 
       {/* Create Ticket Modal */}
       {isCreateOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md p-6 shadow-2xl">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">{t('createModal.title')}</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-              {t('createModal.descriptionPrefix')} <span className="font-mono">/create-ticket</span> {t('createModal.descriptionSuffix')}
-            </p>
-            <form onSubmit={handleCreateTicket} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('createModal.titleLabel')}</label>
-                <input
-                  type="text"
-                  required
-                  disabled={isCreating}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500 disabled:opacity-60"
-                  value={newTitle}
-                  onChange={e => setNewTitle(e.target.value)}
-                  placeholder={t('createModal.titlePlaceholder')}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('createModal.descriptionLabel')}</label>
-                <textarea
-                  rows={3}
-                  disabled={isCreating}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500 disabled:opacity-60"
-                  value={newDesc}
-                  onChange={e => setNewDesc(e.target.value)}
-                  onKeyDown={e => {
-                    if (isSubmitShortcut(e)) {
-                      e.preventDefault();
-                      e.currentTarget.form?.requestSubmit();
-                    }
-                  }}
-                  placeholder={t('createModal.descriptionPlaceholder')}
-                />
-              </div>
-              {/* 作成／起動の結果はフォーカス移動を伴わずに現れるため、読み上げは
-                  常時マウントの live region が担当する（SC 4.1.3）。 */}
-              <StatusLiveRegion message={createStatus || ''} />
-              {createStatus && (
-                <div
-                  aria-hidden="true"
-                  className="p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] rounded-lg border border-slate-200 dark:border-slate-700"
-                >
-                  {createStatus}
-                </div>
-              )}
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    resetCreateStatus();
-                    setIsCreateOpen(false);
-                  }}
-                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 transition"
-                >
-                  {isCreating || createStatus ? t('createModal.close') : t('createModal.cancel')}
-                </button>
-                <button
-                  type="submit"
-                  disabled={isCreating || !newTitle.trim()}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-xs font-semibold text-white shadow-xs transition flex items-center gap-1.5"
-                >
-                  {isCreating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  {t('createModal.submit')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <CreateTicketModal
+          onSubmit={handleCreateTicket}
+          onClose={() => {
+            resetCreateStatus();
+            setIsCreateOpen(false);
+          }}
+          isCreating={isCreating}
+          status={createStatus}
+        />
       )}
 
       {/* Global Claude Modal */}
