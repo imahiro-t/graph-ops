@@ -7,7 +7,7 @@
 // criteria by the time it reaches merged_catalog, so the preview only needs
 // to show the resulting criteria/max_iterations/enabled -- not a separate
 // additional_criteria field.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Save, Plus, Trash2, CheckCircle2, ChevronDown, ChevronRight } from 'lucide-react';
 import { ReviewGateDef, SettingsCatalog, SettingsScope } from '../../types';
@@ -32,11 +32,15 @@ interface Props {
 // displayed.
 type GateRow = ReviewGateDef & { id: string; isOverridden: boolean };
 
+const SMALL_LABEL_CLASS = 'block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5';
+
 export const ReviewGatesEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDirtyChange }) => {
   const { t } = useTranslation();
   // See src/hooks/useLatest.ts -- keeps fetchRows/load below insensitive to
   // language changes (F-1).
   const tRef = useLatest(t);
+  // Row inputs are repeated, so each id is this prefix plus the row index.
+  const idPrefix = useId();
   const [gates, setGates] = useState<GateRow[]>([]);
   const [savedGates, setSavedGates] = useState<GateRow[]>([]);
   const [mergedGates, setMergedGates] = useState<SettingsCatalog['review_gates']>({});
@@ -158,31 +162,42 @@ export const ReviewGatesEditor: React.FC<Props> = ({ scope, projectId, canEdit, 
         )}
         {gates.map((g, idx) => (
           <div key={idx} className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2 bg-white dark:bg-slate-900">
-            <div className="flex items-center gap-2">
-              <input
-                value={g.id}
-                disabled={!canEdit || !g.isOverridden}
-                placeholder={t('settings.reviewGates.idLabel')}
-                onChange={e => updateGate(idx, { id: e.target.value })}
-                className="w-40 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100 disabled:opacity-60"
-              />
+            {/* Each text field has a small visible label above it (the
+                placeholders stay as a supplementary hint); items-end keeps
+                the checkbox and delete button aligned with the inputs. */}
+            <div className="flex items-end gap-2">
+              <div className="w-40 flex flex-col">
+                <label htmlFor={`${idPrefix}-${idx}-id`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.idLabel')}</label>
+                <input
+                  id={`${idPrefix}-${idx}-id`}
+                  value={g.id}
+                  disabled={!canEdit || !g.isOverridden}
+                  placeholder={t('settings.reviewGates.idLabel')}
+                  onChange={e => updateGate(idx, { id: e.target.value })}
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100 disabled:opacity-60"
+                />
+              </div>
               {!g.isOverridden && (
                 <span
                   title={t('settings.reviewGates.defaultBadgeHint')}
-                  className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700"
+                  className="shrink-0 mb-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700"
                 >
                   {t('settings.reviewGates.defaultBadge')}
                 </span>
               )}
-              <input
-                value={g.name || ''}
-                disabled={!canEdit || !g.isOverridden}
-                placeholder={t('settings.reviewGates.nameLabel')}
-                onChange={e => updateGate(idx, { name: e.target.value })}
-                title={g.isOverridden ? undefined : t('settings.reviewGates.cannotRenameDefaultHint')}
-                className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
-              />
-              <label className="flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-400 shrink-0">
+              <div className="flex-1 min-w-0 flex flex-col">
+                <label htmlFor={`${idPrefix}-${idx}-name`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.nameLabel')}</label>
+                <input
+                  id={`${idPrefix}-${idx}-name`}
+                  value={g.name || ''}
+                  disabled={!canEdit || !g.isOverridden}
+                  placeholder={t('settings.reviewGates.nameLabel')}
+                  onChange={e => updateGate(idx, { name: e.target.value })}
+                  title={g.isOverridden ? undefined : t('settings.reviewGates.cannotRenameDefaultHint')}
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
+                />
+              </div>
+              <label className="flex items-center gap-1 mb-1 text-[11px] text-slate-600 dark:text-slate-400 shrink-0">
                 <input
                   type="checkbox"
                   checked={g.enabled !== false}
@@ -192,27 +207,34 @@ export const ReviewGatesEditor: React.FC<Props> = ({ scope, projectId, canEdit, 
                 />
                 {t('settings.reviewGates.enabledLabel')}
               </label>
-              <input
-                type="number"
-                min={1}
-                value={g.max_iterations ?? ''}
-                disabled={!canEdit}
-                placeholder={t('settings.reviewGates.maxIterationsLabel')}
-                onChange={e => updateGate(idx, { max_iterations: e.target.value === '' ? undefined : Number(e.target.value) })}
-                className="w-20 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
-              />
+              <div className="w-20 flex flex-col">
+                <label htmlFor={`${idPrefix}-${idx}-max`} className={`${SMALL_LABEL_CLASS} truncate`} title={t('settings.reviewGates.maxIterationsLabel')}>
+                  {t('settings.reviewGates.maxIterationsLabel')}
+                </label>
+                <input
+                  id={`${idPrefix}-${idx}-max`}
+                  type="number"
+                  min={1}
+                  value={g.max_iterations ?? ''}
+                  disabled={!canEdit}
+                  placeholder={t('settings.reviewGates.maxIterationsLabel')}
+                  onChange={e => updateGate(idx, { max_iterations: e.target.value === '' ? undefined : Number(e.target.value) })}
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
+                />
+              </div>
               <button
                 onClick={() => removeGate(idx)}
                 disabled={!canEdit || !g.isOverridden}
-                className="p-1 text-slate-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40 shrink-0"
+                className="p-1 mb-0.5 text-slate-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40 shrink-0"
                 title={g.isOverridden ? t('settings.reviewGates.deleteGate') : t('settings.reviewGates.cannotDeleteDefaultHint')}
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
             <div>
-              <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.reviewGates.criteriaLabel')}</label>
+              <label htmlFor={`${idPrefix}-${idx}-criteria`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.criteriaLabel')}</label>
               <textarea
+                id={`${idPrefix}-${idx}-criteria`}
                 value={g.criteria || ''}
                 disabled={!canEdit}
                 onChange={e => updateGate(idx, { criteria: e.target.value })}
@@ -221,8 +243,9 @@ export const ReviewGatesEditor: React.FC<Props> = ({ scope, projectId, canEdit, 
               />
             </div>
             <div>
-              <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.reviewGates.additionalCriteriaLabel')}</label>
+              <label htmlFor={`${idPrefix}-${idx}-additional`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.additionalCriteriaLabel')}</label>
               <textarea
+                id={`${idPrefix}-${idx}-additional`}
                 value={g.additional_criteria || ''}
                 disabled={!canEdit}
                 onChange={e => updateGate(idx, { additional_criteria: e.target.value })}
@@ -279,7 +302,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ scope, projectId, canEdit, 
           <button
             onClick={handleSave}
             disabled={!canEdit || saving || !isDirty}
-            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
+            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
           >
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
             {saving ? t('settings.common.saving') : t('settings.common.save')}

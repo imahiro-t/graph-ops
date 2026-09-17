@@ -6,10 +6,11 @@
 // execution plan (art-2aaa5d92 on DFLT-00010-00001) for the scope/tab
 // design rationale and packages/core-go/internal/httpserver/settings.go for
 // the backing API.
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Settings, X, FolderCog, Globe } from 'lucide-react';
 import { Project, SettingsScope } from '../types';
+import { useModalDialog } from '../hooks/useModalDialog';
 import { NodeTypesEditor } from './settings/NodeTypesEditor';
 import { ReviewGatesEditor } from './settings/ReviewGatesEditor';
 import { SkillsEditor } from './settings/SkillsEditor';
@@ -50,9 +51,13 @@ export const SettingsModal: React.FC<Props> = ({
   // the Gherkin scenario "未保存の変更がある状態でタブやモーダルを閉じよう
   // とすると確認ダイアログが出る").
   const [dirty, setDirty] = useState(false);
+  const titleId = useId();
+  const projectSelectId = useId();
 
-  if (!isOpen) return null;
-
+  // Defined before the early return below so the dialog hook can take
+  // handleClose: Escape goes through the same unsaved-changes confirmation
+  // as the close (X) button. useModalDialog reads onEscape through a ref, so
+  // this per-render function always sees the current `dirty`.
   const confirmDiscardIfDirty = (): boolean => {
     if (!dirty) return true;
     return window.confirm(t('settings.unsavedChanges.confirmMessage'));
@@ -63,6 +68,13 @@ export const SettingsModal: React.FC<Props> = ({
     setDirty(false);
     onClose();
   };
+
+  // No initialFocusRef: the fixed part of the modal has no text input and
+  // the tab contents load asynchronously, so focus lands on the first
+  // focusable element (the close button).
+  const dialogRef = useModalDialog({ isOpen, onEscape: handleClose });
+
+  if (!isOpen) return null;
 
   const changeTab = (next: Tab) => {
     if (next === tab) return;
@@ -100,15 +112,27 @@ export const SettingsModal: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-5xl h-[85vh] shadow-2xl overflow-hidden flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-5xl h-[85vh] shadow-2xl overflow-hidden flex flex-col focus:outline-none"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 shrink-0">
-          <div className="flex items-center gap-2 font-bold text-base text-slate-800 dark:text-slate-200">
-            <Settings className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+          <h2 id={titleId} className="flex items-center gap-2 font-bold text-base text-slate-800 dark:text-slate-200">
+            <Settings className="w-5 h-5 text-slate-600 dark:text-slate-400" aria-hidden="true" />
             {t('settings.modalTitle')}
-          </div>
-          <button onClick={handleClose} className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition">
-            <X className="w-5 h-5" />
+          </h2>
+          <button
+            type="button"
+            onClick={handleClose}
+            aria-label={t('common.closeDialog')}
+            className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition"
+          >
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
@@ -135,16 +159,22 @@ export const SettingsModal: React.FC<Props> = ({
           </div>
 
           {scope === 'project' && (
-            <select
-              value={selectedProjectId}
-              onChange={e => changeProject(e.target.value)}
-              className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300"
-            >
-              <option value="">{t('settings.scope.projectPlaceholder')}</option>
-              {projects.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+            <div className="flex items-center gap-2">
+              <label htmlFor={projectSelectId} className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+                {t('settings.scope.projectLabel')}
+              </label>
+              <select
+                id={projectSelectId}
+                value={selectedProjectId}
+                onChange={e => changeProject(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300"
+              >
+                <option value="">{t('settings.scope.projectPlaceholder')}</option>
+                {projects.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
           )}
         </div>
 

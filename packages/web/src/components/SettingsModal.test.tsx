@@ -2,10 +2,12 @@
 // テンプレート tab replaces the old standalone レポートテンプレート tab, and an
 // unsaved edit inside it is still protected by the modal's own tab/scope
 // switch confirmation.
+import { useState } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
+import { getFocusableElements } from '../hooks/useModalDialog';
 import { SettingsModal } from './SettingsModal';
 
 vi.mock('../lib/settingsApi', async () => {
@@ -34,11 +36,11 @@ import {
 
 type Mock = ReturnType<typeof vi.fn>;
 
-function renderModal() {
+function renderModal(onClose: () => void = vi.fn()) {
   return render(
     <SettingsModal
       isOpen
-      onClose={vi.fn()}
+      onClose={onClose}
       projects={[]}
       currentProject={null}
       onProjectsChanged={vi.fn()}
@@ -140,5 +142,144 @@ describe('SettingsModal', () => {
     await user.click(screen.getByRole('button', { name: 'レポート' }));
     await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.skills') }));
     expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
+  // DFLT-00074: dialog semantics, focus management and Escape handling.
+  describe('as a modal dialog', () => {
+    const closeButton = () => screen.getByRole('button', { name: i18n.t('common.closeDialog') });
+
+    // Makes the plan template dirty the same way the tests above do.
+    const makeTemplateEditDirty = async (user: ReturnType<typeof userEvent.setup>) => {
+      await user.click(screen.getByRole('button', { name: 'テンプレート' }));
+      const textarea = await screen.findByDisplayValue('plan-tier');
+      await user.type(textarea, ' edited');
+      return textarea;
+    };
+
+    it('is a dialog named by its title with a labelled close button that gets the initial focus', async () => {
+      renderModal();
+
+      const dialog = screen.getByRole('dialog', { name: i18n.t('settings.modalTitle') });
+      expect(dialog).toHaveAttribute('aria-modal', 'true');
+      expect(closeButton()).toHaveFocus();
+      await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
+    });
+
+    it('wraps Tab and Shift+Tab inside the dialog', async () => {
+      const user = userEvent.setup();
+      renderModal();
+      await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
+
+      const focusable = getFocusableElements(screen.getByRole('dialog'));
+      const last = focusable[focusable.length - 1];
+      expect(focusable[0]).toBe(closeButton());
+
+      await user.tab({ shift: true });
+      expect(last).toHaveFocus();
+      await user.tab();
+      expect(closeButton()).toHaveFocus();
+    });
+
+    it('closes on Escape without asking when nothing is unsaved', async () => {
+      const user = userEvent.setup();
+      const confirm = vi.spyOn(window, 'confirm');
+      const onClose = vi.fn();
+      renderModal(onClose);
+      await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
+
+      await user.keyboard('{Escape}');
+      expect(confirm).not.toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('asks before closing on Escape with an unsaved edit, and stays open with the edit when cancelled', async () => {
+      const user = userEvent.setup();
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+      const onClose = vi.fn();
+      renderModal(onClose);
+
+      const textarea = await makeTemplateEditDirty(user);
+      await user.keyboard('{Escape}');
+
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(confirm).toHaveBeenCalledWith(i18n.t('settings.unsavedChanges.confirmMessage'));
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(textarea).toHaveValue('plan-tier edited');
+    });
+
+    it('closes on Escape with an unsaved edit once the discard is confirmed', async () => {
+      const user = userEvent.setup();
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+      const onClose = vi.fn();
+      renderModal(onClose);
+
+      await makeTemplateEditDirty(user);
+      await user.keyboard('{Escape}');
+
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets Escape in the "add node type" input cancel only the add, and closes on the next Escape', async () => {
+      const user = userEvent.setup();
+      const confirm = vi.spyOn(window, 'confirm');
+      const onClose = vi.fn();
+      renderModal(onClose);
+
+      await user.click(await screen.findByRole('button', { name: i18n.t('settings.nodeTypes.addType') }));
+      const input = screen.getByLabelText(i18n.t('settings.nodeTypes.newTypeLabel'));
+      expect(input).toHaveFocus();
+
+      await user.keyboard('{Escape}');
+      expect(screen.queryByLabelText(i18n.t('settings.nodeTypes.newTypeLabel'))).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') })).toBeInTheDocument();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(confirm).not.toHaveBeenCalled();
+
+      await user.keyboard('{Escape}');
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns focus to the button that opened it when closed', async () => {
+      const user = userEvent.setup();
+      const Harness = () => {
+        const [isOpen, setIsOpen] = useState(false);
+        return (
+          <>
+            <button type="button" onClick={() => setIsOpen(true)}>
+              open-settings
+            </button>
+            <SettingsModal
+              isOpen={isOpen}
+              onClose={() => setIsOpen(false)}
+              projects={[]}
+              currentProject={null}
+              onProjectsChanged={vi.fn()}
+              onPaginationPageSizeChanged={vi.fn()}
+              onMyNameChanged={vi.fn()}
+            />
+          </>
+        );
+      };
+      render(<Harness />);
+
+      await user.click(screen.getByRole('button', { name: 'open-settings' }));
+      expect(closeButton()).toHaveFocus();
+      await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
+
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'open-settings' })).toHaveFocus();
+    });
+
+    it('labels the project select shown for the project scope', async () => {
+      const user = userEvent.setup();
+      renderModal();
+
+      await user.click(screen.getByRole('button', { name: i18n.t('settings.scope.project') }));
+      const select = screen.getByLabelText(i18n.t('settings.scope.projectLabel'));
+      expect(select.tagName).toBe('SELECT');
+    });
   });
 });

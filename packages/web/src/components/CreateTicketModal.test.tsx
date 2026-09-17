@@ -1,6 +1,7 @@
 // DFLT-00079: the "New Ticket" modal asks for a single free-form request
 // instead of separate title/description fields, and the prompt handed to
 // Claude asks the create-ticket skill to work out the title/description.
+import { useState } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -135,6 +136,68 @@ describe('CreateTicketModal', () => {
     expect(getRequestInput()).toBeDisabled();
     expect(getSubmitButton()).toBeDisabled();
     expect(screen.getByRole('button', { name: i18n.t('createModal.close') })).toBeInTheDocument();
+  });
+
+  // DFLT-00074: dialog semantics and keyboard focus management.
+  describe('as a modal dialog', () => {
+    it('is a dialog named by its title, focuses the request textarea and describes it with the shortcut hint', () => {
+      renderModal();
+
+      const dialog = screen.getByRole('dialog', { name: i18n.t('createModal.title') });
+      expect(dialog).toHaveAttribute('aria-modal', 'true');
+      expect(getRequestInput()).toHaveFocus();
+      expect(getRequestInput()).toHaveAccessibleDescription(i18n.t('createModal.shortcutHint'));
+    });
+
+    it('wraps Tab and Shift+Tab inside the dialog', async () => {
+      const user = userEvent.setup();
+      renderModal();
+      const cancel = screen.getByRole('button', { name: i18n.t('createModal.cancel') });
+
+      await user.type(getRequestInput(), 'x');
+      // textarea -> cancel -> submit -> (wrap) textarea
+      await user.tab();
+      expect(cancel).toHaveFocus();
+      await user.tab();
+      expect(getSubmitButton()).toHaveFocus();
+      await user.tab();
+      expect(getRequestInput()).toHaveFocus();
+      await user.tab({ shift: true });
+      expect(getSubmitButton()).toHaveFocus();
+    });
+
+    it('calls onClose on Escape', async () => {
+      const user = userEvent.setup();
+      const { onClose } = renderModal();
+
+      await user.keyboard('{Escape}');
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns focus to the button that opened it when it unmounts', async () => {
+      const user = userEvent.setup();
+      const Harness = () => {
+        const [isOpen, setIsOpen] = useState(false);
+        return (
+          <>
+            <button type="button" onClick={() => setIsOpen(true)}>
+              new-ticket
+            </button>
+            {isOpen && (
+              <CreateTicketModal onSubmit={async () => true} onClose={() => setIsOpen(false)} isCreating={false} status="" />
+            )}
+          </>
+        );
+      };
+      render(<Harness />);
+
+      await user.click(screen.getByRole('button', { name: 'new-ticket' }));
+      expect(getRequestInput()).toHaveFocus();
+      await user.keyboard('{Escape}');
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'new-ticket' })).toHaveFocus();
+    });
   });
 
   it('shows the launch status message', () => {

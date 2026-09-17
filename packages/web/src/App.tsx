@@ -5,7 +5,6 @@ import {
   RotateCw,
   Plus,
   Terminal,
-  Loader2,
   FolderOpen,
   ChevronDown,
   ChevronLeft,
@@ -24,6 +23,7 @@ import { TicketItem } from './components/TicketItem';
 import { ClaudeRunnerModal } from './components/ClaudeRunnerModal';
 import { SettingsModal } from './components/SettingsModal';
 import { CreateTicketModal } from './components/CreateTicketModal';
+import { CreateProjectModal } from './components/CreateProjectModal';
 import { useClaudeLaunch } from './hooks/useClaudeLaunch';
 import { useTheme, ThemePreference } from './hooks/useTheme';
 import { formatTime } from './i18n/formatDate';
@@ -79,6 +79,9 @@ export const App: React.FC = () => {
   const [newProjectWorkDir, setNewProjectWorkDir] = useState('');
   const [projectFormError, setProjectFormError] = useState('');
   const [isSavingProject, setIsSavingProject] = useState(false);
+  // Focus target when the create-project modal closes and the element that
+  // opened it is gone (see CreateProjectModal's returnFocusFallbackRef).
+  const projectSwitcherButtonRef = useRef<HTMLButtonElement>(null);
 
   // Filters
   const [filterQuery, setFilterQuery] = useState('');
@@ -451,6 +454,7 @@ export const App: React.FC = () => {
           <div className="flex items-center gap-3">
             <div className="relative">
               <button
+                ref={projectSwitcherButtonRef}
                 onClick={() => setIsProjectMenuOpen(v => !v)}
                 className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 shadow-xs transition max-w-[14rem]"
                 title={currentProject?.work_dir}
@@ -911,74 +915,19 @@ export const App: React.FC = () => {
 
       {/* Create Project Modal */}
       {isCreateProjectOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md p-6 shadow-2xl">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">{t('createProjectModal.title')}</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">{t('createProjectModal.description')}</p>
-            <form onSubmit={handleCreateProjectSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('createProjectModal.nameLabel')}</label>
-                <input
-                  type="text"
-                  required
-                  disabled={isSavingProject}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500 disabled:opacity-60"
-                  value={newProjectName}
-                  onChange={e => setNewProjectName(e.target.value)}
-                  placeholder={t('createProjectModal.namePlaceholder')}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('createProjectModal.prefixLabel')}</label>
-                <input
-                  type="text"
-                  maxLength={5}
-                  disabled={isSavingProject}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500 disabled:opacity-60 font-mono uppercase"
-                  value={newProjectPrefix}
-                  onChange={e => setNewProjectPrefix(e.target.value.toUpperCase())}
-                  placeholder={t('createProjectModal.prefixPlaceholder')}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('createProjectModal.workDirLabel')}</label>
-                <input
-                  type="text"
-                  required
-                  disabled={isSavingProject}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 font-mono focus:outline-none focus:border-blue-500 disabled:opacity-60"
-                  value={newProjectWorkDir}
-                  onChange={e => setNewProjectWorkDir(e.target.value)}
-                  placeholder={t('createProjectModal.workDirPlaceholder')}
-                />
-              </div>
-
-              {projectFormError && (
-                <div className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900">
-                  {projectFormError}
-                </div>
-              )}
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsCreateProjectOpen(false)}
-                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 transition"
-                >
-                  {t('createModal.cancel')}
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingProject || !newProjectName.trim() || !newProjectWorkDir.trim()}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-xs font-semibold text-white shadow-xs transition flex items-center gap-1.5"
-                >
-                  {isSavingProject && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  {t('createModal.submit')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <CreateProjectModal
+          name={newProjectName}
+          prefix={newProjectPrefix}
+          workDir={newProjectWorkDir}
+          onNameChange={setNewProjectName}
+          onPrefixChange={setNewProjectPrefix}
+          onWorkDirChange={setNewProjectWorkDir}
+          onSubmit={handleCreateProjectSubmit}
+          onClose={() => setIsCreateProjectOpen(false)}
+          isSaving={isSavingProject}
+          error={projectFormError}
+          returnFocusFallbackRef={projectSwitcherButtonRef}
+        />
       )}
     </div>
   );
