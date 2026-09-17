@@ -76,6 +76,18 @@ for (const [name, launch] of Object.entries(launchers)) {
     res = launch(root, [], { env, encoding: 'utf8' });
     assert.match(res.stderr, /fake-engine:libexec/);
   });
+
+  test(`${name}: ignores a relative GRAPH_OPS_ENGINE_DIR and uses the default cache`, { skip }, (t) => {
+    const { tmp, root, env } = setup(t);
+    placeFake(path.join(tmp, 'relative-engine', 'v1.2.3', 'graph-engine'), 'relative');
+    placeFake(path.join(env.HOME, '.cache', 'graph-ops', 'engine', 'v1.2.3', 'graph-engine'), 'home-cache');
+
+    const res = launch(root, ['x'], { env: { ...env, GRAPH_OPS_ENGINE_DIR: 'relative-engine' }, cwd: tmp, encoding: 'utf8' });
+    assert.strictEqual(res.status, 0, res.stderr);
+    assert.strictEqual(res.stdout, '[x]\n');
+    assert.match(res.stderr, /fake-engine:home-cache/);
+    assert.doesNotMatch(res.stderr, /fake-engine:relative/);
+  });
 }
 
 test('scripts/engine-shim.js: reports 128 + signal number when the engine is killed by a signal', { skip }, (t) => {

@@ -11,6 +11,7 @@
 #   2. <root>/../core-go/graph-engine (monorepo checkout)
 #   3. <engine cache>/v<version>/graph-engine, where <engine cache> is
 #      $GRAPH_OPS_ENGINE_DIR or ${XDG_CACHE_HOME:-$HOME/.cache}/graph-ops/engine
+#      (a relative GRAPH_OPS_ENGINE_DIR or XDG_CACHE_HOME is ignored)
 #   4. otherwise `node scripts/install-binary.js --print-path`, which
 #      downloads the release binary for plugin.json's version into the cache
 #      (SHA256-verified against the release's checksums.txt), falling back to
@@ -39,21 +40,25 @@ engine_root=
 case $(uname -s 2>/dev/null || true) in
   MINGW* | MSYS* | CYGWIN*)
     exe=graph-engine.exe
-    if [ -n "${GRAPH_OPS_ENGINE_DIR:-}" ]; then
-      engine_root=$GRAPH_OPS_ENGINE_DIR
-    elif [ -n "${LOCALAPPDATA:-}" ] && command -v cygpath >/dev/null 2>&1; then
-      engine_root=$(cygpath -u "$LOCALAPPDATA")/graph-ops/engine
-    fi
+    case ${GRAPH_OPS_ENGINE_DIR:-} in
+      /* | [A-Za-z]:[\\/]*) engine_root=$GRAPH_OPS_ENGINE_DIR ;;
+      *)
+        if [ -n "${LOCALAPPDATA:-}" ] && command -v cygpath >/dev/null 2>&1; then
+          engine_root=$(cygpath -u "$LOCALAPPDATA")/graph-ops/engine
+        fi
+        ;;
+    esac
     ;;
   *)
-    if [ -n "${GRAPH_OPS_ENGINE_DIR:-}" ]; then
-      engine_root=$GRAPH_OPS_ENGINE_DIR
-    else
-      case ${XDG_CACHE_HOME:-} in
-        /*) engine_root=$XDG_CACHE_HOME/graph-ops/engine ;;
-        *) [ -n "${HOME:-}" ] && engine_root=$HOME/.cache/graph-ops/engine ;;
-      esac
-    fi
+    case ${GRAPH_OPS_ENGINE_DIR:-} in
+      /*) engine_root=$GRAPH_OPS_ENGINE_DIR ;;
+      *)
+        case ${XDG_CACHE_HOME:-} in
+          /*) engine_root=$XDG_CACHE_HOME/graph-ops/engine ;;
+          *) [ -n "${HOME:-}" ] && engine_root=$HOME/.cache/graph-ops/engine ;;
+        esac
+        ;;
+    esac
     ;;
 esac
 

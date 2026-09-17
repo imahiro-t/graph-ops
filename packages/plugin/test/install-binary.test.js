@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const {
   ensureBinary,
@@ -99,6 +100,16 @@ test('engineCacheRoot resolution order', () => {
   assert.strictEqual(
     engineCacheRoot({ env: { GRAPH_OPS_ENGINE_DIR: '/x/engine', LOCALAPPDATA: '/lad' }, platform: 'win32' }),
     path.resolve('/x/engine')
+  );
+});
+
+test('engineCacheRoot ignores a relative GRAPH_OPS_ENGINE_DIR (like a relative XDG_CACHE_HOME)', () => {
+  const posix = (env) => engineCacheRoot({ env, platform: 'linux' });
+  assert.strictEqual(posix({ GRAPH_OPS_ENGINE_DIR: 'engine', HOME: '/home/u' }), path.join('/home/u', '.cache', 'graph-ops', 'engine'));
+  assert.strictEqual(posix({ GRAPH_OPS_ENGINE_DIR: './x', XDG_CACHE_HOME: '/xdg', HOME: '/home/u' }), path.join('/xdg', 'graph-ops', 'engine'));
+  assert.strictEqual(
+    engineCacheRoot({ env: { GRAPH_OPS_ENGINE_DIR: 'engine', LOCALAPPDATA: '/lad' }, platform: 'win32' }),
+    path.join('/lad', 'graph-ops', 'engine')
   );
 });
 
@@ -240,3 +251,114 @@ test('ensureEngine: a successful download prunes other old versions from the cac
   await ensureEngine({ pluginRoot: root, env: { GRAPH_OPS_ENGINE_DIR: engineDir }, log, now: NOW, ...fakeRelease(), retryBackoffMs: 0 });
   assert.deepStrictEqual(fs.readdirSync(engineDir).sort(), ['v1.1.0', 'v1.2.3']);
 });
+
+// Captures everything written to process.stderr while fn runs.
+async function captureStderr(fn) {
+  const chunks = [];
+  const original = process.stderr.write;
+  process.stderr.write = (chunk, ...rest) => {
+    chunks.push(String(chunk));
+    const cb = rest.find((r) => typeof r === 'function');
+    if (cb) cb();
+    return true;
+  };
+  try {
+    return { result: await fn(), stderr: chunks.join('') };
+  } finally {
+    process.stderr.write = original;
+  }
+}
+
+// A fetchFile hook that simulates another process finishing the same install
+// while this one's attempt fails (e.g. rename EPERM/EBUSY on Windows, or a
+// network error after the other process already won the race).
+function racingRelease({ binDir, versionFile }) {
+  const urls = [];
+  return {
+    urls,
+    fetchFile: async (url) => {
+      urls.push(url);
+      writeFile(path.join(binDir, EXE), 'placed by another process', 0o755);
+      if (versionFile !== undefined) writeFile(path.join(binDir, '.version'), versionFile);
+      throw new Error('simulated failure after another process installed the binary');
+    },
+    fetchText: async (url) => {
+      urls.push(url);
+      throw new Error('fetchText must not be reached');
+    },
+  };
+}
+
+test('ensureBinary (versionMarker: false) returns a binary another process placed mid-attempt without retrying or warning', { skip: downloadSkip }, async (t) => {
+  const tmp = makeTmp(t);
+  const root = makePluginRoot(tmp);
+  const binDir = path.join(tmp, 'cache', 'v1.2.3');
+  const release = racingRelease({ binDir });
+
+  const { result, stderr } = await captureStderr(() =>
+    ensureBinary({ pluginRoot: root, binDir, versionMarker: false, ...release, retryBackoffMs: 0 })
+  );
+  assert.strictEqual(result, path.join(binDir, EXE));
+  assert.strictEqual(release.urls.length, 1, 'no second attempt may be made');
+  assert.strictEqual(stderr, '', 'no warning may be printed');
+  assert.deepStrictEqual(fs.readdirSync(binDir), [EXE], 'no temporary download file may be left behind');
+});
+
+test('ensureBinary (versionMarker: true) returns a binary + matching .version another process placed mid-attempt without retrying or warning', { skip: downloadSkip }, async (t) => {
+  const root = makePluginRoot(makeTmp(t));
+  const binDir = path.join(root, 'libexec');
+  const release = racingRelease({ binDir, versionFile: '1.2.3\n' });
+
+  const { result, stderr } = await captureStderr(() => ensureBinary({ pluginRoot: root, ...release, retryBackoffMs: 0 }));
+  assert.strictEqual(result, path.join(binDir, EXE));
+  assert.strictEqual(release.urls.length, 1, 'no second attempt may be made');
+  assert.strictEqual(stderr, '', 'no warning may be printed');
+});
+
+test('ensureBinary (versionMarker: true) does not treat a stale-.version binary as up to date while retrying', { skip: downloadSkip }, async (t) => {
+  const root = makePluginRoot(makeTmp(t));
+  const binDir = path.join(root, 'libexec');
+  const release = racingRelease({ binDir, versionFile: '1.0.0\n' });
+
+  const { result, stderr } = await captureStderr(() => ensureBinary({ pluginRoot: root, ...release, retryBackoffMs: 0 }));
+  assert.strictEqual(result, path.join(binDir, EXE));
+  assert.strictEqual(release.urls.length, MAX_ATTEMPTS, 'every attempt must still be made');
+  assert.match(stderr, /warning: failed to fetch graph-engine v1\.2\.3 .*falling back to the previously cached binary/);
+});
+
+test('ensureBinary removes a leftover temporary file from an earlier run before downloading', { skip: downloadSkip }, async (t) => {
+  const tmp = makeTmp(t);
+  const root = makePluginRoot(tmp);
+  const binDir = path.join(tmp, 'cache', 'v1.2.3');
+  writeFile(path.join(binDir, `${EXE}.download-${process.pid}`), 'leftover');
+
+  const binPath = await ensureBinary({ pluginRoot: root, binDir, versionMarker: false, ...fakeRelease(), retryBackoffMs: 0 });
+  assert.strictEqual(fs.readFileSync(binPath, 'utf8'), BINARY);
+  assert.deepStrictEqual(fs.readdirSync(binDir), [EXE]);
+});
+
+// `bin/graph-engine` execs "$(node scripts/install-binary.js --print-path)",
+// so stdout must be exactly one line: the absolute path, and nothing else.
+for (const where of ['per-user cache', 'libexec']) {
+  test(`install-binary.js --print-path prints exactly the ${where} binary path and exits 0 (no network)`, (t) => {
+    const tmp = makeTmp(t);
+    const root = copyPlugin(tmp, { version: '1.2.3' });
+    const engineDir = path.join(tmp, 'engine');
+    const home = path.join(tmp, 'home');
+    fs.mkdirSync(home);
+    const expected =
+      where === 'libexec'
+        ? writeFile(path.join(root, 'libexec', EXE), 'fake', 0o755)
+        : writeFile(path.join(engineDir, 'v1.2.3', EXE), 'fake', 0o755);
+    if (where === 'libexec') writeFile(path.join(root, 'libexec', '.version'), '1.2.3\n');
+
+    const res = spawnSync(process.execPath, [path.join(root, 'scripts', 'install-binary.js'), '--print-path'], {
+      env: { PATH: process.env.PATH, HOME: home, GRAPH_OPS_ENGINE_DIR: engineDir, LOCALAPPDATA: path.join(tmp, 'lad') },
+      encoding: 'utf8',
+    });
+    assert.strictEqual(res.status, 0, res.stderr);
+    assert.ok(path.isAbsolute(expected));
+    assert.strictEqual(res.stdout, `${expected}\n`);
+    assert.strictEqual(res.stdout.split('\n').length, 2, 'stdout must be a single line');
+  });
+}

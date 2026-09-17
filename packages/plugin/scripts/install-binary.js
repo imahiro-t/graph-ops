@@ -165,13 +165,20 @@ function requestFollowingRedirects(url, redirectsLeft = 5) {
   });
 }
 
+// Streams the body into destPath, which must not exist yet: it is opened with
+// 'wx' (O_CREAT|O_EXCL), so a file or symlink someone planted at the
+// temporary path is never followed or overwritten -- the attempt fails
+// instead (ensureBinary removes its own leftovers before each attempt).
 async function httpGetFollowingRedirects(url, destPath) {
   const res = await requestFollowingRedirects(url);
   await new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(destPath);
+    const file = fs.createWriteStream(destPath, { flags: 'wx' });
     res.pipe(file);
     file.on('finish', () => file.close(() => resolve()));
-    file.on('error', reject);
+    file.on('error', (err) => {
+      res.destroy();
+      reject(err);
+    });
     res.on('error', reject);
   });
 }
@@ -300,7 +307,11 @@ async function downloadAndVerify(
  *
  * The download goes to a per-process temporary file inside binDir and is
  * renamed into place only after verification, so concurrent first runs never
- * expose a partial or unverified binary.
+ * expose a partial or unverified binary. Before every attempt and right after
+ * every failed one, the up-to-date check is repeated, so when another process
+ * (a parallel subagent's first run) installs the binary meanwhile -- including
+ * when this process's own rename then fails with EPERM/EBUSY on Windows --
+ * that binary is returned at once, without further attempts or a warning.
  *
  * Returns the absolute path to the binary. Never re-downloads when the
  * cached binary already matches the plugin's version (so this is cheap and
@@ -324,15 +335,32 @@ async function ensureBinary({
   const exe = localExeName();
   const binPath = path.join(binDir, exe);
   const version = pluginVersion(pluginRoot);
+  const tmpPath = `${binPath}.download-${process.pid}`;
+  // With versionMarker, a binary alone is not enough: a stale libexec binary
+  // must never be returned here as if it were current (it is only used by the
+  // warned fallback after every attempt has failed).
+  const upToDate = () => fs.existsSync(binPath) && (!versionMarker || readCachedVersion(binDir) === version);
+  const removeTmp = () => {
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch {
+      // the temporary file may never have been created; nothing to clean up
+    }
+  };
 
-  if (fs.existsSync(binPath) && (!versionMarker || readCachedVersion(binDir) === version)) {
+  if (upToDate()) {
     return binPath; // already up to date, no network needed
   }
 
   fs.mkdirSync(binDir, { recursive: true });
-  const tmpPath = `${binPath}.download-${process.pid}`;
   let lastErr;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    if (upToDate()) {
+      return binPath; // another process finished the install meanwhile
+    }
+    // A leftover from an earlier run with the same pid would make the 'wx'
+    // open in httpGetFollowingRedirects fail.
+    removeTmp();
     try {
       await downloadAndVerify(pluginRoot, tmpPath, { fetchFile, fetchText });
       if (process.platform !== 'win32') {
@@ -345,10 +373,9 @@ async function ensureBinary({
       return binPath;
     } catch (err) {
       lastErr = err;
-      try {
-        fs.unlinkSync(tmpPath);
-      } catch {
-        // the partial download may never have been created; nothing to clean up
+      removeTmp();
+      if (upToDate()) {
+        return binPath; // another process installed it while this attempt failed
       }
       if (attempt < MAX_ATTEMPTS) {
         await sleep(retryBackoffMs * attempt);
@@ -370,7 +397,8 @@ async function ensureBinary({
  * The per-user directory that holds one v<version>/ subdirectory per
  * downloaded graph-engine version. Resolution order:
  *   1. GRAPH_OPS_ENGINE_DIR (relocates the cache only; never the download
- *      source).
+ *      source). Ignored unless it is an absolute path, like XDG_CACHE_HOME,
+ *      so the cache never depends on the current working directory.
  *   2. win32: %LOCALAPPDATA%\graph-ops\engine
  *   3. otherwise: ${XDG_CACHE_HOME:-$HOME/.cache}/graph-ops/engine
  *      (a relative XDG_CACHE_HOME is ignored, as the XDG spec requires).
@@ -382,7 +410,7 @@ async function ensureBinary({
  * The bin/graph-engine sh shim mirrors this; keep them in sync.
  */
 function engineCacheRoot({ env = process.env, platform = process.platform } = {}) {
-  if (env.GRAPH_OPS_ENGINE_DIR) {
+  if (env.GRAPH_OPS_ENGINE_DIR && path.isAbsolute(env.GRAPH_OPS_ENGINE_DIR)) {
     return path.resolve(env.GRAPH_OPS_ENGINE_DIR);
   }
   if (platform === 'win32') {
@@ -479,7 +507,7 @@ async function ensureEngine({ pluginRoot, env = process.env, now, log = (message
 
   let binPath;
   try {
-    log(`graph-ops: downloading graph-engine v${version} (${assetNameForCurrentTarget()}) into ${cacheDir} (first run only)...\n`);
+    log(`graph-ops: downloading graph-engine v${version} (${assetNameForCurrentTarget()}) into ${cacheDir}...\n`);
     binPath = await ensureBinary({ pluginRoot, binDir: cacheDir, versionMarker: false, ...installOptions });
   } catch (err) {
     if (fs.existsSync(libexecBin)) {
