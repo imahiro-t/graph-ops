@@ -16,10 +16,13 @@ import {
   MonitorCog,
   Languages
 } from 'lucide-react';
-import { Ticket, TicketDetail, TicketStatus, TicketPriority, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
+import { Label, Ticket, TicketDetail, TicketStatus, TicketPriority, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
 import { getStatusMeta, normalizeTicketStatus } from './statusMeta';
 import { getPriorityMeta, matchesPriorityFilter } from './priorityMeta';
+import { matchesLabelFilter } from './labelMeta';
 import { TicketItem } from './components/TicketItem';
+import { LabelFilter } from './components/LabelFilter';
+import { fetchLabels } from './lib/labelsApi';
 import { ClaudeRunnerModal } from './components/ClaudeRunnerModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ProjectSetupModal } from './components/ProjectSetupModal';
@@ -151,6 +154,53 @@ export const App: React.FC = () => {
     setPage(1);
   };
 
+  // Label multi-select (DFLT-00084), see components/LabelFilter.tsx. Unlike
+  // the status/priority filters it starts EMPTY, meaning "no label
+  // filtering": starting with every label checked would, read as OR, hide
+  // every unlabeled ticket, and would need re-syncing whenever a label is
+  // added. Not persisted, same as the other filters.
+  const [filterLabelIds, setFilterLabelIds] = useState<string[]>([]);
+  const changeFilterLabelIds = (next: string[]) => {
+    setFilterLabelIds(next);
+    setPage(1);
+  };
+
+  // The current project's labels: the label filter's options and the
+  // ticket label picker's choices. Re-fetched on project switch, on every
+  // ticket (re)fetch -- so a teammate's label edits show up with the regular
+  // poll -- and after any change in the settings modal's labels tab.
+  const [projectLabels, setProjectLabels] = useState<Label[]>([]);
+  const currentProjectIdRef = useLatest(currentProject?.id ?? '');
+  const refreshProjectLabels = useCallback(
+    async (projectId: string = currentProjectIdRef.current) => {
+      if (!projectId) {
+        setProjectLabels([]);
+        return;
+      }
+      try {
+        const labels = await fetchLabels(tRef.current, projectId);
+        // Ignore a response for a project that is no longer current.
+        if (projectId === currentProjectIdRef.current) setProjectLabels(labels);
+      } catch (e) {
+        // Keep the previous list: clearing it would also clear the filter.
+        console.error('Failed to load labels', e);
+      }
+    },
+    [currentProjectIdRef, tRef]
+  );
+  useEffect(() => {
+    refreshProjectLabels(currentProject?.id ?? '');
+  }, [currentProject?.id, refreshProjectLabels]);
+  // A selected label that no longer exists in the current project (deleted,
+  // or left behind by a project switch) is dropped from the selection, so
+  // the filter never narrows by a label the panel can't show.
+  useEffect(() => {
+    setFilterLabelIds(prev => {
+      const next = prev.filter(id => projectLabels.some(l => l.id === id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [projectLabels]);
+
   // Pagination -- ticket details (nodes/edges/artifacts) are fetched for
   // every ticket up front (see fetchAllTickets), so this is purely a
   // client-side slice of the already-filtered list, not a server-paged
@@ -165,6 +215,11 @@ export const App: React.FC = () => {
   // Stored as a Date (not a pre-formatted string) so the displayed text
   // re-formats itself if the UI language changes without a refetch.
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
+  // Every completed ticket fetch (startup, the 15s poll, manual refresh,
+  // after an edit) also re-fetches the current project's labels.
+  useEffect(() => {
+    if (lastFetchedAt) refreshProjectLabels();
+  }, [lastFetchedAt, refreshProjectLabels]);
 
   // Modals
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -314,6 +369,9 @@ export const App: React.FC = () => {
       return;
     }
     setCurrentProject(project);
+    // Label ids are per project, so the previous project's selection can't
+    // apply to the new one.
+    setFilterLabelIds([]);
     setPage(1);
     fetchAllTickets();
   };
@@ -333,6 +391,7 @@ export const App: React.FC = () => {
     setIsCreateProjectOpen(false);
     setProjectSetupDirectory('');
     setCurrentProject(project);
+    setFilterLabelIds([]);
     setPage(1);
     await fetchProjects();
     fetchAllTickets();
@@ -383,6 +442,8 @@ export const App: React.FC = () => {
     if (filterAssignee && t.assignee !== filterAssignee) return false;
     // Unexpected values count as MEDIUM, matching the badge (priorityMeta.ts).
     if (!matchesPriorityFilter(t.priority, filterPriorities)) return false;
+    // OR across the selected labels; nothing selected passes everything.
+    if (!matchesLabelFilter(t.labels, filterLabelIds)) return false;
     if (filterQuery) {
       const q = filterQuery.toLowerCase();
       const matchId = t.id.toLowerCase().includes(q);
@@ -743,6 +804,10 @@ export const App: React.FC = () => {
                 </>
               )}
             </div>
+
+            {/* Label multi-select (DFLT-00084), AND-combined with the filters
+                above; see LabelFilter.tsx. */}
+            <LabelFilter labels={projectLabels} selectedIds={filterLabelIds} onChange={changeFilterLabelIds} />
           </div>
 
           <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400 text-xs">
@@ -828,6 +893,7 @@ export const App: React.FC = () => {
                   onToggleExpand={() => handleToggleExpand(ticket.id)}
                   onRefresh={fetchAllTickets}
                   myName={myName}
+                  projectLabels={projectLabels}
                 />
               ))}
 
@@ -895,6 +961,11 @@ export const App: React.FC = () => {
         onProjectsChanged={refreshProjects}
         onPaginationPageSizeChanged={setTicketsPerPage}
         onMyNameChanged={setMyName}
+        onLabelsChanged={() => {
+          // A rename/recolor/delete shows on tickets, so re-fetch both.
+          refreshProjectLabels();
+          fetchAllTickets();
+        }}
       />
 
       {/* Project setup / create dialog (DFLT-00080) */}

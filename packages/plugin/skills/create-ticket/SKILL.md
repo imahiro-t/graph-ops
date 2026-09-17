@@ -35,13 +35,20 @@ Keep this pass lightweight (a couple of exchanges, not a full requirements inter
 
 Once the title/description are settled, judge the ticket's priority (`HIGH`/`MEDIUM`/`LOW`) from its content -- urgency, blast radius, whether it blocks other work, how visible the problem is -- and present that judgment to the user together with your reasoning, then ask them to confirm or override it before creating the ticket. If the user has no particular preference, don't insist: the ticket can be created without `--priority`, and it then gets the default priority `MEDIUM`.
 
+At the same point, ask the user whether they want any labels on the ticket (for example "バグ" / "機能追加"). Labels are optional -- if they want none, create the ticket without `--label`. Keep in mind:
+
+- Only labels already registered for the target project can be used. Labels are registered, renamed and deleted only in the Web UI's settings (設定 → プロジェクト単位設定 → ラベル); there is no CLI command to create, rename, delete or list labels.
+- Names are matched ignoring surrounding spaces and letter case.
+- If any given name isn't registered, `create-ticket` fails with `LABEL_NOT_FOUND` and **no ticket is created**. The error message lists the project's registered label names -- pick from those with the user (or have them register the label in the Web UI first) and run the command again.
+
 ## 3. Create the ticket
 
-Use the title/description agreed on in step 2, not the user's original raw message. If a priority other than the default was confirmed in step 2, pass it via `--priority`:
+Use the title/description agreed on in step 2, not the user's original raw message. If a priority other than the default was confirmed in step 2, pass it via `--priority`; pass each confirmed label with its own `--label <name>` (repeat the flag for several labels):
 
 ```bash
 graph-engine create-ticket "<title>" "<description>"
 graph-engine create-ticket "<title>" "<description>" --priority <HIGH|MEDIUM|LOW>
+graph-engine create-ticket "<title>" "<description>" --label "<name>" --label "<name>"
 ```
 
 Omitting `--priority` creates the ticket with priority `MEDIUM` (the default). Every ticket always has one of `HIGH`/`MEDIUM`/`LOW` -- a priority can never be left empty.

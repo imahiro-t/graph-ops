@@ -34,7 +34,12 @@
     "prioritySelected": "優先度: {{count}}件選択",
     "priorityGroupLabel": "優先度で絞り込む",
     "refreshTitle": "最新の状態に更新",
-    "updatedAt": "{{time}} 更新"
+    "updatedAt": "{{time}} 更新",
+    "labelAll": "ラベル: すべて",
+    "labelSelected": "ラベル: {{count}}件選択",
+    "labelGroupLabel": "ラベルで絞り込む",
+    "labelClear": "選択を解除",
+    "labelEmpty": "このプロジェクトにはラベルがありません"
   },
   "summary": {
     "title": "全チケット概要",
@@ -259,7 +264,8 @@
       "reviewGates": "レビューゲート",
       "skills": "スキル",
       "templates": "テンプレート",
-      "appSettings": "アプリ設定"
+      "appSettings": "アプリ設定",
+      "labels": "ラベル"
     },
     "unsavedChanges": {
       "confirmMessage": "未保存の変更があります。このまま続けると変更内容は失われます。続けますか？"
@@ -422,6 +428,27 @@
         "notSet": "未設定",
         "confirmDelete": "プロジェクト「{{name}}」（{{id}}）を削除します。このプロジェクトに属するすべてのチケット・ノード・成果物が完全に削除され、この操作は取り消せません。本当に削除しますか？"
       }
+    },
+    "labels": {
+      "title": "ラベル",
+      "description": "チケットに付けるラベルを、選択中のプロジェクト単位で管理します。変更はすぐに保存され、チームで共有されます。",
+      "selectProject": "プロジェクト単位設定でプロジェクトを選択してください。",
+      "loading": "読み込み中...",
+      "empty": "ラベルはまだありません。",
+      "name": "名前",
+      "color": "色",
+      "namePlaceholder": "ラベル名（例: バグ）",
+      "create": "作成",
+      "rename": "名前を変更",
+      "save": "保存",
+      "cancel": "キャンセル",
+      "delete": "削除",
+      "renameLabel": "「{{name}}」の新しい名前",
+      "colorGroup": "「{{name}}」の色",
+      "newColorGroup": "新しいラベルの色",
+      "usage": "{{count}}件のチケットで使用中",
+      "confirmDelete": "ラベル「{{name}}」を削除しますか？",
+      "confirmDeleteInUse": "ラベル「{{name}}」は{{count}}件のチケットで使用中です。削除すると、すべてのチケットからこのラベルが外れます。削除しますか？"
     }
   },
   "errors": {
@@ -447,6 +474,36 @@
     "INVALID_REPORT_TEMPLATE": "レポートテンプレートに必要な構造マーカーが含まれていません。",
     "PROJECT_LOCAL_PATH_NOT_SET": "このプロジェクトはこの環境でローカルパスが未設定です。「アプリ設定」タブ（全体設定）のプロジェクト管理でローカルパスを設定してください。",
     "PROJECT_CREATED_LOCAL_PATH_NOT_SAVED": "プロジェクトはDBに作成されましたが、この環境のローカルパスの保存に失敗しました。作成し直さずに、「アプリ設定」タブ（全体設定）のプロジェクト管理でローカルパスを設定してください。",
+    "LABEL_NOT_FOUND": "ラベルが見つかりません。削除されたか、別のプロジェクトのラベルです。",
+    "LABEL_NAME_TAKEN": "同じ名前のラベルがすでにあります（大文字小文字は区別しません）。",
+    "INVALID_LABEL_NAME": "ラベル名は 1〜50 文字で入力してください。",
+    "INVALID_LABEL_COLOR": "ラベルの色が不正です。パレットから選んでください。",
     "UNKNOWN": "予期しないエラーが発生しました。再度お試しください。"
+  },
+  "labels": {
+    "colors": {
+      "gray": "グレー",
+      "red": "赤",
+      "orange": "オレンジ",
+      "amber": "琥珀",
+      "green": "緑",
+      "teal": "ティール",
+      "blue": "青",
+      "indigo": "藍",
+      "purple": "紫",
+      "pink": "ピンク"
+    }
+  },
+  "ticket": {
+    "labels": {
+      "title": "ラベル",
+      "none": "ラベルなし",
+      "edit": "ラベルを編集",
+      "groupLabel": "チケット {{id}} のラベル",
+      "noRegistered": "設定画面でラベルを登録してください。",
+      "saveError": "ラベルを保存できませんでした: {{message}}",
+      "more": "+{{count}}",
+      "moreSr": "他{{count}}件のラベル: {{names}}"
+    }
   }
 }

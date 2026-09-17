@@ -22,12 +22,14 @@ import {
   Archive,
   RotateCcw
 } from 'lucide-react';
-import { TicketDetail, TicketPriority } from '../types';
+import { Label, TicketDetail, TicketPriority } from '../types';
 import { getStatusMeta, TODO_META } from '../statusMeta';
 import { GherkinViewer } from './GherkinViewer';
 import { MarkdownViewer } from './MarkdownViewer';
 import { NodeTypeBadge } from './NodeTypeBadge';
 import { PrioritySelect } from './PrioritySelect';
+import { LabelChip } from './LabelChip';
+import { LabelSelect } from './LabelSelect';
 import { StatusLiveRegion } from './StatusLiveRegion';
 import { useClaudeLaunch } from '../hooks/useClaudeLaunch';
 import { formatDateTime, formatTime } from '../i18n/formatDate';
@@ -47,14 +49,23 @@ interface Props {
   // viewer regardless of whether they've configured their own name
   // (completion criterion 5: assignee must be identifiable to any viewer).
   myName: string;
+  // The current project's registered labels (DFLT-00084): the choices of the
+  // detail view's label picker. Omitted/empty makes the picker point the
+  // user to Settings instead.
+  projectLabels?: Label[];
 }
+
+// How many label chips the collapsed header row shows before folding the
+// rest into "+N" -- the row already carries id/status/priority/title/assignee.
+const MAX_HEADER_LABELS = 3;
 
 export const TicketItem: React.FC<Props> = ({
   ticket,
   isExpanded,
   onToggleExpand,
   onRefresh,
-  myName
+  myName,
+  projectLabels = []
 }) => {
   const { t, i18n } = useTranslation();
   const [promptText, setPromptText] = useState('');
@@ -511,6 +522,10 @@ export const TicketItem: React.FC<Props> = ({
 
   const ticketStatusMeta = getStatusMeta(ticket.status);
 
+  const ticketLabels = ticket.labels ?? [];
+  const headerLabels = ticketLabels.slice(0, MAX_HEADER_LABELS);
+  const hiddenLabelCount = ticketLabels.length - headerLabels.length;
+
   return (
     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs transition-all overflow-clip mb-4">
       {/* Header Row */}
@@ -560,6 +575,38 @@ export const TicketItem: React.FC<Props> = ({
           <span className="font-bold text-slate-900 dark:text-slate-100 text-sm truncate min-w-0">
             {ticket.title}
           </span>
+
+          {/* Labels (DFLT-00084): at most MAX_HEADER_LABELS chips, the rest
+              folded into "+N" whose title lists every label name. shrink-0
+              keeps them intact; the title above is what truncates. */}
+          {ticketLabels.length > 0 && (
+            <span className="flex items-center gap-1 shrink-0" data-testid="ticket-header-labels">
+              {headerLabels.map(l => (
+                <LabelChip key={l.id} name={l.name} color={l.color} />
+              ))}
+              {hiddenLabelCount > 0 && (
+                <span
+                  data-testid="ticket-header-labels-more"
+                  title={ticketLabels.map(l => l.name).join(', ')}
+                  className="px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-semibold"
+                >
+                  {/* The bare "+N" means nothing read aloud, and screen
+                      readers don't reliably read title: they get the
+                      folded label names as sr-only text instead. */}
+                  <span aria-hidden="true">{t('ticket.labels.more', { count: hiddenLabelCount })}</span>
+                  <span className="sr-only">
+                    {t('ticket.labels.moreSr', {
+                      count: hiddenLabelCount,
+                      names: ticketLabels
+                        .slice(MAX_HEADER_LABELS)
+                        .map(l => l.name)
+                        .join(', ')
+                    })}
+                  </span>
+                </span>
+              )}
+            </span>
+          )}
 
           {rejectedApprovalNodes.length > 0 && (
             <span
@@ -786,6 +833,16 @@ export const TicketItem: React.FC<Props> = ({
             )}
             <div>
               {t('ticketItem.createdAt')}: <span className="font-mono text-slate-700 dark:text-slate-300">{formatDateTime(ticket.created_at, i18n.language)}</span>
+            </div>
+            {/* Labels (DFLT-00084): every label, plus the picker. */}
+            <div className="flex flex-wrap items-center gap-1.5" data-testid="ticket-detail-labels">
+              <span>{t('ticket.labels.title')}:</span>
+              {ticketLabels.length === 0 ? (
+                <span className="text-slate-500 dark:text-slate-400">{t('ticket.labels.none')}</span>
+              ) : (
+                ticketLabels.map(l => <LabelChip key={l.id} name={l.name} color={l.color} />)
+              )}
+              <LabelSelect ticketId={ticket.id} labels={ticketLabels} projectLabels={projectLabels} onSaved={onRefresh} />
             </div>
             {ticket.closed_reason && (
               <div className="flex items-center gap-1 text-slate-700 dark:text-slate-300">

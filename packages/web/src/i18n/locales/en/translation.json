@@ -34,7 +34,12 @@
     "prioritySelected": "Priority: {{count}} selected",
     "priorityGroupLabel": "Filter by priority",
     "refreshTitle": "Refresh to the latest state",
-    "updatedAt": "Updated {{time}}"
+    "updatedAt": "Updated {{time}}",
+    "labelAll": "Labels: All",
+    "labelSelected": "Labels: {{count}} selected",
+    "labelGroupLabel": "Filter by label",
+    "labelClear": "Clear selection",
+    "labelEmpty": "This project has no labels"
   },
   "summary": {
     "title": "All Tickets Overview",
@@ -259,7 +264,8 @@
       "reviewGates": "Review Gates",
       "skills": "Skills",
       "templates": "Templates",
-      "appSettings": "App Settings"
+      "appSettings": "App Settings",
+      "labels": "Labels"
     },
     "unsavedChanges": {
       "confirmMessage": "You have unsaved changes. They will be lost if you continue. Continue anyway?"
@@ -422,6 +428,27 @@
         "notSet": "Not set",
         "confirmDelete": "This will delete project \"{{name}}\" ({{id}}). Every ticket, node, and artifact under this project will be permanently deleted, and this action cannot be undone. Are you sure you want to delete it?"
       }
+    },
+    "labels": {
+      "title": "Labels",
+      "description": "Manage the labels tickets can carry, per selected project. Changes are saved immediately and shared with your team.",
+      "selectProject": "Select a project under Project settings.",
+      "loading": "Loading...",
+      "empty": "No labels yet.",
+      "name": "Name",
+      "color": "Color",
+      "namePlaceholder": "Label name (e.g. Bug)",
+      "create": "Create",
+      "rename": "Rename",
+      "save": "Save",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "renameLabel": "New name for \"{{name}}\"",
+      "colorGroup": "Color of \"{{name}}\"",
+      "newColorGroup": "Color of the new label",
+      "usage": "Tickets using it: {{count}}",
+      "confirmDelete": "Delete the label \"{{name}}\"?",
+      "confirmDeleteInUse": "The label \"{{name}}\" is in use on {{count}} ticket(s). Deleting it removes it from all of them. Delete it?"
     }
   },
   "errors": {
@@ -447,6 +474,36 @@
     "INVALID_REPORT_TEMPLATE": "The report template is missing required structural markers.",
     "PROJECT_LOCAL_PATH_NOT_SET": "This project has no local path in this environment. Set its local path under Project Management in the App Settings tab (Global Settings).",
     "PROJECT_CREATED_LOCAL_PATH_NOT_SAVED": "The project was created in the DB, but saving its local path for this environment failed. Do not create it again; set its local path under Project Management in the App Settings tab (Global Settings) instead.",
+    "LABEL_NOT_FOUND": "Label not found. It was deleted or belongs to another project.",
+    "LABEL_NAME_TAKEN": "A label with the same name already exists (case-insensitive).",
+    "INVALID_LABEL_NAME": "Label names must be 1 to 50 characters.",
+    "INVALID_LABEL_COLOR": "Invalid label color. Choose one from the palette.",
     "UNKNOWN": "An unexpected error occurred. Please try again."
+  },
+  "labels": {
+    "colors": {
+      "gray": "Gray",
+      "red": "Red",
+      "orange": "Orange",
+      "amber": "Amber",
+      "green": "Green",
+      "teal": "Teal",
+      "blue": "Blue",
+      "indigo": "Indigo",
+      "purple": "Purple",
+      "pink": "Pink"
+    }
+  },
+  "ticket": {
+    "labels": {
+      "title": "Labels",
+      "none": "No labels",
+      "edit": "Edit labels",
+      "groupLabel": "Labels of ticket {{id}}",
+      "noRegistered": "Register labels in Settings first.",
+      "saveError": "Could not save labels: {{message}}",
+      "more": "+{{count}}",
+      "moreSr": "{{count}} more labels: {{names}}"
+    }
   }
 }

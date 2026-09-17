@@ -100,6 +100,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/current-project", s.handleGetCurrentProject)
 	mux.HandleFunc("PUT /api/current-project", s.handleSetCurrentProject)
 
+	mux.HandleFunc("GET /api/projects/{id}/labels", s.handleListLabels)
+	mux.HandleFunc("POST /api/projects/{id}/labels", s.handleCreateLabel)
+	mux.HandleFunc("PATCH /api/labels/{id}", s.handleUpdateLabel)
+	mux.HandleFunc("DELETE /api/labels/{id}", s.handleDeleteLabel)
+
 	mux.HandleFunc("POST /api/tickets/{id}/refine", s.handleRefine)
 	mux.HandleFunc("POST /api/tickets/{id}/close", s.handleCloseTicket)
 	mux.HandleFunc("POST /api/tickets/{id}/reopen", s.handleReopenTicket)
@@ -455,9 +460,11 @@ func statusForError(err error, fallback int) int {
 			domain.ErrCodeNoCurrentProject, domain.ErrCodeValidation, domain.ErrCodeTitleRequired,
 			domain.ErrCodeInvalidScope, domain.ErrCodeCatalogCycleDetected, domain.ErrCodeCatalogUnknownReference,
 			domain.ErrCodeCatalogDuplicateNode, domain.ErrCodeCatalogInvalidDocument, domain.ErrCodeInvalidMaxIterations,
-			domain.ErrCodeInvalidReportTemplate, domain.ErrCodeProjectLocalPathNotSet:
+			domain.ErrCodeInvalidReportTemplate, domain.ErrCodeProjectLocalPathNotSet,
+			domain.ErrCodeInvalidLabelName, domain.ErrCodeInvalidLabelColor, domain.ErrCodeLabelNameTaken:
 			return http.StatusBadRequest
-		case domain.ErrCodeProjectNotFound, domain.ErrCodeTicketNotFound, domain.ErrCodeNodeNotFound, domain.ErrCodeArtifactNotFound:
+		case domain.ErrCodeProjectNotFound, domain.ErrCodeTicketNotFound, domain.ErrCodeNodeNotFound, domain.ErrCodeArtifactNotFound,
+			domain.ErrCodeLabelNotFound:
 			return http.StatusNotFound
 		}
 	}

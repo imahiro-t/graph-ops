@@ -17,6 +17,7 @@ import { ReviewGatesEditor } from './settings/ReviewGatesEditor';
 import { SkillsEditor } from './settings/SkillsEditor';
 import { TemplatesEditor } from './settings/TemplatesEditor';
 import { AppSettingsEditor } from './settings/AppSettingsEditor';
+import { LabelsEditor } from './settings/LabelsEditor';
 
 interface Props {
   isOpen: boolean;
@@ -30,9 +31,12 @@ interface Props {
   onProjectsChanged: () => void;
   onPaginationPageSizeChanged: (size: number) => void;
   onMyNameChanged: (name: string) => void;
+  // The labels tab (DFLT-00084) calls this after every saved label change so
+  // App.tsx can re-fetch its label list and tickets.
+  onLabelsChanged?: () => void;
 }
 
-type Tab = 'nodeTypes' | 'reviewGates' | 'skills' | 'templates' | 'appSettings';
+type Tab = 'nodeTypes' | 'reviewGates' | 'skills' | 'templates' | 'labels' | 'appSettings';
 
 export const SettingsModal: React.FC<Props> = ({
   isOpen,
@@ -41,7 +45,8 @@ export const SettingsModal: React.FC<Props> = ({
   currentProject,
   onProjectsChanged,
   onPaginationPageSizeChanged,
-  onMyNameChanged
+  onMyNameChanged,
+  onLabelsChanged
 }) => {
   const { t } = useTranslation();
   const [scope, setScope] = useState<SettingsScope>('global');
@@ -110,6 +115,7 @@ export const SettingsModal: React.FC<Props> = ({
     { key: 'reviewGates', labelKey: 'settings.tabs.reviewGates' },
     { key: 'skills', labelKey: 'settings.tabs.skills' },
     { key: 'templates', labelKey: 'settings.tabs.templates' },
+    { key: 'labels', labelKey: 'settings.tabs.labels' },
     { key: 'appSettings', labelKey: 'settings.tabs.appSettings' }
   ];
 
@@ -192,7 +198,7 @@ export const SettingsModal: React.FC<Props> = ({
             Only the project-scoped editors are affected -- the modal, the
             global scope and the App Settings tab (where the path is set)
             keep working. */}
-        {scope === 'project' && selectedProject && !selectedProject.local_path && (
+        {scope === 'project' && selectedProject && !selectedProject.local_path && tab !== 'labels' && (
           <div role="status" className="mx-6 mt-3 p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[11px] rounded-lg border border-amber-200 dark:border-amber-800 shrink-0">
             {t('settings.scope.localPathNotSet')}
           </div>
@@ -228,6 +234,12 @@ export const SettingsModal: React.FC<Props> = ({
           )}
           {tab === 'templates' && (
             <TemplatesEditor scope={scope} projectId={selectedProjectId} canEdit={canEdit} onDirtyChange={setDirty} />
+          )}
+          {/* Labels (DFLT-00084) live in the DB, not in team-tier files, so
+              they need only a selected project -- no local path -- and only
+              make sense under the project scope. */}
+          {tab === 'labels' && (
+            <LabelsEditor projectId={scope === 'project' ? selectedProjectId : ''} onLabelsChanged={onLabelsChanged} />
           )}
           {tab === 'appSettings' && (
             <AppSettingsEditor

@@ -6,6 +6,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/graph-ops/core-go/internal/config"
@@ -43,13 +44,40 @@ func (e *GraphEngine) CreateTicket(projectID, title, description string) (domain
 // directly -- e.g. from a future call site that doesn't already funnel
 // through the CLI/HTTP validation this ticket's other entry points perform.
 func (e *GraphEngine) CreateTicketWithPriority(projectID, title, description string, priority *domain.TicketPriority) (domain.Ticket, error) {
+	return e.CreateTicketWithOptions(projectID, title, description, CreateTicketOptions{Priority: priority})
+}
+
+// CreateTicketOptions are CreateTicketWithOptions' optional settings.
+type CreateTicketOptions struct {
+	// Priority: nil -> domain.DefaultTicketPriority.
+	Priority *domain.TicketPriority
+	// LabelNames (DFLT-00084) are resolved against projectID's registered
+	// labels (see resolveLabelNames); any unregistered name fails the call
+	// before the ticket is created.
+	LabelNames []string
+}
+
+// CreateTicketWithOptions is CreateTicketWithPriority plus labels given by
+// name (DFLT-00084), following the same "new method, old ones delegate"
+// approach DFLT-00059 took so the existing signatures stay frozen.
+func (e *GraphEngine) CreateTicketWithOptions(projectID, title, description string, opts CreateTicketOptions) (domain.Ticket, error) {
 	value := domain.DefaultTicketPriority
-	if priority != nil {
-		parsed, err := domain.ParseTicketPriority(string(*priority))
+	if opts.Priority != nil {
+		parsed, err := domain.ParseTicketPriority(string(*opts.Priority))
 		if err != nil {
 			return domain.Ticket{}, err
 		}
 		value = parsed
+	}
+	var labels []domain.Label
+	if len(opts.LabelNames) > 0 {
+		ids, err := e.resolveLabelNames(projectID, opts.LabelNames)
+		if err != nil {
+			return domain.Ticket{}, err
+		}
+		for _, id := range ids {
+			labels = append(labels, domain.Label{ID: id})
+		}
 	}
 	return e.repo.CreateTicket(projectID, domain.Ticket{
 		Title:          title,
@@ -58,7 +86,74 @@ func (e *GraphEngine) CreateTicketWithPriority(projectID, title, description str
 		AutoExecutable: true,
 		Blocked:        false,
 		Priority:       value,
+		Labels:         labels,
 	})
+}
+
+// resolveLabelNames maps label names to the IDs of projectID's registered
+// labels (DFLT-00084), for the CLI's --label flags. Each name is trimmed and
+// matched case-insensitively; repeated names collapse to one ID. If any name
+// matches nothing, it returns LABEL_NOT_FOUND naming every unmatched name
+// and every label the project does have, and the caller writes nothing --
+// there is no CLI command to list labels, so the message is how an agent
+// learns the valid names.
+func (e *GraphEngine) resolveLabelNames(projectID string, names []string) ([]string, error) {
+	registered, err := e.repo.ListLabelsByProject(projectID)
+	if err != nil {
+		return nil, err
+	}
+	var ids, missing []string
+	seen := map[string]bool{}
+	for _, raw := range names {
+		name := strings.TrimSpace(raw)
+		var match string
+		for _, l := range registered {
+			if strings.EqualFold(l.Name, name) {
+				match = l.ID
+				break
+			}
+		}
+		if match == "" {
+			missing = append(missing, fmt.Sprintf("%q", name))
+			continue
+		}
+		if !seen[match] {
+			seen[match] = true
+			ids = append(ids, match)
+		}
+	}
+	if len(missing) > 0 {
+		available := make([]string, 0, len(registered))
+		for _, l := range registered {
+			available = append(available, fmt.Sprintf("%q", l.Name))
+		}
+		list := strings.Join(available, ", ")
+		if list == "" {
+			list = "(none; register labels in the Web UI settings)"
+		}
+		return nil, domain.NewAPIError(domain.ErrCodeLabelNotFound,
+			"LABEL_NOT_FOUND: label(s) %s not registered in project %s; registered labels: %s",
+			strings.Join(missing, ", "), projectID, list)
+	}
+	return ids, nil
+}
+
+// LabelChange describes what RefineTicketWithLabels does to a ticket's
+// labels (DFLT-00084), shaped like PriorityChange: the zero value
+// (NoLabelChange()) leaves them untouched, SetLabelsByName replaces them
+// with exactly the named set.
+type LabelChange struct {
+	names []string
+	set   bool
+}
+
+// NoLabelChange leaves the ticket's labels untouched.
+func NoLabelChange() LabelChange { return LabelChange{} }
+
+// SetLabelsByName replaces the ticket's labels with the named ones, resolved
+// against the ticket's project (see resolveLabelNames).
+func SetLabelsByName(names []string) LabelChange {
+	return LabelChange{names: append([]string(nil), names...), set: true}
 }
 
 // PriorityChange describes what RefineTicket should do to a ticket's
@@ -111,6 +206,15 @@ func SetPriority(p domain.TicketPriority) PriorityChange {
 // ticket.Status directly and unconditionally, so without this check it would
 // be a silent backdoor out of CLOSED that bypasses ReopenTicket entirely.
 func (e *GraphEngine) RefineTicket(ticketID string, description string, priority PriorityChange) (*domain.Ticket, error) {
+	return e.RefineTicketWithLabels(ticketID, description, priority, NoLabelChange())
+}
+
+// RefineTicketWithLabels is RefineTicket plus a label change (DFLT-00084).
+// The CLOSED check runs first, then label names are resolved; an unresolved
+// name fails before anything is written, so the description, priority,
+// status and refined_at all stay as they were. Otherwise the labels are
+// replaced in the same UpdateTicket call as everything else.
+func (e *GraphEngine) RefineTicketWithLabels(ticketID string, description string, priority PriorityChange, labels LabelChange) (*domain.Ticket, error) {
 	ticket, err := e.repo.GetTicket(ticketID)
 	if err != nil {
 		return nil, err
@@ -122,8 +226,19 @@ func (e *GraphEngine) RefineTicket(ticketID string, description string, priority
 		return nil, fmt.Errorf("ticket %s is CLOSED; reopen it first with reopen-ticket", ticketID)
 	}
 
-	newDescription := ticket.Description
 	patch := store.TicketPatch{}
+	if labels.set {
+		ids, err := e.resolveLabelNames(ticket.ProjectID, labels.names)
+		if err != nil {
+			return nil, err
+		}
+		if ids == nil {
+			ids = []string{}
+		}
+		patch.LabelIDs = &ids
+	}
+
+	newDescription := ticket.Description
 	if description != "" {
 		newDescription = description
 		now := time.Now().UTC().Format(time.RFC3339Nano)

@@ -187,6 +187,11 @@ func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 		// (DFLT-00083): a priority can't be cleared, see
 		// domain.Ticket.Priority's doc comment.
 		Priority nullableString `json:"priority"`
+		// LabelIDs (DFLT-00084): absent leaves labels unchanged, an array
+		// replaces them (duplicates collapsed, [] removes all), null is a
+		// 400. Every ID must be a label of the ticket's project, otherwise
+		// the whole PATCH is a 400 LABEL_NOT_FOUND and nothing is written.
+		LabelIDs nullableStringSlice `json:"label_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -196,6 +201,15 @@ func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 	patch := store.TicketPatch{
 		Title: body.Title, Description: body.Description, Status: body.Status,
 		AutoExecutable: body.AutoExecutable, Blocked: body.Blocked,
+	}
+	if body.LabelIDs.Present {
+		if body.LabelIDs.Null {
+			writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation,
+				"label_ids cannot be null: send [] to remove every label"))
+			return
+		}
+		ids := body.LabelIDs.Value
+		patch.LabelIDs = &ids
 	}
 	if body.Assignee.Present {
 		patch.Assignee = &body.Assignee.Value
@@ -215,9 +229,12 @@ func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 		patch.Priority = &priority
 	}
 
+	// Errors go through statusForTicketUpdateError: a missing ticket is 404
+	// TICKET_NOT_FOUND, an invalid label_ids entry 400, anything
+	// unclassified still 500.
 	updated, err := s.repo.UpdateTicket(id, patch)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeError(w, statusForTicketUpdateError(err), err)
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)

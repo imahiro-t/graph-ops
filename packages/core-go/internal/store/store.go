@@ -27,6 +27,21 @@ type TicketPatch struct {
 	Assignee        **string
 	GraphExpandedAt *string
 	Priority        *domain.TicketPriority
+	// LabelIDs (DFLT-00084): nil leaves the ticket's labels unchanged; a
+	// non-nil slice replaces them with exactly that set (duplicates are
+	// collapsed, an empty slice removes every label). Every ID must name a
+	// label of the ticket's own project, otherwise UpdateTicket returns
+	// LABEL_NOT_FOUND and writes nothing at all -- not even the other
+	// fields of the same patch.
+	LabelIDs *[]string
+}
+
+// LabelPatch carries optional field updates for UpdateLabel; nil fields are
+// left unchanged. Name is normalized (domain.NormalizeLabelName) and Color
+// validated (domain.ParseLabelColor) by the store.
+type LabelPatch struct {
+	Name  *string
+	Color *string
 }
 
 // NodePatch carries optional field updates for UpdateNode; nil fields are
@@ -65,6 +80,10 @@ type GraphRepository interface {
 
 	// CreateTicket mints a new ID (<project's prefix>-<seq:05d>) from
 	// projectID's own counter and ignores t.ID/t.ProjectID.
+	//
+	// t.Labels' IDs (only the IDs) are attached in the same transaction; a
+	// label that doesn't exist or belongs to another project fails the whole
+	// call with LABEL_NOT_FOUND and no ticket is created.
 	CreateTicket(projectID string, t domain.Ticket) (domain.Ticket, error)
 	GetTicket(id string) (*domain.Ticket, error)
 	GetTicketDetail(id string) (*domain.TicketDetail, error)
@@ -73,6 +92,8 @@ type GraphRepository interface {
 	// the default, project-scoped listing.
 	ListTickets() ([]domain.Ticket, error)
 	ListTicketsByProject(projectID string) ([]domain.Ticket, error)
+	// UpdateTicket applies patch in one transaction. A missing ticket is
+	// TICKET_NOT_FOUND; see TicketPatch.LabelIDs for label validation.
 	UpdateTicket(id string, patch TicketPatch) (domain.Ticket, error)
 	DeleteTicket(id string) error
 
@@ -109,6 +130,22 @@ type GraphRepository interface {
 	// it referenced this project. A no-op (not an error) if the project
 	// doesn't exist.
 	DeleteProject(id string) error
+
+	// Labels (DFLT-00084). CreateLabel/UpdateLabel normalize the name and
+	// validate the color (INVALID_LABEL_NAME/INVALID_LABEL_COLOR), and reject
+	// a name another label of the same project already has, compared
+	// case-insensitively (LABEL_NAME_TAKEN). A missing project is
+	// PROJECT_NOT_FOUND and a missing label LABEL_NOT_FOUND.
+	CreateLabel(projectID, name, color string) (domain.Label, error)
+	// GetLabel returns nil (not an error) when the label doesn't exist.
+	GetLabel(id string) (*domain.Label, error)
+	// ListLabelsByProject returns the project's labels sorted by name
+	// (case-insensitively), each with the number of tickets carrying it.
+	ListLabelsByProject(projectID string) ([]domain.LabelUsage, error)
+	UpdateLabel(id string, patch LabelPatch) (domain.Label, error)
+	// DeleteLabel detaches the label from every ticket and deletes it, in
+	// one transaction, returning how many tickets it was removed from.
+	DeleteLabel(id string) (removedFromTickets int, err error)
 
 	// GetCurrentProjectID returns "" (not an error) when no project has
 	// ever been selected.
