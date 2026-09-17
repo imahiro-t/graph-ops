@@ -71,11 +71,9 @@
   "createModal": {
     "title": "Create New Ticket",
     "descriptionPrefix": "The input is passed to the",
-    "descriptionSuffix": "skill, and Claude Code creates the ticket (no graph is built yet).",
-    "titleLabel": "Title *",
-    "titlePlaceholder": "e.g. Revisit the account-unlock flow after a failed login",
-    "descriptionLabel": "Description",
-    "descriptionPlaceholder": "Describe the requirements and background...",
+    "descriptionSuffix": "skill, and Claude Code works out a title and description and creates the ticket once you confirm them (no graph is built yet).",
+    "requestLabel": "What kind of ticket do you want to create? *",
+    "requestPlaceholder": "e.g. I want to revisit the account-unlock flow after a failed login. Right now users have to contact support to unlock…",
     "close": "Close",
     "cancel": "Cancel",
     "submit": "Create"
@@ -186,7 +184,7 @@
   "claudePrompts": {
     "executeIncompleteNodes": "Please execute the incomplete nodes of ticket {{ticketId}}.",
     "refineTicket": "Use the /refine-ticket skill on {{ticketId}} to pin down the completion criteria and the Why (background and purpose).",
-    "createTicket": "Use the /create-ticket skill to create a ticket with title \"{{title}}\", description \"{{description}}\"."
+    "createTicket": "Use the /create-ticket skill to create a ticket, working out its title and description from the following request.\n\nRequest:\n{{request}}"
   },
   "graphViewer": {
     "manualNode": "Manual operation node",
