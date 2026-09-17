@@ -1,12 +1,12 @@
 // Regression coverage for behaviour DFLT-00023 left unverified (5-5) and for
 // F-1's structural non-regression (language switch must never re-trigger
 // this tab's load). See this ticket's plan section 4-2.
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { AppSettingsEditor } from './AppSettingsEditor';
-import { REDACTED_SECRET_PLACEHOLDER, AppSettingsResponse } from '../../types';
+import { REDACTED_SECRET_PLACEHOLDER, AppSettingsResponse, Project } from '../../types';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -210,5 +210,122 @@ describe('AppSettingsEditor', () => {
 
     expect(mockedFetchAppSettings).toHaveBeenCalledTimes(1);
     expect(screen.getByPlaceholderText('/tmp/graph.db')).toHaveValue('unsaved-value.db');
+  });
+});
+
+// DFLT-00080: project management edits this environment's local path
+// (Project.local_path, stored in graph-config.json's projectPaths).
+describe('AppSettingsEditor project local paths', () => {
+  const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALPHA', local_path: '/work/alpha', created_at: '', updated_at: '' };
+  const beta: Project = { id: 'p-beta', name: 'Beta', prefix: 'BETA', local_path: '', created_at: '', updated_at: '' };
+
+  function renderWithProjects(projects: Project[], onProjectsChanged = vi.fn()) {
+    const utils = render(
+      <AppSettingsEditor
+        scope="global"
+        projects={projects}
+        onDirtyChange={vi.fn()}
+        onProjectsChanged={onProjectsChanged}
+        onPaginationPageSizeChanged={vi.fn()}
+        onMyNameChanged={vi.fn()}
+      />
+    );
+    const rerenderWith = (next: Project[]) =>
+      utils.rerender(
+        <AppSettingsEditor
+          scope="global"
+          projects={next}
+          onDirtyChange={vi.fn()}
+          onProjectsChanged={onProjectsChanged}
+          onPaginationPageSizeChanged={vi.fn()}
+          onMyNameChanged={vi.fn()}
+        />
+      );
+    return { ...utils, rerenderWith };
+  }
+
+  const row = (id: string) => within(screen.getByTestId(`project-row-${id}`));
+  const localPathInput = (id: string) => row(id).getByLabelText(new RegExp(i18n.t('settings.appSettings.projects.localPathLabel').replace(/[()]/g, '\\$&')));
+  const saveButton = (id: string) => row(id).getByRole('button', { name: i18n.t('settings.common.save') });
+  const patchBody = (n = 0) => {
+    const [url, init] = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[n];
+    return { url: String(url), method: (init as RequestInit).method, body: JSON.parse((init as RequestInit).body as string) };
+  };
+
+  beforeEach(() => {
+    mockedFetchAppSettings.mockReset();
+    mockedFetchAppSettings.mockResolvedValue(makeResponse());
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('shows "not set" for a project without a local path and the path for one that has it', async () => {
+    renderWithProjects([alpha, beta]);
+    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+    expect(localPathInput('p-alpha')).toHaveValue('/work/alpha');
+    expect(localPathInput('p-beta')).toHaveValue('');
+    expect(row('p-beta').getAllByText(i18n.t('settings.appSettings.projects.notSet')).length).toBeGreaterThan(0);
+    expect(row('p-alpha').queryByText(i18n.t('settings.appSettings.projects.notSet'))).not.toBeInTheDocument();
+  });
+
+  it('labels the field as this environment only and explains it is not stored in the DB', async () => {
+    renderWithProjects([alpha]);
+    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+    expect(row('p-alpha').getByText(i18n.t('settings.appSettings.projects.localPathLabel'))).toBeInTheDocument();
+    expect(i18n.t('settings.appSettings.projects.localPathLabel')).toBe('ローカルパス（この環境）');
+    expect(screen.getByText(i18n.t('settings.appSettings.projects.localPathHint'))).toBeInTheDocument();
+  });
+
+  it('sets a local path on an unset project', async () => {
+    const user = userEvent.setup();
+    const onProjectsChanged = vi.fn();
+    const { rerenderWith } = renderWithProjects([beta], onProjectsChanged);
+    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+    await user.type(localPathInput('p-beta'), '/work/beta');
+    await user.click(saveButton('p-beta'));
+
+    await waitFor(() => expect(onProjectsChanged).toHaveBeenCalled());
+    expect(patchBody()).toEqual({ url: '/api/projects/p-beta', method: 'PATCH', body: { name: 'Beta', local_path: '/work/beta' } });
+    rerenderWith([{ ...beta, local_path: '/work/beta' }]);
+    expect(localPathInput('p-beta')).toHaveValue('/work/beta');
+  });
+
+  it('changes an existing local path', async () => {
+    const user = userEvent.setup();
+    const onProjectsChanged = vi.fn();
+    const { rerenderWith } = renderWithProjects([alpha], onProjectsChanged);
+    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+    await user.clear(localPathInput('p-alpha'));
+    await user.type(localPathInput('p-alpha'), '/work/alpha2');
+    await user.click(saveButton('p-alpha'));
+
+    await waitFor(() => expect(onProjectsChanged).toHaveBeenCalled());
+    expect(patchBody().body).toEqual({ name: 'Alpha', local_path: '/work/alpha2' });
+    rerenderWith([{ ...alpha, local_path: '/work/alpha2' }]);
+    expect(localPathInput('p-alpha')).toHaveValue('/work/alpha2');
+  });
+
+  it('clearing the local path keeps save enabled and unsets it', async () => {
+    const user = userEvent.setup();
+    const onProjectsChanged = vi.fn();
+    const { rerenderWith } = renderWithProjects([alpha], onProjectsChanged);
+    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+    await user.clear(localPathInput('p-alpha'));
+    expect(saveButton('p-alpha')).toBeEnabled();
+    await user.click(saveButton('p-alpha'));
+
+    await waitFor(() => expect(onProjectsChanged).toHaveBeenCalled());
+    expect(patchBody().body).toEqual({ name: 'Alpha', local_path: '' });
+    rerenderWith([{ ...alpha, local_path: '' }]);
+    expect(localPathInput('p-alpha')).toHaveValue('');
+    expect(row('p-alpha').getAllByText(i18n.t('settings.appSettings.projects.notSet')).length).toBeGreaterThan(0);
   });
 });

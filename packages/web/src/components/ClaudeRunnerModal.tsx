@@ -10,7 +10,7 @@ interface Props {
   onClose: () => void;
   ticketId?: string;
   // The currently-selected project (App.tsx's currentProject.id), so the
-  // launched terminal opens in *that* project's work_dir rather than
+  // launched terminal opens in *that* project's local path rather than
   // silently falling back to the server's own launch directory when neither
   // this nor ticketId is set (see resolveLaunchWorkDir's priority order).
   projectId?: string;

@@ -60,13 +60,25 @@
   },
   "createProjectModal": {
     "title": "Create New Project",
-    "description": "A project scopes its own ticket list, working directory, and ticket/node ID prefix.",
+    "description": "A project scopes its own ticket list and ticket/node ID prefix. The local path is saved only in this environment's settings file (graph-config.json), not in the DB.",
     "nameLabel": "Name *",
     "namePlaceholder": "e.g. Payments Service",
     "prefixLabel": "ID prefix (optional, up to 5 alphanumeric characters)",
     "prefixPlaceholder": "Auto-generated from the name if left blank",
-    "workDirLabel": "Working folder (absolute path) *",
-    "workDirPlaceholder": "e.g. /Users/me/dev/payments-service"
+    "localPathLabel": "Local path (this environment, absolute path, optional)",
+    "localPathPlaceholder": "e.g. /Users/me/dev/payments-service"
+  },
+  "projectSetupModal": {
+    "title": "Set Up a Project for This Directory",
+    "description": "No project is mapped to {{dir}} in this environment's local settings. Create a new project, or pick an existing one from the DB (for example, one a teammate already created). Either way, the mapping to this directory is saved to this environment's graph-config.json.",
+    "modeLabel": "How to set up",
+    "modeCreate": "Create new",
+    "modeExisting": "Choose an existing project",
+    "noExistingProjects": "There are no projects in the DB yet, so there is nothing to choose from.",
+    "existingListLabel": "Project",
+    "notSet": "Not set",
+    "overwriteWarning": "This project's local path {{current}} will be replaced with {{next}}.",
+    "confirmExisting": "Use this project"
   },
   "createModal": {
     "title": "Create New Ticket",
@@ -234,7 +246,8 @@
       "global": "Global Settings",
       "project": "Project Settings",
       "projectPlaceholder": "Select a project",
-      "noProjectSelected": "No project is selected in the app. Select a project from the switcher first to edit project-scoped settings."
+      "noProjectSelected": "No project is selected in the app. Select a project from the switcher first to edit project-scoped settings.",
+      "localPathNotSet": "This project has no local path in this environment, so its project settings cannot be read or written. Set its local path under Project Management in the App Settings tab (Global Settings)."
     },
     "tabs": {
       "nodeTypes": "Node Types",
@@ -394,11 +407,13 @@
       },
       "projects": {
         "title": "Project Management",
-        "description": "Edit each project's name and working directory (where Claude Code is launched), or delete a project.",
+        "description": "Edit each project's name and local path (where Claude Code is launched and project settings are stored), or delete a project.",
         "empty": "No projects yet.",
         "delete": "Delete project",
         "nameLabel": "Project name",
-        "workDirLabel": "Working directory",
+        "localPathLabel": "Local path (this environment)",
+        "localPathHint": "The local path is not stored in the DB -- only in this environment's graph-config.json -- so it never affects teammates sharing the same DB. Save it empty to unset it.",
+        "notSet": "Not set",
         "confirmDelete": "This will delete project \"{{name}}\" ({{id}}). Every ticket, node, and artifact under this project will be permanently deleted, and this action cannot be undone. Are you sure you want to delete it?"
       }
     }
@@ -424,6 +439,7 @@
     "INVALID_MAX_ITERATIONS": "Max iterations must be an integer of 1 or greater.",
     "WORKFLOW_NODES_LOCKED": "The workflow's node structure (skeleton) is defined by the plugin default only and can't be overridden. Add or edit review gates from the Review Gates tab instead.",
     "INVALID_REPORT_TEMPLATE": "The report template is missing required structural markers.",
+    "PROJECT_LOCAL_PATH_NOT_SET": "This project has no local path in this environment. Set its local path under Project Management in the App Settings tab (Global Settings).",
     "UNKNOWN": "An unexpected error occurred. Please try again."
   }
 }
