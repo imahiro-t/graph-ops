@@ -616,6 +616,11 @@ func (r *MySQLRepository) UpdateTicket(id string, patch TicketPatch) (domain.Tic
 	if patch.Priority != nil {
 		cur.Priority = *patch.Priority
 	}
+	// A row still NULL/empty (e.g. written by an older graph-engine sharing
+	// this DB after Init's backfill ran) must not be written back as '': fill
+	// the default on write, as CreateTicket does, so any update -- even one
+	// that doesn't touch priority -- leaves the row with a valid level.
+	cur.Priority = domain.TicketPriority(ticketPriorityOrDefault(cur.Priority))
 	cur.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 
 	_, err = r.db.Exec(

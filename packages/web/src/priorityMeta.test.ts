@@ -50,8 +50,12 @@ describe('getPriorityMeta', () => {
     expect(Object.keys(en.priority).sort()).toEqual(['high', 'low', 'medium']);
   });
 
-  it('no longer exports an unset meta', () => {
-    expect(Object.keys(priorityMeta)).not.toContain('UNSET_PRIORITY_META');
+  it('exports only the three priority helpers, with no meta for a fourth level', () => {
+    expect(Object.keys(priorityMeta).sort()).toEqual([
+      'getPriorityMeta',
+      'matchesPriorityFilter',
+      'normalizeTicketPriority'
+    ]);
   });
 });
 

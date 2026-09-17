@@ -224,9 +224,10 @@ func nullableString(s *string) sql.NullString {
 }
 
 // ticketPriorityOrDefault returns p, or domain.DefaultTicketPriority when p
-// is empty (DFLT-00083). CreateTicket uses it so a direct store call that
-// leaves Priority zero (tests, or any caller bypassing the engine) still
-// never writes a NULL/empty priority. It is only applied on write -- reads
+// is empty (DFLT-00083). CreateTicket and UpdateTicket use it so a direct
+// store call that leaves Priority zero (tests, or any caller bypassing the
+// engine), or an update of a row still holding a legacy NULL, never writes a
+// NULL/empty priority. It is only applied on write -- reads
 // return the stored value as-is.
 func ticketPriorityOrDefault(p domain.TicketPriority) string {
 	if p == "" {
@@ -431,6 +432,11 @@ func (r *SQLiteRepository) UpdateTicket(id string, patch TicketPatch) (domain.Ti
 	if patch.Priority != nil {
 		cur.Priority = *patch.Priority
 	}
+	// A row still NULL/empty (e.g. written by an older graph-engine sharing
+	// this DB after Init's backfill ran) must not be written back as '': fill
+	// the default on write, as CreateTicket does, so any update -- even one
+	// that doesn't touch priority -- leaves the row with a valid level.
+	cur.Priority = domain.TicketPriority(ticketPriorityOrDefault(cur.Priority))
 	cur.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 
 	_, err = r.db.Exec(

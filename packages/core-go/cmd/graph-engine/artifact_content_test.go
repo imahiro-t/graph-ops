@@ -246,4 +246,3 @@ func TestCmdAddArtifact_HTMLInlineContentAccepted(t *testing.T) {
 		t.Fatalf("Content = %v, want %q", a.Content, html)
 	}
 }
-

@@ -303,3 +303,16 @@ func TestMySQLRepository_InitBackfillsNullTicketPriority(t *testing.T) {
 
 	assertNullPriorityBackfill(t, repo.db, repo.Init, ids)
 }
+
+// TestMySQLRepository_UpdateTicketFillsDefaultForLegacyNullPriority is the
+// MySQL half of assertUpdateTicketFillsLegacyPriority.
+func TestMySQLRepository_UpdateTicketFillsDefaultForLegacyNullPriority(t *testing.T) {
+	repo := newTestMySQLRepo(t)
+	proj, err := repo.CreateProject("Priority Update", "PRIU")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	ids := insertLegacyPriorityTickets(t, repo.db, proj.ID, proj.Prefix)
+
+	assertUpdateTicketFillsLegacyPriority(t, repo.db, repo.UpdateTicket, ids)
+}

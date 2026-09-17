@@ -24,9 +24,10 @@ export interface PriorityMeta {
   // width as the arrows.
   symbol: string;
   // Extra classes for the symbol only. MEDIUM is the default, so it is drawn
-  // deliberately understated -- `font-normal` (plus a lighter tone) versus
-  // `font-bold` for HIGH/LOW; `font-normal` is the MEDIUM-only marker tests
-  // key on.
+  // deliberately understated -- `font-normal` versus `font-bold` for
+  // HIGH/LOW; `font-normal` is the MEDIUM-only marker tests key on. It is
+  // not also faded (e.g. opacity): amber-700 on amber-100 is only just 4.5:1,
+  // so any transparency would drop the symbol below WCAG AA contrast.
   symbolClass: string;
   // Badge colors, each including its dark-theme variant.
   chip: { bg: string; text: string };
@@ -38,19 +39,19 @@ export interface PriorityMeta {
 const PRIORITY_META: Record<TicketPriority, PriorityMeta> = {
   HIGH: {
     labelKey: 'priority.high',
-    symbol: '↑', // ↑
+    symbol: '↑', // U+2191 UPWARDS ARROW
     symbolClass: 'font-bold',
     chip: { bg: 'bg-rose-100 dark:bg-rose-950', text: 'text-rose-700 dark:text-rose-300' }
   },
   MEDIUM: {
     labelKey: 'priority.medium',
-    symbol: '−', // − (MINUS SIGN)
-    symbolClass: 'font-normal opacity-60',
+    symbol: '−', // U+2212 MINUS SIGN
+    symbolClass: 'font-normal',
     chip: { bg: 'bg-amber-100 dark:bg-amber-950', text: 'text-amber-700 dark:text-amber-300' }
   },
   LOW: {
     labelKey: 'priority.low',
-    symbol: '↓', // ↓
+    symbol: '↓', // U+2193 DOWNWARDS ARROW
     symbolClass: 'font-bold',
     chip: { bg: 'bg-sky-100 dark:bg-sky-950', text: 'text-sky-700 dark:text-sky-300' }
   }
