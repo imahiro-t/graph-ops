@@ -32,8 +32,10 @@ const UI = mk('label-ui', 'UI', 'purple');
 const PERF = mk('label-perf', '性能', 'amber');
 const PROJECT_LABELS = [BUG, FEAT, UI, PERF];
 
+const editButtonName = () => `${i18n.t('ticket.labels.edit')}: TEST-00001`;
+
 async function openPanel(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: i18n.t('ticket.labels.edit') }));
+  await user.click(screen.getByRole('button', { name: editButtonName() }));
   return screen.getByRole('group', { name: i18n.t('ticket.labels.groupLabel', { id: 'TEST-00001' }) });
 }
 
@@ -66,13 +68,18 @@ describe('LabelSelect', () => {
     const [, ticketId, ids] = mockedSet.mock.calls[0];
     expect(ticketId).toBe('TEST-00001');
     expect([...ids].sort()).toEqual(['label-bug', 'label-ui']);
+    // Only aria-disabled while saving (a natively disabled checkbox would
+    // drop keyboard focus); a further click is ignored.
     for (const box of screen.getAllByRole('checkbox')) {
-      expect(box).toBeDisabled();
+      expect(box).toHaveAttribute('aria-disabled', 'true');
+      expect(box).not.toBeDisabled();
     }
+    await user.click(screen.getByRole('checkbox', { name: '性能' }));
+    expect(mockedSet).toHaveBeenCalledTimes(1);
 
     resolveSave({});
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'UI' })).not.toBeDisabled());
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'UI' })).toHaveAttribute('aria-disabled', 'false'));
   });
 
   it('PATCHes the remaining labels when one is removed', async () => {
@@ -119,7 +126,7 @@ describe('LabelSelect', () => {
       </div>
     );
 
-    const button = screen.getByRole('button', { name: i18n.t('ticket.labels.edit') });
+    const button = screen.getByRole('button', { name: editButtonName() });
     await user.click(button);
     expect(button).toHaveAttribute('aria-expanded', 'true');
     expect(onParentClick).not.toHaveBeenCalled();
@@ -129,5 +136,47 @@ describe('LabelSelect', () => {
     expect(screen.queryByRole('group')).not.toBeInTheDocument();
     expect(button).toHaveFocus();
     expect(onParentClick).not.toHaveBeenCalled();
+  });
+
+  it('keeps keyboard focus on the checkbox across a save, so labels can be toggled in a row and Escape still closes', async () => {
+    let resolveSave: (v: unknown) => void = () => {};
+    mockedSet.mockImplementation(() => new Promise(r => (resolveSave = r)));
+    const user = userEvent.setup();
+    render(<LabelSelect ticketId="TEST-00001" labels={[]} projectLabels={PROJECT_LABELS} onSaved={vi.fn()} />);
+
+    await openPanel(user);
+    const bug = screen.getByRole('checkbox', { name: 'バグ' });
+    bug.focus();
+    await user.keyboard(' ');
+    expect(mockedSet).toHaveBeenLastCalledWith(expect.anything(), 'TEST-00001', ['label-bug']);
+    expect(bug).toHaveFocus();
+    resolveSave({});
+    await waitFor(() => expect(bug).toHaveAttribute('aria-disabled', 'false'));
+    expect(bug).toHaveFocus();
+
+    await user.tab();
+    const feat = screen.getByRole('checkbox', { name: '機能追加' });
+    expect(feat).toHaveFocus();
+    await user.keyboard(' ');
+    expect(mockedSet).toHaveBeenLastCalledWith(expect.anything(), 'TEST-00001', ['label-bug', 'label-feat']);
+    resolveSave({});
+    await waitFor(() => expect(feat).toHaveAttribute('aria-disabled', 'false'));
+    expect(feat).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('group')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: editButtonName() })).toHaveFocus();
+  });
+
+  it('keeps a current label missing from a stale projectLabels when adding another', async () => {
+    mockedSet.mockResolvedValue({});
+    const NEW = mk('label-new', '新規', 'green');
+    const user = userEvent.setup();
+    render(<LabelSelect ticketId="TEST-00001" labels={[NEW]} projectLabels={PROJECT_LABELS} onSaved={vi.fn()} />);
+
+    await openPanel(user);
+    await user.click(screen.getByRole('checkbox', { name: 'UI' }));
+
+    expect(mockedSet).toHaveBeenCalledWith(expect.anything(), 'TEST-00001', ['label-new', 'label-ui']);
   });
 });

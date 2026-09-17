@@ -590,7 +590,19 @@ export const TicketItem: React.FC<Props> = ({
                   title={ticketLabels.map(l => l.name).join(', ')}
                   className="px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-semibold"
                 >
-                  {t('ticket.labels.more', { count: hiddenLabelCount })}
+                  {/* The bare "+N" means nothing read aloud, and screen
+                      readers don't reliably read title: they get the
+                      folded label names as sr-only text instead. */}
+                  <span aria-hidden="true">{t('ticket.labels.more', { count: hiddenLabelCount })}</span>
+                  <span className="sr-only">
+                    {t('ticket.labels.moreSr', {
+                      count: hiddenLabelCount,
+                      names: ticketLabels
+                        .slice(MAX_HEADER_LABELS)
+                        .map(l => l.name)
+                        .join(', ')
+                    })}
+                  </span>
                 </span>
               )}
             </span>
@@ -826,7 +838,7 @@ export const TicketItem: React.FC<Props> = ({
             <div className="flex flex-wrap items-center gap-1.5" data-testid="ticket-detail-labels">
               <span>{t('ticket.labels.title')}:</span>
               {ticketLabels.length === 0 ? (
-                <span className="text-slate-400 dark:text-slate-500">{t('ticket.labels.none')}</span>
+                <span className="text-slate-500 dark:text-slate-400">{t('ticket.labels.none')}</span>
               ) : (
                 ticketLabels.map(l => <LabelChip key={l.id} name={l.name} color={l.color} />)
               )}

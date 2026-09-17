@@ -63,7 +63,7 @@ export const LabelFilter: React.FC<Props> = ({ labels, selectedIds, onChange }) 
             className="absolute left-0 mt-1.5 w-56 max-h-80 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-xs"
           >
             {labels.length === 0 && (
-              <div className="px-3 py-1.5 text-slate-400 dark:text-slate-500">{t('toolbar.labelEmpty')}</div>
+              <div className="px-3 py-1.5 text-slate-500 dark:text-slate-400">{t('toolbar.labelEmpty')}</div>
             )}
             {labels.map(l => (
               <label

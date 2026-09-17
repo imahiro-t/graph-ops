@@ -145,12 +145,25 @@ var mysqlSchemaStatements = []string{
 	// Labels (DFLT-00084), see schemaDDL's labels/ticket_labels. name is
 	// VARCHAR(100) (labels are capped at 50 characters) so the
 	// (project_id, name) UNIQUE key fits InnoDB's 3072-byte index limit:
-	// (191 + 100) * 4 = 1164 bytes. utf8mb4_general_ci makes that key
-	// case-insensitive; it backs up the store's own name check.
+	// (191 + 100) * 4 = 1164 bytes.
+	//
+	// name alone uses the binary utf8mb4_bin collation, unlike every other
+	// column (the table default stays utf8mb4_general_ci so the FK columns
+	// keep matching projects/tickets -- see the collation note above).
+	// Under utf8mb4_general_ci the UNIQUE key would treat names differing
+	// only in accents ("cafe" / "café") or only in a supplementary-plane
+	// character such as an emoji ("🐛 バグ" / "🚀 バグ" -- all such
+	// characters weigh the same there) as duplicates, rejecting labels
+	// SQLite accepts. The duplicate-name rule itself (case-insensitive,
+	// strings.EqualFold) is enforced by the store's ensureLabelNameFree
+	// under the project row lock, identically on both backends; this key
+	// only stops byte-identical names. The labels table is new in
+	// DFLT-00084 and never existed with the old collation outside that
+	// ticket's own unreleased branch, so Init carries no ALTER for it.
 	`CREATE TABLE IF NOT EXISTS labels (
 	id VARCHAR(191) PRIMARY KEY,
 	project_id VARCHAR(191) NOT NULL,
-	name VARCHAR(100) NOT NULL,
+	name VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
 	color VARCHAR(32) NOT NULL,
 	created_at VARCHAR(64) NOT NULL,
 	updated_at VARCHAR(64) NOT NULL,

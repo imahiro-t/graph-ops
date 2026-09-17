@@ -502,7 +502,8 @@
       "groupLabel": "チケット {{id}} のラベル",
       "noRegistered": "設定画面でラベルを登録してください。",
       "saveError": "ラベルを保存できませんでした: {{message}}",
-      "more": "+{{count}}"
+      "more": "+{{count}}",
+      "moreSr": "他{{count}}件のラベル: {{names}}"
     }
   }
 }

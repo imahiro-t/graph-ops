@@ -128,6 +128,33 @@ func runLabelCRUDContract(t *testing.T, repo GraphRepository, db *sql.DB) {
 	// Same name in another project is fine.
 	mustCreateLabel(t, repo, beta.ID, "Bug", "red")
 
+	// Names that differ only in an emoji (a supplementary-plane character)
+	// or only in accents are different names on every backend -- MySQL's
+	// utf8mb4_general_ci would have collapsed both pairs in its UNIQUE key.
+	// Their case variants are still duplicates.
+	variants := []domain.Label{
+		mustCreateLabel(t, repo, beta.ID, "🐛 バグ", "red"),
+		mustCreateLabel(t, repo, beta.ID, "🚀 バグ", "blue"),
+		mustCreateLabel(t, repo, beta.ID, "cafe", "gray"),
+		mustCreateLabel(t, repo, beta.ID, "café", "amber"),
+	}
+	_, err = repo.CreateLabel(beta.ID, "CAFÉ", "red")
+	wantAPIErrorCode(t, err, domain.ErrCodeLabelNameTaken)
+	_, err = repo.CreateLabel(beta.ID, "🐛 バグ", "red")
+	wantAPIErrorCode(t, err, domain.ErrCodeLabelNameTaken)
+	accentRename := "Cafè"
+	if l, err := repo.UpdateLabel(variants[2].ID, LabelPatch{Name: &accentRename}); err != nil || l.Name != "Cafè" {
+		t.Errorf("renaming to a name differing from another only in accents must succeed: %+v, %v", l, err)
+	}
+	caseRename := "CAFÉ"
+	_, err = repo.UpdateLabel(variants[2].ID, LabelPatch{Name: &caseRename})
+	wantAPIErrorCode(t, err, domain.ErrCodeLabelNameTaken)
+	for _, v := range variants {
+		if _, err := repo.DeleteLabel(v.ID); err != nil {
+			t.Fatalf("DeleteLabel(%s): %v", v.Name, err)
+		}
+	}
+
 	// Invalid input.
 	for _, bad := range []struct{ name, color string }{{"", "red"}, {"   ", "red"}, {"　", "red"}, {strings.Repeat("a", 51), "red"}, {strings.Repeat("字", 51), "red"}} {
 		_, err := repo.CreateLabel(alpha.ID, bad.name, bad.color)

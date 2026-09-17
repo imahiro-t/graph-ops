@@ -24,6 +24,31 @@ func TestMySQLRepository_TicketLabels(t *testing.T) {
 	runTicketLabelContract(t, repo, repo.db)
 }
 
+// TestMySQLRepository_LabelNameCollation: labels.name is utf8mb4_bin (so the
+// UNIQUE key only rejects byte-identical names; see mysqlSchemaStatements)
+// while the table default -- and so its FK columns -- stays
+// utf8mb4_general_ci like every other table.
+func TestMySQLRepository_LabelNameCollation(t *testing.T) {
+	repo := newTestMySQLRepo(t)
+	collation := func(column string) string {
+		t.Helper()
+		var c string
+		if err := repo.db.QueryRow(
+			`SELECT COLLATION_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'labels' AND COLUMN_NAME = ?`,
+			column,
+		).Scan(&c); err != nil {
+			t.Fatalf("reading collation of labels.%s: %v", column, err)
+		}
+		return c
+	}
+	if c := collation("name"); c != "utf8mb4_bin" {
+		t.Errorf("labels.name collation = %q, want utf8mb4_bin", c)
+	}
+	if c := collation("project_id"); c != "utf8mb4_general_ci" {
+		t.Errorf("labels.project_id collation = %q, want utf8mb4_general_ci", c)
+	}
+}
+
 func TestIsMySQLDuplicateKeyError(t *testing.T) {
 	dup := &mysqldriver.MySQLError{Number: 1062, Message: "Duplicate entry 'x' for key 'idx_labels_project_name'"}
 	if !isMySQLDuplicateKeyError(dup) {

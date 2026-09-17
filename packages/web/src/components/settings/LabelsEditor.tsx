@@ -3,10 +3,10 @@
 // the same backend -- not team-tier files -- so, unlike the other
 // project-scoped editors, this tab needs no local path, and every change is
 // saved immediately (there is no dirty/unsaved state to protect).
-import React, { useCallback, useEffect, useId, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Pencil, Plus, Tag, Trash2 } from 'lucide-react';
-import { LabelColor, LabelUsage, LABEL_COLORS } from '../../types';
+import { LabelColor, LabelUsage, LABEL_COLORS, LABEL_NAME_MAX_LENGTH } from '../../types';
 import { getLabelColorMeta } from '../../labelMeta';
 import { createLabel, deleteLabel, fetchLabels, updateLabel } from '../../lib/labelsApi';
 import { errorMessage } from '../../lib/apiError';
@@ -29,10 +29,29 @@ function sortLabels(labels: LabelUsage[]): LabelUsage[] {
   });
 }
 
+// Keys pressed while an IME composition is in progress (confirming or
+// cancelling a conversion) must not save/cancel a rename -- the same guard
+// useModalDialog applies.
+function isImeComposing(e: React.KeyboardEvent): boolean {
+  return e.nativeEvent.isComposing || e.keyCode === 229;
+}
+
+// data-focus-key values of the elements focus is moved to after an action
+// unmounts or disables the focused one (see pendingFocus).
+const CREATE_NAME_FOCUS_KEY = 'create-name';
+const renameButtonKey = (id: string) => `rename-${id}`;
+const renameInputKey = (id: string) => `rename-input-${id}`;
+const deleteButtonKey = (id: string) => `delete-${id}`;
+
 interface PaletteProps {
   value: LabelColor | null;
   onChange: (color: LabelColor) => void;
+  // Not operable at all (natively disabled).
   disabled?: boolean;
+  // A request is in flight: clicks are ignored and the buttons are
+  // aria-disabled, but not natively disabled -- that would drop the keyboard
+  // focus of the button just pressed.
+  busy?: boolean;
   groupLabel: string;
   size?: 'md' | 'sm';
 }
@@ -40,7 +59,7 @@ interface PaletteProps {
 // The fixed color palette as a group of toggle buttons: each button is named
 // by its translated color name and reports whether it is the current color
 // via aria-pressed, so the choice is not conveyed by color alone.
-export const LabelColorPalette: React.FC<PaletteProps> = ({ value, onChange, disabled = false, groupLabel, size = 'md' }) => {
+export const LabelColorPalette: React.FC<PaletteProps> = ({ value, onChange, disabled = false, busy = false, groupLabel, size = 'md' }) => {
   const { t } = useTranslation();
   const dim = size === 'md' ? 'w-6 h-6' : 'w-4 h-4';
   return (
@@ -54,10 +73,13 @@ export const LabelColorPalette: React.FC<PaletteProps> = ({ value, onChange, dis
             type="button"
             aria-label={t(meta.nameKey)}
             aria-pressed={selected}
+            aria-disabled={busy || undefined}
             title={t(meta.nameKey)}
             disabled={disabled}
-            onClick={() => onChange(color)}
-            className={`${dim} rounded-full ${meta.swatch} disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
+            onClick={() => {
+              if (!busy) onChange(color);
+            }}
+            className={`${dim} rounded-full ${meta.swatch} disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-wait focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
               selected ? 'ring-2 ring-offset-2 ring-slate-700 dark:ring-slate-200 dark:ring-offset-slate-900' : ''
             }`}
           />
@@ -71,6 +93,8 @@ export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) =>
   const { t } = useTranslation();
   const canEdit = projectId !== '';
   const nameInputId = useId();
+  const errorId = useId();
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const [labels, setLabels] = useState<LabelUsage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -79,12 +103,30 @@ export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) =>
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState<LabelColor>('gray');
   const [creating, setCreating] = useState(false);
+  // Whether `error` is about the create form's name (it then marks the name
+  // input aria-invalid and describes it).
+  const [createFailed, setCreateFailed] = useState(false);
 
   // Inline rename: which row is being renamed, and its draft.
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   // The row with a request in flight, if any.
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Where keyboard focus goes once the next render has settled: finishing a
+  // rename unmounts its input and buttons, and deleting removes the focused
+  // button's whole row, which would otherwise drop focus to <body> (and the
+  // modal's focus trap would then send the next Tab to the dialog's start).
+  const [pendingFocus, setPendingFocus] = useState<string | null>(null);
+  useEffect(() => {
+    if (pendingFocus === null) return;
+    const el = containerRef.current?.querySelector<HTMLElement>(`[data-focus-key="${pendingFocus}"]`);
+    if (el && (el as HTMLButtonElement).disabled) return; // retry once re-enabled
+    el?.focus();
+    setPendingFocus(null);
+    // labels/renamingId/busyId/creating are what mount, unmount, disable and
+    // re-enable the target; they are listed so the effect re-runs on them.
+  }, [pendingFocus, labels, renamingId, busyId, creating]);
 
   const load = useCallback(async () => {
     if (!projectId) {
@@ -111,9 +153,10 @@ export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) =>
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canEdit || creating) return;
+    if (!canEdit || creating || newName.trim() === '') return;
     setCreating(true);
     setError('');
+    setCreateFailed(false);
     try {
       const created = await createLabel(t, projectId, newName, newColor);
       setLabels(prev => sortLabels([...prev, { ...created, ticket_count: 0 }]));
@@ -121,14 +164,19 @@ export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) =>
       onLabelsChanged?.();
     } catch (err) {
       setError(errorMessage(err, t('errors.UNKNOWN')));
+      setCreateFailed(true);
     } finally {
       setCreating(false);
+      // The submit button was disabled while creating; the name input is
+      // where the next label (or the fix for this one) is typed.
+      setPendingFocus(CREATE_NAME_FOCUS_KEY);
     }
   };
 
   const applyUpdate = async (label: LabelUsage, patch: { name?: string; color?: LabelColor }) => {
     setBusyId(label.id);
     setError('');
+    setCreateFailed(false);
     try {
       const updated = await updateLabel(t, label.id, patch);
       setLabels(prev => sortLabels(prev.map(l => (l.id === label.id ? { ...updated, ticket_count: l.ticket_count } : l))));
@@ -142,33 +190,83 @@ export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) =>
     }
   };
 
+  const finishRename = (label: LabelUsage) => {
+    setRenamingId(null);
+    setPendingFocus(renameButtonKey(label.id));
+  };
+
   const handleRenameSave = async (label: LabelUsage) => {
+    if (busyId === label.id) return;
     if (await applyUpdate(label, { name: renameDraft })) {
-      setRenamingId(null);
+      finishRename(label);
+    } else {
+      // Stay in the rename, back in its input, to fix the name.
+      setPendingFocus(renameInputKey(label.id));
     }
   };
 
+  // Where focus goes when `removed` leaves the list: the next row's delete
+  // button, else the previous row's, else (no labels left) the create
+  // form's name input.
+  const focusAfterRemoval = (removed: LabelUsage, remaining: LabelUsage[]) => {
+    const index = labels.findIndex(l => l.id === removed.id);
+    const neighbor = remaining[Math.max(index, 0)] ?? remaining[remaining.length - 1];
+    setPendingFocus(neighbor ? deleteButtonKey(neighbor.id) : CREATE_NAME_FOCUS_KEY);
+  };
+
   const handleDelete = async (label: LabelUsage) => {
-    const message =
-      label.ticket_count > 0
-        ? t('settings.labels.confirmDeleteInUse', { name: label.name, count: label.ticket_count })
-        : t('settings.labels.confirmDelete', { name: label.name });
-    if (!window.confirm(message)) return;
+    if (busyId === label.id) return;
     setBusyId(label.id);
     setError('');
+    setCreateFailed(false);
     try {
-      await deleteLabel(t, label.id);
+      // Re-read the usage counts first: labels are shared, so tickets may
+      // have gained or lost this label since the tab loaded, and the
+      // confirmation must state the count as of now.
+      let fresh: LabelUsage[];
+      try {
+        fresh = sortLabels(await fetchLabels(t, projectId));
+      } catch (err) {
+        setError(errorMessage(err, t('errors.UNKNOWN')));
+        setPendingFocus(deleteButtonKey(label.id));
+        return;
+      }
+      setLabels(fresh);
+      const current = fresh.find(l => l.id === label.id);
+      if (!current) {
+        // Already deleted by someone else: nothing to confirm.
+        focusAfterRemoval(label, fresh);
+        onLabelsChanged?.();
+        return;
+      }
+      const message =
+        current.ticket_count > 0
+          ? t('settings.labels.confirmDeleteInUse', { name: current.name, count: current.ticket_count })
+          : t('settings.labels.confirmDelete', { name: current.name });
+      if (!window.confirm(message)) {
+        setPendingFocus(deleteButtonKey(label.id));
+        return;
+      }
+      try {
+        await deleteLabel(t, label.id);
+      } catch (err) {
+        setError(errorMessage(err, t('errors.UNKNOWN')));
+        setPendingFocus(deleteButtonKey(label.id));
+        return;
+      }
+      const remaining = fresh.filter(l => l.id !== label.id);
       setLabels(prev => prev.filter(l => l.id !== label.id));
+      focusAfterRemoval(label, remaining);
       onLabelsChanged?.();
-    } catch (err) {
-      setError(errorMessage(err, t('errors.UNKNOWN')));
     } finally {
       setBusyId(null);
     }
   };
 
+  const errorDescribesName = createFailed && error !== '';
+
   return (
-    <div className="h-full overflow-y-auto space-y-4 text-xs">
+    <div ref={containerRef} className="h-full overflow-y-auto space-y-4 text-xs">
       <div>
         <h3 className="flex items-center gap-1.5 font-bold text-sm text-slate-800 dark:text-slate-200">
           <Tag className="w-4 h-4 text-slate-500 dark:text-slate-400" aria-hidden="true" />
@@ -196,14 +294,25 @@ export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) =>
           <label htmlFor={nameInputId} className="font-semibold text-slate-600 dark:text-slate-400">
             {t('settings.labels.name')}
           </label>
+          {/* readOnly (not disabled) while creating, so pressing Enter here
+              keeps focus in the input. maxLength counts UTF-16 code units
+              where the server counts characters, so it is at most stricter
+              (for emoji and other supplementary-plane characters). */}
           <input
             id={nameInputId}
             type="text"
             value={newName}
-            onChange={e => setNewName(e.target.value)}
+            onChange={e => {
+              setNewName(e.target.value);
+              setCreateFailed(false);
+            }}
             placeholder={t('settings.labels.namePlaceholder')}
-            maxLength={100}
-            disabled={!canEdit || creating}
+            maxLength={LABEL_NAME_MAX_LENGTH}
+            disabled={!canEdit}
+            readOnly={creating}
+            aria-invalid={errorDescribesName || undefined}
+            aria-describedby={errorDescribesName ? errorId : undefined}
+            data-focus-key={CREATE_NAME_FOCUS_KEY}
             className="px-2.5 py-1.5 w-56 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 disabled:opacity-50"
           />
           <button
@@ -221,22 +330,31 @@ export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) =>
           <LabelColorPalette
             value={newColor}
             onChange={setNewColor}
-            disabled={!canEdit || creating}
+            disabled={!canEdit}
+            busy={creating}
             groupLabel={t('settings.labels.newColorGroup')}
           />
         </div>
       </form>
 
       {error && (
-        <div role="alert" className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 rounded-lg border border-red-200 dark:border-red-800">
+        <div
+          id={errorId}
+          role="alert"
+          className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 rounded-lg border border-red-200 dark:border-red-800"
+        >
           {error}
         </div>
       )}
 
       {/* List */}
-      {canEdit && loading && <div className="text-slate-400 dark:text-slate-500">{t('settings.labels.loading')}</div>}
+      {canEdit && loading && (
+        <div role="status" className="text-slate-500 dark:text-slate-400">
+          {t('settings.labels.loading')}
+        </div>
+      )}
       {canEdit && !loading && labels.length === 0 && (
-        <div className="text-slate-400 dark:text-slate-500">{t('settings.labels.empty')}</div>
+        <div className="text-slate-500 dark:text-slate-400">{t('settings.labels.empty')}</div>
       )}
       {labels.length > 0 && (
         <ul className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg">
@@ -253,17 +371,19 @@ export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) =>
                       value={renameDraft}
                       onChange={e => setRenameDraft(e.target.value)}
                       onKeyDown={e => {
+                        if (isImeComposing(e)) return;
                         if (e.key === 'Enter') {
                           e.preventDefault();
                           handleRenameSave(label);
                         } else if (e.key === 'Escape') {
                           e.stopPropagation();
-                          setRenamingId(null);
+                          if (!busy) finishRename(label);
                         }
                       }}
                       aria-label={t('settings.labels.renameLabel', { name: label.name })}
-                      maxLength={100}
-                      disabled={busy}
+                      maxLength={LABEL_NAME_MAX_LENGTH}
+                      readOnly={busy}
+                      data-focus-key={renameInputKey(label.id)}
                       className="px-2 py-1 w-44 rounded bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                     />
                   ) : (
@@ -278,7 +398,7 @@ export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) =>
                   onChange={color => {
                     if (color !== label.color) applyUpdate(label, { color });
                   }}
-                  disabled={busy}
+                  busy={busy}
                   groupLabel={t('settings.labels.colorGroup', { name: label.name })}
                   size="sm"
                 />
@@ -296,7 +416,7 @@ export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) =>
                       </button>
                       <button
                         type="button"
-                        onClick={() => setRenamingId(null)}
+                        onClick={() => finishRename(label)}
                         disabled={busy}
                         className="px-2 py-1 rounded text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 font-semibold"
                       >
@@ -312,6 +432,7 @@ export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) =>
                       }}
                       disabled={busy}
                       aria-label={`${t('settings.labels.rename')}: ${label.name}`}
+                      data-focus-key={renameButtonKey(label.id)}
                       className="px-2 py-1 rounded text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 font-semibold disabled:opacity-50"
                     >
                       <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
@@ -323,6 +444,7 @@ export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) =>
                     onClick={() => handleDelete(label)}
                     disabled={busy}
                     aria-label={`${t('settings.labels.delete')}: ${label.name}`}
+                    data-focus-key={deleteButtonKey(label.id)}
                     className="px-2 py-1 rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 flex items-center gap-1 font-semibold disabled:opacity-50"
                   >
                     <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />

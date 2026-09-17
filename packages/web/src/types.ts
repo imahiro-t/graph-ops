@@ -131,6 +131,10 @@ export const LABEL_COLORS: readonly LabelColor[] = [
   'pink'
 ];
 
+// The longest label name the server accepts (Go's domain.MaxLabelNameLength,
+// counted there in runes after trimming).
+export const LABEL_NAME_MAX_LENGTH = 50;
+
 // A project-scoped label (DFLT-00084). Tickets reference labels by id, so a
 // rename or recolor shows on every ticket carrying it.
 export interface Label {

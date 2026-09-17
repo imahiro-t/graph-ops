@@ -502,7 +502,8 @@
       "groupLabel": "Labels of ticket {{id}}",
       "noRegistered": "Register labels in Settings first.",
       "saveError": "Could not save labels: {{message}}",
-      "more": "+{{count}}"
+      "more": "+{{count}}",
+      "moreSr": "{{count}} more labels: {{names}}"
     }
   }
 }

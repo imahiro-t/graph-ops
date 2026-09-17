@@ -81,6 +81,17 @@ describe('TicketItem labels', () => {
     }
   });
 
+  it('gives "+N" a screen-reader text naming the folded labels, hiding the bare "+N" from it', () => {
+    renderItem([BUG, FEAT, UI, PERF]);
+
+    const more = screen.getByTestId('ticket-header-labels-more');
+    const visible = within(more).getByText('+1');
+    expect(visible).toHaveAttribute('aria-hidden', 'true');
+    const srText = within(more).getByText(i18n.t('ticket.labels.moreSr', { count: 1, names: '性能' }));
+    expect(srText).toHaveClass('sr-only');
+    expect(srText).toHaveTextContent('性能');
+  });
+
   it('shows no chips or "+N" for a ticket without labels', () => {
     renderItem([]);
     expect(screen.queryByTestId('ticket-header-labels')).not.toBeInTheDocument();
@@ -101,6 +112,6 @@ describe('TicketItem labels', () => {
     const chips = within(detail).getAllByTestId('label-chip');
     expect(chips.map(c => c.textContent)).toEqual(['バグ', '機能追加', 'UI', '性能']);
     expect(chips.map(c => c.getAttribute('data-label-color'))).toEqual(['red', 'blue', 'purple', 'amber']);
-    expect(within(detail).getByRole('button', { name: i18n.t('ticket.labels.edit') })).toBeInTheDocument();
+    expect(within(detail).getByRole('button', { name: new RegExp(`^${i18n.t('ticket.labels.edit')}`) })).toBeInTheDocument();
   });
 });

@@ -87,11 +87,21 @@ func projectExists(q sqlRunner, d sqlDialect, projectID string) (bool, error) {
 
 // ensureLabelNameFree returns LABEL_NAME_TAKEN if a label of projectID other
 // than exceptID already has name, compared with strings.EqualFold. This is
-// the rule both backends apply identically; the DB's own case-insensitive
-// UNIQUE index differs per backend (SQLite's NOCASE folds ASCII only, MySQL's
-// utf8mb4_general_ci folds more) and only backs this check up.
-func ensureLabelNameFree(q sqlRunner, projectID, name, exceptID string) error {
-	rows, err := q.Query(`SELECT id, name FROM labels WHERE project_id = ?`, projectID)
+// the duplicate-name rule, applied identically by both backends. The DB's
+// UNIQUE index does not implement it: SQLite's NOCASE folds ASCII only, and
+// MySQL's labels.name is utf8mb4_bin (see mysqlSchemaStatements), so there
+// the index only catches byte-identical names.
+//
+// Callers hold the project row lock (projectExists with d), which serializes
+// every create/rename within the project. The SELECT is itself a locking
+// read (d.forUpdate) so that on MySQL it sees the latest committed labels
+// rather than a REPEATABLE READ snapshot an earlier plain read in the same
+// transaction (updateLabel's first getLabel) may already have fixed: a
+// case-variant name committed while this transaction waited for the project
+// lock would otherwise go unnoticed, and the binary UNIQUE key would not
+// catch it either.
+func ensureLabelNameFree(q sqlRunner, d sqlDialect, projectID, name, exceptID string) error {
+	rows, err := q.Query(`SELECT id, name FROM labels WHERE project_id = ?`+d.forUpdate, projectID)
 	if err != nil {
 		return fmt.Errorf("listing label names for project %s: %w", projectID, err)
 	}
@@ -138,7 +148,7 @@ func createLabel(db *sql.DB, d sqlDialect, projectID, rawName, rawColor string) 
 	if !ok {
 		return domain.Label{}, domain.NewAPIError(domain.ErrCodeProjectNotFound, "project %s not found", projectID)
 	}
-	if err := ensureLabelNameFree(tx, projectID, name, ""); err != nil {
+	if err := ensureLabelNameFree(tx, d, projectID, name, ""); err != nil {
 		return domain.Label{}, err
 	}
 
@@ -246,7 +256,7 @@ func updateLabel(db *sql.DB, d sqlDialect, id string, patch LabelPatch) (domain.
 		return domain.Label{}, domain.NewAPIError(domain.ErrCodeLabelNotFound, "label %s not found", id)
 	}
 	if name != nil {
-		if err := ensureLabelNameFree(tx, cur.ProjectID, *name, cur.ID); err != nil {
+		if err := ensureLabelNameFree(tx, d, cur.ProjectID, *name, cur.ID); err != nil {
 			return domain.Label{}, err
 		}
 		cur.Name = *name
