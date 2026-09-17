@@ -96,9 +96,10 @@ type FileConfig struct {
 
 	// ProjectPaths maps a project ID (the only key) to this environment's
 	// local path for that project -- an absolute directory (DFLT-00080). It
-	// replaced the DB column projects.work_dir: the DB (possibly a MySQL
-	// shared by a whole team) holds the project itself, while where each
-	// member has it checked out is a per-environment setting kept here. Being
+	// replaced the per-project directory column the DB used to hold: the DB
+	// (possibly a MySQL shared by a whole team) holds the project itself,
+	// while where each member has it checked out is a per-environment
+	// setting kept here. Being
 	// a map, a project can have at most one path per environment; a project
 	// with no entry simply has no local path ("未設定"). Read it through
 	// ProjectPath and write it through SetProjectPath / Update.

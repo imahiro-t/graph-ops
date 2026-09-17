@@ -38,7 +38,7 @@ The first run downloads the plugin and a `graph-engine` binary for your OS/archi
 #### Quick start
 
 1. **Choose the plugin's language**: run `/graph-ops:onboarding` once. It asks which language the plugin should use for node names and generated content (plans, Gherkin specs, implementation notes, review results, reports). You can re-run it any time.
-2. **Register your project**: `cd` into your project's working directory, start Claude Code, and run `/graph-ops:ui`. The Web UI opens in your browser. If the directory is not registered yet, the "Create New Project" dialog opens with that directory filled in.
+2. **Register your project**: `cd` into your project's working directory, start Claude Code, and run `/graph-ops:ui`. The Web UI opens in your browser. If no project is mapped to that directory in your environment yet, a dialog opens where you either **create a new project** or **choose an existing project** from the database (for example, one a teammate sharing the same MySQL database already created). Either way, the mapping from that directory to the project is saved to your local `graph-config.json`.
 3. **Create a ticket**: run `/graph-ops:create-ticket` and describe what you want. Claude talks the request through with you (scope, affected areas, edge cases) before it registers the ticket. You can also start from the Web UI's "New Ticket" button.
 4. **Refine the ticket (optional)**: run `/graph-ops:refine-ticket` to pin down the completion criteria and the "why". The ticket's description is rewritten around them.
 5. **Run the ticket**: run `/graph-ops:process-ticket` (or press "Run" on the ticket in the Web UI). It builds the execution graph, runs each node with a subagent (in parallel where possible), saves artifacts, and repeats reviews until they pass.
@@ -62,13 +62,15 @@ Each release pins a new release tag in the plugin's fetch command, and Claude Co
 | `/graph-ops:create-ticket` | Talks a request through with you, then creates a ticket. Does not build an execution graph. |
 | `/graph-ops:refine-ticket` | Pins down a ticket's completion criteria and "why", and rewrites its description. Does not build an execution graph. |
 | `/graph-ops:process-ticket` | Decides the shape of the ticket's execution graph, then runs it with subagents, saving artifacts and repeating reviews until they converge. |
-| `/graph-ops:ui` | Opens the local Web UI for the project that matches the current directory, starting the UI server if needed. |
+| `/graph-ops:ui` | Opens the local Web UI for the project whose local path is (or contains) the current directory, starting the UI server if needed. If none matches, lets you create a new project or choose an existing one for this directory. |
 
 ### Using the Web UI
 
 #### Projects
 
-Switch between registered projects from the project menu in the header. Choose "New project..." to register another one (name, optional ID prefix, and the working folder as an absolute path). Tickets and their IDs (for example `SHOP-00001`) belong to a project.
+Switch between registered projects from the project menu in the header. Choose "New project..." to register another one (name, optional ID prefix, and optionally its local path as an absolute path). Tickets and their IDs (for example `SHOP-00001`) belong to a project.
+
+A project itself (name, prefix, tickets) lives in the database and can be shared by a team, but its **local path** -- where the project is checked out on your machine -- is a per-environment setting. It is stored in your own `graph-config.json` under `projectPaths` (project ID -> absolute path), never in the database, so every member sharing one database sets their own path without affecting anyone else. The local path is what `/graph-ops:ui` and `create-ticket` match the current directory against (the deepest local path containing the directory wins, so git worktrees under the project resolve to it), the directory Claude Code is launched in, and where the project's team settings (`.graph-ops/`) are read from. A project with no local path in your environment still works: launches fall back to the default terminal directory, and "Project Settings" asks you to set the path first.
 
 #### Ticket list
 
@@ -111,9 +113,9 @@ The prompt fields accept multiple lines: press Enter for a new line, and press "
 
 Open Settings with the gear button in the header.
 
-- **Scope**: "Global Settings" apply to you on every project (stored in `$HOME/.graph-ops` by default). "Project Settings" apply to one project and are stored in the `.graph-ops/` directory of its working folder, so you can commit and share them with your team. Project settings take precedence over global settings.
+- **Scope**: "Global Settings" apply to you on every project (stored in `$HOME/.graph-ops` by default). "Project Settings" apply to one project and are stored in the `.graph-ops/` directory of its local path, so you can commit and share them with your team. Project settings take precedence over global settings. Editing "Project Settings" requires the project's local path to be set in your environment.
 - **Node Types / Review Gates / Skills / Templates**: add instructions for each node type, change or add review-gate criteria, add instructions to each skill, and replace the execution-plan, review, and HTML report templates (the Templates tab's left-hand list switches between the three). Each screen also shows a merged preview of what an agent actually sees.
-- **App Settings** (Global Settings only): data storage (SQLite database file or MySQL connection, including TLS), "My Profile" (your name for "Assign to me"), the number of tickets per page, the node/workflow config directory, and project management (rename a project, change its working directory, or delete it). Storage changes take effect the next time the server starts. The defaults work as they are, so most users don't need to change anything here.
+- **App Settings** (Global Settings only): data storage (SQLite database file or MySQL connection, including TLS), "My Profile" (your name for "Assign to me"), the number of tickets per page, the node/workflow config directory, and project management (rename a project, check / set / change / clear its local path for this environment -- shown as "Not set" when there is none -- or delete it). Storage changes take effect the next time the server starts. The defaults work as they are, so most users don't need to change anything here.
 
 #### Theme and language
 
@@ -123,7 +125,8 @@ Use the header buttons to switch the theme (light / dark / match system) and the
 
 - **Local, single-user tool**: the Web UI has no login. By default, the server listens only on `127.0.0.1` (port `49173`). To change this, set `host` / `port` in `graph-config.json`, or the `GRAPH_HOST` / `PORT` environment variables. Only open it to other machines on a network you trust.
 - **Where data is stored**: tickets, execution graphs, and artifacts are stored in a database, by default the SQLite file `$HOME/.graph-ops/graph.db`. `$HOME/.graph-ops/artifacts` is a working-files directory for investigation material and temporary files. When an HTML or image artifact is registered from a file path, only files under this directory can be read. If an `artifacts/` directory appears at the root of your repository, it is stray output and safe to delete.
-- **Configuration file**: runtime settings are read from `graph-config.json` in the directory the server or CLI starts from, or else from `$HOME/.graph-ops/config.json`. App Settings writes to that same file. Environment variables take precedence over the file.
+- **Configuration file**: runtime settings are read from `graph-config.json` in the directory the server or CLI starts from, or else from `$HOME/.graph-ops/config.json`. App Settings writes to that same file. Environment variables take precedence over the file. The file also holds `projectPaths`, each project's local path in this environment; it is saved to whichever `graph-config.json` the server (or CLI) in use reads, so start them from places that resolve to the same file.
+- **Upgrading from a version that stored `work_dir` in the database**: the `projects.work_dir` column is dropped automatically (SQLite and MySQL) the first time the new version starts, and its values are **not** migrated. Set each project's local path again, from App Settings > project management or by running `/graph-ops:ui` in the project directory and choosing the existing project. If your team shares a MySQL database, upgrade everyone together: an older binary cannot create or read projects once the column is gone. API change: project responses no longer contain `work_dir`; they contain `local_path` (this environment's path, `""` when not set) instead, and `POST` / `PATCH /api/projects` accept `local_path`.
 - **Two separate language settings**: `/graph-ops:onboarding` sets the language of the content the plugin generates (saved as `language:` in `$HOME/.graph-ops/config.yaml`). The header's language button only changes the Web UI's display language.
 
 ### Troubleshooting
@@ -173,7 +176,7 @@ Claude Code 内で次を実行します。
 #### クイックスタート
 
 1. **プラグインの言語を選ぶ**: `/graph-ops:onboarding` を一度実行します。ノード名や生成される内容（計画、Gherkin 仕様、実装メモ、レビュー結果、レポート）に使う言語を聞かれます。いつでも再実行できます。
-2. **プロジェクトを登録する**: プロジェクトの作業ディレクトリに `cd` して Claude Code を起動し、`/graph-ops:ui` を実行します。ブラウザで Web UI が開きます。未登録のディレクトリなら、そのディレクトリが入力済みの「新規プロジェクト作成」ダイアログが開きます。
+2. **プロジェクトを登録する**: プロジェクトの作業ディレクトリに `cd` して Claude Code を起動し、`/graph-ops:ui` を実行します。ブラウザで Web UI が開きます。自分の環境でそのディレクトリに対応するプロジェクトがまだなければ、ダイアログで「**新規作成**」するか、DB にある「**既存プロジェクトから選ぶ**」（同じ MySQL を使うメンバーがすでに作ったプロジェクトなど）を選べます。どちらを選んでも、そのディレクトリとプロジェクトの対応が自分の `graph-config.json` に保存されます。
 3. **チケットを作る**: `/graph-ops:create-ticket` を実行し、やりたいことを伝えます。Claude が範囲・影響箇所・エッジケースなどを対話で詰めてから、チケットを登録します。Web UI の「新規チケット」ボタンから始めることもできます。
 4. **チケットをリファインする（任意）**: `/graph-ops:refine-ticket` を実行すると、完了条件と「なぜやるか」を固め、その内容でチケットの説明を書き直します。
 5. **チケットを実行する**: `/graph-ops:process-ticket` を実行します（Web UI のチケットの「実行する」ボタンでも可）。実行グラフを組み立て、ノードごとにサブエージェントで（可能なところは並列に）作業し、成果物を保存し、レビューが通るまで繰り返します。
@@ -197,13 +200,15 @@ claude plugin update graph-ops@graph-ops
 | `/graph-ops:create-ticket` | 依頼内容を対話で詰めてから、チケットを作成します。実行グラフは作りません。 |
 | `/graph-ops:refine-ticket` | チケットの完了条件と「なぜやるか」を固め、説明を書き直します。実行グラフは作りません。 |
 | `/graph-ops:process-ticket` | チケットの実行グラフの形を決め、サブエージェントで実行します。成果物の保存と、レビューが収束するまでの繰り返しも行います。 |
-| `/graph-ops:ui` | カレントディレクトリに対応するプロジェクトのローカル Web UI を開きます。必要なら UI サーバーを起動します。 |
+| `/graph-ops:ui` | カレントディレクトリがローカルパス（またはその配下）にあたるプロジェクトのローカル Web UI を開きます。必要なら UI サーバーを起動します。該当がなければ、このディレクトリ用にプロジェクトを新規作成するか既存プロジェクトを選べます。 |
 
 ### Web UI の使い方
 
 #### プロジェクト
 
-ヘッダーのプロジェクトメニューで、登録済みのプロジェクトを切り替えます。「新規プロジェクト...」から別のプロジェクトを登録できます（名前、任意の ID プレフィックス、作業フォルダの絶対パス）。チケットとその ID（例: `SHOP-00001`）はプロジェクトに属します。
+ヘッダーのプロジェクトメニューで、登録済みのプロジェクトを切り替えます。「新規プロジェクト...」から別のプロジェクトを登録できます（名前、任意の ID プレフィックス、任意でローカルパスの絶対パス）。チケットとその ID（例: `SHOP-00001`）はプロジェクトに属します。
+
+プロジェクト本体（名前・プレフィックス・チケット）は DB にあり、チームで共有できます。一方、**ローカルパス**（自分のマシン上でプロジェクトがある場所）は環境ごとの設定です。DB ではなく自分の `graph-config.json` の `projectPaths`（プロジェクト ID → 絶対パス）に保存されるので、同じ DB を使うメンバーがそれぞれ自分のパスを設定しても互いに影響しません。ローカルパスは、`/graph-ops:ui` や `create-ticket` がカレントディレクトリと照合する対象（ディレクトリを含むローカルパスのうち一番深いものが優先されるので、プロジェクト配下の git worktree もそのプロジェクトになります）、Claude Code を起動するディレクトリ、プロジェクトのチーム用設定（`.graph-ops/`）の読み込み元として使われます。自分の環境でローカルパスが未設定のプロジェクトも使えます。起動は既定のターミナル用ディレクトリで行われ、「プロジェクト単位設定」は先にパスの設定を促します。
 
 #### チケット一覧
 
@@ -246,9 +251,9 @@ claude plugin update graph-ops@graph-ops
 
 ヘッダーの歯車ボタンで設定画面を開きます。
 
-- **スコープ**: 「全体設定」は、すべてのプロジェクトで自分に適用されます（既定の保存先は `$HOME/.graph-ops`）。「プロジェクト単位設定」は 1 つのプロジェクトに適用され、その作業フォルダの `.graph-ops/` ディレクトリに保存されるので、コミットしてチームで共有できます。プロジェクト単位設定は全体設定より優先されます。
+- **スコープ**: 「全体設定」は、すべてのプロジェクトで自分に適用されます（既定の保存先は `$HOME/.graph-ops`）。「プロジェクト単位設定」は 1 つのプロジェクトに適用され、そのローカルパスの `.graph-ops/` ディレクトリに保存されるので、コミットしてチームで共有できます。プロジェクト単位設定は全体設定より優先されます。「プロジェクト単位設定」を編集するには、自分の環境でそのプロジェクトのローカルパスが設定されている必要があります。
 - **ノード種別／レビューゲート／スキル／レポートテンプレート**: ノード種別ごとの指示の追加、レビューゲートの観点の変更・追加、スキルごとの指示の追加、HTML レポートテンプレートの差し替えができます。どの画面にも、エージェントが実際に受け取る内容のマージ済みプレビューがあります。
-- **アプリ設定**（全体設定のみ）: データ保存先（SQLite のデータベースファイル、または TLS 設定を含む MySQL 接続）、「自分の情報」（「担当する」に使う名前）、1 ページあたりのチケット数、ノード／ワークフロー設定ディレクトリ、プロジェクト管理（名前や作業ディレクトリの変更、削除）。保存先の変更は、次にサーバーを起動したときに反映されます。既定値のままで動くので、ほとんどの場合は変更不要です。
+- **アプリ設定**（全体設定のみ）: データ保存先（SQLite のデータベースファイル、または TLS 設定を含む MySQL 接続）、「自分の情報」（「担当する」に使う名前）、1 ページあたりのチケット数、ノード／ワークフロー設定ディレクトリ、プロジェクト管理（名前の変更、この環境でのローカルパスの確認・設定・変更・クリア（未設定なら「未設定」と表示）、削除）。保存先の変更は、次にサーバーを起動したときに反映されます。既定値のままで動くので、ほとんどの場合は変更不要です。
 
 #### テーマと言語
 
@@ -258,7 +263,8 @@ claude plugin update graph-ops@graph-ops
 
 - **ローカル・単一ユーザー向けのツール**: Web UI にログインはありません。既定では、サーバーは `127.0.0.1`（ポート `49173`）でのみ待ち受けます。変更するには、`graph-config.json` の `host`／`port`、または環境変数 `GRAPH_HOST`／`PORT` を設定します。他のマシンに公開するのは、信頼できるネットワークの中だけにしてください。
 - **データの保存先**: チケット・実行グラフ・成果物はデータベースに保存されます。既定は SQLite ファイル `$HOME/.graph-ops/graph.db` です。`$HOME/.graph-ops/artifacts` は、調査資料や一時ファイルを置く作業ファイル置き場です。HTML や画像の成果物をファイルパスで登録するときは、このディレクトリ配下のファイルだけを読み込めます。リポジトリ直下に `artifacts/` ディレクトリができていたら、紛れ込んだ不要な出力なので削除してかまいません。
-- **設定ファイル**: 実行時の設定は、サーバーや CLI を起動したディレクトリの `graph-config.json`、なければ `$HOME/.graph-ops/config.json` から読み込まれます。アプリ設定もこのファイルに書き込みます。環境変数はファイルより優先されます。
+- **設定ファイル**: 実行時の設定は、サーバーや CLI を起動したディレクトリの `graph-config.json`、なければ `$HOME/.graph-ops/config.json` から読み込まれます。アプリ設定もこのファイルに書き込みます。環境変数はファイルより優先されます。このファイルには、この環境での各プロジェクトのローカルパス `projectPaths` も入ります。使っているサーバー（または CLI）が読む `graph-config.json` に保存されるので、両者が同じファイルを読む場所から起動してください。
+- **DB に `work_dir` を保存していたバージョンからのアップグレード**: 新しいバージョンの初回起動時に `projects.work_dir` カラムが自動で削除されます（SQLite・MySQL とも）。既存の値は**移行されません**。各プロジェクトのローカルパスは、アプリ設定のプロジェクト管理か、プロジェクトのディレクトリで `/graph-ops:ui` を実行して既存プロジェクトを選ぶことで、各自が設定し直してください。チームで MySQL を共有している場合は、全員そろってアップグレードしてください。カラム削除後は、古いバイナリではプロジェクトの作成や取得ができません。API の変更点: プロジェクトの応答から `work_dir` がなくなり、代わりに `local_path`（この環境でのパス。未設定なら `""`）が入ります。`POST`／`PATCH /api/projects` は `local_path` を受け付けます。
 - **2 種類の言語設定**: `/graph-ops:onboarding` は、プラグインが生成する内容の言語を設定します（`$HOME/.graph-ops/config.yaml` に `language:` として保存）。ヘッダーの言語ボタンは、Web UI の表示言語だけを切り替えます。
 
 ### トラブルシューティング

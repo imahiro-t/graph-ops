@@ -22,7 +22,7 @@ const (
 // resolveCreateTicketProject decides which project `create-ticket` targets
 // when --project is omitted (DFLT-00025):
 //
-//  1. If workDir (the CLI's cwd, runtimeConfig.WorkDir) is non-empty and
+//  1. If cwd (the CLI's current directory, runtimeConfig.WorkDir) is non-empty and
 //     equals or lies under some project's local path (projectPaths, i.e.
 //     graph-config.json's per-environment project ID -> path map, see
 //     DFLT-00080), that project wins -- the deepest such path when several
@@ -32,7 +32,7 @@ const (
 //     project switcher).
 //  3. Otherwise, the long-standing "no current project selected" error.
 //
-// An empty workDir skips step 1 entirely rather than falling back to
+// An empty cwd skips step 1 entirely rather than falling back to
 // os.Getwd()/filepath.Abs("") -- the caller didn't supply a cwd, and
 // silently substituting the process's own one would make the result depend
 // on wherever the process (e.g. a test binary) happens to run.
@@ -43,13 +43,13 @@ const (
 // prevent. Likewise a current_project_id that no longer names a project is
 // an error (with the dangling id in the message) rather than something to
 // guess around.
-func resolveCreateTicketProject(repo store.GraphRepository, workDir string, projectPaths map[string]string) (*domain.Project, projectResolutionSource, error) {
-	if workDir != "" {
+func resolveCreateTicketProject(repo store.GraphRepository, cwd string, projectPaths map[string]string) (*domain.Project, projectResolutionSource, error) {
+	if cwd != "" {
 		projects, err := repo.ListProjects()
 		if err != nil {
 			return nil, "", fmt.Errorf("listing projects to match the current directory against their local paths: %w", err)
 		}
-		if matched := findProjectForDir(projects, projectPaths, workDir); matched != nil {
+		if matched := findProjectForDir(projects, projectPaths, cwd); matched != nil {
 			return matched, resolvedFromCurrentDirectory, nil
 		}
 	}

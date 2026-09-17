@@ -95,12 +95,12 @@ func TestSettingsNodeType_GlobalScopeSaveAndClear(t *testing.T) {
 // per-project team-tier resolution.
 func TestSettingsNodeType_ProjectScopeIsolatedPerProject(t *testing.T) {
 	s, repo, projA := newSettingsTestServer(t)
-	workDirB := t.TempDir()
+	localPathB := t.TempDir()
 	projB, err := repo.CreateProject("Project B", "PB")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	if _, err := runtimeconfig.SetProjectPath(s.cfg.WorkDir, s.cfg.HomeDir, projB.ID, workDirB); err != nil {
+	if _, err := runtimeconfig.SetProjectPath(s.cfg.WorkDir, s.cfg.HomeDir, projB.ID, localPathB); err != nil {
 		t.Fatalf("SetProjectPath(B): %v", err)
 	}
 

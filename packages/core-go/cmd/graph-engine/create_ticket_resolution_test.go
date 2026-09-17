@@ -67,14 +67,14 @@ func (sp standardProjects) id(t *testing.T, logical string) string {
 	return id
 }
 
-func (sp standardProjects) add(t *testing.T, logical, name, workDir string) domain.Project {
+func (sp standardProjects) add(t *testing.T, logical, name, localPath string) domain.Project {
 	t.Helper()
 	p, err := sp.repo.CreateProject(name, "")
 	if err != nil {
-		t.Fatalf("CreateProject(%s, %q): %v", logical, workDir, err)
+		t.Fatalf("CreateProject(%s, %q): %v", logical, localPath, err)
 	}
 	sp.ids[logical] = p.ID
-	sp.paths[p.ID] = workDir
+	sp.paths[p.ID] = localPath
 	return p
 }
 
@@ -123,16 +123,16 @@ type cliResult struct {
 	err    error
 }
 
-// runCreateTicket runs cmdCreateTicket with rc.WorkDir = workDir and
+// runCreateTicket runs cmdCreateTicket with rc.WorkDir = cwd and
 // rc.ProjectPaths = paths against repo, capturing stdout and stderr
 // separately.
-func runCreateTicket(t *testing.T, repo store.GraphRepository, paths map[string]string, workDir string, args ...string) cliResult {
+func runCreateTicket(t *testing.T, repo store.GraphRepository, paths map[string]string, cwd string, args ...string) cliResult {
 	t.Helper()
 	eng := engine.New(repo)
 	var res cliResult
 	res.stderr = captureStderr(t, func() {
 		res.stdout = captureStdout(t, func() {
-			res.err = cmdCreateTicket(eng, repo, runtimeConfig{WorkDir: workDir, ProjectPaths: paths}, args)
+			res.err = cmdCreateTicket(eng, repo, runtimeConfig{WorkDir: cwd, ProjectPaths: paths}, args)
 		})
 	})
 	return res
@@ -273,7 +273,7 @@ func TestCreateTicketResolution_DoesNotChangeCurrentProject(t *testing.T) {
 // Rule 2: nested local paths -> the deepest match wins.
 // ---------------------------------------------------------------------------
 
-func TestCreateTicketResolution_NestedWorkDirDeepestWins(t *testing.T) {
+func TestCreateTicketResolution_NestedLocalPathDeepestWins(t *testing.T) {
 	cases := []struct {
 		cwd  string
 		want string
@@ -329,9 +329,9 @@ func TestCreateTicketResolution_DeepestWinsRegardlessOfListOrder(t *testing.T) {
 
 func TestCreateTicketResolution_SeparatorBoundary(t *testing.T) {
 	cases := []struct {
-		workDir string
-		cwd     string
-		want    string
+		localPath string
+		cwd       string
+		want      string
 	}{
 		{"/a/foo", "/a/foobar", "proj-blg"},
 		{"/a/foo", "/a/foobar/baz", "proj-blg"},
@@ -340,9 +340,9 @@ func TestCreateTicketResolution_SeparatorBoundary(t *testing.T) {
 		{"/a/foo/bar", "/a/foo", "proj-blg"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.workDir+"@"+tc.cwd, func(t *testing.T) {
+		t.Run(tc.localPath+"@"+tc.cwd, func(t *testing.T) {
 			sp := newStandardResolutionEnv(t)
-			sp.add(t, "proj-foo", "Foo", tc.workDir)
+			sp.add(t, "proj-foo", "Foo", tc.localPath)
 			sp.setCurrent(t, "proj-blg")
 
 			ticket := mustSucceed(t, runCreateTicket(t, sp.repo, sp.paths, tc.cwd, "タイトル"))
@@ -351,10 +351,10 @@ func TestCreateTicketResolution_SeparatorBoundary(t *testing.T) {
 	}
 }
 
-func TestCreateTicketResolution_WorkDirIsCleaned(t *testing.T) {
+func TestCreateTicketResolution_LocalPathIsCleaned(t *testing.T) {
 	cases := []struct {
-		workDir string
-		cwd     string
+		localPath string
+		cwd       string
 	}{
 		{"/a/foo/", "/a/foo"},
 		{"/a/foo//", "/a/foo/bar"},
@@ -362,9 +362,9 @@ func TestCreateTicketResolution_WorkDirIsCleaned(t *testing.T) {
 		{"/a/./foo", "/a/foo/bar"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.workDir+"@"+tc.cwd, func(t *testing.T) {
+		t.Run(tc.localPath+"@"+tc.cwd, func(t *testing.T) {
 			sp := newStandardResolutionEnv(t)
-			sp.add(t, "proj-foo", "Foo", tc.workDir)
+			sp.add(t, "proj-foo", "Foo", tc.localPath)
 			sp.setCurrent(t, "proj-blg")
 
 			ticket := mustSucceed(t, runCreateTicket(t, sp.repo, sp.paths, tc.cwd, "タイトル"))
@@ -404,7 +404,7 @@ func withExtraProjects(sp standardProjects, extras ...extraProject) *resolutionS
 	}
 }
 
-func TestCreateTicketResolution_EmptyWorkDirNeverMatches(t *testing.T) {
+func TestCreateTicketResolution_EmptyLocalPathNeverMatches(t *testing.T) {
 	sp := newStandardResolutionEnv(t)
 	sp.setCurrent(t, "proj-blg")
 	stub := withExtraProjects(sp, extraProject{ID: "proj-empty", Name: "Empty", Path: ""})
@@ -413,20 +413,20 @@ func TestCreateTicketResolution_EmptyWorkDirNeverMatches(t *testing.T) {
 	assertProject(t, sp, ticket, "proj-blg")
 }
 
-func TestCreateTicketResolution_RelativeWorkDirExcluded(t *testing.T) {
+func TestCreateTicketResolution_RelativeLocalPathExcluded(t *testing.T) {
 	cases := []struct {
-		workDir string
-		cwd     string
+		localPath string
+		cwd       string
 	}{
 		{".", "/somewhere/else"},
 		{"graph-ops", "/somewhere/graph-ops"},
 		{"./tech-blog2", "/somewhere"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.workDir+"@"+tc.cwd, func(t *testing.T) {
+		t.Run(tc.localPath+"@"+tc.cwd, func(t *testing.T) {
 			sp := newStandardResolutionEnv(t)
 			sp.setCurrent(t, "proj-blg")
-			stub := withExtraProjects(sp, extraProject{ID: "proj-rel", Name: "Rel", Path: tc.workDir})
+			stub := withExtraProjects(sp, extraProject{ID: "proj-rel", Name: "Rel", Path: tc.localPath})
 
 			ticket := mustSucceed(t, runCreateTicket(t, stub, sp.paths, tc.cwd, "タイトル"))
 			assertProject(t, sp, ticket, "proj-blg")
@@ -439,7 +439,7 @@ func TestCreateTicketResolution_RelativeWorkDirExcluded(t *testing.T) {
 // cwd paths above can't expose that (Abs resolves against the test
 // process's real cwd), so this chdirs to a symlink-resolved D and passes D
 // as rc.WorkDir too.
-func TestCreateTicketResolution_RelativeWorkDirExcludedEvenWhenItResolvesToCwd(t *testing.T) {
+func TestCreateTicketResolution_RelativeLocalPathExcludedEvenWhenItResolvesToCwd(t *testing.T) {
 	sp := newStandardResolutionEnv(t)
 	sp.setCurrent(t, "proj-blg")
 	d, err := filepath.EvalSymlinks(t.TempDir())
@@ -536,7 +536,7 @@ func TestCreateTicketResolution_DanglingCurrentProjectFails(t *testing.T) {
 // D is symlink-resolved and the precondition os.Getwd() == D is asserted: on
 // macOS t.TempDir() lives under /var -> /private/var, and without this a
 // buggy os.Getwd()-based implementation would miss the match and pass anyway.
-func TestCreateTicketResolution_EmptyWorkDirIgnoresProcessCwd(t *testing.T) {
+func TestCreateTicketResolution_EmptyCwdIgnoresProcessCwd(t *testing.T) {
 	sp := newStandardResolutionEnv(t)
 	d, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {

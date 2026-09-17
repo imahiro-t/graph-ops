@@ -123,7 +123,8 @@ func setProjectPathIn(cfg *FileConfig, projectID, normalized string) {
 // another member -- is ignored.
 //
 // Matching rules (carried over unchanged from the pre-DFLT-00080
-// cmd/graph-engine findProjectForDir, which matched DB work_dir values):
+// cmd/graph-engine findProjectForDir, which matched the per-project
+// directory the DB used to hold):
 //   - dir and each path are compared after filepath.Clean, so trailing
 //     separators, "//", "." and ".." segments don't matter.
 //   - "Under" is checked on a path-separator boundary: /a/foo matches

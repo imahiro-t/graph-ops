@@ -126,26 +126,26 @@ func TestBuiltinNodeTypes_CoverEveryShippedDefaultFile(t *testing.T) {
 }
 
 func TestResolveRootsForProjectWorkDir_UsesProjectWorkDirAsTeamRootStart(t *testing.T) {
-	projectWorkDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(projectWorkDir, configDirName), 0o755); err != nil {
+	projectDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectDir, configDirName), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	roots, err := ResolveRootsForProjectWorkDir(projectWorkDir, "", "")
+	roots, err := ResolveRootsForProjectWorkDir(projectDir, "", "")
 	if err != nil {
 		t.Fatalf("ResolveRootsForProjectWorkDir: %v", err)
 	}
-	want := filepath.Join(projectWorkDir, configDirName)
+	want := filepath.Join(projectDir, configDirName)
 	if roots.TeamDir != want {
 		t.Errorf("TeamDir = %q, want %q", roots.TeamDir, want)
 	}
 }
 
 func TestResolveRootsForProjectWorkDir_ExplicitTeamOverrideWins(t *testing.T) {
-	projectWorkDir := t.TempDir()
+	projectDir := t.TempDir()
 	explicitTeamDir := t.TempDir()
 
-	roots, err := ResolveRootsForProjectWorkDir(projectWorkDir, "", explicitTeamDir)
+	roots, err := ResolveRootsForProjectWorkDir(projectDir, "", explicitTeamDir)
 	if err != nil {
 		t.Fatalf("ResolveRootsForProjectWorkDir: %v", err)
 	}
@@ -155,12 +155,12 @@ func TestResolveRootsForProjectWorkDir_ExplicitTeamOverrideWins(t *testing.T) {
 }
 
 func TestProjectTeamRoot_ReturnsNewPathWhenNoneExistsYet(t *testing.T) {
-	projectWorkDir := t.TempDir()
-	got, err := ProjectTeamRoot(projectWorkDir)
+	projectDir := t.TempDir()
+	got, err := ProjectTeamRoot(projectDir)
 	if err != nil {
 		t.Fatalf("ProjectTeamRoot: %v", err)
 	}
-	want := filepath.Join(projectWorkDir, configDirName)
+	want := filepath.Join(projectDir, configDirName)
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

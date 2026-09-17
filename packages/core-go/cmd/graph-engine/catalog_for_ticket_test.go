@@ -10,11 +10,11 @@ import (
 )
 
 // writeWorkflowYAML writes a minimal team-tier workflow.yaml under
-// <workDir>/.graph-ops/workflow.yaml, matching what the settings
+// <root>/.graph-ops/workflow.yaml, matching what the settings
 // UI's PUT /api/settings/catalog (scope=project) would save.
-func writeWorkflowYAML(t *testing.T, workDir, content string) {
+func writeWorkflowYAML(t *testing.T, root, content string) {
 	t.Helper()
-	dir := filepath.Join(workDir, ".graph-ops")
+	dir := filepath.Join(root, ".graph-ops")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -32,7 +32,7 @@ func writeWorkflowYAML(t *testing.T, workDir, content string) {
 // else entirely.
 func TestCatalogForTicket_UsesProjectLocalPathNotProcessCWD(t *testing.T) {
 	repo := newTestRepo(t)
-	projectWorkDir := t.TempDir()
+	projectLocalPath := t.TempDir()
 	proj, err := repo.CreateProject("P", "PROJ")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
@@ -42,7 +42,7 @@ func TestCatalogForTicket_UsesProjectLocalPathNotProcessCWD(t *testing.T) {
 		t.Fatalf("CreateTicket: %v", err)
 	}
 
-	writeWorkflowYAML(t, projectWorkDir, `version: 1
+	writeWorkflowYAML(t, projectLocalPath, `version: 1
 review_gates:
   code_review:
     max_iterations: 7
@@ -51,7 +51,7 @@ review_gates:
 	// rc.WorkDir deliberately points elsewhere (an unrelated temp dir, never
 	// touched by writeWorkflowYAML above) to prove the project's own local
 	// path -- not the process cwd -- is what gets resolved.
-	rc := runtimeConfig{WorkDir: t.TempDir(), UserExtensionsDir: t.TempDir(), ProjectPaths: map[string]string{proj.ID: projectWorkDir}}
+	rc := runtimeConfig{WorkDir: t.TempDir(), UserExtensionsDir: t.TempDir(), ProjectPaths: map[string]string{proj.ID: projectLocalPath}}
 	catalog, err := catalogForTicket(repo, rc, ticket.ID, "")
 	if err != nil {
 		t.Fatalf("catalogForTicket: %v", err)
@@ -128,7 +128,7 @@ func TestCmdGetLanguageSettings_ProjectLocalPath(t *testing.T) {
 // そちらが優先される.
 func TestCatalogForTicket_ExplicitTeamExtensionsDirWins(t *testing.T) {
 	repo := newTestRepo(t)
-	projectWorkDir := t.TempDir()
+	projectLocalPath := t.TempDir()
 	proj, err := repo.CreateProject("P", "PROJ")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
@@ -138,7 +138,7 @@ func TestCatalogForTicket_ExplicitTeamExtensionsDirWins(t *testing.T) {
 		t.Fatalf("CreateTicket: %v", err)
 	}
 
-	writeWorkflowYAML(t, projectWorkDir, `version: 1
+	writeWorkflowYAML(t, projectLocalPath, `version: 1
 review_gates:
   code_review:
     max_iterations: 7
@@ -153,7 +153,7 @@ review_gates:
 		t.Fatalf("write explicit workflow.yaml: %v", err)
 	}
 
-	rc := runtimeConfig{WorkDir: t.TempDir(), UserExtensionsDir: t.TempDir(), TeamExtensionsDir: explicitTeamDir, ProjectPaths: map[string]string{proj.ID: projectWorkDir}}
+	rc := runtimeConfig{WorkDir: t.TempDir(), UserExtensionsDir: t.TempDir(), TeamExtensionsDir: explicitTeamDir, ProjectPaths: map[string]string{proj.ID: projectLocalPath}}
 	catalog, err := catalogForTicket(repo, rc, ticket.ID, "")
 	if err != nil {
 		t.Fatalf("catalogForTicket: %v", err)

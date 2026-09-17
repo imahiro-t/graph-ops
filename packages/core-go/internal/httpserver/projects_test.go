@@ -111,7 +111,7 @@ func TestHandleCreateProject_WithoutLocalPath(t *testing.T) {
 	}
 }
 
-// Replaces the store-level TestCreateProjectRejectsRelativeWorkDir: the
+// Replaces the removed store-level "relative path is rejected" test: the
 // absolute-path rule now lives at the API layer (the store has no path).
 func TestHandleCreateProject_RelativeLocalPathIs400(t *testing.T) {
 	s, repo := newBareTestServer(t)
