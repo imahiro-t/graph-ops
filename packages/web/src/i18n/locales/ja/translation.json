@@ -201,8 +201,9 @@
   },
   "claudePrompts": {
     "executeIncompleteNodes": "チケット {{ticketId}} の未完了ノードを実行してください",
-    "refineTicket": "/refine-ticket {{ticketId}} のスキルを使って、完了条件とWhy（背景・目的）を詰めてください",
-    "createTicket": "次の内容からタイトルと説明を考えて、/create-ticket のスキルを使ってチケットを作成してください。\n\n作成したいチケットの内容:\n{{request}}"
+    "refineTicket": "/graph-ops:refine-ticket {{ticketId}} のスキルを使って、完了条件とWhy（背景・目的）を詰めてください",
+    "processTicket": "/graph-ops:process-ticket {{ticketId}}",
+    "createTicket": "/graph-ops:create-ticket 次の内容からタイトルと説明を考えて、チケットを作成してください。\n\n作成したいチケットの内容:\n{{request}}"
   },
   "graphViewer": {
     "manualNode": "手動操作ノード",

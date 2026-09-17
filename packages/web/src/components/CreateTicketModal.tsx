@@ -59,7 +59,7 @@ export const CreateTicketModal: React.FC<Props> = ({ onSubmit, onClose, isCreati
       >
         <h2 id={titleId} className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">{t('createModal.title')}</h2>
         <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-          {t('createModal.descriptionPrefix')} <span className="font-mono">/create-ticket</span> {t('createModal.descriptionSuffix')}
+          {t('createModal.descriptionPrefix')} <span className="font-mono">/graph-ops:create-ticket</span> {t('createModal.descriptionSuffix')}
         </p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

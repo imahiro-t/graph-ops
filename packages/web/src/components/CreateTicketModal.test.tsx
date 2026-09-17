@@ -222,7 +222,7 @@ describe('create-ticket translations', () => {
 
     const prompt = locale.claudePrompts.createTicket;
     expect(prompt).toContain('{{request}}');
-    expect(prompt).toContain('/create-ticket');
+    expect(prompt).toMatch(/^\/graph-ops:create-ticket\s/);
     expect(prompt).not.toContain('{{title}}');
     expect(prompt).not.toContain('{{description}}');
   });

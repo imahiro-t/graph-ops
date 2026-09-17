@@ -201,8 +201,9 @@
   },
   "claudePrompts": {
     "executeIncompleteNodes": "Please execute the incomplete nodes of ticket {{ticketId}}.",
-    "refineTicket": "Use the /refine-ticket skill on {{ticketId}} to pin down the completion criteria and the Why (background and purpose).",
-    "createTicket": "Use the /create-ticket skill to create a ticket, working out its title and description from the following request.\n\nRequest:\n{{request}}"
+    "refineTicket": "/graph-ops:refine-ticket {{ticketId}} Pin down the completion criteria and the Why (background and purpose).",
+    "processTicket": "/graph-ops:process-ticket {{ticketId}}",
+    "createTicket": "/graph-ops:create-ticket Create a ticket, working out its title and description from the following request.\n\nRequest:\n{{request}}"
   },
   "graphViewer": {
     "manualNode": "Manual operation node",
