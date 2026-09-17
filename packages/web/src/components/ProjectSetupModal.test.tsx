@@ -1,6 +1,7 @@
 // DFLT-00080: the project setup dialog `graph-engine ui` opens for a
 // directory no project's local path covers -- "create new" vs "choose an
 // existing project" -- plus the header's create-only entry.
+import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -181,5 +182,231 @@ describe('ProjectSetupModal', () => {
 
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith(created));
     expect(calls()[0].body).toEqual({ name: 'NoPathProj' });
+  });
+
+  describe('accessibility (iteration 2)', () => {
+    it('moves focus into the dialog on open, traps Tab/Shift+Tab, closes on Escape, and restores focus on close', async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      const props = {
+        directory: '/work/new',
+        offerExisting: true,
+        projects: [project('p1', 'Alpha', '/work/alpha')],
+        onClose,
+        onCreated: vi.fn(),
+        onLinked: vi.fn()
+      };
+      const { rerender } = render(
+        <>
+          <button type="button">opener</button>
+          <ProjectSetupModal isOpen={false} {...props} />
+        </>
+      );
+      const opener = screen.getByRole('button', { name: 'opener' });
+      opener.focus();
+
+      rerender(
+        <>
+          <button type="button">opener</button>
+          <ProjectSetupModal isOpen {...props} />
+        </>
+      );
+
+      // Initial focus: the selected mode radio ("create").
+      expect(createRadio()).toHaveFocus();
+
+      // Shift+Tab from the first stop wraps to the last one (Cancel: the
+      // submit button is disabled while the name is empty).
+      const cancel = screen.getByRole('button', { name: i18n.t('createModal.cancel') });
+      await user.tab({ shift: true });
+      expect(cancel).toHaveFocus();
+      // Tab from the last stop wraps back to the first one.
+      await user.tab();
+      expect(createRadio()).toHaveFocus();
+      // Walking forward never leaves the dialog.
+      const dialog = screen.getByRole('dialog');
+      for (let i = 0; i < 8; i++) {
+        await user.tab();
+        expect(dialog).toContainElement(document.activeElement as HTMLElement);
+      }
+
+      await user.keyboard('{Escape}');
+      expect(onClose).toHaveBeenCalledTimes(1);
+
+      rerender(
+        <>
+          <button type="button">opener</button>
+          <ProjectSetupModal isOpen={false} {...props} />
+        </>
+      );
+      expect(screen.getByRole('button', { name: 'opener' })).toHaveFocus();
+    });
+
+    it('create-only entry focuses the name input, and falls back to returnFocusRef when the opener is gone', () => {
+      const returnTarget = React.createRef<HTMLButtonElement>();
+      const props = {
+        directory: '',
+        offerExisting: false,
+        projects: [],
+        onClose: vi.fn(),
+        onCreated: vi.fn(),
+        onLinked: vi.fn(),
+        returnFocusRef: returnTarget
+      };
+      const { rerender } = render(
+        <>
+          <button type="button" ref={returnTarget}>switcher</button>
+          <ProjectSetupModal isOpen={false} {...props} />
+        </>
+      );
+
+      rerender(
+        <>
+          <button type="button" ref={returnTarget}>switcher</button>
+          <ProjectSetupModal isOpen {...props} />
+        </>
+      );
+      expect(screen.getByLabelText(i18n.t('createProjectModal.nameLabel'))).toHaveFocus();
+
+      rerender(
+        <>
+          <button type="button" ref={returnTarget}>switcher</button>
+          <ProjectSetupModal isOpen={false} {...props} />
+        </>
+      );
+      expect(screen.getByRole('button', { name: 'switcher' })).toHaveFocus();
+    });
+
+    it('announces the overwrite warning via role="status" and describes each radio with its local path', async () => {
+      const user = userEvent.setup();
+      renderModal({ directory: '/work/alpha-copy', projects: [project('p1', 'Alpha', '/work/alpha'), project('p2', 'Shared', '')] });
+
+      await user.click(existingRadio());
+      const status = screen.getByTestId('project-setup-overwrite-status');
+      expect(status).toHaveAttribute('role', 'status');
+      expect(status).toBeEmptyDOMElement();
+
+      expect(screen.getByRole('radio', { name: 'Alpha' })).toHaveAccessibleDescription('/work/alpha');
+      expect(screen.getByRole('radio', { name: 'Shared' })).toHaveAccessibleDescription(i18n.t('projectSetupModal.notSet'));
+
+      await user.click(screen.getByRole('radio', { name: 'Alpha' }));
+      expect(screen.getByRole('status')).toHaveTextContent(
+        i18n.t('projectSetupModal.overwriteWarning', { current: '/work/alpha', next: '/work/alpha-copy' })
+      );
+      // Selected card (bg-blue-50): the path uses slate-600 (>= 4.5:1), not slate-500.
+      const path = screen.getByTestId('project-setup-local-path-p1');
+      expect(path).toHaveClass('text-slate-600');
+      expect(path).not.toHaveClass('text-slate-500');
+    });
+  });
+
+  describe('created in the DB but the local path could not be saved (iteration 2)', () => {
+    const partialFailure = () =>
+      jsonResponse(500, {
+        error: { code: 'PROJECT_CREATED_LOCAL_PATH_NOT_SAVED', message: 'project Theta (p-theta) was created, but saving its local path ... failed' }
+      });
+
+    // Stateful parent standing in for App: onProjectsChanged re-fetches the list.
+    function Harness({ initial, after, offerExisting, onLinked, onProjectsChanged }: {
+      initial: Project[];
+      after: Project[];
+      offerExisting: boolean;
+      onLinked: () => void;
+      onProjectsChanged: () => void;
+    }) {
+      const [projects, setProjects] = React.useState(initial);
+      return (
+        <ProjectSetupModal
+          isOpen
+          directory={offerExisting ? '/work/theta' : ''}
+          offerExisting={offerExisting}
+          projects={projects}
+          onClose={vi.fn()}
+          onCreated={vi.fn()}
+          onLinked={onLinked}
+          onProjectsChanged={() => {
+            onProjectsChanged();
+            setProjects(after);
+          }}
+        />
+      );
+    }
+
+    it('`graph-engine ui` entry: re-fetches, says it was created, blocks a second create, and links the new project instead', async () => {
+      const alpha = project('p1', 'Alpha', '/work/alpha');
+      const theta = project('p-theta', 'Theta', '');
+      const linked = { ...theta, local_path: '/work/theta' };
+      fetchMock()
+        .mockResolvedValueOnce(partialFailure())
+        .mockResolvedValueOnce(jsonResponse(200, linked))
+        .mockResolvedValueOnce(jsonResponse(200, linked));
+      const onLinked = vi.fn();
+      const onProjectsChanged = vi.fn();
+      const user = userEvent.setup();
+      render(<Harness initial={[alpha]} after={[alpha, theta]} offerExisting onLinked={onLinked} onProjectsChanged={onProjectsChanged} />);
+
+      await user.type(screen.getByLabelText(i18n.t('createProjectModal.nameLabel')), 'Theta');
+      await user.click(screen.getByRole('button', { name: i18n.t('createModal.submit') }));
+
+      const notice = await screen.findByTestId('project-setup-partial-create');
+      expect(notice).toHaveAttribute('role', 'alert');
+      expect(notice).toHaveTextContent(i18n.t('projectSetupModal.createdButLocalPathNotSavedChooseExisting', { name: 'Theta' }));
+      expect(onProjectsChanged).toHaveBeenCalledTimes(1);
+      // Moved to "choose existing" with the new project preselected.
+      expect(existingRadio()).toBeChecked();
+      await waitFor(() => expect(screen.getByRole('radio', { name: 'Theta' })).toBeChecked());
+
+      // Going back to "create" does not allow a second POST.
+      await user.click(createRadio());
+      expect(screen.getByTestId('project-setup-partial-create')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: i18n.t('createModal.submit') })).toBeDisabled();
+
+      await user.click(existingRadio());
+      await user.click(screen.getByRole('radio', { name: 'Theta' }));
+      await user.click(screen.getByRole('button', { name: i18n.t('projectSetupModal.confirmExisting') }));
+
+      await waitFor(() => expect(onLinked).toHaveBeenCalledWith(linked));
+      expect(calls().map(c => `${c.method} ${c.url}`)).toEqual([
+        'POST /api/projects',
+        'PATCH /api/projects/p-theta',
+        'PUT /api/current-project'
+      ]);
+    });
+
+    it('header entry: says it was created, points to the settings screen, and disables create', async () => {
+      const theta = project('p-theta', 'Theta', '');
+      fetchMock().mockResolvedValueOnce(partialFailure());
+      const onProjectsChanged = vi.fn();
+      const user = userEvent.setup();
+      render(<Harness initial={[]} after={[theta]} offerExisting={false} onLinked={vi.fn()} onProjectsChanged={onProjectsChanged} />);
+
+      await user.type(screen.getByLabelText(i18n.t('createProjectModal.nameLabel')), 'Theta');
+      const submit = screen.getByRole('button', { name: i18n.t('createModal.submit') });
+      await user.click(submit);
+
+      expect(await screen.findByTestId('project-setup-partial-create')).toHaveTextContent(
+        i18n.t('projectSetupModal.createdButLocalPathNotSavedUseSettings', { name: 'Theta' })
+      );
+      expect(onProjectsChanged).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(submit).toBeDisabled());
+      await user.click(submit);
+      expect(calls()).toHaveLength(1);
+    });
+
+    it('a plain INTERNAL_ERROR is not treated as "already created": create stays available', async () => {
+      fetchMock().mockResolvedValueOnce(jsonResponse(500, { error: { code: 'INTERNAL_ERROR', message: 'db down' } }));
+      const onProjectsChanged = vi.fn();
+      const user = userEvent.setup();
+      render(<Harness initial={[]} after={[]} offerExisting={false} onLinked={vi.fn()} onProjectsChanged={onProjectsChanged} />);
+
+      await user.type(screen.getByLabelText(i18n.t('createProjectModal.nameLabel')), 'Theta');
+      const submit = screen.getByRole('button', { name: i18n.t('createModal.submit') });
+      await user.click(submit);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(i18n.t('errors.INTERNAL_ERROR'));
+      expect(screen.queryByTestId('project-setup-partial-create')).not.toBeInTheDocument();
+      expect(onProjectsChanged).not.toHaveBeenCalled();
+      await waitFor(() => expect(submit).toBeEnabled());
+    });
   });
 });

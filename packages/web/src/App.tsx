@@ -76,6 +76,10 @@ export const App: React.FC = () => {
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
+  // The header's project switcher button: where ProjectSetupModal returns
+  // focus on close when the element that opened it is gone (the menu item
+  // unmounts with the menu) or the dialog opened by itself (?newProject=1).
+  const projectMenuButtonRef = useRef<HTMLButtonElement>(null);
   // The directory `graph-engine ui` asked a project to be set up for (see
   // the newProject query effect below), or '' when the dialog was opened
   // from the header's "New project..." entry.
@@ -438,6 +442,7 @@ export const App: React.FC = () => {
           <div className="flex items-center gap-3">
             <div className="relative">
               <button
+                ref={projectMenuButtonRef}
                 onClick={() => setIsProjectMenuOpen(v => !v)}
                 className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 shadow-xs transition max-w-[14rem]"
                 title={currentProject ? currentProject.local_path || t('settings.appSettings.projects.notSet') : undefined}
@@ -967,6 +972,8 @@ export const App: React.FC = () => {
         onClose={() => setIsCreateProjectOpen(false)}
         onCreated={handleProjectCreated}
         onLinked={handleProjectLinked}
+        onProjectsChanged={fetchProjects}
+        returnFocusRef={projectMenuButtonRef}
       />
     </div>
   );
