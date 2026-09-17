@@ -5,14 +5,13 @@
 //
 // Where binaries live (see findLocalEngine / ensureEngine for the order):
 //   - <pluginRoot>/libexec/graph-engine[.exe] (+ libexec/.version): filled by
-//     `npm run build:go` in the monorepo, and by claude-plugin-path.js for the
-//     marketplace's `command` source (a tag-pinned clone under
-//     `~/.cache/graph-ops/<tag>`). Never tracked by git.
+//     `npm run build:go` in the monorepo (local development). Never tracked by
+//     git.
 //   - <engineCacheRoot>/v<version>/graph-engine[.exe]: the per-user cache the
-//     committed bin/graph-engine shim downloads into on first run when the
-//     plugin was installed without a binary (e.g. through a `git-subdir`
-//     source such as the community catalog, where gitignored files never
-//     arrive and no install-time script runs).
+//     committed bin/graph-engine shim downloads into on first run. Every
+//     marketplace install lands here: the plugin arrives through a `git-subdir`
+//     source (this repo's own marketplace and the community catalog), where
+//     gitignored files never arrive and no install-time script runs.
 //
 // bin/ itself only holds the committed shims (bin/graph-engine for sh,
 // bin/graph-engine.cmd for cmd/PowerShell). Claude Code adds bin/ to the
@@ -34,12 +33,12 @@ const os = require('os');
 const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
-const { pruneStaleEngineVersions } = require('./prune-plugin-cache');
+const { pruneStaleEngineVersions } = require('./prune-engine-cache');
 
 // Idle-socket timeout applied to every GET (including each redirect hop):
 // without this, a hung connection (dead proxy, captive portal, stalled TLS
 // handshake, ...) leaves the request's Promise pending forever, which in
-// turn hangs claude-plugin-path.js or the bin/graph-engine shim.
+// turn hangs the bin/graph-engine shim.
 const REQUEST_TIMEOUT_MS = 10000;
 
 // A fresh install (no cached binary yet) has no fallback to fall back to, so
