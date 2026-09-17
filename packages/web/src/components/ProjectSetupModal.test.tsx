@@ -2,7 +2,7 @@
 // directory no project's local path covers -- "create new" vs "choose an
 // existing project" -- plus the header's create-only entry.
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
@@ -48,6 +48,8 @@ function renderModal(props: Partial<React.ComponentProps<typeof ProjectSetupModa
 
 const createRadio = () => screen.getByRole('radio', { name: i18n.t('projectSetupModal.modeCreate') });
 const existingRadio = () => screen.getByRole('radio', { name: i18n.t('projectSetupModal.modeExisting') });
+const existingProjectRadio = (id: string) =>
+  screen.getAllByRole('radio').find(r => (r as HTMLInputElement).name === 'project-setup-existing' && (r as HTMLInputElement).value === id);
 
 describe('ProjectSetupModal', () => {
   beforeEach(() => {
@@ -242,6 +244,20 @@ describe('ProjectSetupModal', () => {
       expect(screen.getByRole('button', { name: 'opener' })).toHaveFocus();
     });
 
+    it('does not close on Escape while an IME composition is in progress (isComposing / keyCode 229)', () => {
+      const { onClose } = renderModal();
+      const nameInput = screen.getByLabelText(i18n.t('createProjectModal.nameLabel'));
+
+      fireEvent.keyDown(nameInput, { key: 'Escape', isComposing: true });
+      expect(onClose).not.toHaveBeenCalled();
+      fireEvent.keyDown(nameInput, { key: 'Escape', keyCode: 229 });
+      expect(onClose).not.toHaveBeenCalled();
+
+      // A plain Escape (composition finished) still closes the dialog.
+      fireEvent.keyDown(nameInput, { key: 'Escape' });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
     it('create-only entry focuses the name input, and falls back to returnFocusRef when the opener is gone', () => {
       const returnTarget = React.createRef<HTMLButtonElement>();
       const props = {
@@ -369,6 +385,73 @@ describe('ProjectSetupModal', () => {
       expect(calls().map(c => `${c.method} ${c.url}`)).toEqual([
         'POST /api/projects',
         'PATCH /api/projects/p-theta',
+        'PUT /api/current-project'
+      ]);
+    });
+
+    it('`graph-engine ui` entry: with an async re-fetch and a pre-existing same-named project, preselects only the newly created one', async () => {
+      const oldTheta = project('p-old', 'Theta', '/work/old-theta');
+      const newTheta = project('p-new', 'Theta', '');
+      const linked = { ...newTheta, local_path: '/work/theta' };
+      fetchMock()
+        .mockResolvedValueOnce(partialFailure())
+        .mockResolvedValueOnce(jsonResponse(200, linked))
+        .mockResolvedValueOnce(jsonResponse(200, linked));
+      const onLinked = vi.fn();
+      let finishRefetch: () => void = () => {};
+
+      // Stands in for App.fetchProjects: the list only changes after the
+      // fetch resolves, so the dialog first re-renders with the stale list.
+      function AsyncHarness() {
+        const [projects, setProjects] = React.useState<Project[]>([oldTheta]);
+        return (
+          <ProjectSetupModal
+            isOpen
+            directory="/work/theta"
+            offerExisting
+            projects={projects}
+            onClose={vi.fn()}
+            onCreated={vi.fn()}
+            onLinked={onLinked}
+            onProjectsChanged={() =>
+              new Promise<void>(resolve => {
+                finishRefetch = () => {
+                  setProjects([oldTheta, newTheta]);
+                  resolve();
+                };
+              })
+            }
+          />
+        );
+      }
+      const user = userEvent.setup();
+      render(<AsyncHarness />);
+
+      await user.type(screen.getByLabelText(i18n.t('createProjectModal.nameLabel')), 'Theta');
+      await user.click(screen.getByRole('button', { name: i18n.t('createModal.submit') }));
+
+      // Before the re-fetch resolves: in "choose existing", nothing is selected
+      // (the old same-named project must not be picked).
+      await screen.findByTestId('project-setup-partial-create');
+      expect(existingRadio()).toBeChecked();
+      const oldRadio = screen.getByRole('radio', { name: 'Theta' });
+      expect(oldRadio).not.toBeChecked();
+      expect(screen.getByTestId('project-setup-overwrite-status')).toBeEmptyDOMElement();
+      expect(screen.getByRole('button', { name: i18n.t('projectSetupModal.confirmExisting') })).toBeDisabled();
+
+      await act(async () => {
+        finishRefetch();
+      });
+
+      // After the re-fetch: the new project (p-new) is selected, the old one is not.
+      await waitFor(() => expect(existingProjectRadio('p-new')).toBeChecked());
+      expect(existingProjectRadio('p-old')).not.toBeChecked();
+
+      await user.click(screen.getByRole('button', { name: i18n.t('projectSetupModal.confirmExisting') }));
+      await waitFor(() => expect(onLinked).toHaveBeenCalledWith(linked));
+      expect(calls().map(c => `${c.method} ${c.url}`)).toEqual([
+        'POST /api/projects',
+        'PATCH /api/projects/p-new',
         'PUT /api/current-project'
       ]);
     });

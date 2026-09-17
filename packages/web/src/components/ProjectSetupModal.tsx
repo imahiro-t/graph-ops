@@ -165,6 +165,9 @@ export const ProjectSetupModal: React.FC<Props> = ({
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // Escape during IME composition cancels the conversion; it must not
+        // close the dialog (and throw away the typed name).
+        if (e.isComposing || e.keyCode === 229) return;
         e.preventDefault();
         e.stopPropagation();
         onCloseRef.current();
@@ -207,11 +210,16 @@ export const ProjectSetupModal: React.FC<Props> = ({
 
   // After a partial create, preselect the new project once the re-fetched
   // list contains it (`graph-engine ui` entry only -- it has the list).
+  // Only a same-named project whose id was NOT in the list before the POST
+  // counts: the render before the (async) re-fetch still shows the old list,
+  // and a pre-existing project with the same name must never be picked --
+  // confirming would overwrite that other project's local path. If the
+  // re-fetch fails or the match is ambiguous, nothing is preselected and the
+  // user picks from the list.
   useEffect(() => {
     if (!partialCreate || !offerExisting || selectedId) return;
-    const candidates = projects.filter(p => p.name === partialCreate.name);
-    const created = candidates.find(p => !partialCreate.knownIds.includes(p.id)) ?? candidates[candidates.length - 1];
-    if (created) setSelectedId(created.id);
+    const fresh = projects.filter(p => p.name === partialCreate.name && !partialCreate.knownIds.includes(p.id));
+    if (fresh.length === 1) setSelectedId(fresh[0].id);
   }, [partialCreate, offerExisting, projects, selectedId]);
 
   if (!isOpen) return null;
