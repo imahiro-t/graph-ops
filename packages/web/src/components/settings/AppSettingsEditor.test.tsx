@@ -196,6 +196,49 @@ describe('AppSettingsEditor', () => {
     await waitFor(() => expect(document.activeElement).toBe(saveButton));
   });
 
+  // DFLT-00074: fields that had a visible label (or only a placeholder) but
+  // no programmatic association are now labelled.
+  it('labels the storage, profile, pagination and extensions-dir fields and the DB backend radio group', async () => {
+    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse({ dbPath: 'a.db', artifactsDir: 'arts', myName: 'me', userExtensionsDir: 'ext' }));
+    renderEditor();
+
+    expect(await screen.findByLabelText(i18n.t('settings.appSettings.storage.dbPathLabel'))).toHaveValue('a.db');
+    expect(screen.getByLabelText(i18n.t('settings.appSettings.storage.artifactsDirLabel'))).toHaveValue('arts');
+    expect(screen.getByLabelText(i18n.t('settings.appSettings.myProfile.nameLabel'))).toHaveValue('me');
+    expect(screen.getByLabelText(i18n.t('settings.appSettings.pagination.pageSizeLabel'))).toHaveValue(10);
+    expect(screen.getByLabelText(i18n.t('settings.appSettings.extensionsDir.title'))).toHaveValue('ext');
+
+    const group = screen.getByRole('radiogroup', { name: i18n.t('settings.appSettings.storage.dbBackendLabel') });
+    expect(group.querySelectorAll('input[type="radio"]')).toHaveLength(2);
+  });
+
+  it('labels each project row name and local path input', async () => {
+    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse());
+    const projects = [
+      { id: 'p1', name: 'Alpha', prefix: 'ALP', local_path: '/a', created_at: '', updated_at: '' },
+      { id: 'p2', name: 'Beta', prefix: 'BET', local_path: '', created_at: '', updated_at: '' }
+    ];
+    render(
+      <AppSettingsEditor
+        scope="global"
+        projects={projects}
+        onDirtyChange={vi.fn()}
+        onProjectsChanged={vi.fn()}
+        onPaginationPageSizeChanged={vi.fn()}
+        onMyNameChanged={vi.fn()}
+      />
+    );
+    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+    const names = screen.getAllByLabelText(i18n.t('settings.appSettings.projects.nameLabel'));
+    expect(names.map(el => (el as HTMLInputElement).value)).toEqual(['Alpha', 'Beta']);
+    // The label also carries the "not set" badge for a project without a
+    // local path in this environment, so match the label text as a prefix.
+    const escaped = i18n.t('settings.appSettings.projects.localPathLabel').replace(/[()]/g, '\\$&');
+    const localPaths = screen.getAllByLabelText(new RegExp(`^${escaped}`));
+    expect(localPaths.map(el => (el as HTMLInputElement).value)).toEqual(['/a', '']);
+  });
+
   it('F-1 non-regression: switching language after editing does not re-fetch app settings or discard the unsaved edit', async () => {
     const user = userEvent.setup();
     mockedFetchAppSettings.mockResolvedValueOnce(makeResponse({ dbPath: '' }));

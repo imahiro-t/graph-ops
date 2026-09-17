@@ -2,7 +2,7 @@
 // instructions appended for one node type (GET/PUT
 // /api/settings/node-types(/{type})). See internal/config.ResolveNodeTypeContext
 // for the append-by-default merge semantics this editor exposes.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Save, CheckCircle2, Plus, Trash2, Check, X } from 'lucide-react';
 import { SettingsNodeTypeInfo, SettingsScope } from '../../types';
@@ -45,6 +45,8 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
   // list item.
   const [isAddingType, setIsAddingType] = useState(false);
   const [newTypeName, setNewTypeName] = useState('');
+  const newTypeInputId = useId();
+  const tierTextId = useId();
 
   const isDirty = canEdit && tierText !== savedTierText;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
@@ -214,25 +216,38 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
         {/* Add a brand-new custom node type (not yet known to any tier). */}
         <div className="mt-auto border-t border-slate-200 dark:border-slate-700 p-2">
           {isAddingType ? (
-            <div className="flex items-center gap-1">
-              <input
-                autoFocus
-                value={newTypeName}
-                onChange={e => setNewTypeName(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') confirmAddType();
-                  if (e.key === 'Escape') cancelAddType();
-                }}
-                placeholder={t('settings.nodeTypes.newTypePlaceholder')}
-                className="flex-1 min-w-0 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
-              />
-              <button onClick={confirmAddType} className="p-1 text-emerald-600 hover:text-emerald-700 shrink-0" title={t('settings.common.yes')}>
-                <Check className="w-3.5 h-3.5" />
-              </button>
-              <button onClick={cancelAddType} className="p-1 text-slate-400 hover:text-slate-600 shrink-0" title={t('settings.common.no')}>
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            <>
+              <label htmlFor={newTypeInputId} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+                {t('settings.nodeTypes.newTypeLabel')}
+              </label>
+              <div className="flex items-center gap-1">
+                <input
+                  id={newTypeInputId}
+                  autoFocus
+                  value={newTypeName}
+                  onChange={e => setNewTypeName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') confirmAddType();
+                    if (e.key === 'Escape') {
+                      // preventDefault tells the enclosing SettingsModal's
+                      // dialog hook (useModalDialog) that this Escape was
+                      // handled here, so it only cancels the add and does not
+                      // also close the modal.
+                      e.preventDefault();
+                      cancelAddType();
+                    }
+                  }}
+                  placeholder={t('settings.nodeTypes.newTypePlaceholder')}
+                  className="flex-1 min-w-0 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+                />
+                <button onClick={confirmAddType} className="p-1 text-emerald-600 hover:text-emerald-700 shrink-0" title={t('settings.common.yes')}>
+                  <Check className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={cancelAddType} className="p-1 text-slate-400 hover:text-slate-600 shrink-0" title={t('settings.common.no')}>
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </>
           ) : (
             <button
               onClick={() => setIsAddingType(true)}
@@ -261,13 +276,14 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
               </pre>
             </div>
             <div className="flex-1 min-h-0 flex flex-col">
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('settings.nodeTypes.tierTextLabel')}</label>
+              <label htmlFor={tierTextId} className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('settings.nodeTypes.tierTextLabel')}</label>
               <textarea
+                id={tierTextId}
                 value={tierText}
                 onChange={e => setTierText(e.target.value)}
                 disabled={!canEdit}
                 placeholder={t('settings.nodeTypes.tierTextPlaceholder')}
-                className="flex-1 min-h-[10rem] w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
+                className="flex-1 min-h-[10rem] w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
               />
               <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">{t('settings.nodeTypes.emptyOverrideHint')}</p>
             </div>
@@ -280,7 +296,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
               <button
                 onClick={handleSave}
                 disabled={!canEdit || saving || !isDirty}
-                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
+                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
               >
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                 {saving ? t('settings.common.saving') : t('settings.common.save')}

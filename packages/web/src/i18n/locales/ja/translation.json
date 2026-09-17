@@ -1,6 +1,7 @@
 {
   "common": {
-    "justNow": "たった今"
+    "justNow": "たった今",
+    "closeDialog": "閉じる"
   },
   "header": {
     "subtitle": "チケット・実行グラフ管理",
@@ -85,11 +86,10 @@
   "createModal": {
     "title": "新規チケット作成",
     "descriptionPrefix": "入力内容は",
-    "descriptionSuffix": "スキルに渡され、Claude Codeがチケットを作成します（グラフはまだ作られません）。",
-    "titleLabel": "タイトル *",
-    "titlePlaceholder": "例: ログイン失敗時のアカウントロック解除フローを見直す",
-    "descriptionLabel": "説明",
-    "descriptionPlaceholder": "要件や背景を記述...",
+    "descriptionSuffix": "スキルに渡され、Claude Codeがタイトルと説明を考えて、確認のうえチケットを作成します（グラフはまだ作られません）。",
+    "requestLabel": "どのようなチケットを作成したいですか？ *",
+    "requestPlaceholder": "例: ログインに失敗したときのアカウントロック解除の流れを見直したい。今は解除にサポートへの問い合わせが必要で…",
+    "shortcutHint": "Cmd（⌘）/ Ctrl + Enter で作成できます",
     "close": "閉じる",
     "cancel": "キャンセル",
     "submit": "作成"
@@ -189,7 +189,9 @@
     "title": "Claude Code を起動",
     "descriptionPrefix": "入力したプロンプトで、外部ターミナルに",
     "descriptionSuffix": "が対話起動します。権限確認や以降のやり取りはそちらのターミナルで行ってください。",
+    "promptLabel": "プロンプト",
     "placeholder": "Claude Code に送信するコマンドやプロンプト...",
+    "shortcutHint": "Cmd（⌘）/ Ctrl + Enter で起動できます",
     "launch": "起動"
   },
   "claudeLaunch": {
@@ -200,7 +202,7 @@
   "claudePrompts": {
     "executeIncompleteNodes": "チケット {{ticketId}} の未完了ノードを実行してください",
     "refineTicket": "/refine-ticket {{ticketId}} のスキルを使って、完了条件とWhy（背景・目的）を詰めてください",
-    "createTicket": "/create-ticket のスキルを使って、タイトル「{{title}}」、説明「{{description}}」でチケットを作成してください。"
+    "createTicket": "次の内容からタイトルと説明を考えて、/create-ticket のスキルを使ってチケットを作成してください。\n\n作成したいチケットの内容:\n{{request}}"
   },
   "graphViewer": {
     "manualNode": "手動操作ノード",
@@ -247,6 +249,7 @@
       "label": "スコープ",
       "global": "全体設定",
       "project": "プロジェクト単位設定",
+      "projectLabel": "対象プロジェクト",
       "projectPlaceholder": "プロジェクトを選択",
       "noProjectSelected": "アプリ全体でプロジェクトが選択されていません。プロジェクト単位設定を編集するには、先にプロジェクトスイッチャーからプロジェクトを選択してください。",
       "localPathNotSet": "このプロジェクトはこの環境でローカルパスが未設定のため、プロジェクト単位設定を読み書きできません。「アプリ設定」タブ（全体設定）のプロジェクト管理でローカルパスを設定してください。"
@@ -281,6 +284,7 @@
       "emptyOverrideHint": "空にして保存すると上書きが解除され、下位層の内容にフォールバックします。",
       "addType": "ノード種別を追加",
       "newTypePlaceholder": "例: custom_lint",
+      "newTypeLabel": "新しいノード種別名",
       "invalidTypeName": "「/」「\\」「.」「..」を含まない名前を入力してください。",
       "deleteType": "このノード種別の上書きを削除",
       "defaultBadge": "既定",

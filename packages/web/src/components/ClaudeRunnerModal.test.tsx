@@ -1,6 +1,7 @@
 // DFLT-00072: the launcher modal's prompt input is a multi-line textarea.
 // Plain Enter must insert a newline, Cmd/Ctrl+Enter must launch, and the
 // prompt must reach the launch API with its newlines intact.
+import React, { useState } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -98,6 +99,76 @@ describe('ClaudeRunnerModal', () => {
     // Once there is actual content, the button becomes enabled.
     await user.type(getPromptInput(), 'a');
     expect(getLaunchButton()).toBeEnabled();
+  });
+
+  // DFLT-00074: dialog semantics and keyboard focus management.
+  describe('as a modal dialog', () => {
+    const Harness: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
+      const [isOpen, setIsOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setIsOpen(true)}>
+            open-launcher
+          </button>
+          <ClaudeRunnerModal
+            isOpen={isOpen}
+            onClose={() => {
+              onClose?.();
+              setIsOpen(false);
+            }}
+            projectId="proj-x"
+            defaultPrompt="hello"
+          />
+        </>
+      );
+    };
+
+    it('is a dialog named by its title with a labelled close button', () => {
+      render(<ClaudeRunnerModal isOpen onClose={() => {}} projectId="proj-x" />);
+
+      const dialog = screen.getByRole('dialog', { name: i18n.t('claudeRunnerModal.title') });
+      expect(dialog).toHaveAttribute('aria-modal', 'true');
+      expect(screen.getByRole('button', { name: i18n.t('common.closeDialog') })).toBeInTheDocument();
+    });
+
+    it('labels the prompt textarea and describes it with the shortcut hint', () => {
+      render(<ClaudeRunnerModal isOpen onClose={() => {}} projectId="proj-x" />);
+
+      const textarea = screen.getByLabelText(i18n.t('claudeRunnerModal.promptLabel'));
+      expect(textarea).toBe(getPromptInput());
+      expect(textarea).toHaveAccessibleDescription(i18n.t('claudeRunnerModal.shortcutHint'));
+    });
+
+    it('moves focus to the textarea on open, wraps Tab/Shift+Tab, closes on Escape and returns focus to the opener', async () => {
+      const onClose = vi.fn();
+      const user = userEvent.setup();
+      render(<Harness onClose={onClose} />);
+
+      await user.click(screen.getByRole('button', { name: 'open-launcher' }));
+      expect(getPromptInput()).toHaveFocus();
+
+      await user.tab();
+      expect(getLaunchButton()).toHaveFocus();
+      await user.tab();
+      expect(screen.getByRole('button', { name: i18n.t('common.closeDialog') })).toHaveFocus();
+      await user.tab({ shift: true });
+      expect(getLaunchButton()).toHaveFocus();
+
+      await user.keyboard('{Escape}');
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'open-launcher' })).toHaveFocus();
+    });
+
+    it('returns focus to the opener when closed with the close button', async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+
+      await user.click(screen.getByRole('button', { name: 'open-launcher' }));
+      await user.click(screen.getByRole('button', { name: i18n.t('common.closeDialog') }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'open-launcher' })).toHaveFocus();
+    });
   });
 
   it('does not launch on Ctrl/Cmd+Enter when the prompt is only whitespace and newlines', async () => {

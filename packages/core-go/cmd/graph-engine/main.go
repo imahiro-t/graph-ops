@@ -38,8 +38,14 @@ func main() {
 		return
 	}
 	if err := run(os.Args[1], os.Args[2:]); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
-		os.Exit(1)
+		// Most errors exit 1 with "Error: ..." on stderr. An exitCodeError
+		// (wait-node's timeout) exits with its own code and prints nothing
+		// extra, since the command already wrote its result to stdout.
+		code, printErr := exitCodeFor(err)
+		if printErr {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+		}
+		os.Exit(code)
 	}
 }
 
@@ -109,6 +115,8 @@ func run(cmd string, args []string) error {
 		return cmdAddArtifact(repo, rc.ArtifactsDir, args)
 	case "get-review-criteria":
 		return cmdGetReviewCriteria(repo, args)
+	case "wait-node":
+		return cmdWaitNode(repo, args)
 	case "get-language-settings":
 		return cmdGetLanguageSettings(repo, rc, args)
 	case "ui":
@@ -276,6 +284,18 @@ Commands:
                                            read the content from stdin, e.g. for a large write-up:
                                              cat notes.md | graph-engine add-artifact T N Name text -)
   get-review-criteria <nodeId>
+  wait-node <nodeId> [<nodeId> ...] [--timeout <duration>]
+                                          (blocks, polling the DB every ~2s, until at least one given node
+                                           is no longer TODO -- any other status counts, including IN
+                                           PROGRESS, not only DONE/REJECTED -- then prints
+                                           {"result":"changed","nodes":[{"id","status","rejection_reason"}]}
+                                           listing every node changed at that moment (rejection_reason only
+                                           for REJECTED, from the newest rejection_reason artifact) and
+                                           exits 0. --timeout takes a Go duration (30s, 10m, 12h); omitted ->
+                                           waits forever. On timeout prints {"result":"timeout","nodes":[]}
+                                           and exits 2. An unknown node id is an error (exit 1) before any
+                                           waiting starts. process-ticket runs this in the background at an
+                                           approval_gate so a Web UI approve/reject resumes the session.)
   ui                                      (opens the local Web UI, in the default browser, on the project
                                            whose local path (projectPaths in graph-config.json) is the current
                                            directory or contains it (deepest wins) -- auto-starting the UI

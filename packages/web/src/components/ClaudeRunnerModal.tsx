@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Terminal, X, ExternalLink, Loader2 } from 'lucide-react';
 import { useClaudeLaunch } from '../hooks/useClaudeLaunch';
+import { useModalDialog } from '../hooks/useModalDialog';
 import { isSubmitShortcut } from '../lib/keyboardShortcuts';
 import { StatusLiveRegion } from './StatusLiveRegion';
 
@@ -22,6 +23,12 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
   const buildDefaultPrompt = () => defaultPrompt || (ticketId ? t('claudePrompts.executeIncompleteNodes', { ticketId }) : '');
   const [prompt, setPrompt] = useState(buildDefaultPrompt);
   const { isLaunching, lastMessage, launch, reset } = useClaudeLaunch();
+  const titleId = useId();
+  const promptId = useId();
+  const hintId = useId();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Must be called before the `if (!isOpen) return null` below.
+  const dialogRef = useModalDialog({ isOpen, onEscape: onClose, initialFocusRef: textareaRef });
 
   // The modal component stays mounted (see App.tsx) even while hidden, so a
   // previous session's prompt text and status message must be wiped out each
@@ -59,15 +66,27 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-xl shadow-2xl overflow-hidden">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-xl shadow-2xl overflow-hidden focus:outline-none"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800">
-          <div className="flex items-center gap-2 font-bold text-base text-slate-800 dark:text-slate-200">
-            <Terminal className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+          <h2 id={titleId} className="flex items-center gap-2 font-bold text-base text-slate-800 dark:text-slate-200">
+            <Terminal className="w-5 h-5 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
             {t('claudeRunnerModal.title')}
-          </div>
-          <button onClick={onClose} className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition">
-            <X className="w-5 h-5" />
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t('common.closeDialog')}
+            className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition"
+          >
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
@@ -83,9 +102,15 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
                 only Cmd/Ctrl+Enter launches (same as TicketItem's free-form
                 input). The value is passed to launch() untouched so newlines
                 survive. */}
+            <label htmlFor={promptId} className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+              {t('claudeRunnerModal.promptLabel')}
+            </label>
             <textarea
+              ref={textareaRef}
+              id={promptId}
+              aria-describedby={hintId}
               rows={4}
-              className="w-full resize-y font-sans bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-800 transition"
+              className="w-full resize-y font-sans bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-400 focus:bg-white dark:focus:bg-slate-800 transition"
               placeholder={t('claudeRunnerModal.placeholder')}
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
@@ -97,10 +122,14 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
               }}
               disabled={isLaunching}
             />
+            <p id={hintId} className="text-xs text-slate-500 dark:text-slate-400">
+              {t('claudeRunnerModal.shortcutHint')}
+            </p>
             <button
+              type="button"
               onClick={handleLaunch}
               disabled={isLaunching || !prompt.trim()}
-              className="self-end px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg flex items-center gap-2 shadow-sm transition"
+              className="self-end px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg flex items-center gap-2 shadow-sm transition"
             >
               {isLaunching ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
               {t('claudeRunnerModal.launch')}
