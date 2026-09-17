@@ -21,7 +21,10 @@
 // __dirname is therefore inside the cached clone's packages/plugin, so the
 // plugin content itself is already in place -- the only thing this needs to
 // prepare before printing the path is the platform-specific graph-engine
-// binary under bin/. It also prunes stale caches of other versions (see
+// binary under libexec/ (bin/ only holds the committed bin/graph-engine shim,
+// which runs libexec/graph-engine when libexec/.version matches the plugin
+// version, so a `command`-source install never downloads on first run). It
+// also prunes stale caches of other versions (see
 // scripts/prune-plugin-cache.js); that is best-effort and never affects the
 // printed path or the exit code.
 'use strict';
