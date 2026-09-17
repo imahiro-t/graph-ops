@@ -5,7 +5,8 @@ pass/fail judgment at this node, which is what `review_gate` is for.
 ## Procedure
 
 1. Present what is being approved to the human and obtain an explicit approve
-   or reject decision.
+   or reject decision. The human may answer in the terminal session or
+   approve/reject the node in the Web UI; both write the same result.
 2. On approval, mark the node DONE. Successor nodes then become runnable.
 3. On rejection, take a free-text reason and mark the node REJECTED -- not
    DONE, and not left at TODO. TODO means "not judged yet"; REJECTED means
@@ -51,7 +52,13 @@ artifact on the same `POST /api/nodes/{id}/complete` request.
     user instead. The ticket stays blocked and the REJECTED gate stays
     REJECTED until a human intervenes (for example via refine-ticket or
     further discussion).
-- This triage only happens when something re-invokes process-ticket on the
-  ticket -- there is no background or always-on trigger in this architecture,
-  so a rejection made purely through the Web UI sits blocked until a
-  process-ticket session picks it up again.
+- There is no always-on trigger and no server-to-session notification in this
+  architecture. Instead, a process-ticket session that reaches a gate runs
+  `graph-engine wait-node <nodeId...>` in the background and ends its turn;
+  the command polls the DB and exits once the gate leaves TODO, so a decision
+  made in the Web UI resumes that session automatically (approval continues
+  the graph, rejection goes to the triage above). The resumed session checks
+  the gate's status with get-ticket first and never records the same decision
+  twice. With no session waiting, a Web UI decision just sits in the DB -- a
+  rejection stays blocked -- until process-ticket is invoked on the ticket
+  again.
