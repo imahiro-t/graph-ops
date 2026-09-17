@@ -2,6 +2,18 @@ import React from 'react';
 
 interface Props {
   content: string;
+  // DFLT-00085: when true this bordered box itself becomes a 16rem-capped
+  // scroll container, so inline artifact previews stay skimmable in a list.
+  // The box that owns the border is the scroller on purpose (rather than an
+  // outer wrapper) so the border stays put and only the content moves --
+  // that fixed frame is what makes it read as "there is more inside".
+  // Default false keeps the full-height render used by the ticket
+  // description and by the open-in-a-new-tab preview page.
+  scrollable?: boolean;
+  // Accessible name for that scroll region. A keyboard user has to be able
+  // to reach and scroll the box (WCAG 2.1.1), which means it takes focus --
+  // and a focusable region needs a name saying which artifact it holds.
+  label?: string;
 }
 
 // Text color for each of the three "real" step keywords And/But continue.
@@ -14,7 +26,7 @@ const stepKeywordColor: Record<'Given' | 'When' | 'Then', string> = {
   Then: 'text-emerald-600'
 };
 
-export const GherkinViewer: React.FC<Props> = ({ content }) => {
+export const GherkinViewer: React.FC<Props> = ({ content, scrollable = false, label }) => {
   const lines = content.split('\n');
 
   // And/But are continuations of whichever of Given/When/Then most recently
@@ -126,7 +138,17 @@ export const GherkinViewer: React.FC<Props> = ({ content }) => {
   };
 
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3 font-mono text-xs overflow-x-auto shadow-inner">
+    <div
+      data-testid="gherkin-viewer"
+      // max-h-64 (not h-64) so a short artifact still renders at its own
+      // height instead of being stretched to 16rem with dead space below.
+      className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3 font-mono text-xs overflow-x-auto shadow-inner${
+        scrollable ? ' max-h-64 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400' : ''
+      }`}
+      tabIndex={scrollable ? 0 : undefined}
+      role={scrollable && label ? 'region' : undefined}
+      aria-label={scrollable ? label : undefined}
+    >
       {lines.map((l, i) => renderLine(l, i))}
     </div>
   );

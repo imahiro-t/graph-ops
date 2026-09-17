@@ -1306,7 +1306,11 @@ export const TicketItem: React.FC<Props> = ({
                                     {art.type === 'gherkin' && art.content && (
                                       <div className="space-y-1">
                                         <div className="flex justify-end">{openInNewTabLink(art)}</div>
-                                        <GherkinViewer content={art.content} />
+                                        <GherkinViewer
+                                          content={art.content}
+                                          scrollable
+                                          label={t('ticketItem.artifactScrollRegion', { name: art.name })}
+                                        />
                                       </div>
                                     )}
 
@@ -1325,7 +1329,11 @@ export const TicketItem: React.FC<Props> = ({
                                     {art.type === 'text' && art.content && (
                                       <div className="space-y-1">
                                         <div className="flex justify-end">{openInNewTabLink(art)}</div>
-                                        <MarkdownViewer content={art.content} />
+                                        <MarkdownViewer
+                                          content={art.content}
+                                          scrollable
+                                          label={t('ticketItem.artifactScrollRegion', { name: art.name })}
+                                        />
                                       </div>
                                     )}
                                   </div>
@@ -1354,7 +1362,13 @@ export const TicketItem: React.FC<Props> = ({
                               <span className="text-[10px] text-slate-500 dark:text-slate-400">{formatDateTime(g.created_at, i18n.language)}</span>
                             </span>
                           </div>
-                          {g.content && <GherkinViewer content={g.content} />}
+                          {g.content && (
+                            <GherkinViewer
+                              content={g.content}
+                              scrollable
+                              label={t('ticketItem.artifactScrollRegion', { name: g.name })}
+                            />
+                          )}
                         </div>
                       ))
                     )}
@@ -1418,12 +1432,20 @@ export const TicketItem: React.FC<Props> = ({
                           {a.type === 'gherkin' && a.content ? (
                             <div className="space-y-1">
                               <div className="flex justify-end">{openInNewTabLink(a)}</div>
-                              <GherkinViewer content={a.content} />
+                              <GherkinViewer
+                                content={a.content}
+                                scrollable
+                                label={t('ticketItem.artifactScrollRegion', { name: a.name })}
+                              />
                             </div>
                           ) : a.type === 'text' && a.content ? (
                             <div className="space-y-1">
                               <div className="flex justify-end">{openInNewTabLink(a)}</div>
-                              <MarkdownViewer content={a.content} />
+                              <MarkdownViewer
+                                content={a.content}
+                                scrollable
+                                label={t('ticketItem.artifactScrollRegion', { name: a.name })}
+                              />
                             </div>
                           ) : a.type === 'image' ? (
                             // Served from the DB via
