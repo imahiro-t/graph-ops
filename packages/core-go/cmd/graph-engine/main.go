@@ -198,7 +198,7 @@ Commands:
   use-project <projectId>                (sets the current project; POST /api/tickets and GET /api/tickets
                                            default to whichever project is current. create-ticket uses it
                                            only as a fallback when the cwd matches no project's local path)
-  create-ticket <title> [description] [--project <id>] [--priority <HIGH|MEDIUM|LOW>]
+  create-ticket <title> [description] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...
                                           (--project omitted -> the project whose local path (projectPaths in
                                            graph-config.json) is the cwd or contains it (deepest nested
                                            local path wins), else the current
@@ -210,14 +210,23 @@ Commands:
                                            --project given -> used as-is, nothing on stderr.
                                            --priority omitted -> created with priority MEDIUM; given ->
                                            validated (HIGH/MEDIUM/LOW only) before the ticket is created.
+                                           --label <name> (repeatable) attaches labels already registered
+                                           in the project (matched case-insensitively); an unregistered
+                                           name is an error and no ticket is created. Labels are
+                                           registered, renamed and deleted only in the Web UI's settings.
                                            Tickets start unassigned; use the Web UI's assign button)
-  refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>]
+  refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...
                                           (replaces the ticket's description with the refined text; builds
                                            no graph. --priority is independent of the description: omitted
                                            leaves the stored priority untouched, HIGH/MEDIUM/LOW sets it --
                                            so "refine-ticket <id> --priority LOW" with no description
                                            positional changes only the priority. A priority can't be
-                                           removed; any other value is an error and changes nothing)
+                                           removed; any other value is an error and changes nothing.
+                                           --label <name> (repeatable) REPLACES the ticket's labels with
+                                           exactly the named registered labels -- name existing ones too
+                                           to keep them; omitted leaves labels untouched. An unregistered
+                                           name is an error and changes nothing. Like any refine, this
+                                           sets the status to REFINED)
   close-ticket <ticketId> [--reason "<text>"]
                                           (withdraws the ticket without marking it complete: sets status to
                                            CLOSED from ANY status, including one with nodes IN PROGRESS/IN
@@ -371,6 +380,12 @@ func printJSON(v any) error {
 // with priority silently dropped. Omitting --priority creates the ticket
 // with domain.DefaultTicketPriority (MEDIUM, DFLT-00083).
 //
+// --label <name> (DFLT-00084) may be repeated anywhere among the positionals.
+// Names must already be registered in the target project (labels are
+// managed only in the Web UI); an unregistered name fails the command with
+// LABEL_NOT_FOUND and no ticket is created. A trailing --label with no value
+// is a usage error.
+//
 // More than two positionals is a usage error rather than silently dropping
 // the extras: the third positional used to be the (since removed) assignee,
 // so ignoring it would let an old invocation "succeed" while leaving the user
@@ -378,9 +393,10 @@ func printJSON(v any) error {
 // API, which ignores an unknown "assignee" key -- for the CLI the positional
 // count itself is the contract.
 func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc runtimeConfig, args []string) error {
-	const usage = `usage: graph-engine create-ticket <title> [description] [--project <id>] [--priority <HIGH|MEDIUM|LOW>]`
+	const usage = `usage: graph-engine create-ticket <title> [description] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...`
 
 	var projectFlag, priorityFlag string
+	var labelNames []string
 	var positional []string
 	for i := 0; i < len(args); i++ {
 		switch {
@@ -389,6 +405,12 @@ func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc run
 			i++
 		case args[i] == "--priority" && i+1 < len(args):
 			priorityFlag = args[i+1]
+			i++
+		case args[i] == "--label":
+			if i+1 >= len(args) {
+				return fmt.Errorf("%s: --label requires a value", usage)
+			}
+			labelNames = append(labelNames, args[i+1])
 			i++
 		default:
 			positional = append(positional, args[i])
@@ -412,8 +434,9 @@ func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc run
 		priority = &parsed
 	}
 
+	opts := engine.CreateTicketOptions{Priority: priority, LabelNames: labelNames}
 	if projectFlag != "" {
-		ticket, err := eng.CreateTicketWithPriority(projectFlag, title, description, priority)
+		ticket, err := eng.CreateTicketWithOptions(projectFlag, title, description, opts)
 		if err != nil {
 			return err
 		}
@@ -424,7 +447,7 @@ func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc run
 	if err != nil {
 		return err
 	}
-	ticket, err := eng.CreateTicketWithPriority(project.ID, title, description, priority)
+	ticket, err := eng.CreateTicketWithOptions(project.ID, title, description, opts)
 	if err != nil {
 		return err
 	}
@@ -549,8 +572,14 @@ func cmdUseProject(repo store.GraphRepository, args []string) error {
 // caller change only the priority
 // (`refine-ticket <id> --priority LOW`, description omitted so it too is
 // left unchanged) as easily as only the description.
+//
+// --label <name> (DFLT-00084), repeatable: given at least once, the ticket's
+// labels are replaced with exactly that set (keep existing ones by naming
+// them too); omitted, they are left untouched. Names are resolved in the
+// engine against the ticket's project, and an unregistered name fails the
+// whole command without writing any field.
 func cmdRefineTicket(eng *engine.GraphEngine, args []string) error {
-	const usage = `usage: graph-engine refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>]`
+	const usage = `usage: graph-engine refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...`
 	if len(args) < 1 {
 		return fmt.Errorf(usage)
 	}
@@ -558,9 +587,18 @@ func cmdRefineTicket(eng *engine.GraphEngine, args []string) error {
 
 	var priorityFlag string
 	var priorityGiven bool
+	var labelNames []string
 	var positional []string
 	rest := args[1:]
 	for i := 0; i < len(rest); i++ {
+		if rest[i] == "--label" {
+			if i+1 >= len(rest) {
+				return fmt.Errorf("%s: --label requires a value", usage)
+			}
+			labelNames = append(labelNames, rest[i+1])
+			i++
+			continue
+		}
 		if rest[i] == "--priority" {
 			if i+1 >= len(rest) {
 				return fmt.Errorf("%s: --priority requires a value", usage)
@@ -598,7 +636,12 @@ func cmdRefineTicket(eng *engine.GraphEngine, args []string) error {
 		}
 	}
 
-	ticket, err := eng.RefineTicket(ticketID, description, priority)
+	labels := engine.NoLabelChange()
+	if len(labelNames) > 0 {
+		labels = engine.SetLabelsByName(labelNames)
+	}
+
+	ticket, err := eng.RefineTicketWithLabels(ticketID, description, priority, labels)
 	if err != nil {
 		return err
 	}

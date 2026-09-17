@@ -106,6 +106,20 @@ const (
 	// connection, so it (the password, or the "${ENV_VAR}" reference) has to
 	// be retyped before it can be used against a different destination.
 	ErrCodeMySQLPasswordRetypeRequired ErrorCode = "MYSQL_PASSWORD_RETYPE_REQUIRED"
+	// ErrCodeLabelNotFound: the requested label does not exist, or it
+	// belongs to a different project than the ticket it was to be attached
+	// to, or (CLI --label) no label with that name is registered in the
+	// ticket's project (DFLT-00084).
+	ErrCodeLabelNotFound ErrorCode = "LABEL_NOT_FOUND"
+	// ErrCodeLabelNameTaken: another label in the same project already has
+	// this name, compared case-insensitively after trimming.
+	ErrCodeLabelNameTaken ErrorCode = "LABEL_NAME_TAKEN"
+	// ErrCodeInvalidLabelName: a label name is empty after trimming, or
+	// longer than domain.MaxLabelNameLength characters.
+	ErrCodeInvalidLabelName ErrorCode = "INVALID_LABEL_NAME"
+	// ErrCodeInvalidLabelColor: a label color is not one of the fixed
+	// palette keys (domain.LabelColors).
+	ErrCodeInvalidLabelColor ErrorCode = "INVALID_LABEL_COLOR"
 )
 
 // APIError pairs a machine-readable Code with a developer-facing English

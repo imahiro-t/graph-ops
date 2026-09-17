@@ -70,7 +70,7 @@ func newTestMySQLRepo(t *testing.T) *MySQLRepository {
 	if err := repo.Init(); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	for _, table := range []string{"artifacts", "edges", "nodes", "tickets", "app_state", "projects"} {
+	for _, table := range []string{"ticket_labels", "labels", "artifacts", "edges", "nodes", "tickets", "app_state", "projects"} {
 		if _, err := repo.db.Exec("DELETE FROM " + table); err != nil {
 			t.Fatalf("cleaning table %s before test: %v", table, err)
 		}

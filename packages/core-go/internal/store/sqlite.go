@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -102,7 +103,45 @@ CREATE INDEX IF NOT EXISTS idx_edges_ticket ON edges(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_ticket ON artifacts(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_node ON artifacts(node_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_project ON tickets(project_id);
+
+-- Labels (DFLT-00084): a project-scoped master plus the ticket link table.
+-- New tables only, so Init on an existing DB just adds them and every
+-- existing ticket reads back with no labels. The case-insensitive UNIQUE
+-- index backs up the store's own strings.EqualFold name check (labels.go)
+-- against concurrent writers.
+CREATE TABLE IF NOT EXISTS labels (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	name TEXT NOT NULL,
+	color TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_labels_project_name_nocase ON labels(project_id, name COLLATE NOCASE);
+
+CREATE TABLE IF NOT EXISTS ticket_labels (
+	ticket_id TEXT NOT NULL,
+	label_id TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (ticket_id, label_id),
+	FOREIGN KEY(ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+	FOREIGN KEY(label_id) REFERENCES labels(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ticket_labels_label ON ticket_labels(label_id);
 `
+
+// sqliteDialect is the shared label/ticket-update code's view of SQLite: no
+// row locks (the single pinned connection already serializes writers) and
+// modernc.org/sqlite's UNIQUE violation message.
+var sqliteDialect = sqlDialect{
+	forUpdate: "",
+	isUniqueViolation: func(err error) bool {
+		return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+	},
+}
 
 // SQLiteRepository implements GraphRepository on top of database/sql with the
 // pure-Go modernc.org/sqlite driver. The pool is pinned to a single
@@ -284,6 +323,11 @@ func (r *SQLiteRepository) CreateTicket(projectID string, t domain.Ticket) (doma
 	if err != nil {
 		return domain.Ticket{}, fmt.Errorf("inserting ticket: %w", err)
 	}
+	if len(t.Labels) > 0 {
+		if err := replaceTicketLabels(tx, id, projectID, labelIDsOf(t.Labels)); err != nil {
+			return domain.Ticket{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.Ticket{}, err
 	}
@@ -327,17 +371,9 @@ func scanTicket(row interface {
 	return &t, nil
 }
 
-// GetTicket looks up a ticket by its ID.
+// GetTicket looks up a ticket by its ID, with its labels.
 func (r *SQLiteRepository) GetTicket(id string) (*domain.Ticket, error) {
-	row := r.db.QueryRow(`SELECT `+ticketSelectCols+` FROM tickets WHERE id = ?`, id)
-	t, err := scanTicket(row)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("getting ticket %s: %w", id, err)
-	}
-	return t, nil
+	return getTicketWithLabels(r.db, sqliteDialect, id)
 }
 
 func (r *SQLiteRepository) GetTicketDetail(id string) (*domain.TicketDetail, error) {
@@ -360,95 +396,25 @@ func (r *SQLiteRepository) GetTicketDetail(id string) (*domain.TicketDetail, err
 	return &domain.TicketDetail{Ticket: *t, Nodes: nodes, Edges: edges, Artifacts: artifacts}, nil
 }
 
+// ListTickets lists every ticket with its labels (one extra query in total,
+// not one per ticket).
 func (r *SQLiteRepository) ListTickets() ([]domain.Ticket, error) {
-	rows, err := r.db.Query(`SELECT ` + ticketSelectCols + ` FROM tickets ORDER BY created_at DESC`)
-	if err != nil {
-		return nil, fmt.Errorf("listing tickets: %w", err)
-	}
-	defer rows.Close()
-	out := []domain.Ticket{}
-	for rows.Next() {
-		t, err := scanTicket(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *t)
-	}
-	return out, rows.Err()
+	return listTicketsWithLabels(r.db,
+		`SELECT `+ticketSelectCols+` FROM tickets ORDER BY created_at DESC`, nil,
+		``, nil)
 }
 
+// ListTicketsByProject lists projectID's tickets with their labels (one
+// extra query in total, not one per ticket).
 func (r *SQLiteRepository) ListTicketsByProject(projectID string) ([]domain.Ticket, error) {
-	rows, err := r.db.Query(`SELECT `+ticketSelectCols+` FROM tickets WHERE project_id = ? ORDER BY created_at DESC`, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("listing tickets for project %s: %w", projectID, err)
-	}
-	defer rows.Close()
-	out := []domain.Ticket{}
-	for rows.Next() {
-		t, err := scanTicket(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *t)
-	}
-	return out, rows.Err()
+	return listTicketsWithLabels(r.db,
+		`SELECT `+ticketSelectCols+` FROM tickets WHERE project_id = ? ORDER BY created_at DESC`, []any{projectID},
+		`JOIN tickets t ON t.id = tl.ticket_id WHERE t.project_id = ?`, []any{projectID})
 }
 
+// UpdateTicket: see updateTicket (labels.go).
 func (r *SQLiteRepository) UpdateTicket(id string, patch TicketPatch) (domain.Ticket, error) {
-	cur, err := r.GetTicket(id)
-	if err != nil {
-		return domain.Ticket{}, err
-	}
-	if cur == nil {
-		return domain.Ticket{}, fmt.Errorf("ticket %s not found", id)
-	}
-	if patch.Title != nil {
-		cur.Title = *patch.Title
-	}
-	if patch.Description != nil {
-		cur.Description = *patch.Description
-	}
-	if patch.Status != nil {
-		cur.Status = *patch.Status
-	}
-	if patch.AutoExecutable != nil {
-		cur.AutoExecutable = *patch.AutoExecutable
-	}
-	if patch.Blocked != nil {
-		cur.Blocked = *patch.Blocked
-	}
-	if patch.RefinedAt != nil {
-		cur.RefinedAt = patch.RefinedAt
-	}
-	if patch.Assignee != nil {
-		cur.Assignee = *patch.Assignee
-	}
-	if patch.ClosedReason != nil {
-		cur.ClosedReason = patch.ClosedReason
-	}
-	if patch.GraphExpandedAt != nil {
-		cur.GraphExpandedAt = patch.GraphExpandedAt
-	}
-	if patch.Priority != nil {
-		cur.Priority = *patch.Priority
-	}
-	// A row still NULL/empty (e.g. written by an older graph-engine sharing
-	// this DB after Init's backfill ran) must not be written back as '': fill
-	// the default on write, as CreateTicket does, so any update -- even one
-	// that doesn't touch priority -- leaves the row with a valid level.
-	cur.Priority = domain.TicketPriority(ticketPriorityOrDefault(cur.Priority))
-	cur.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-
-	_, err = r.db.Exec(
-		`UPDATE tickets SET title=?, description=?, status=?, auto_executable=?, blocked=?, refined_at=?, closed_reason=?, assignee_name=?, graph_expanded_at=?, priority=?, updated_at=?
-		 WHERE id=?`,
-		cur.Title, cur.Description, cur.Status,
-		boolToInt(cur.AutoExecutable), boolToInt(cur.Blocked), nullableString(cur.RefinedAt), nullableString(cur.ClosedReason), nullableString(cur.Assignee), nullableString(cur.GraphExpandedAt), string(cur.Priority), cur.UpdatedAt, cur.ID,
-	)
-	if err != nil {
-		return domain.Ticket{}, fmt.Errorf("updating ticket %s: %w", id, err)
-	}
-	return *cur, nil
+	return updateTicket(r.db, sqliteDialect, id, patch)
 }
 
 func (r *SQLiteRepository) DeleteTicket(id string) error {
@@ -960,11 +926,36 @@ func (r *SQLiteRepository) DeleteProject(id string) error {
 	if _, err := tx.Exec(`DELETE FROM tickets WHERE project_id = ?`, id); err != nil {
 		return fmt.Errorf("deleting tickets under project %s: %w", id, err)
 	}
+	if err := deleteProjectLabels(tx, id); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM projects WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("deleting project %s: %w", id, err)
 	}
 
 	return tx.Commit()
+}
+
+// --- Labels (DFLT-00084; shared implementation in labels.go) ---
+
+func (r *SQLiteRepository) CreateLabel(projectID, name, color string) (domain.Label, error) {
+	return createLabel(r.db, sqliteDialect, projectID, name, color)
+}
+
+func (r *SQLiteRepository) GetLabel(id string) (*domain.Label, error) {
+	return getLabel(r.db, sqliteDialect, id)
+}
+
+func (r *SQLiteRepository) ListLabelsByProject(projectID string) ([]domain.LabelUsage, error) {
+	return listLabelsByProject(r.db, projectID)
+}
+
+func (r *SQLiteRepository) UpdateLabel(id string, patch LabelPatch) (domain.Label, error) {
+	return updateLabel(r.db, sqliteDialect, id, patch)
+}
+
+func (r *SQLiteRepository) DeleteLabel(id string) (int, error) {
+	return deleteLabel(r.db, sqliteDialect, id)
 }
 
 func (r *SQLiteRepository) GetCurrentProjectID() (string, error) {

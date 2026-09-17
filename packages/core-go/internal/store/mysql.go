@@ -141,6 +141,50 @@ var mysqlSchemaStatements = []string{
 	CONSTRAINT fk_artifacts_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
 	CONSTRAINT fk_artifacts_node FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
+
+	// Labels (DFLT-00084), see schemaDDL's labels/ticket_labels. name is
+	// VARCHAR(100) (labels are capped at 50 characters) so the
+	// (project_id, name) UNIQUE key fits InnoDB's 3072-byte index limit:
+	// (191 + 100) * 4 = 1164 bytes. utf8mb4_general_ci makes that key
+	// case-insensitive; it backs up the store's own name check.
+	`CREATE TABLE IF NOT EXISTS labels (
+	id VARCHAR(191) PRIMARY KEY,
+	project_id VARCHAR(191) NOT NULL,
+	name VARCHAR(100) NOT NULL,
+	color VARCHAR(32) NOT NULL,
+	created_at VARCHAR(64) NOT NULL,
+	updated_at VARCHAR(64) NOT NULL,
+	UNIQUE KEY idx_labels_project_name (project_id, name),
+	CONSTRAINT fk_labels_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
+
+	`CREATE TABLE IF NOT EXISTS ticket_labels (
+	ticket_id VARCHAR(191) NOT NULL,
+	label_id VARCHAR(191) NOT NULL,
+	created_at VARCHAR(64) NOT NULL,
+	PRIMARY KEY (ticket_id, label_id),
+	KEY idx_ticket_labels_label (label_id),
+	CONSTRAINT fk_ticket_labels_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+	CONSTRAINT fk_ticket_labels_label FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
+}
+
+// mysqlErDupEntry is MySQL's ER_DUP_ENTRY: a UNIQUE/PRIMARY KEY violation.
+const mysqlErDupEntry = 1062
+
+// isMySQLDuplicateKeyError reports whether err is (or wraps) a MySQL error
+// 1062. Only that number counts: every other MySQL error is left as is, so
+// it is never misreported as LABEL_NAME_TAKEN.
+func isMySQLDuplicateKeyError(err error) bool {
+	var myErr *mysqldriver.MySQLError
+	return errors.As(err, &myErr) && myErr.Number == mysqlErDupEntry
+}
+
+// mysqlDialect is the shared label/ticket-update code's view of MySQL:
+// explicit row locks (the pool has many connections) and error 1062.
+var mysqlDialect = sqlDialect{
+	forUpdate:         " FOR UPDATE",
+	isUniqueViolation: isMySQLDuplicateKeyError,
 }
 
 // MySQLRepository implements GraphRepository on top of database/sql with
@@ -502,6 +546,11 @@ func (r *MySQLRepository) CreateTicket(projectID string, t domain.Ticket) (domai
 	if err != nil {
 		return domain.Ticket{}, fmt.Errorf("inserting ticket: %w", err)
 	}
+	if len(t.Labels) > 0 {
+		if err := replaceTicketLabels(tx, id, projectID, labelIDsOf(t.Labels)); err != nil {
+			return domain.Ticket{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.Ticket{}, err
 	}
@@ -513,15 +562,7 @@ func (r *MySQLRepository) CreateTicket(projectID string, t domain.Ticket) (domai
 }
 
 func (r *MySQLRepository) GetTicket(id string) (*domain.Ticket, error) {
-	row := r.db.QueryRow(`SELECT `+ticketSelectCols+` FROM tickets WHERE id = ?`, id)
-	t, err := scanTicket(row)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("getting ticket %s: %w", id, err)
-	}
-	return t, nil
+	return getTicketWithLabels(r.db, sqlDialect{}, id)
 }
 
 func (r *MySQLRepository) GetTicketDetail(id string) (*domain.TicketDetail, error) {
@@ -544,95 +585,23 @@ func (r *MySQLRepository) GetTicketDetail(id string) (*domain.TicketDetail, erro
 	return &domain.TicketDetail{Ticket: *t, Nodes: nodes, Edges: edges, Artifacts: artifacts}, nil
 }
 
+// ListTickets: see SQLiteRepository.ListTickets.
 func (r *MySQLRepository) ListTickets() ([]domain.Ticket, error) {
-	rows, err := r.db.Query(`SELECT ` + ticketSelectCols + ` FROM tickets ORDER BY created_at DESC`)
-	if err != nil {
-		return nil, fmt.Errorf("listing tickets: %w", err)
-	}
-	defer rows.Close()
-	out := []domain.Ticket{}
-	for rows.Next() {
-		t, err := scanTicket(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *t)
-	}
-	return out, rows.Err()
+	return listTicketsWithLabels(r.db,
+		`SELECT `+ticketSelectCols+` FROM tickets ORDER BY created_at DESC`, nil,
+		``, nil)
 }
 
+// ListTicketsByProject: see SQLiteRepository.ListTicketsByProject.
 func (r *MySQLRepository) ListTicketsByProject(projectID string) ([]domain.Ticket, error) {
-	rows, err := r.db.Query(`SELECT `+ticketSelectCols+` FROM tickets WHERE project_id = ? ORDER BY created_at DESC`, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("listing tickets for project %s: %w", projectID, err)
-	}
-	defer rows.Close()
-	out := []domain.Ticket{}
-	for rows.Next() {
-		t, err := scanTicket(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *t)
-	}
-	return out, rows.Err()
+	return listTicketsWithLabels(r.db,
+		`SELECT `+ticketSelectCols+` FROM tickets WHERE project_id = ? ORDER BY created_at DESC`, []any{projectID},
+		`JOIN tickets t ON t.id = tl.ticket_id WHERE t.project_id = ?`, []any{projectID})
 }
 
+// UpdateTicket: see updateTicket (labels.go).
 func (r *MySQLRepository) UpdateTicket(id string, patch TicketPatch) (domain.Ticket, error) {
-	cur, err := r.GetTicket(id)
-	if err != nil {
-		return domain.Ticket{}, err
-	}
-	if cur == nil {
-		return domain.Ticket{}, fmt.Errorf("ticket %s not found", id)
-	}
-	if patch.Title != nil {
-		cur.Title = *patch.Title
-	}
-	if patch.Description != nil {
-		cur.Description = *patch.Description
-	}
-	if patch.Status != nil {
-		cur.Status = *patch.Status
-	}
-	if patch.AutoExecutable != nil {
-		cur.AutoExecutable = *patch.AutoExecutable
-	}
-	if patch.Blocked != nil {
-		cur.Blocked = *patch.Blocked
-	}
-	if patch.RefinedAt != nil {
-		cur.RefinedAt = patch.RefinedAt
-	}
-	if patch.Assignee != nil {
-		cur.Assignee = *patch.Assignee
-	}
-	if patch.ClosedReason != nil {
-		cur.ClosedReason = patch.ClosedReason
-	}
-	if patch.GraphExpandedAt != nil {
-		cur.GraphExpandedAt = patch.GraphExpandedAt
-	}
-	if patch.Priority != nil {
-		cur.Priority = *patch.Priority
-	}
-	// A row still NULL/empty (e.g. written by an older graph-engine sharing
-	// this DB after Init's backfill ran) must not be written back as '': fill
-	// the default on write, as CreateTicket does, so any update -- even one
-	// that doesn't touch priority -- leaves the row with a valid level.
-	cur.Priority = domain.TicketPriority(ticketPriorityOrDefault(cur.Priority))
-	cur.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-
-	_, err = r.db.Exec(
-		`UPDATE tickets SET title=?, description=?, status=?, auto_executable=?, blocked=?, refined_at=?, closed_reason=?, assignee_name=?, graph_expanded_at=?, priority=?, updated_at=?
-		 WHERE id=?`,
-		cur.Title, cur.Description, cur.Status,
-		boolToInt(cur.AutoExecutable), boolToInt(cur.Blocked), nullableString(cur.RefinedAt), nullableString(cur.ClosedReason), nullableString(cur.Assignee), nullableString(cur.GraphExpandedAt), string(cur.Priority), cur.UpdatedAt, cur.ID,
-	)
-	if err != nil {
-		return domain.Ticket{}, fmt.Errorf("updating ticket %s: %w", id, err)
-	}
-	return *cur, nil
+	return updateTicket(r.db, mysqlDialect, id, patch)
 }
 
 func (r *MySQLRepository) DeleteTicket(id string) error {
@@ -1030,11 +999,36 @@ func (r *MySQLRepository) DeleteProject(id string) error {
 	if _, err := tx.Exec(`DELETE FROM tickets WHERE project_id = ?`, id); err != nil {
 		return fmt.Errorf("deleting tickets under project %s: %w", id, err)
 	}
+	if err := deleteProjectLabels(tx, id); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM projects WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("deleting project %s: %w", id, err)
 	}
 
 	return tx.Commit()
+}
+
+// --- Labels (DFLT-00084; shared implementation in labels.go) ---
+
+func (r *MySQLRepository) CreateLabel(projectID, name, color string) (domain.Label, error) {
+	return createLabel(r.db, mysqlDialect, projectID, name, color)
+}
+
+func (r *MySQLRepository) GetLabel(id string) (*domain.Label, error) {
+	return getLabel(r.db, sqlDialect{}, id)
+}
+
+func (r *MySQLRepository) ListLabelsByProject(projectID string) ([]domain.LabelUsage, error) {
+	return listLabelsByProject(r.db, projectID)
+}
+
+func (r *MySQLRepository) UpdateLabel(id string, patch LabelPatch) (domain.Label, error) {
+	return updateLabel(r.db, mysqlDialect, id, patch)
+}
+
+func (r *MySQLRepository) DeleteLabel(id string) (int, error) {
+	return deleteLabel(r.db, mysqlDialect, id)
 }
 
 func (r *MySQLRepository) GetCurrentProjectID() (string, error) {

@@ -6,7 +6,11 @@
 // handling of time.Time scan destinations.
 package domain
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+	"unicode/utf8"
+)
 
 type TicketStatus string
 
@@ -219,6 +223,88 @@ type Ticket struct {
 	// none was given at creation (DFLT-00083). It is always serialized --
 	// there is no null/omitted "unset" state.
 	Priority TicketPriority `json:"priority"`
+	// Labels are the project-scoped labels attached to this ticket
+	// (DFLT-00084), sorted by name case-insensitively. The store always
+	// fills it with a non-nil slice so it serializes as [] rather than null
+	// for a ticket with no labels. The link is by label ID, so renaming or
+	// recoloring a label shows up on every ticket that carries it.
+	//
+	// On store.GraphRepository.CreateTicket's input only each element's ID
+	// is read (the labels to attach); Name/Color/etc. are ignored there.
+	Labels []Label `json:"labels"`
+}
+
+// LabelColor is one of the fixed palette keys a label can use (DFLT-00084).
+// Only the key is stored; how each key looks (light/dark theme classes) is
+// the Web UI's concern (packages/web/src/labelMeta.ts).
+type LabelColor string
+
+const (
+	LabelColorGray   LabelColor = "gray"
+	LabelColorRed    LabelColor = "red"
+	LabelColorOrange LabelColor = "orange"
+	LabelColorAmber  LabelColor = "amber"
+	LabelColorGreen  LabelColor = "green"
+	LabelColorTeal   LabelColor = "teal"
+	LabelColorBlue   LabelColor = "blue"
+	LabelColorIndigo LabelColor = "indigo"
+	LabelColorPurple LabelColor = "purple"
+	LabelColorPink   LabelColor = "pink"
+)
+
+// LabelColors is the fixed palette in display order.
+var LabelColors = []LabelColor{
+	LabelColorGray, LabelColorRed, LabelColorOrange, LabelColorAmber, LabelColorGreen,
+	LabelColorTeal, LabelColorBlue, LabelColorIndigo, LabelColorPurple, LabelColorPink,
+}
+
+// ParseLabelColor validates s against the fixed palette. It is exact-match:
+// no trimming or case folding, so the stored key is always one of
+// LabelColors verbatim.
+func ParseLabelColor(s string) (LabelColor, error) {
+	for _, c := range LabelColors {
+		if string(c) == s {
+			return c, nil
+		}
+	}
+	return "", NewAPIError(ErrCodeInvalidLabelColor, "invalid label color %q: must be one of the fixed palette colors", s)
+}
+
+// MaxLabelNameLength is the maximum label name length in runes (not bytes),
+// after surrounding whitespace is trimmed.
+const MaxLabelNameLength = 50
+
+// NormalizeLabelName trims surrounding whitespace (including full-width
+// spaces) and rejects an empty result or one longer than
+// MaxLabelNameLength runes. Label creation and renaming both go through it.
+func NormalizeLabelName(s string) (string, error) {
+	name := strings.TrimSpace(s)
+	if name == "" {
+		return "", NewAPIError(ErrCodeInvalidLabelName, "label name is required")
+	}
+	if n := utf8.RuneCountInString(name); n > MaxLabelNameLength {
+		return "", NewAPIError(ErrCodeInvalidLabelName, "label name is %d characters long; the maximum is %d", n, MaxLabelNameLength)
+	}
+	return name, nil
+}
+
+// Label is a project-scoped label (DFLT-00084). Name is unique within its
+// project, compared case-insensitively.
+type Label struct {
+	ID        string     `json:"id"`
+	ProjectID string     `json:"project_id"`
+	Name      string     `json:"name"`
+	Color     LabelColor `json:"color"`
+	CreatedAt string     `json:"created_at"`
+	UpdatedAt string     `json:"updated_at"`
+}
+
+// LabelUsage is a label plus how many tickets carry it, as listed by
+// GET /api/projects/{id}/labels (the Web UI's delete confirmation shows the
+// count).
+type LabelUsage struct {
+	Label
+	TicketCount int `json:"ticket_count"`
 }
 
 // Project scopes a set of tickets to one prefix-based ID namespace. Where
