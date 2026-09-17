@@ -7,8 +7,7 @@
 // and mirrored by the bin/graph-engine sh shim):
 //
 //   1. <pluginRoot>/libexec/graph-engine[.exe] when libexec/.version matches
-//      plugin.json's version -- filled by `npm run build:go` and by the
-//      marketplace's `command` source (scripts/claude-plugin-path.js).
+//      plugin.json's version -- filled by `npm run build:go`.
 //   2. <pluginRoot>/../core-go/graph-engine[.exe] -- monorepo `go build`
 //      output, for a checkout.
 //   3. <engineCacheRoot>/v<version>/graph-engine[.exe] -- the per-user cache

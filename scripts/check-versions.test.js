@@ -11,8 +11,8 @@ const path = require('node:path');
 
 const { checkVersions } = require('./check-versions.js');
 
-function marketplaceCommand(version) {
-  return `node -e "f=require('fs');v='v${version}';require(d+'/packages/plugin')"`;
+function marketplaceSource(ref) {
+  return { source: 'git-subdir', url: 'https://github.com/example/graph-ops.git', path: 'packages/plugin', ref };
 }
 
 // Builds a fixture tree with the 5 real locations, using `versions` (an
@@ -47,7 +47,7 @@ function makeFixture(versions) {
       plugins: [
         {
           name: 'graph-ops',
-          source: { source: 'command', command: marketplaceCommand(marketplaceVersion), mode: 'copy', timeout: 300 },
+          source: marketplaceSource(`v${marketplaceVersion}`),
         },
       ],
     })
@@ -77,18 +77,18 @@ test('checkVersions throws, naming every location, when one location disagrees',
   });
 });
 
-test('checkVersions throws when the marketplace.json command has no extractable version', (t) => {
+test('checkVersions throws when the marketplace.json source ref has no extractable version', (t) => {
   const root = makeFixture(['1.2.3', '1.2.3', '1.2.3', '1.2.3', '1.2.3']);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
-  // Overwrite the marketplace command so it has no v='v<version>' substring.
+  // Overwrite the marketplace ref with something that is not a v<version> tag.
   fs.writeFileSync(
     path.join(root, '.claude-plugin', 'marketplace.json'),
     JSON.stringify({
       plugins: [
         {
           name: 'graph-ops',
-          source: { source: 'command', command: 'node -e "console.log(1)"', mode: 'copy', timeout: 300 },
+          source: marketplaceSource('main'),
         },
       ],
     })

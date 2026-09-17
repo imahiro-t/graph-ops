@@ -5,10 +5,9 @@
 //   - packages/web/package.json
 //   - packages/plugin/package.json
 //   - packages/plugin/.claude-plugin/plugin.json
-//   - .claude-plugin/marketplace.json (embedded as a `v='vX.Y.Z'` substring
-//     inside the marketplace `command` source string -- see
-//     packages/plugin/test/marketplace-command.test.js for the same
-//     extraction approach)
+//   - .claude-plugin/marketplace.json (the graph-ops entry's `git-subdir`
+//     source `ref`, the release tag `vX.Y.Z` -- see
+//     packages/plugin/test/marketplace-source.test.js)
 //
 // Run directly (`npm run check:versions`) or required as a module by tests.
 // Exits non-zero -- with a message naming every location and its value -- on
@@ -28,7 +27,7 @@ const JSON_LOCATIONS = [
   'packages/plugin/.claude-plugin/plugin.json',
 ];
 
-// Location whose version is embedded inside a command string.
+// Location whose version is the release tag in the marketplace source ref.
 const MARKETPLACE_LOCATION = '.claude-plugin/marketplace.json';
 
 function readJsonVersion(root, relPath) {
@@ -54,18 +53,17 @@ function readMarketplaceVersion(root, relPath = MARKETPLACE_LOCATION) {
     throw new Error(`Failed to read/parse ${relPath}: ${err.message}`);
   }
   const entry = (marketplace.plugins || []).find((p) => p && p.name === 'graph-ops');
-  if (!entry || typeof entry.source?.command !== 'string') {
-    throw new Error(`${relPath} has no "graph-ops" plugin entry with a string source.command`);
+  if (!entry || typeof entry.source?.ref !== 'string') {
+    throw new Error(`${relPath} has no "graph-ops" plugin entry with a string source.ref`);
   }
-  const match = entry.source.command.match(/\bv='v([^']+)'/);
+  const match = entry.source.ref.match(/^v(.+)$/);
   if (!match) {
-    // Extraction failure must be a hard failure, not a silent pass: if this
-    // pattern ever breaks (e.g. the command string is reshaped), treating it
-    // as "versions agree" would be a false negative that lets a real
-    // mismatch through undetected.
+    // Extraction failure must be a hard failure, not a silent pass: treating
+    // an unexpected ref shape as "versions agree" would be a false negative
+    // that lets a real mismatch through undetected.
     throw new Error(
-      `Could not extract a version from ${relPath}'s command string ` +
-        "(expected a v='v<version>' substring); treating this as a failure " +
+      `Could not extract a version from ${relPath}'s source.ref ` +
+        '(expected a v<version> release tag); treating this as a failure ' +
         'rather than skipping the check'
     );
   }

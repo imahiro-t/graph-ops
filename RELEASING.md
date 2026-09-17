@@ -12,8 +12,8 @@ The release version is hardcoded in 5 places:
 - `packages/web/package.json`
 - `packages/plugin/package.json`
 - `packages/plugin/.claude-plugin/plugin.json`
-- `.claude-plugin/marketplace.json` (embedded in a `node -e` command string
-  as `v='vX.Y.Z'`)
+- `.claude-plugin/marketplace.json` (the graph-ops entry's `git-subdir`
+  source `ref`, as the tag `vX.Y.Z`)
 
 Run:
 

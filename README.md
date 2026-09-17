@@ -21,7 +21,7 @@ GraphOps is a ticket management and execution platform for AI-driven development
 ### Requirements
 
 - [Claude Code](https://docs.claude.com/en/docs/claude-code)
-- `git` and `node` on your `PATH`, and network access for the first install (the plugin is fetched with `git` by a `node` one-liner)
+- `git` and `node` on your `PATH`, and network access for the first install (Claude Code fetches the plugin with `git`; on first use the plugin runs `node` to download the `graph-engine` binary)
 - macOS (Apple silicon / Intel), Linux (x86_64), or Windows (x86_64)
 
 ### Installation & Getting Started
@@ -33,7 +33,7 @@ Run the following inside Claude Code:
 /plugin marketplace add imahiro-t/graph-ops
 /plugin install graph-ops@graph-ops
 ```
-The first run downloads the plugin and a `graph-engine` binary for your OS/architecture into a per-user cache. Later runs reuse the cache.
+Installing fetches the plugin at the current release tag. The first time the plugin runs `graph-engine`, it downloads the binary for your OS/architecture from that release's GitHub Release, checks it against the release's `checksums.txt`, and stores it in a per-user cache (`~/.cache/graph-ops/engine/`). Later runs reuse the cache.
 
 #### Quick start
 
@@ -46,13 +46,12 @@ The first run downloads the plugin and a `graph-engine` binary for your OS/archi
 
 #### Updating to a new release
 
-Run the following in a regular terminal (not the `/plugin` menu):
+Update from the `/plugin` menu, or run the following in a terminal:
 ```sh
 claude plugin update graph-ops@graph-ops
 ```
-Each release pins a new release tag in the plugin's fetch command, and Claude Code only runs a fetch command you have approved. The update shows the new command and asks you to approve it. Once you approve it, you are on the new release. You don't need to uninstall or reinstall.
-- Updating from the `/plugin` menu, or Claude Code's automatic background refresh, can't approve a new command, so you stay on the old release (the `/plugin` Errors tab shows the command waiting for approval).
-- In a non-interactive shell (scripts, CI, provisioning), add `--yes` to accept the command: `claude plugin update graph-ops@graph-ops --yes`.
+Each release points the marketplace entry at the new release tag, so updating fetches that release. The first run after the update downloads the matching `graph-engine` binary. You don't need to uninstall or reinstall.
+- **If you installed version 0.4.0 or earlier**: those versions were fetched by a `node` one-liner that kept a clone of the repository per release under `~/.cache/graph-ops/` (for example `~/.cache/graph-ops/v0.4.0`). The plugin no longer uses those clones, so you can delete the `v*` directories there. Leave `~/.cache/graph-ops/engine/`, which holds the downloaded binaries.
 
 ### Commands
 
@@ -135,7 +134,7 @@ Use the header buttons to switch the theme (light / dark / match system) and the
 
 ### Troubleshooting
 
-- **The plugin update fails or stays on the old release, saying the command changed since install**: this is expected on every release, because the new fetch command must be approved. Run `claude plugin update graph-ops@graph-ops` in a regular terminal and approve it (see "Updating to a new release"). You don't need to uninstall or reinstall.
+- **The plugin update fails or stays on the old release, saying the command changed since install**: your installed copy came from the old fetch command (version 0.4.0 or earlier). Run `claude plugin update graph-ops@graph-ops` in a regular terminal; if it asks you to approve a command, approve it once. From then on, updates need no approval (see "Updating to a new release").
 - **A button that launches Claude Code doesn't seem to open a terminal**: GraphOps picks the terminal automatically, in this order: a `terminalCommand` you configured; a new window in the current `tmux` session; Terminal.app on macOS; Windows Terminal (`wt.exe`) or, if it isn't installed, a PowerShell window on Windows. If none applies (for example on Linux outside `tmux`), the launch fails and a short error message appears in the Web UI and disappears after a few seconds. Set `terminalCommand` in `graph-config.json` (or the `TERMINAL_COMMAND` environment variable) to a shell command template that uses the `{cwd}` and `{command}` placeholders. For example, with WezTerm:
   ```json
   { "terminalCommand": "wezterm start --cwd {cwd} -- {command}" }
@@ -163,7 +162,7 @@ GraphOps は、実行グラフ（DAG／並列／ループ）を軸にした、AI
 ### 必要なもの
 
 - [Claude Code](https://docs.claude.com/en/docs/claude-code)
-- `PATH` 上の `git` と `node`、および初回インストール時のネットワーク接続（プラグインは `node` のワンライナーから `git` で取得されます）
+- `PATH` 上の `git` と `node`、および初回インストール時のネットワーク接続（Claude Code がプラグインを `git` で取得し、プラグインは初回利用時に `node` で `graph-engine` バイナリをダウンロードします）
 - macOS（Apple シリコン／Intel）、Linux（x86_64）、Windows（x86_64）
 
 ### インストールと使い始め方
@@ -175,7 +174,7 @@ Claude Code 内で次を実行します。
 /plugin marketplace add imahiro-t/graph-ops
 /plugin install graph-ops@graph-ops
 ```
-初回実行時に、プラグイン本体と、お使いの OS／アーキテクチャ向けの `graph-engine` バイナリがユーザーごとのキャッシュにダウンロードされます。2 回目以降はこのキャッシュを使います。
+インストールすると、現在のリリースタグのプラグインが取得されます。プラグインが初めて `graph-engine` を実行するときに、お使いの OS／アーキテクチャ向けのバイナリをそのリリースの GitHub Release からダウンロードし、リリースの `checksums.txt` と照合してから、ユーザーごとのキャッシュ（`~/.cache/graph-ops/engine/`）に保存します。2 回目以降はこのキャッシュを使います。
 
 #### クイックスタート
 
@@ -188,13 +187,12 @@ Claude Code 内で次を実行します。
 
 #### 新しいリリースへの更新
 
-通常のターミナル（`/plugin` メニューではなく）で次を実行します。
+`/plugin` メニューから更新するか、ターミナルで次を実行します。
 ```sh
 claude plugin update graph-ops@graph-ops
 ```
-リリースのたびに、プラグインの取得コマンドに固定されるリリースタグが変わります。Claude Code は、承認済みの取得コマンドしか実行しません。更新時に新しいコマンドが表示され、承認を求められます。承認すれば新しいリリースに切り替わります。アンインストールや再インストールは不要です。
-- `/plugin` メニューからの更新や、Claude Code の自動バックグラウンド更新では新しいコマンドを承認できないため、古いリリースのままになります（`/plugin` の Errors タブに承認待ちのコマンドが表示されます）。
-- 対話できないシェル（スクリプト・CI・プロビジョニングなど）では、`--yes` を付けてコマンドを承認します: `claude plugin update graph-ops@graph-ops --yes`
+リリースのたびにマーケットプレイスの登録内容が新しいリリースタグを指すので、更新するとそのリリースが取得されます。更新後の初回実行時に、対応する `graph-engine` バイナリがダウンロードされます。アンインストールや再インストールは不要です。
+- **バージョン 0.4.0 以前をインストールしていた場合**: これらのバージョンは `node` のワンライナーで取得され、リリースごとにリポジトリのクローンを `~/.cache/graph-ops/` の下（例: `~/.cache/graph-ops/v0.4.0`）に残していました。現在のプラグインはこれらを使わないので、そこにある `v*` ディレクトリは削除してかまいません。ダウンロード済みのバイナリが入っている `~/.cache/graph-ops/engine/` は残してください。
 
 ### コマンド一覧
 
@@ -277,7 +275,7 @@ claude plugin update graph-ops@graph-ops
 
 ### トラブルシューティング
 
-- **プラグインの更新が「インストール時からコマンドが変わった」として失敗する、または古いリリースのままになる**: 新しい取得コマンドの承認が必要なため、リリースのたびに起きる想定どおりの動作です。通常のターミナルで `claude plugin update graph-ops@graph-ops` を実行し、承認してください（「新しいリリースへの更新」を参照）。アンインストールや再インストールは不要です。
+- **プラグインの更新が「インストール時からコマンドが変わった」として失敗する、または古いリリースのままになる**: インストール済みのプラグインが、以前の取得コマンド（バージョン 0.4.0 以前）で入ったものです。通常のターミナルで `claude plugin update graph-ops@graph-ops` を実行し、コマンドの承認を求められたら一度だけ承認してください。以降の更新では承認は不要です（「新しいリリースへの更新」を参照）。
 - **Claude Code を起動するボタンを押してもターミナルが開かないように見える**: GraphOps は次の順にターミナルを自動で選びます。設定済みの `terminalCommand`、実行中の `tmux` セッションの新しいウィンドウ、macOS の Terminal.app、Windows の Windows Terminal（`wt.exe`。未インストールなら PowerShell のウィンドウ）です。どれにも当てはまらない場合（Linux で `tmux` を使っていない場合など）は起動に失敗し、Web UI に短いエラーメッセージが表示され、数秒で消えます。`graph-config.json` の `terminalCommand`（または環境変数 `TERMINAL_COMMAND`）に、`{cwd}` と `{command}` のプレースホルダーを使ったシェルコマンドのテンプレートを設定してください。例えば WezTerm の場合:
   ```json
   { "terminalCommand": "wezterm start --cwd {cwd} -- {command}" }
