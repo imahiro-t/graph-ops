@@ -134,6 +134,9 @@ func TestHandleCreateProject_LocalPathSaveFailureIs500AndSaysCreated(t *testing.
 		t.Skip("permission-based write failure cannot be simulated as root")
 	}
 	s, repo := newBareTestServer(t)
+	var logBuf bytes.Buffer
+	var mu sync.Mutex
+	s.logger = slog.New(slog.NewTextHandler(&lockedWriter{w: &logBuf, mu: &mu}, nil))
 	// No graph-config.json exists, so Save would create $HOME/.graph-ops;
 	// a read-only HomeDir makes that fail.
 	if err := os.Chmod(s.cfg.HomeDir, 0o500); err != nil {
@@ -149,9 +152,20 @@ func TestHandleCreateProject_LocalPathSaveFailureIs500AndSaysCreated(t *testing.
 	if !strings.Contains(apiErr.Message, "Theta") || !strings.Contains(apiErr.Message, "was created") {
 		t.Errorf("message should say the project was created: %q", apiErr.Message)
 	}
+	// A dedicated code lets the Web UI tell "already created" apart from a
+	// plain INTERNAL_ERROR (and so avoid a duplicate create).
+	if apiErr.Code != domain.ErrCodeProjectCreatedLocalPathNotSaved {
+		t.Errorf("expected code %s, got %s", domain.ErrCodeProjectCreatedLocalPathNotSaved, apiErr.Code)
+	}
 	projects, _ := repo.ListProjects()
 	if len(projects) != 1 || projects[0].Name != "Theta" {
-		t.Errorf("project Theta should exist in the DB, got %+v", projects)
+		t.Fatalf("project Theta should exist in the DB, got %+v", projects)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	logged := logBuf.String()
+	if !strings.Contains(logged, "project_local_path_save_failed_after_create") || !strings.Contains(logged, projects[0].ID) {
+		t.Errorf("expected a save-failure log line naming the project, got %q", logged)
 	}
 }
 
@@ -356,6 +370,33 @@ func TestHandleDeleteProject_CleanupFailureStillSucceedsAndLogs(t *testing.T) {
 	defer mu.Unlock()
 	if !strings.Contains(logBuf.String(), "project_local_path_cleanup_failed") || !strings.Contains(logBuf.String(), beta.ID) {
 		t.Errorf("expected a cleanup-failure log line, got %q", logBuf.String())
+	}
+}
+
+// A graph-config.json that cannot be parsed makes projectLocalPath fall back
+// to "not set" (Claude launch / catalog loading keep working), but the reason
+// is logged instead of being swallowed.
+func TestProjectLocalPath_UnreadableConfigFallsBackAndLogs(t *testing.T) {
+	s, repo := newBareTestServer(t)
+	var logBuf bytes.Buffer
+	var mu sync.Mutex
+	s.logger = slog.New(slog.NewTextHandler(&lockedWriter{w: &logBuf, mu: &mu}, nil))
+	beta, _ := repo.CreateProject("Beta", "")
+	path := runtimeconfig.ResolvePath(s.cfg.WorkDir, s.cfg.HomeDir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := s.projectLocalPath(beta.ID); got != "" {
+		t.Errorf("expected \"\" for an unreadable config, got %q", got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(logBuf.String(), "project_local_path_load_failed") || !strings.Contains(logBuf.String(), beta.ID) {
+		t.Errorf("expected a load-failure log line, got %q", logBuf.String())
 	}
 }
 

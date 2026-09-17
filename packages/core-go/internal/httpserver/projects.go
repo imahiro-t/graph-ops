@@ -38,6 +38,12 @@ func (s *Server) loadProjectPaths() (runtimeconfig.FileConfig, error) {
 func (s *Server) projectLocalPath(projectID string) string {
 	fileCfg, err := s.loadProjectPaths()
 	if err != nil {
+		// Falling back silently would hide why Claude opened in the
+		// terminal directory or team extensions were not loaded.
+		s.logger.Warn("failed to read graph-config.json for a project's local path; treating it as not set",
+			slog.String("event", "project_local_path_load_failed"),
+			slog.String("project_id", projectID),
+			slog.String("error", err.Error()))
 		return ""
 	}
 	return fileCfg.ProjectPath(projectID)
@@ -57,9 +63,10 @@ func withLocalPath(p domain.Project, fileCfg runtimeconfig.FileConfig) projectRe
 // matches the current directory against.
 //
 // If the DB insert succeeds but saving the local path fails, the response is
-// a 500 whose message says the project itself was created, so the user
-// knows to set the path again (from the settings screen) rather than create
-// a duplicate project.
+// a 500 with code PROJECT_CREATED_LOCAL_PATH_NOT_SAVED and a message saying
+// the project itself was created, and the failure is logged. The Web UI keys
+// off that code to re-fetch the project list and steer the user to the
+// existing project instead of creating a duplicate one.
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name      string `json:"name"`
@@ -87,7 +94,15 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if localPath != "" {
 		if _, err := runtimeconfig.SetProjectPath(s.cfg.WorkDir, s.cfg.HomeDir, project.ID, localPath); err != nil {
-			writeError(w, http.StatusInternalServerError, domain.NewAPIError(domain.ErrCodeInternal,
+			// writeError does not log 5xx responses, and this one leaves a
+			// half-done state (a project in the shared DB with no local path
+			// here), so record it for whoever investigates later.
+			s.logger.Error("project was created but saving its local path to graph-config.json failed",
+				slog.String("event", "project_local_path_save_failed_after_create"),
+				slog.String("project_id", project.ID),
+				slog.String("project_name", project.Name),
+				slog.String("error", err.Error()))
+			writeError(w, http.StatusInternalServerError, domain.NewAPIError(domain.ErrCodeProjectCreatedLocalPathNotSaved,
 				"project %s (%s) was created, but saving its local path to graph-config.json failed: %v", project.Name, project.ID, err))
 			return
 		}

@@ -433,17 +433,15 @@ func (r *MySQLRepository) Init() error {
 	// DFLT-00080 migration: drop the legacy projects.work_dir column from a
 	// DB created before that ticket (see SQLiteRepository's
 	// dropLegacyProjectsWorkDir for why its values are not carried over).
-	// Checking first keeps Init idempotent.
-	hasWorkDir, err := r.mysqlColumnExists("projects", "work_dir")
-	if err != nil {
-		return fmt.Errorf("inspecting projects columns: %w", err)
-	}
-	if hasWorkDir {
-		if _, err := r.db.Exec(`ALTER TABLE projects DROP COLUMN work_dir`); err != nil {
-			return fmt.Errorf("dropping legacy projects.work_dir column: %w", err)
-		}
-	}
-	return nil
+	// Checking first keeps Init idempotent; a DROP that loses a race with
+	// another member's (or process's) concurrent Init is not an error (see
+	// dropLegacyProjectsWorkDirColumn).
+	return dropLegacyProjectsWorkDirColumn("mysql", func() (bool, error) {
+		return r.mysqlColumnExists("projects", "work_dir")
+	}, func() error {
+		_, err := r.db.Exec(`ALTER TABLE projects DROP COLUMN work_dir`)
+		return err
+	})
 }
 
 // mysqlColumnExists checks INFORMATION_SCHEMA.COLUMNS for the current

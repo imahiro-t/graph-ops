@@ -172,10 +172,20 @@ func (r *SQLiteRepository) Init() error {
 // ALTER TABLE ... DROP COLUMN needs SQLite 3.35+, which the bundled
 // modernc.org/sqlite satisfies; work_dir is in no index or constraint.
 func (r *SQLiteRepository) dropLegacyProjectsWorkDir() error {
+	return dropLegacyProjectsWorkDirColumn("sqlite", r.projectsHasWorkDir, func() error {
+		_, err := r.db.Exec(`ALTER TABLE projects DROP COLUMN work_dir`)
+		return err
+	})
+}
+
+// projectsHasWorkDir reports whether the projects table still has the legacy
+// work_dir column (PRAGMA table_info).
+func (r *SQLiteRepository) projectsHasWorkDir() (bool, error) {
 	rows, err := r.db.Query(`PRAGMA table_info(projects)`)
 	if err != nil {
-		return fmt.Errorf("inspecting projects columns: %w", err)
+		return false, err
 	}
+	defer rows.Close()
 	hasWorkDir := false
 	for rows.Next() {
 		var (
@@ -186,25 +196,16 @@ func (r *SQLiteRepository) dropLegacyProjectsWorkDir() error {
 			primaryKey int
 		)
 		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &primaryKey); err != nil {
-			rows.Close()
-			return fmt.Errorf("inspecting projects columns: %w", err)
+			return false, err
 		}
 		if name == "work_dir" {
 			hasWorkDir = true
 		}
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
-		return fmt.Errorf("inspecting projects columns: %w", err)
+		return false, err
 	}
-	rows.Close()
-	if !hasWorkDir {
-		return nil
-	}
-	if _, err := r.db.Exec(`ALTER TABLE projects DROP COLUMN work_dir`); err != nil {
-		return fmt.Errorf("dropping legacy projects.work_dir column: %w", err)
-	}
-	return nil
+	return hasWorkDir, nil
 }
 
 func shortUUID() string {

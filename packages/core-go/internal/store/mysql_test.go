@@ -260,3 +260,31 @@ func TestMySQLRepository_InitDropsLegacyWorkDirColumnAndKeepsData(t *testing.T) 
 		t.Errorf("CreateProject after migration: %v", err)
 	}
 }
+
+// Same race as TestSQLiteInit_LegacyWorkDirDroppedConcurrentlyIsNotAnError,
+// on a shared MySQL: another member's Init drops work_dir between this
+// Init's column check and its DROP (which then fails with error 1091).
+func TestMySQLRepository_InitLegacyWorkDirDroppedConcurrentlyIsNotAnError(t *testing.T) {
+	repo := newTestMySQLRepo(t)
+	if _, err := repo.db.Exec(`ALTER TABLE projects ADD COLUMN work_dir TEXT NOT NULL AFTER prefix`); err != nil {
+		t.Fatalf("re-adding legacy work_dir column: %v", err)
+	}
+	other, err := NewMySQLRepository(mysqlTestConfig(t))
+	if err != nil {
+		t.Fatalf("NewMySQLRepository: %v", err)
+	}
+	t.Cleanup(func() { other.db.Close() })
+
+	setLegacyWorkDirDropHook(t, func() {
+		if err := other.Init(); err != nil {
+			t.Errorf("concurrent Init: %v", err)
+		}
+	})
+
+	if err := repo.Init(); err != nil {
+		t.Fatalf("Init should treat the already-dropped column as success, got %v", err)
+	}
+	if exists, err := repo.mysqlColumnExists("projects", "work_dir"); err != nil || exists {
+		t.Fatalf("projects.work_dir should be gone (exists=%v, err=%v)", exists, err)
+	}
+}
