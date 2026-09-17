@@ -55,6 +55,14 @@ describe('SkillsEditor', () => {
     expect(await screen.findByDisplayValue('create-ticket-tier-text')).toBeInTheDocument();
   });
 
+  // DFLT-00074
+  it('labels the tier text textarea', async () => {
+    render(<SkillsEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+
+    const textarea = await screen.findByDisplayValue('create-ticket-tier-text');
+    expect(screen.getByLabelText(i18n.t('settings.skills.tierTextLabel'))).toBe(textarea);
+  });
+
   it('#7 non-regression: changing the selection does not re-fetch the skill list', async () => {
     const user = userEvent.setup();
     render(<SkillsEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);

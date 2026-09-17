@@ -76,6 +76,22 @@ describe('ReviewGatesEditor', () => {
     expect(await screen.findByDisplayValue('QA Review (overridden)!')).toBeInTheDocument();
   });
 
+  // DFLT-00074: every row's fields have visible labels tied to their inputs.
+  it('labels the id, name, max iterations and criteria fields of each row', async () => {
+    render(<ReviewGatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+
+    const ids = screen.getAllByLabelText(i18n.t('settings.reviewGates.idLabel'));
+    expect(ids.map(el => (el as HTMLInputElement).value)).toEqual(['code_review', 'qa_review']);
+    const names = screen.getAllByLabelText(i18n.t('settings.reviewGates.nameLabel'));
+    expect(names.map(el => (el as HTMLInputElement).value)).toEqual(['Code Review', 'QA Review (overridden)']);
+    const maxIterations = screen.getAllByLabelText(i18n.t('settings.reviewGates.maxIterationsLabel'));
+    expect(maxIterations.map(el => (el as HTMLInputElement).value)).toEqual(['3', '2']);
+    const criteria = screen.getAllByLabelText(i18n.t('settings.reviewGates.criteriaLabel'));
+    expect(criteria.map(el => (el as HTMLTextAreaElement).value)).toEqual(['code criteria', 'qa criteria']);
+    expect(screen.getAllByLabelText(i18n.t('settings.reviewGates.additionalCriteriaLabel'))).toHaveLength(2);
+  });
+
   it('keeps the name field editable for a newly added gate', async () => {
     const user = userEvent.setup();
     render(<ReviewGatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);

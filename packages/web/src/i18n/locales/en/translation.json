@@ -1,6 +1,7 @@
 {
   "common": {
-    "justNow": "just now"
+    "justNow": "just now",
+    "closeDialog": "Close"
   },
   "header": {
     "subtitle": "Ticket & Execution Graph Management",
@@ -74,6 +75,7 @@
     "descriptionSuffix": "skill, and Claude Code works out a title and description and creates the ticket once you confirm them (no graph is built yet).",
     "requestLabel": "What kind of ticket do you want to create? *",
     "requestPlaceholder": "e.g. I want to revisit the account-unlock flow after a failed login. Right now users have to contact support to unlock…",
+    "shortcutHint": "Press Cmd (⌘) / Ctrl + Enter to create",
     "close": "Close",
     "cancel": "Cancel",
     "submit": "Create"
@@ -173,7 +175,9 @@
     "title": "Launch Claude Code",
     "descriptionPrefix": "The prompt you enter starts",
     "descriptionSuffix": "interactively in an external terminal. Handle permission prompts and any further interaction there.",
+    "promptLabel": "Prompt",
     "placeholder": "Command or prompt to send to Claude Code...",
+    "shortcutHint": "Press Cmd (⌘) / Ctrl + Enter to launch",
     "launch": "Launch"
   },
   "claudeLaunch": {
@@ -231,6 +235,7 @@
       "label": "Scope",
       "global": "Global Settings",
       "project": "Project Settings",
+      "projectLabel": "Project",
       "projectPlaceholder": "Select a project",
       "noProjectSelected": "No project is selected in the app. Select a project from the switcher first to edit project-scoped settings."
     },
@@ -264,6 +269,7 @@
       "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the layer below.",
       "addType": "Add Node Type",
       "newTypePlaceholder": "e.g. custom_lint",
+      "newTypeLabel": "New node type name",
       "invalidTypeName": "Enter a name with no \"/\", \"\\\", \".\" or \"..\".",
       "deleteType": "Delete this node type's override",
       "defaultBadge": "Default",

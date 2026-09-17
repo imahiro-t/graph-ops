@@ -2,6 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+/* DFLT-00074: placeholder text inside modal dialogs. Preflight's default
+   (gray-400) is only about 2.4:1 on the light inputs; slate-500 gives 4.55:1
+   on slate-50 and 4.76:1 on white (WCAG 1.4.3 AA). These selectors
+   ([role="dialog"] *::placeholder, 0,1,1) beat preflight's
+   input::placeholder (0,0,2). Scoped to dialogs so other screens are
+   unchanged. If an input background inside a dialog gets darker than
+   slate-50, recheck the ratio -- the light-theme margin is small. */
+@layer base {
+  [role="dialog"] *::placeholder {
+    color: theme('colors.slate.500');
+  }
+  .dark [role="dialog"] *::placeholder {
+    color: theme('colors.slate.400');
+  }
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;

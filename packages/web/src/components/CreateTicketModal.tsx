@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { isSubmitShortcut } from '../lib/keyboardShortcuts';
+import { useModalDialog } from '../hooks/useModalDialog';
 import { StatusLiveRegion } from './StatusLiveRegion';
 
 interface Props {
@@ -19,6 +20,7 @@ interface Props {
 }
 
 const REQUEST_INPUT_ID = 'create-ticket-request';
+const SHORTCUT_HINT_ID = 'create-ticket-shortcut-hint';
 
 // The "New Ticket" modal. It deliberately asks for a single free-form
 // request instead of separate title/description fields: working out a title
@@ -27,6 +29,11 @@ const REQUEST_INPUT_ID = 'create-ticket-request';
 export const CreateTicketModal: React.FC<Props> = ({ onSubmit, onClose, isCreating, status }) => {
   const { t } = useTranslation();
   const [request, setRequest] = useState('');
+  const titleId = useId();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Mounted only while open, so isOpen stays at its default and the hook's
+  // unmount cleanup returns focus to the "New Ticket" button.
+  const dialogRef = useModalDialog({ onEscape: onClose, initialFocusRef: textareaRef });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,8 +49,15 @@ export const CreateTicketModal: React.FC<Props> = ({ onSubmit, onClose, isCreati
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md p-6 shadow-2xl">
-        <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">{t('createModal.title')}</h2>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md p-6 shadow-2xl focus:outline-none"
+      >
+        <h2 id={titleId} className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">{t('createModal.title')}</h2>
         <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
           {t('createModal.descriptionPrefix')} <span className="font-mono">/create-ticket</span> {t('createModal.descriptionSuffix')}
         </p>
@@ -59,11 +73,13 @@ export const CreateTicketModal: React.FC<Props> = ({ onSubmit, onClose, isCreati
                 lines); Cmd/Ctrl+Enter submits, same as the other prompt
                 inputs. The value is passed on untouched so newlines survive. */}
             <textarea
+              ref={textareaRef}
               id={REQUEST_INPUT_ID}
+              aria-describedby={SHORTCUT_HINT_ID}
               rows={5}
               required
               disabled={isCreating}
-              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500 disabled:opacity-60"
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60"
               value={request}
               onChange={e => setRequest(e.target.value)}
               onKeyDown={e => {
@@ -74,6 +90,9 @@ export const CreateTicketModal: React.FC<Props> = ({ onSubmit, onClose, isCreati
               }}
               placeholder={t('createModal.requestPlaceholder')}
             />
+            <p id={SHORTCUT_HINT_ID} className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {t('createModal.shortcutHint')}
+            </p>
           </div>
           {/* 作成／起動の結果はフォーカス移動を伴わずに現れるため、読み上げは
               常時マウントの live region が担当する（SC 4.1.3）。 */}
@@ -98,7 +117,7 @@ export const CreateTicketModal: React.FC<Props> = ({ onSubmit, onClose, isCreati
             <button
               type="submit"
               disabled={isCreating || !request.trim()}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-xs font-semibold text-white shadow-xs transition flex items-center gap-1.5"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white shadow-xs transition flex items-center gap-1.5"
             >
               {isCreating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               {t('createModal.submit')}

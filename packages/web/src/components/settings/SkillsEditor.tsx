@@ -4,7 +4,7 @@
 // See internal/config.ResolveSkillContext for the append-by-default merge
 // semantics this editor exposes -- structurally a copy of NodeTypesEditor,
 // minus the plugin-default layer skills don't have.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Save, CheckCircle2 } from 'lucide-react';
 import { SettingsSkillInfo, SettingsScope } from '../../types';
@@ -33,6 +33,7 @@ export const SkillsEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDir
   // See src/hooks/useLatest.ts -- keeps loadSkills/loadSelected below
   // insensitive to language changes (F-1).
   const tRef = useLatest(t);
+  const tierTextId = useId();
   const [skills, setSkills] = useState<SettingsSkillInfo[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [tierText, setTierText] = useState('');
@@ -146,13 +147,14 @@ export const SkillsEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDir
               </pre>
             </div>
             <div className="flex-1 min-h-0 flex flex-col">
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('settings.skills.tierTextLabel')}</label>
+              <label htmlFor={tierTextId} className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('settings.skills.tierTextLabel')}</label>
               <textarea
+                id={tierTextId}
                 value={tierText}
                 onChange={e => setTierText(e.target.value)}
                 disabled={!canEdit}
                 placeholder={t('settings.skills.tierTextPlaceholder')}
-                className="flex-1 min-h-[10rem] w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
+                className="flex-1 min-h-[10rem] w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
               />
               <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">{t('settings.skills.emptyOverrideHint')}</p>
             </div>
@@ -165,7 +167,7 @@ export const SkillsEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDir
               <button
                 onClick={handleSave}
                 disabled={!canEdit || saving || !isDirty}
-                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
+                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
               >
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                 {saving ? t('settings.common.saving') : t('settings.common.save')}
