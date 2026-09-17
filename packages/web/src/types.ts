@@ -94,6 +94,58 @@ export interface Ticket {
   // PrioritySelect.tsx; it can't be cleared), and used to filter the ticket
   // list (see priorityMeta.ts and App.tsx's filterPriorities).
   priority: TicketPriority;
+  // The project labels attached to this ticket (DFLT-00084), sorted by name
+  // case-insensitively. The backend always sends an array ([] when none);
+  // it is optional here only so a response from an older graph-engine (or a
+  // hand-built fixture) without the key is still a valid Ticket -- read it
+  // as `ticket.labels ?? []`.
+  labels?: Label[];
+}
+
+// A label's color is one of a fixed palette (DFLT-00084). The backend stores
+// only the key; how each key looks lives in labelMeta.ts.
+export type LabelColor =
+  | 'gray'
+  | 'red'
+  | 'orange'
+  | 'amber'
+  | 'green'
+  | 'teal'
+  | 'blue'
+  | 'indigo'
+  | 'purple'
+  | 'pink';
+
+// Every LabelColor in palette display order -- must match the Go side's
+// domain.LabelColors.
+export const LABEL_COLORS: readonly LabelColor[] = [
+  'gray',
+  'red',
+  'orange',
+  'amber',
+  'green',
+  'teal',
+  'blue',
+  'indigo',
+  'purple',
+  'pink'
+];
+
+// A project-scoped label (DFLT-00084). Tickets reference labels by id, so a
+// rename or recolor shows on every ticket carrying it.
+export interface Label {
+  id: string;
+  project_id: string;
+  name: string;
+  color: LabelColor;
+  created_at: string;
+  updated_at: string;
+}
+
+// GET /api/projects/{id}/labels' element: a label plus how many tickets
+// carry it (shown in settings and in the in-use delete confirmation).
+export interface LabelUsage extends Label {
+  ticket_count: number;
 }
 
 export interface GraphNode {
