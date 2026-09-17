@@ -18,6 +18,7 @@ func TestIsHelpRequest(t *testing.T) {
 		{"flag after command", []string{"create-ticket", "--help"}, true},
 		{"short flag after command", []string{"create-ticket", "-h"}, true},
 		{"flag in a later position", []string{"add-artifact", "T", "N", "name", "--help"}, true},
+		{"flag after wait-node", []string{"wait-node", "--help"}, true},
 		{"plain command", []string{"list-tickets"}, false},
 		{"command with real args", []string{"create-ticket", "title", "description"}, false},
 		{"help only as a substring", []string{"create-ticket", "--help-wanted"}, false},
