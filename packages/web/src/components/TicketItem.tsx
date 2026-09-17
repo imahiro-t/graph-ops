@@ -1431,7 +1431,7 @@ export const TicketItem: React.FC<Props> = ({
                   {t('ticketItem.actions.refine')}
                 </button>
                 <button
-                  onClick={() => handleRunClaude(`/process-ticket ${ticket.id}`, ticket.id)}
+                  onClick={() => handleRunClaude(t('claudePrompts.processTicket', { ticketId: ticket.id }), ticket.id)}
                   disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
                   className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
                 >
