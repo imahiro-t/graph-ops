@@ -63,7 +63,6 @@ var mysqlSchemaStatements = []string{
 	id VARCHAR(191) PRIMARY KEY,
 	name TEXT NOT NULL,
 	prefix VARCHAR(20) NOT NULL,
-	work_dir TEXT NOT NULL,
 	ticket_seq INT NOT NULL DEFAULT 0,
 	created_at VARCHAR(64) NOT NULL,
 	updated_at VARCHAR(64) NOT NULL,
@@ -431,12 +430,25 @@ func (r *MySQLRepository) Init() error {
 			return fmt.Errorf("applying mysql schema: %w", err)
 		}
 	}
+	// DFLT-00080 migration: drop the legacy projects.work_dir column from a
+	// DB created before that ticket (see SQLiteRepository's
+	// dropLegacyProjectsWorkDir for why its values are not carried over).
+	// Checking first keeps Init idempotent.
+	hasWorkDir, err := r.mysqlColumnExists("projects", "work_dir")
+	if err != nil {
+		return fmt.Errorf("inspecting projects columns: %w", err)
+	}
+	if hasWorkDir {
+		if _, err := r.db.Exec(`ALTER TABLE projects DROP COLUMN work_dir`); err != nil {
+			return fmt.Errorf("dropping legacy projects.work_dir column: %w", err)
+		}
+	}
 	return nil
 }
 
 // mysqlColumnExists checks INFORMATION_SCHEMA.COLUMNS for the current
-// database (DATABASE()). Used by tests to assert that a fresh schema already
-// has a given column.
+// database (DATABASE()). Used by Init's legacy-column migration and by tests
+// to assert whether a schema has a given column.
 func (r *MySQLRepository) mysqlColumnExists(table, column string) (bool, error) {
 	var count int
 	row := r.db.QueryRow(
@@ -883,12 +895,9 @@ func (r *MySQLRepository) ListArtifactsByNode(nodeID string) ([]domain.Artifact,
 // the row), using FOR UPDATE to lock the existing prefixes for the
 // duration -- see CreateTicket's doc comment for why MySQL needs this
 // explicit locking where SQLite didn't.
-func (r *MySQLRepository) CreateProject(name, prefix, workDir string) (domain.Project, error) {
+func (r *MySQLRepository) CreateProject(name, prefix string) (domain.Project, error) {
 	if name == "" {
 		return domain.Project{}, domain.NewAPIError(domain.ErrCodeValidation, "project name is required")
-	}
-	if workDir == "" || !filepath.IsAbs(workDir) {
-		return domain.Project{}, domain.NewAPIError(domain.ErrCodeValidation, "work_dir must be an absolute path")
 	}
 
 	tx, err := r.db.Begin()
@@ -924,8 +933,8 @@ func (r *MySQLRepository) CreateProject(name, prefix, workDir string) (domain.Pr
 	id := "proj-" + shortUUID()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err := tx.Exec(
-		`INSERT INTO projects (id, name, prefix, work_dir, ticket_seq, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)`,
-		id, name, resolvedPrefix, workDir, now, now,
+		`INSERT INTO projects (id, name, prefix, ticket_seq, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)`,
+		id, name, resolvedPrefix, now, now,
 	); err != nil {
 		return domain.Project{}, fmt.Errorf("inserting project: %w", err)
 	}
@@ -980,15 +989,9 @@ func (r *MySQLRepository) UpdateProject(id string, patch ProjectPatch) (domain.P
 	if patch.Name != nil {
 		cur.Name = *patch.Name
 	}
-	if patch.WorkDir != nil {
-		if *patch.WorkDir == "" || !filepath.IsAbs(*patch.WorkDir) {
-			return domain.Project{}, domain.NewAPIError(domain.ErrCodeValidation, "work_dir must be an absolute path")
-		}
-		cur.WorkDir = *patch.WorkDir
-	}
 	cur.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 
-	_, err = r.db.Exec(`UPDATE projects SET name=?, work_dir=?, updated_at=? WHERE id=?`, cur.Name, cur.WorkDir, cur.UpdatedAt, cur.ID)
+	_, err = r.db.Exec(`UPDATE projects SET name=?, updated_at=? WHERE id=?`, cur.Name, cur.UpdatedAt, cur.ID)
 	if err != nil {
 		return domain.Project{}, fmt.Errorf("updating project %s: %w", id, err)
 	}

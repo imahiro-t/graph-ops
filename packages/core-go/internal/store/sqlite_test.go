@@ -57,7 +57,7 @@ func newTestRepo(t *testing.T) *SQLiteRepository {
 func newTestRepoWithProject(t *testing.T) (*SQLiteRepository, domain.Project) {
 	t.Helper()
 	repo := newTestRepo(t)
-	proj, err := repo.CreateProject("Test Project", "TEST", t.TempDir())
+	proj, err := repo.CreateProject("Test Project", "TEST")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
@@ -387,19 +387,101 @@ func TestGetTicketDetailAssemblesGraph(t *testing.T) {
 
 func TestCreateProjectExplicitPrefix(t *testing.T) {
 	repo := newTestRepo(t)
-	workDir := t.TempDir()
-	proj, err := repo.CreateProject("Sample Project", "SMPL", workDir)
+	proj, err := repo.CreateProject("Sample Project", "SMPL")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	if proj.Name != "Sample Project" || proj.Prefix != "SMPL" || proj.WorkDir != workDir {
+	if proj.Name != "Sample Project" || proj.Prefix != "SMPL" {
 		t.Errorf("unexpected project: %+v", proj)
+	}
+}
+
+// TestSQLiteInit_NewDBHasNoWorkDirColumn: a fresh schema never had
+// projects.work_dir (DFLT-00080) -- a project's local path lives in each
+// environment's graph-config.json, not the DB.
+func TestSQLiteInit_NewDBHasNoWorkDirColumn(t *testing.T) {
+	repo := newTestRepo(t)
+	if sqliteColumnNames(t, repo.db, "projects")["work_dir"] {
+		t.Fatal("a freshly initialized projects table must not have a work_dir column")
+	}
+}
+
+// legacySchemaDDL is schemaDDL as it was before DFLT-00080: projects still
+// had a `work_dir TEXT NOT NULL` column right after prefix.
+func legacySchemaDDL(t *testing.T) string {
+	t.Helper()
+	const anchor = "\tprefix TEXT NOT NULL,\n"
+	if !strings.Contains(schemaDDL, anchor) {
+		t.Fatal("schemaDDL no longer contains the projects.prefix line this test anchors on")
+	}
+	return strings.Replace(schemaDDL, anchor, anchor+"\twork_dir TEXT NOT NULL,\n", 1)
+}
+
+// TestSQLiteInit_DropsLegacyWorkDirColumnAndKeepsData covers the DFLT-00080
+// migration against a DB file created with the old schema: Init (run twice,
+// to prove idempotency) must drop projects.work_dir, keep the project row
+// (id/name/prefix/ticket_seq) and its ticket, and leave CreateProject --
+// whose INSERT no longer supplies work_dir -- working. The old value is not
+// migrated anywhere.
+func TestSQLiteInit_DropsLegacyWorkDirColumnAndKeepsData(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	legacy, err := NewSQLiteRepository(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	if _, err := legacy.db.Exec(legacySchemaDDL(t)); err != nil {
+		t.Fatalf("applying legacy schema: %v", err)
+	}
+	if _, err := legacy.db.Exec(
+		`INSERT INTO projects (id, name, prefix, work_dir, ticket_seq, created_at, updated_at) VALUES ('proj-legacy', 'Alpha', 'ALPHA', '/home/a/alpha', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+	); err != nil {
+		t.Fatalf("inserting legacy project: %v", err)
+	}
+	if !sqliteColumnNames(t, legacy.db, "projects")["work_dir"] {
+		t.Fatal("test setup: the legacy projects table should have work_dir")
+	}
+	ticket, err := legacy.CreateTicket("proj-legacy", domain.Ticket{Title: "legacy ticket", Status: domain.TicketTODO})
+	if err != nil {
+		t.Fatalf("CreateTicket on legacy schema: %v", err)
+	}
+	legacy.db.Close()
+
+	repo, err := NewSQLiteRepository(dbPath)
+	if err != nil {
+		t.Fatalf("reopening: %v", err)
+	}
+	t.Cleanup(func() { repo.db.Close() })
+	for i := 1; i <= 2; i++ {
+		if err := repo.Init(); err != nil {
+			t.Fatalf("Init #%d: %v", i, err)
+		}
+	}
+
+	if sqliteColumnNames(t, repo.db, "projects")["work_dir"] {
+		t.Fatal("projects.work_dir should have been dropped by Init")
+	}
+	got, err := repo.GetProject("proj-legacy")
+	if err != nil || got == nil {
+		t.Fatalf("GetProject after migration: %v, %+v", err, got)
+	}
+	if got.Name != "Alpha" || got.Prefix != "ALPHA" {
+		t.Errorf("project row changed by migration: %+v", got)
+	}
+	var seq int
+	if err := repo.db.QueryRow(`SELECT ticket_seq FROM projects WHERE id = 'proj-legacy'`).Scan(&seq); err != nil || seq != 1 {
+		t.Errorf("ticket_seq after migration = %d (err %v), want 1", seq, err)
+	}
+	if gotTicket, err := repo.GetTicket(ticket.ID); err != nil || gotTicket == nil || gotTicket.Title != "legacy ticket" {
+		t.Errorf("ticket after migration: %v, %+v", err, gotTicket)
+	}
+	if _, err := repo.CreateProject("Beta", ""); err != nil {
+		t.Errorf("CreateProject after migration: %v", err)
 	}
 }
 
 func TestCreateProjectAutoPrefixAndDedup(t *testing.T) {
 	repo := newTestRepo(t)
-	p1, err := repo.CreateProject("My Project", "", t.TempDir())
+	p1, err := repo.CreateProject("My Project", "")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
@@ -407,7 +489,7 @@ func TestCreateProjectAutoPrefixAndDedup(t *testing.T) {
 		t.Errorf("expected MYPRO, got %q", p1.Prefix)
 	}
 
-	p2, err := repo.CreateProject("MyProject2", "", t.TempDir())
+	p2, err := repo.CreateProject("MyProject2", "")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
@@ -416,17 +498,9 @@ func TestCreateProjectAutoPrefixAndDedup(t *testing.T) {
 	}
 }
 
-func TestCreateProjectRejectsRelativeWorkDir(t *testing.T) {
-	repo := newTestRepo(t)
-	_, err := repo.CreateProject("P", "PPPPP", "relative/path")
-	if err == nil {
-		t.Fatal("expected an error for a relative work_dir")
-	}
-}
-
 func TestCreateProjectRejectsInvalidExplicitPrefix(t *testing.T) {
 	repo := newTestRepo(t)
-	_, err := repo.CreateProject("P", "ABCDEF", t.TempDir())
+	_, err := repo.CreateProject("P", "ABCDEF")
 	apiErr, ok := err.(*domain.APIError)
 	if !ok || apiErr.Code != domain.ErrCodeInvalidPrefix {
 		t.Fatalf("expected ErrCodeInvalidPrefix, got %v", err)
@@ -435,10 +509,10 @@ func TestCreateProjectRejectsInvalidExplicitPrefix(t *testing.T) {
 
 func TestCreateProjectRejectsDuplicateExplicitPrefixCaseInsensitive(t *testing.T) {
 	repo := newTestRepo(t)
-	if _, err := repo.CreateProject("P1", "ABCDE", t.TempDir()); err != nil {
+	if _, err := repo.CreateProject("P1", "ABCDE"); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	_, err := repo.CreateProject("P2", "abcde", t.TempDir())
+	_, err := repo.CreateProject("P2", "abcde")
 	apiErr, ok := err.(*domain.APIError)
 	if !ok || apiErr.Code != domain.ErrCodePrefixTaken {
 		t.Fatalf("expected ErrCodePrefixTaken, got %v", err)
@@ -447,7 +521,7 @@ func TestCreateProjectRejectsDuplicateExplicitPrefixCaseInsensitive(t *testing.T
 
 func TestUpdateProjectCannotChangePrefix(t *testing.T) {
 	repo := newTestRepo(t)
-	proj, err := repo.CreateProject("P", "FIXED", t.TempDir())
+	proj, err := repo.CreateProject("P", "FIXED")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
@@ -470,11 +544,11 @@ func TestUpdateProjectCannotChangePrefix(t *testing.T) {
 
 func TestListProjectsAndSwitching(t *testing.T) {
 	repo := newTestRepo(t)
-	a, err := repo.CreateProject("Project A", "AAAAA", t.TempDir())
+	a, err := repo.CreateProject("Project A", "AAAAA")
 	if err != nil {
 		t.Fatalf("CreateProject A: %v", err)
 	}
-	b, err := repo.CreateProject("Project B", "BBBBB", t.TempDir())
+	b, err := repo.CreateProject("Project B", "BBBBB")
 	if err != nil {
 		t.Fatalf("CreateProject B: %v", err)
 	}
@@ -551,8 +625,8 @@ func TestDeleteProject_NonExistentIsNoop(t *testing.T) {
 // survive untouched.
 func TestDeleteProject_LeavesOtherProjectsCurrentProjectAlone(t *testing.T) {
 	repo := newTestRepo(t)
-	a, _ := repo.CreateProject("A", "AAAAA", t.TempDir())
-	b, _ := repo.CreateProject("B", "BBBBB", t.TempDir())
+	a, _ := repo.CreateProject("A", "AAAAA")
+	b, _ := repo.CreateProject("B", "BBBBB")
 	if err := repo.SetCurrentProjectID(a.ID); err != nil {
 		t.Fatalf("SetCurrentProjectID: %v", err)
 	}
@@ -581,8 +655,8 @@ func TestGetCurrentProjectIDDefaultsToEmpty(t *testing.T) {
 // current project changes which tickets ListTicketsByProject returns.
 func TestTicketsScopedPerProject(t *testing.T) {
 	repo := newTestRepo(t)
-	a, _ := repo.CreateProject("A", "AAAAA", t.TempDir())
-	b, _ := repo.CreateProject("B", "BBBBB", t.TempDir())
+	a, _ := repo.CreateProject("A", "AAAAA")
+	b, _ := repo.CreateProject("B", "BBBBB")
 
 	ta, err := repo.CreateTicket(a.ID, domain.Ticket{Title: "A-1", Status: domain.TicketTODO})
 	if err != nil {

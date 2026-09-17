@@ -19,7 +19,6 @@ CREATE TABLE IF NOT EXISTS projects (
 	id TEXT PRIMARY KEY,
 	name TEXT NOT NULL,
 	prefix TEXT NOT NULL,
-	work_dir TEXT NOT NULL,
 	ticket_seq INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
@@ -158,6 +157,52 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 func (r *SQLiteRepository) Init() error {
 	if _, err := r.db.Exec(schemaDDL); err != nil {
 		return fmt.Errorf("applying schema: %w", err)
+	}
+	return r.dropLegacyProjectsWorkDir()
+}
+
+// dropLegacyProjectsWorkDir is the DFLT-00080 migration: a DB created before
+// that ticket still has the projects.work_dir column (TEXT NOT NULL), which
+// schemaDDL's CREATE TABLE IF NOT EXISTS leaves in place. The column is
+// dropped outright -- its values are deliberately not carried anywhere,
+// since a project's local path is now a per-environment setting
+// (graph-config.json's projectPaths) that each user sets again. Leaving it
+// would also break CreateProject, whose INSERT no longer supplies a value
+// for a NOT NULL column. Idempotent: a DB without the column is untouched.
+// ALTER TABLE ... DROP COLUMN needs SQLite 3.35+, which the bundled
+// modernc.org/sqlite satisfies; work_dir is in no index or constraint.
+func (r *SQLiteRepository) dropLegacyProjectsWorkDir() error {
+	rows, err := r.db.Query(`PRAGMA table_info(projects)`)
+	if err != nil {
+		return fmt.Errorf("inspecting projects columns: %w", err)
+	}
+	hasWorkDir := false
+	for rows.Next() {
+		var (
+			cid        int
+			name, typ  string
+			notNull    int
+			dflt       sql.NullString
+			primaryKey int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &primaryKey); err != nil {
+			rows.Close()
+			return fmt.Errorf("inspecting projects columns: %w", err)
+		}
+		if name == "work_dir" {
+			hasWorkDir = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("inspecting projects columns: %w", err)
+	}
+	rows.Close()
+	if !hasWorkDir {
+		return nil
+	}
+	if _, err := r.db.Exec(`ALTER TABLE projects DROP COLUMN work_dir`); err != nil {
+		return fmt.Errorf("dropping legacy projects.work_dir column: %w", err)
 	}
 	return nil
 }
@@ -754,13 +799,13 @@ func (r *SQLiteRepository) ListArtifactsByNode(nodeID string) ([]domain.Artifact
 
 // --- Projects ---
 
-const projectSelectCols = `id, name, prefix, work_dir, created_at, updated_at`
+const projectSelectCols = `id, name, prefix, created_at, updated_at`
 
 func scanProject(row interface {
 	Scan(dest ...any) error
 }) (*domain.Project, error) {
 	var p domain.Project
-	if err := row.Scan(&p.ID, &p.Name, &p.Prefix, &p.WorkDir, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &p.Prefix, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return &p, nil
@@ -771,12 +816,9 @@ func scanProject(row interface {
 // CreateProject calls can never both resolve to (and insert) the same
 // auto-generated prefix -- the same atomicity concern CreateTicket/CreateNode
 // address for their own counters (see SQLiteRepository's doc comment).
-func (r *SQLiteRepository) CreateProject(name, prefix, workDir string) (domain.Project, error) {
+func (r *SQLiteRepository) CreateProject(name, prefix string) (domain.Project, error) {
 	if name == "" {
 		return domain.Project{}, domain.NewAPIError(domain.ErrCodeValidation, "project name is required")
-	}
-	if workDir == "" || !filepath.IsAbs(workDir) {
-		return domain.Project{}, domain.NewAPIError(domain.ErrCodeValidation, "work_dir must be an absolute path")
 	}
 
 	tx, err := r.db.Begin()
@@ -812,8 +854,8 @@ func (r *SQLiteRepository) CreateProject(name, prefix, workDir string) (domain.P
 	id := "proj-" + shortUUID()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err := tx.Exec(
-		`INSERT INTO projects (id, name, prefix, work_dir, ticket_seq, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)`,
-		id, name, resolvedPrefix, workDir, now, now,
+		`INSERT INTO projects (id, name, prefix, ticket_seq, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)`,
+		id, name, resolvedPrefix, now, now,
 	); err != nil {
 		return domain.Project{}, fmt.Errorf("inserting project: %w", err)
 	}
@@ -868,15 +910,9 @@ func (r *SQLiteRepository) UpdateProject(id string, patch ProjectPatch) (domain.
 	if patch.Name != nil {
 		cur.Name = *patch.Name
 	}
-	if patch.WorkDir != nil {
-		if *patch.WorkDir == "" || !filepath.IsAbs(*patch.WorkDir) {
-			return domain.Project{}, domain.NewAPIError(domain.ErrCodeValidation, "work_dir must be an absolute path")
-		}
-		cur.WorkDir = *patch.WorkDir
-	}
 	cur.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 
-	_, err = r.db.Exec(`UPDATE projects SET name=?, work_dir=?, updated_at=? WHERE id=?`, cur.Name, cur.WorkDir, cur.UpdatedAt, cur.ID)
+	_, err = r.db.Exec(`UPDATE projects SET name=?, updated_at=? WHERE id=?`, cur.Name, cur.UpdatedAt, cur.ID)
 	if err != nil {
 		return domain.Project{}, fmt.Errorf("updating project %s: %w", id, err)
 	}

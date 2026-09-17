@@ -15,7 +15,7 @@ import (
 // any state-changing request (POST/PATCH/PUT/DELETE) that doesn't carry
 // csrfHeaderName must be rejected before it ever reaches a handler -- that's
 // what stops an arbitrary web page (or LAN host) from e.g. POSTing
-// /api/projects with a chosen work_dir and then POSTing /api/claude/launch
+// /api/projects with a chosen local_path and then POSTing /api/claude/launch
 // to open a terminal there.
 func TestCSRFHeader_MutatingRequestRejectedWithoutIt(t *testing.T) {
 	s, _, _ := newTestServer(t)

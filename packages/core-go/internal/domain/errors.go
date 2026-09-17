@@ -78,6 +78,12 @@ const (
 	// ErrCodeInvalidPaginationPageSize: the app-settings "pagination page
 	// size" was set to a value less than 1.
 	ErrCodeInvalidPaginationPageSize ErrorCode = "INVALID_PAGINATION_PAGE_SIZE"
+	// ErrCodeProjectLocalPathNotSet: a scope=project settings request named a
+	// project that has no local path in this environment's graph-config.json
+	// (projectPaths), so there is no directory to read the team tier from or
+	// write it to (DFLT-00080). Falling back to the server's own cwd would
+	// silently read/write the wrong place, so this is reported instead.
+	ErrCodeProjectLocalPathNotSet ErrorCode = "PROJECT_LOCAL_PATH_NOT_SET"
 	// ErrCodeWorkflowNodesLocked: a settings catalog save set workflow.nodes
 	// or workflow.seed. The skeleton graph (plan/plan_review/approval gates/
 	// release) and its seed are fixed by the plugin default only -- no

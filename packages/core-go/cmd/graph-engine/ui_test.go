@@ -10,47 +10,71 @@ import (
 	"github.com/graph-ops/core-go/internal/domain"
 )
 
-func TestFindProjectByWorkDir(t *testing.T) {
-	projects := []domain.Project{
-		{ID: "p1", WorkDir: "/Users/dev/foo"},
-		{ID: "p2", WorkDir: "/Users/dev/bar/"}, // trailing slash, should still match once Clean()'d
+func uiP(id, localPath string) uiProject {
+	return uiProject{Project: domain.Project{ID: id}, LocalPath: localPath}
+}
+
+func TestFindProjectByLocalPath(t *testing.T) {
+	skipOnWindows(t)
+	projects := []uiProject{
+		uiP("p1", "/Users/dev/foo"),
+		uiP("p2", "/Users/dev/bar/"), // trailing slash, should still match once Clean()'d
 	}
 
-	if got := findProjectByWorkDir(projects, "/Users/dev/foo"); got == nil || got.ID != "p1" {
+	if got := findProjectByLocalPath(projects, "/Users/dev/foo"); got == nil || got.ID != "p1" {
 		t.Fatalf("expected p1, got %+v", got)
 	}
-	if got := findProjectByWorkDir(projects, "/Users/dev/bar"); got == nil || got.ID != "p2" {
+	if got := findProjectByLocalPath(projects, "/Users/dev/bar"); got == nil || got.ID != "p2" {
 		t.Fatalf("expected p2 (trailing-slash normalized), got %+v", got)
 	}
-	if got := findProjectByWorkDir(projects, "/Users/dev/baz"); got != nil {
+	if got := findProjectByLocalPath(projects, "/Users/dev/baz"); got != nil {
 		t.Fatalf("expected no match, got %+v", got)
 	}
 }
 
-// TestFindProjectByWorkDir_SubdirectoryDoesNotMatch pins the `ui` command's
-// exact-match-only behaviour: DFLT-00025 made create-ticket accept a cwd
-// under a project's work_dir (findProjectForDir) but deliberately left `ui`
-// unchanged.
-func TestFindProjectByWorkDir_SubdirectoryDoesNotMatch(t *testing.T) {
-	projects := []domain.Project{{ID: "p1", WorkDir: "/work/graph-ops"}}
-	if got := findProjectByWorkDir(projects, "/work/graph-ops/packages"); got != nil {
-		t.Fatalf("expected no match for a subdirectory, got %+v", got)
+// TestFindProjectByLocalPath_SubdirectoryMatchesDeepest pins the DFLT-00080
+// change: `ui` now uses the same deepest-containing-path rule as
+// create-ticket, so a subdirectory (e.g. a git worktree) selects the
+// enclosing project instead of opening the setup dialog. Before, `ui` was
+// exact-match only.
+func TestFindProjectByLocalPath_SubdirectoryMatchesDeepest(t *testing.T) {
+	skipOnWindows(t)
+	projects := []uiProject{uiP("parent", "/work/graph-ops"), uiP("child", "/work/graph-ops/packages/sub")}
+	if got := findProjectByLocalPath(projects, "/work/graph-ops/.claude/worktrees/DFLT-00001"); got == nil || got.ID != "parent" {
+		t.Fatalf("expected parent for a subdirectory, got %+v", got)
+	}
+	if got := findProjectByLocalPath(projects, "/work/graph-ops/packages/sub/x"); got == nil || got.ID != "child" {
+		t.Fatalf("expected the deepest (child), got %+v", got)
+	}
+	if got := findProjectByLocalPath(projects, "/work/graph-opsx"); got != nil {
+		t.Fatalf("expected no match across a separator boundary, got %+v", got)
 	}
 }
 
-func TestFindProjectByWorkDir_FirstOfDuplicatesWins(t *testing.T) {
-	projects := []domain.Project{
-		{ID: "first", WorkDir: "/Users/dev/dup"},
-		{ID: "second", WorkDir: "/Users/dev/dup"},
+// A project without a local path in the server's environment -- e.g. one
+// only another team member has set up -- never matches.
+func TestFindProjectByLocalPath_UnsetNeverMatches(t *testing.T) {
+	skipOnWindows(t)
+	projects := []uiProject{uiP("shared", "")}
+	if got := findProjectByLocalPath(projects, "/work/shared"); got != nil {
+		t.Fatalf("expected no match for a project without a local path, got %+v", got)
 	}
-	got := findProjectByWorkDir(projects, "/Users/dev/dup")
+	if got := resolveTargetURL("http://localhost:3001", "/work/shared", nil); got != "http://localhost:3001/?newProject=1&workDir=%2Fwork%2Fshared" {
+		t.Fatalf("unexpected URL %q", got)
+	}
+}
+
+func TestFindProjectByLocalPath_FirstOfDuplicatesWins(t *testing.T) {
+	skipOnWindows(t)
+	projects := []uiProject{uiP("first", "/Users/dev/dup"), uiP("second", "/Users/dev/dup")}
+	got := findProjectByLocalPath(projects, "/Users/dev/dup")
 	if got == nil || got.ID != "first" {
 		t.Fatalf("expected the first duplicate to win, got %+v", got)
 	}
 }
 
 func TestResolveTargetURL_MatchedProject(t *testing.T) {
-	matched := &domain.Project{ID: "p1", WorkDir: "/Users/dev/foo"}
+	matched := &uiProject{Project: domain.Project{ID: "p1"}, LocalPath: "/Users/dev/foo"}
 	got := resolveTargetURL("http://localhost:3001", "/Users/dev/foo", matched)
 	want := "http://localhost:3001/"
 	if got != want {

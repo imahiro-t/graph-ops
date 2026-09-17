@@ -22,7 +22,7 @@ func newTestEngine(t *testing.T) (*GraphEngine, store.GraphRepository, string) {
 	if err := repo.Init(); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	proj, err := repo.CreateProject("Test Project", "TEST", t.TempDir())
+	proj, err := repo.CreateProject("Test Project", "TEST")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}

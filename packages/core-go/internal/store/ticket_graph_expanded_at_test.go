@@ -54,7 +54,7 @@ func TestMySQL_FreshDBHasTicketGraphExpandedAtColumn(t *testing.T) {
 
 func TestMySQL_UpdateTicketRoundTripsGraphExpandedAt(t *testing.T) {
 	repo := newTestMySQLRepo(t)
-	proj, err := repo.CreateProject("Graph Expanded At", "GEAT", t.TempDir())
+	proj, err := repo.CreateProject("Graph Expanded At", "GEAT")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}

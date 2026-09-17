@@ -59,7 +59,7 @@ func TestMySQL_FreshDBHasTicketClosedReasonColumn(t *testing.T) {
 
 func TestMySQL_UpdateTicketRoundTripsClosedReason(t *testing.T) {
 	repo := newTestMySQLRepo(t)
-	proj, err := repo.CreateProject("Closed Reason", "CLRS", t.TempDir())
+	proj, err := repo.CreateProject("Closed Reason", "CLRS")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}

@@ -22,7 +22,7 @@ func TestOpen_SQLiteDefaultAndExplicit(t *testing.T) {
 			}
 			// Init must have already run: a basic operation should work
 			// without the caller calling Init again.
-			if _, err := repo.CreateProject("P", "PPPPP", t.TempDir()); err != nil {
+			if _, err := repo.CreateProject("P", "PPPPP"); err != nil {
 				t.Fatalf("CreateProject on the opened repo: %v", err)
 			}
 		})

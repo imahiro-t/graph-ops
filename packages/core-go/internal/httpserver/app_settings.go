@@ -62,9 +62,10 @@ type redactedFileConfig runtimeconfig.FileConfig
 
 // newRedactedFileConfig returns cfg with every secret-bearing field replaced
 // by what may safely be sent to a client (see runtimeconfig.RedactSecret).
-// FileConfig is a plain value type, so the copy taken by the parameter is
-// already the defensive copy -- the caller's own cfg, which is what gets
-// written back to disk, is untouched.
+// Only scalar fields are replaced, so the copy taken by the parameter is
+// defensive enough -- the caller's own cfg, which is what gets written back
+// to disk, is untouched (ProjectPaths, the one map, is shared but never
+// modified here).
 func newRedactedFileConfig(cfg runtimeconfig.FileConfig) redactedFileConfig {
 	cfg.MySQLPassword = runtimeconfig.RedactSecret(cfg.MySQLPassword)
 	return redactedFileConfig(cfg)
@@ -330,7 +331,12 @@ func (s *Server) handleGetAppSettings(w http.ResponseWriter, r *http.Request) {
 // mysqlPassword/mysqlTls/mysqlTlsCa/artifactsDir/userExtensionsDir/
 // paginationPageSize/myName) into graph-config.json, preserving every other
 // field already in the file (port/host/claudeBinary/terminalCommand/workDir/
-// teamExtensionsDir) untouched.
+// teamExtensionsDir/projectPaths) untouched.
+//
+// The load-edit-save runs inside runtimeconfig.Update, which serializes it
+// with every other in-process writer of the same file -- in particular the
+// project API's projectPaths edits (DFLT-00080) -- so a concurrent PATCH
+// /api/projects/{id} and this PUT can never lose each other's change.
 //
 // Those owned fields are a full replacement, not a patch: each one is
 // written from the request body as submitted, so a field the body leaves out
@@ -423,40 +429,41 @@ func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	fileCfg, _, err := runtimeconfig.Load(s.cfg.WorkDir, s.cfg.HomeDir)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	// Resolve the password before any of the body's values are copied over
-	// fileCfg: the comparison resolveSubmittedMySQLPassword makes is against
-	// what is *currently* on disk, which is exactly what the next few lines
-	// are about to overwrite.
 	target := newMySQLTarget(body.MySQLHost, body.MySQLPort, body.MySQLDatabase, body.MySQLUser, body.MySQLTLS, body.MySQLTLSCA)
-	password, err := resolveSubmittedMySQLPassword(fileCfg, target, body.MySQLPassword)
-	if err != nil {
-		if isPasswordRetypeRequired(err) {
-			s.logPasswordRetypeRejected(r, fileCfg, target)
+	var passwordErr error
+	fileCfg, path, err := runtimeconfig.Update(s.cfg.WorkDir, s.cfg.HomeDir, func(fileCfg *runtimeconfig.FileConfig) error {
+		// Resolve the password before any of the body's values are copied
+		// over fileCfg: the comparison resolveSubmittedMySQLPassword makes is
+		// against what is *currently* on disk, which is exactly what the next
+		// few lines are about to overwrite.
+		password, err := resolveSubmittedMySQLPassword(*fileCfg, target, body.MySQLPassword)
+		if err != nil {
+			if isPasswordRetypeRequired(err) {
+				s.logPasswordRetypeRejected(r, *fileCfg, target)
+			}
+			passwordErr = err
+			return err
 		}
-		writeError(w, http.StatusBadRequest, err)
+
+		fileCfg.DBBackend = body.DBBackend
+		fileCfg.DBPath = body.DBPath
+		fileCfg.MySQLHost = body.MySQLHost
+		fileCfg.MySQLPort = body.MySQLPort
+		fileCfg.MySQLDatabase = body.MySQLDatabase
+		fileCfg.MySQLUser = body.MySQLUser
+		fileCfg.MySQLPassword = password
+		fileCfg.MySQLTLS = body.MySQLTLS
+		fileCfg.MySQLTLSCA = body.MySQLTLSCA
+		fileCfg.ArtifactsDir = body.ArtifactsDir
+		fileCfg.UserExtensionsDir = body.UserExtensionsDir
+		fileCfg.PaginationPageSize = body.PaginationPageSize
+		fileCfg.MyName = body.MyName
+		return nil
+	})
+	if passwordErr != nil {
+		writeError(w, http.StatusBadRequest, passwordErr)
 		return
 	}
-
-	fileCfg.DBBackend = body.DBBackend
-	fileCfg.DBPath = body.DBPath
-	fileCfg.MySQLHost = body.MySQLHost
-	fileCfg.MySQLPort = body.MySQLPort
-	fileCfg.MySQLDatabase = body.MySQLDatabase
-	fileCfg.MySQLUser = body.MySQLUser
-	fileCfg.MySQLPassword = password
-	fileCfg.MySQLTLS = body.MySQLTLS
-	fileCfg.MySQLTLSCA = body.MySQLTLSCA
-	fileCfg.ArtifactsDir = body.ArtifactsDir
-	fileCfg.UserExtensionsDir = body.UserExtensionsDir
-	fileCfg.PaginationPageSize = body.PaginationPageSize
-	fileCfg.MyName = body.MyName
-
-	path, err := runtimeconfig.Save(s.cfg.WorkDir, s.cfg.HomeDir, fileCfg)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

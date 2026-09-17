@@ -14,6 +14,7 @@ import (
 
 	"github.com/graph-ops/core-go/internal/browser"
 	"github.com/graph-ops/core-go/internal/domain"
+	"github.com/graph-ops/core-go/internal/runtimeconfig"
 )
 
 const (
@@ -34,7 +35,9 @@ const (
 // (art-630d82eb section 4.1) for the full design; this follows it directly:
 //
 //  1. Resolve the current working directory and look it up against every
-//     registered project's WorkDir (repo.ListProjects()).
+//     project's local path as the running server reports it (GET
+//     /api/projects' local_path, i.e. the server's graph-config.json
+//     projectPaths -- DFLT-00080), deepest containing path first.
 //  2. Health-check the UI server (GET /api/health); if it doesn't respond,
 //     start it in the background (this same binary, `serve`, detached) and
 //     poll until it comes up or uiServerStartTimeout elapses. This is the
@@ -44,8 +47,10 @@ const (
 //     server's "current project" to it (PUT /api/current-project) and open
 //     the UI's root URL; otherwise open the root URL with a
 //     newProject=1&workDir=<dir> query the Web UI reads on mount to
-//     pre-fill and auto-open its create-project dialog (see
-//     packages/web/src/App.tsx's newProject query handling).
+//     auto-open its project-setup dialog for that directory, where the user
+//     either creates a new project or picks an existing one (see
+//     packages/web/src/components/ProjectSetupModal.tsx). The query name
+//     workDir is kept as-is for compatibility.
 //
 // Opening the browser itself is deliberately best-effort: a failure there
 // is reported as a warning (with the URL printed for the user to open by
@@ -98,7 +103,7 @@ func cmdUI(rc runtimeConfig, args []string) error {
 	if err != nil {
 		return err
 	}
-	matched := findProjectByWorkDir(projects, targetDir)
+	matched := findProjectByLocalPath(projects, targetDir)
 
 	targetURL := resolveTargetURL(browserBaseURL, targetDir, matched)
 	if matched != nil {
@@ -115,16 +120,38 @@ func cmdUI(rc runtimeConfig, args []string) error {
 	return nil
 }
 
-// findProjectByWorkDir returns the first project (in ListProjects order)
-// whose WorkDir, once cleaned, matches targetDir (already cleaned/absolute).
-// Symlinks are deliberately not resolved -- a plain path comparison is all
-// the plan calls for (see art-630d82eb section 7's noted limitation). If
-// more than one project happens to share the same work_dir (not prevented
-// by the schema), the first one wins; that ambiguity is a pre-existing data
-// modeling question out of scope for this command.
-func findProjectByWorkDir(projects []domain.Project, targetDir string) *domain.Project {
+// uiProject is one element of GET /api/projects as this command decodes it:
+// the DB project plus the server environment's local path for it ("" when
+// unset -- such a project never matches a directory).
+type uiProject struct {
+	domain.Project
+	LocalPath string `json:"local_path"`
+}
+
+// findProjectByLocalPath returns the project whose local path is targetDir
+// (already cleaned/absolute) or contains it, the deepest such path winning
+// -- the same rule create-ticket uses (runtimeconfig.FindProjectIDForDir),
+// so running `ui` from a subdirectory such as a git worktree selects the
+// enclosing project instead of opening the setup dialog. Symlinks are not
+// resolved; a tie between projects sharing the same path goes to the one
+// listed first.
+func findProjectByLocalPath(projects []uiProject, targetDir string) *uiProject {
+	paths := make(map[string]string, len(projects))
+	ids := make([]string, 0, len(projects))
+	for _, p := range projects {
+		ids = append(ids, p.ID)
+		if p.LocalPath != "" {
+			if _, dup := paths[p.ID]; !dup {
+				paths[p.ID] = p.LocalPath
+			}
+		}
+	}
+	id := runtimeconfig.FindProjectIDForDir(paths, ids, targetDir)
+	if id == "" {
+		return nil
+	}
 	for i := range projects {
-		if filepath.Clean(projects[i].WorkDir) == targetDir {
+		if projects[i].ID == id {
 			return &projects[i]
 		}
 	}
@@ -134,9 +161,10 @@ func findProjectByWorkDir(projects []domain.Project, targetDir string) *domain.P
 // resolveTargetURL builds the URL `ui` opens: the UI's root when an existing
 // project matched (its current-project switch is a separate, best-effort
 // step handled by the caller), or the root with a newProject=1&workDir=...
-// query the Web UI reads on mount to auto-open its create-project dialog
-// pre-filled with targetDir, when nothing matched.
-func resolveTargetURL(baseURL, targetDir string, matched *domain.Project) string {
+// query the Web UI reads on mount to auto-open its project-setup dialog
+// (create a new project, or pick an existing one) for targetDir, when
+// nothing matched.
+func resolveTargetURL(baseURL, targetDir string, matched *uiProject) string {
 	if matched != nil {
 		return baseURL + "/"
 	}
@@ -254,7 +282,7 @@ func uiServerLogPath() (string, error) {
 // returning it the same registry switchCurrentProjectViaAPI (PUT
 // /api/current-project) will act against -- see cmdUI's comment on why this
 // isn't repo.ListProjects() opened directly by this CLI process.
-func fetchProjectsViaAPI(baseURL string) ([]domain.Project, error) {
+func fetchProjectsViaAPI(baseURL string) ([]uiProject, error) {
 	client := http.Client{Timeout: uiAPIRequestTimeout}
 	resp, err := client.Get(baseURL + "/api/projects")
 	if err != nil {
@@ -264,7 +292,7 @@ func fetchProjectsViaAPI(baseURL string) ([]domain.Project, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET /api/projects: unexpected status %d", resp.StatusCode)
 	}
-	var projects []domain.Project
+	var projects []uiProject
 	if err := json.NewDecoder(resp.Body).Decode(&projects); err != nil {
 		return nil, err
 	}

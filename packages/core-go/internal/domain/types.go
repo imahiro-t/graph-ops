@@ -220,8 +220,11 @@ type Ticket struct {
 	Priority *TicketPriority `json:"priority,omitempty"`
 }
 
-// Project scopes a set of tickets to one working directory and one
-// prefix-based ID namespace. Prefix is immutable once created (see
+// Project scopes a set of tickets to one prefix-based ID namespace. Where
+// the project lives on disk is not part of it (DFLT-00080): that local path
+// differs per team member, so it is kept per environment in
+// graph-config.json's projectPaths (internal/runtimeconfig), not in the
+// shared DB. Prefix is immutable once created (see
 // internal/project.ResolvePrefix): tickets/nodes already minted under it
 // would otherwise disagree with a later rename. TicketSeq/NodeSeq (the
 // per-project/per-ticket counters that mint new IDs) are store-internal
@@ -230,7 +233,6 @@ type Project struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Prefix    string `json:"prefix"`
-	WorkDir   string `json:"work_dir"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }

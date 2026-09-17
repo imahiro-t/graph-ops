@@ -192,7 +192,7 @@ func ListNodeTypeOverrideNames(root string) []string {
 }
 
 // ResolveRootsForProjectWorkDir is ResolveRoots, but always resolves the
-// team-tier root starting from projectWorkDir (a DB Project's work_dir)
+// team-tier root starting from projectWorkDir (a project's local path)
 // rather than the caller's own process cwd -- see the execution plan's
 // section on why the settings UI's "project-scoped" tier must be tied to the
 // selected DB Project, not wherever the server/CLI process happens to be

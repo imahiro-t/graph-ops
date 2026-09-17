@@ -80,9 +80,9 @@ func run(cmd string, args []string) error {
 	case "create-ticket":
 		return cmdCreateTicket(eng, repo, rc, args)
 	case "create-project":
-		return cmdCreateProject(repo, args)
+		return cmdCreateProject(repo, rc, args)
 	case "list-projects":
-		return cmdListProjects(repo)
+		return cmdListProjects(repo, rc)
 	case "use-project":
 		return cmdUseProject(repo, args)
 	case "refine-ticket":
@@ -182,15 +182,18 @@ func printUsage() {
 Commands:
   create-project <name> [--prefix P] [--workdir path]
                                           (--prefix omitted -> derived from name and de-duplicated;
-                                           --workdir omitted -> cwd. Does not switch the current project;
-                                           follow up with use-project)
-  list-projects
+                                           --workdir is the project's local path in this environment,
+                                           saved to graph-config.json's projectPaths (not the DB);
+                                           omitted -> cwd, relative -> resolved against the cwd.
+                                           Does not switch the current project; follow up with use-project)
+  list-projects                           (each project with this environment's "local_path", "" if unset)
   use-project <projectId>                (sets the current project; POST /api/tickets and GET /api/tickets
                                            default to whichever project is current. create-ticket uses it
-                                           only as a fallback when the cwd matches no project's work_dir)
+                                           only as a fallback when the cwd matches no project's local path)
   create-ticket <title> [description] [--project <id>] [--priority <HIGH|MEDIUM|LOW>]
-                                          (--project omitted -> the project whose work_dir is the cwd or
-                                           contains it (deepest nested work_dir wins), else the current
+                                          (--project omitted -> the project whose local path (projectPaths in
+                                           graph-config.json) is the cwd or contains it (deepest nested
+                                           local path wins), else the current
                                            project, else an error. Paths are compared as written, so a
                                            symlinked or case-differing cwd does not match and falls back.
                                            The choice is reported as one stderr line, "resolved project:
@@ -274,10 +277,11 @@ Commands:
                                              cat notes.md | graph-engine add-artifact T N Name text -)
   get-review-criteria <nodeId>
   ui                                      (opens the local Web UI, in the default browser, on the project
-                                           whose work_dir matches the current directory -- auto-starting the
-                                           UI server first if it isn't already running. If no project matches,
-                                           opens the Web UI's new-project dialog pre-filled with the current
-                                           directory instead. Fails only if starting the UI server itself
+                                           whose local path (projectPaths in graph-config.json) is the current
+                                           directory or contains it (deepest wins) -- auto-starting the UI
+                                           server first if it isn't already running. If no project matches,
+                                           opens the Web UI's project-setup dialog for the current directory
+                                           instead, to create a new project or pick an existing one. Fails only if starting the UI server itself
                                            fails; a browser-launch failure is a warning with the URL printed
                                            for you to open by hand.)
   get-workflow-catalog [--language <code>]
@@ -297,9 +301,9 @@ Commands:
                                            tier) and what it resolves to, so onboarding/process-ticket can
                                            tell that apart from "nothing set yet, decide one for this
                                            session" without parsing prose. --project resolves the team tier
-                                           from that DB Project's work_dir, same as get-executable/
-                                           expand-graph's ticket-based resolution; omitted falls back to
-                                           this process's own team root)
+                                           from that project's local path, same as get-executable/
+                                           expand-graph's ticket-based resolution; omitted, or no local
+                                           path set, falls back to this process's own team root)
   serve [--port N] [--host ADDR]
                                           (--host omitted -> GRAPH_HOST / graph-config.json's "host" /
                                            127.0.0.1. This API has no authentication, so it listens on
@@ -328,8 +332,8 @@ func printJSON(v any) error {
 //
 // An explicit --project always wins; nothing else is consulted and nothing
 // is written to stderr. With no --project, the target is resolved by
-// resolveCreateTicketProject: the project whose work_dir contains the CLI's
-// cwd (rc.WorkDir, deepest match), else the currently-selected project
+// resolveCreateTicketProject: the project whose local path (rc.ProjectPaths)
+// contains the CLI's cwd (rc.WorkDir, deepest match), else the currently-selected project
 // (use-project / the Web UI's switcher), else an error. The chosen project
 // and how it was chosen are then reported as one line on stderr, keeping
 // stdout the ticket JSON alone.
@@ -396,7 +400,7 @@ func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc run
 		return printJSON(ticket)
 	}
 
-	project, source, err := resolveCreateTicketProject(repo, rc.WorkDir)
+	project, source, err := resolveCreateTicketProject(repo, rc.WorkDir, rc.ProjectPaths)
 	if err != nil {
 		return err
 	}
@@ -417,7 +421,13 @@ func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc run
 // current project (see use-project) -- creating and selecting are separate,
 // explicit steps for the CLI, mirroring the Web UI's create-then-switch flow
 // (see the execution plan section 7.3).
-func cmdCreateProject(repo store.GraphRepository, args []string) error {
+//
+// --workdir (default: the cwd) is the project's local path in this
+// environment. Since DFLT-00080 it is not stored in the DB -- which may be
+// shared by a whole team -- but in graph-config.json's projectPaths, through
+// runtimeconfig.SetProjectPath (the same file loadRuntimeConfig read). A
+// relative --workdir is resolved against rc.WorkDir (the cwd).
+func cmdCreateProject(repo store.GraphRepository, rc runtimeConfig, args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf(`usage: graph-engine create-project <name> [--prefix P] [--workdir path]`)
 	}
@@ -437,30 +447,51 @@ func cmdCreateProject(repo store.GraphRepository, args []string) error {
 			}
 		}
 	}
-	if workdir == "" {
+	base := rc.WorkDir
+	if base == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return err
 		}
-		workdir = cwd
+		base = cwd
 	}
-	abs, err := filepath.Abs(workdir)
+	localPath := workdir
+	if localPath == "" {
+		localPath = base
+	} else if !filepath.IsAbs(localPath) {
+		localPath = filepath.Join(base, localPath)
+	}
+	localPath = filepath.Clean(localPath)
+
+	project, err := repo.CreateProject(name, prefix)
 	if err != nil {
 		return err
 	}
-	project, err := repo.CreateProject(name, prefix, abs)
-	if err != nil {
-		return err
+	if _, err := runtimeconfig.SetProjectPath(rc.WorkDir, rc.HomeDir, project.ID, localPath); err != nil {
+		return fmt.Errorf("project %s (%s) was created, but saving its local path to graph-config.json failed: %w", project.Name, project.ID, err)
 	}
-	return printJSON(project)
+	return printJSON(cliProject{Project: project, LocalPath: localPath})
 }
 
-func cmdListProjects(repo store.GraphRepository) error {
+// cliProject is list-projects/create-project's output shape: the DB project
+// plus this environment's local path ("" when unset), matching the Web API's
+// project responses (internal/httpserver's projectResponse).
+type cliProject struct {
+	domain.Project
+	LocalPath string `json:"local_path"`
+}
+
+func cmdListProjects(repo store.GraphRepository, rc runtimeConfig) error {
 	projects, err := repo.ListProjects()
 	if err != nil {
 		return err
 	}
-	return printJSON(projects)
+	fileCfg := runtimeconfig.FileConfig{ProjectPaths: rc.ProjectPaths}
+	out := make([]cliProject, 0, len(projects))
+	for _, p := range projects {
+		out = append(out, cliProject{Project: p, LocalPath: fileCfg.ProjectPath(p.ID)})
+	}
+	return printJSON(out)
 }
 
 func cmdUseProject(repo store.GraphRepository, args []string) error {
@@ -1031,18 +1062,19 @@ func cmdGetWorkflowCatalog(rc runtimeConfig, args []string) error {
 }
 
 // catalogForTicket is config.LoadWithRoots(rc.WorkDir, ...), except that --
-// when ticketID resolves to a ticket whose Project has a work_dir, and no
-// explicit rc.TeamExtensionsDir override is configured -- the team tier is
-// resolved from that Project's work_dir instead of this process's own cwd
-// (rc.WorkDir). This is the CLI counterpart of httpserver's
-// Server.loadCatalogForTicket (see its doc comment for the full rationale):
-// without it, a project-scoped settings edit (always written under that
-// Project's work_dir) would only affect `get-executable`/`expand-graph` when
-// this CLI process happens to be invoked with the project's directory as its
-// cwd, which does not hold for a shared/remote-DB multi-project deployment.
-// An unresolvable ticket/project (including a not-yet-created ticket, or one
-// belonging to a project with no work_dir) falls back to the plain
-// rc.WorkDir-based resolution unchanged.
+// when ticketID resolves to a ticket whose project has a local path in this
+// environment (rc.ProjectPaths, DFLT-00080), and no explicit
+// rc.TeamExtensionsDir override is configured -- the team tier is resolved
+// from that local path instead of this process's own cwd (rc.WorkDir). This
+// is the CLI counterpart of httpserver's Server.loadCatalogForTicket (see
+// its doc comment for the full rationale): without it, a project-scoped
+// settings edit (always written under that project's local path) would only
+// affect `get-executable`/`expand-graph` when this CLI process happens to be
+// invoked with the project's directory as its cwd, which does not hold for a
+// shared/remote-DB multi-project deployment. An unresolvable ticket
+// (including a not-yet-created one), or one belonging to a project with no
+// local path in this environment, falls back to the plain rc.WorkDir-based
+// resolution unchanged.
 //
 // language is passed straight through to config.LoadWithRoots as its
 // languageOverride (see that function and ResolveLanguage) -- "" reproduces
@@ -1051,8 +1083,9 @@ func cmdGetWorkflowCatalog(rc runtimeConfig, args []string) error {
 func catalogForTicket(repo store.GraphRepository, rc runtimeConfig, ticketID, language string) (config.Catalog, error) {
 	if rc.TeamExtensionsDir == "" {
 		if ticket, err := repo.GetTicket(ticketID); err == nil && ticket != nil {
-			if project, err := repo.GetProject(ticket.ProjectID); err == nil && project != nil && project.WorkDir != "" {
-				return config.LoadWithRoots(project.WorkDir, rc.UserExtensionsDir, "", language)
+			localPath := runtimeconfig.FileConfig{ProjectPaths: rc.ProjectPaths}.ProjectPath(ticket.ProjectID)
+			if localPath != "" {
+				return config.LoadWithRoots(localPath, rc.UserExtensionsDir, "", language)
 			}
 		}
 	}
@@ -1065,8 +1098,9 @@ func catalogForTicket(repo store.GraphRepository, rc runtimeConfig, ticketID, la
 // persistent choice" from "nothing is set yet, decide one for this session"
 // without parsing prose out of another command's output (see the execution
 // plan's section 1.5). --project <id>, like catalogForTicket, resolves the
-// team tier from that DB Project's work_dir instead of this process's own
-// cwd, so the answer matches what get-executable/expand-graph would
+// team tier from that project's local path (rc.ProjectPaths) instead of this
+// process's own cwd -- a project with no local path keeps rc's own team root,
+// never an error -- so the answer matches what get-executable/expand-graph would
 // actually use for tickets under that project; omitting it falls back to
 // rc's own team root (rc.TeamExtensionsDir / the nearest ancestor
 // .graph-ops), matching get-workflow-catalog.
@@ -1098,8 +1132,8 @@ func cmdGetLanguageSettings(repo store.GraphRepository, rc runtimeConfig, args [
 		if project == nil {
 			return fmt.Errorf("project not found: %s", projectID)
 		}
-		if project.WorkDir != "" {
-			teamRoot, err := config.ProjectTeamRoot(project.WorkDir)
+		if localPath := (runtimeconfig.FileConfig{ProjectPaths: rc.ProjectPaths}).ProjectPath(project.ID); localPath != "" {
+			teamRoot, err := config.ProjectTeamRoot(localPath)
 			if err != nil {
 				return err
 			}
