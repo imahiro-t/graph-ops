@@ -23,14 +23,13 @@
   "toolbar": {
     "searchPlaceholder": "チケット検索 (ID・タイトル)...",
     "statusAll": "ステータス: すべて",
-    "statusNone": "ステータス: 未選択",
     "statusSelected": "ステータス: {{count}}件選択",
     "statusGroupLabel": "ステータスで絞り込む",
     "assigneeAll": "担当者: すべて",
-    "assigneeSelected": "担当者: {{name}}",
+    "assigneeSelected": "担当者: {{count}}件選択",
     "assigneeGroupLabel": "担当者で絞り込む",
+    "assigneeUnassigned": "未割り当て",
     "priorityAll": "優先度: すべて",
-    "priorityNone": "優先度: 未選択",
     "prioritySelected": "優先度: {{count}}件選択",
     "priorityGroupLabel": "優先度で絞り込む",
     "refreshTitle": "最新の状態に更新",
@@ -38,8 +37,8 @@
     "labelAll": "ラベル: すべて",
     "labelSelected": "ラベル: {{count}}件選択",
     "labelGroupLabel": "ラベルで絞り込む",
-    "labelClear": "選択を解除",
-    "labelEmpty": "このプロジェクトにはラベルがありません"
+    "labelEmpty": "このプロジェクトにはラベルがありません",
+    "filterClear": "選択を解除"
   },
   "summary": {
     "title": "全チケット概要",

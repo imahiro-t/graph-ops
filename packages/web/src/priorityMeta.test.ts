@@ -80,9 +80,12 @@ describe('matchesPriorityFilter', () => {
     expect(tickets.filter(t => matchesPriorityFilter(t.priority, ['MEDIUM'])).map(t => t.id)).toEqual(['B']);
   });
 
-  it('keeps every ticket when all three levels are selected and none when nothing is', () => {
+  it('keeps every ticket both when all three levels are selected and when none is', () => {
     expect(tickets.filter(t => matchesPriorityFilter(t.priority, TICKET_PRIORITIES))).toHaveLength(3);
-    expect(tickets.filter(t => matchesPriorityFilter(t.priority, []))).toHaveLength(0);
+    // DFLT-00086: an empty selection means "don't filter by priority", not
+    // "match nothing" -- unchecking everything widens the list rather than
+    // emptying it, as it does for the other three toolbar filters.
+    expect(tickets.filter(t => matchesPriorityFilter(t.priority, []))).toHaveLength(3);
   });
 
   it('filters an unexpected value under MEDIUM, the level it is displayed as', () => {

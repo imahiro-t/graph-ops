@@ -1,5 +1,10 @@
 // DFLT-00084: the toolbar's label filter component on its own. How its
 // selection narrows the ticket list is covered by App.labels.test.tsx.
+//
+// Since DFLT-00086 the open/close, checkbox and clear-button behaviour lives
+// in MultiSelectFilter (see its own test); what is left to check here is
+// that labels reach it as options with the chip as visible content and the
+// label's name as the checkbox's accessible name.
 import { useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -64,7 +69,7 @@ describe('LabelFilter', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('toolbar.labelAll') }));
     await user.click(screen.getByRole('checkbox', { name: 'バグ' }));
     await user.click(screen.getByRole('checkbox', { name: 'UI' }));
-    await user.click(screen.getByRole('button', { name: i18n.t('toolbar.labelClear') }));
+    await user.click(screen.getByRole('button', { name: i18n.t('toolbar.filterClear') }));
 
     expect(onChange).toHaveBeenLastCalledWith([]);
     expect(screen.getByRole('button', { name: i18n.t('toolbar.labelAll') })).toBeInTheDocument();
@@ -88,10 +93,24 @@ describe('LabelFilter', () => {
     expect(updated).toHaveFocus();
   });
 
-  it('says so when the project has no labels', async () => {
+  it('draws each option as a colored chip named after the label', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole('button', { name: i18n.t('toolbar.labelAll') }));
+
+    const chips = screen.getAllByTestId('label-chip');
+    expect(chips.map(c => c.textContent)).toEqual(['バグ', '機能追加', 'UI']);
+    expect(chips[0]).toHaveAttribute('data-label-color', 'red');
+    // The chip is the visible content, so the checkbox needs the name
+    // spelled out for it -- and it has to be exactly the visible text.
+    expect(screen.getByRole('checkbox', { name: 'バグ' })).toBeInTheDocument();
+  });
+
+  it('says so when the project has no labels, with the clear button disabled', async () => {
     const user = userEvent.setup();
     render(<LabelFilter labels={[]} selectedIds={[]} onChange={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: i18n.t('toolbar.labelAll') }));
     expect(screen.getByText(i18n.t('toolbar.labelEmpty'))).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('toolbar.filterClear') })).toBeDisabled();
   });
 });
