@@ -65,11 +65,7 @@ func fileExists(path string) bool {
 
 func projectTeamRoot(t *testing.T, s *Server, projectID string) string {
 	t.Helper()
-	project, err := s.repo.GetProject(projectID)
-	if err != nil || project == nil {
-		t.Fatalf("GetProject(%s): %v", projectID, err)
-	}
-	return filepath.Join(project.WorkDir, ".graph-ops")
+	return filepath.Join(testProjectLocalPath(t, s, projectID), ".graph-ops")
 }
 
 // Scenario: 上書きがないとき、GET は空の tier_text と英語デフォルトの

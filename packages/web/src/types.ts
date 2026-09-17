@@ -147,15 +147,20 @@ export interface TicketDetail extends Ticket {
   artifacts: Artifact[];
 }
 
-// A project scopes a set of tickets to one working directory and one
-// prefix-based ID namespace (see GET/POST /api/projects, backed by
-// packages/core-go/internal/domain.Project). prefix is fixed at creation
-// time -- there is no UI or API surface to change it afterward.
+// A project scopes a set of tickets to one prefix-based ID namespace (see
+// GET/POST /api/projects, backed by packages/core-go/internal/domain.Project).
+// prefix is fixed at creation time -- there is no UI or API surface to change
+// it afterward.
+//
+// local_path is where the project lives on *this* environment's disk
+// (DFLT-00080). It is not stored in the (possibly team-shared) DB but in the
+// server's own graph-config.json (projectPaths), so each member sees their
+// own value here. '' means it is not set in this environment ("未設定").
 export interface Project {
   id: string;
   name: string;
   prefix: string;
-  work_dir: string;
+  local_path: string;
   created_at: string;
   updated_at: string;
 }
@@ -278,8 +283,9 @@ export type SettingsReportTemplateResponse = SettingsTemplateTextResponse;
 // AppSettingsFile mirrors packages/core-go/internal/runtimeconfig.FileConfig
 // (graph-config.json's shape) -- only the fields this tab edits are listed
 // here; the others (port/claudeBinary/terminalCommand/workDir/
-// teamExtensionsDir) are preserved server-side but never surfaced in this
-// UI. An empty string means "not set, falls back to an env var or a
+// teamExtensionsDir/projectPaths) are preserved server-side but never
+// surfaced in this UI (projectPaths is edited through the project API as
+// Project.local_path instead). An empty string means "not set, falls back to an env var or a
 // hardcoded default".
 export type DBBackend = 'sqlite' | 'mysql';
 

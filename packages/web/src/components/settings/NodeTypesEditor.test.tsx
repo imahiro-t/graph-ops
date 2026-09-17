@@ -2,7 +2,7 @@
 // because `selected` changed) and F-1's structural non-regression (language
 // switch must never re-trigger a load and blow away an unsaved edit). See
 // this ticket's plan sections 3-2 (#3/#4) and 4-2.
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
@@ -54,6 +54,30 @@ describe('NodeTypesEditor', () => {
 
     await waitFor(() => expect(mockedFetchType).toHaveBeenCalledWith(expect.anything(), 'global', '', 'implementation'));
     expect(await screen.findByDisplayValue('implementation-tier-text')).toBeInTheDocument();
+  });
+
+  // DFLT-00074
+  it('labels the tier text textarea', async () => {
+    render(<NodeTypesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+
+    const textarea = await screen.findByDisplayValue('implementation-tier-text');
+    expect(screen.getByLabelText(i18n.t('settings.nodeTypes.tierTextLabel'))).toBe(textarea);
+  });
+
+  it('labels the "add node type" input, and handles Escape there with preventDefault to cancel the add', async () => {
+    const user = userEvent.setup();
+    render(<NodeTypesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') }));
+    const input = screen.getByLabelText(i18n.t('settings.nodeTypes.newTypeLabel'));
+    expect(input).toHaveAttribute('placeholder', i18n.t('settings.nodeTypes.newTypePlaceholder'));
+    await user.type(input, 'custom_lint');
+
+    // fireEvent returns false when the handler called preventDefault().
+    expect(fireEvent.keyDown(input, { key: 'Escape' })).toBe(false);
+    expect(screen.queryByLabelText(i18n.t('settings.nodeTypes.newTypeLabel'))).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /custom_lint/ })).not.toBeInTheDocument();
   });
 
   it('#3 non-regression: changing the selection does not re-fetch the type list', async () => {

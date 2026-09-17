@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -53,7 +54,7 @@ func TestAppSettings_GetReflectsFileAndEffectiveValues(t *testing.T) {
 	mustDecode(t, rec, &got)
 
 	// No graph-config.json exists yet -- every File field should be unset.
-	if got.File != (redactedFileConfig{}) {
+	if !reflect.DeepEqual(got.File, redactedFileConfig{}) {
 		t.Errorf("expected empty file config before any save, got %+v", got.File)
 	}
 	// Effective must reflect this already-running server's own cfg, since

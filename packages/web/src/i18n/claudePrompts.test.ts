@@ -30,11 +30,10 @@ describe.each(languages)('claudePrompts (%s)', (lng) => {
     );
   });
 
-  it('チケット作成のプロンプトは /graph-ops:create-ticket で始まり、タイトルと説明を含む', () => {
-    const prompt = t('claudePrompts.createTicket', { title: 'タイトルX', description: '説明Y' });
+  it('チケット作成のプロンプトは /graph-ops:create-ticket で始まり、依頼内容を含む', () => {
+    const prompt = t('claudePrompts.createTicket', { request: '依頼内容X' });
     expect(prompt).toMatch(/^\/graph-ops:create-ticket\s/);
-    expect(prompt).toContain('タイトルX');
-    expect(prompt).toContain('説明Y');
+    expect(prompt).toContain('依頼内容X');
   });
 
   it('名前空間なしのスキルコマンドを含まない', () => {

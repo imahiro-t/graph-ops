@@ -1,11 +1,12 @@
 // "全体設定" の appSettings タブ: graph-config.json 由来のサーバー/CLI設定
 // （DBパス・作業ファイル置き場・ノード/ワークフロー設定用ディレクトリの上書き・
-// チケット一覧のページング行数）と、プロジェクト管理（作業ディレクトリ編集・
-// 削除）をまとめて扱う。node-types/workflow/reviewGates の各タブと違い、
+// チケット一覧のページング行数）と、プロジェクト管理（名前とローカルパスの編集・
+// 削除）をまとめて扱う。ローカルパスは DB ではなくこの環境の graph-config.json
+// （projectPaths）に保存される（DFLT-00080）。node-types/workflow/reviewGates の各タブと違い、
 // スコープに関わらず内容自体は変わらない（プロジェクト単位の版は存在しない）
 // ため、scope !== 'global' のときは編集そのものを無効化し、切り替えを促す
 // メッセージだけを表示する。
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Save, CheckCircle2, XCircle, Trash2, FolderCog, AlertTriangle, PlugZap } from 'lucide-react';
 import {
@@ -126,6 +127,8 @@ export const AppSettingsEditor: React.FC<Props> = ({
   // See src/hooks/useLatest.ts -- keeps `load` below insensitive to
   // language changes (F-1).
   const tRef = useLatest(t);
+  // Prefix for the label/field ids below (project rows append p.id).
+  const fieldId = useId();
   const [form, setForm] = useState<FormState>(emptyForm);
   const [savedForm, setSavedForm] = useState<FormState>(emptyForm);
   const [effective, setEffective] = useState<EffectiveAppSettings | null>(null);
@@ -138,16 +141,18 @@ export const AppSettingsEditor: React.FC<Props> = ({
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
-  const [workDirDrafts, setWorkDirDrafts] = useState<Record<string, string>>({});
+  const [localPathDrafts, setLocalPathDrafts] = useState<Record<string, string>>({});
   const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({});
   const [projectSavingId, setProjectSavingId] = useState<string | null>(null);
   const [projectDeletingId, setProjectDeletingId] = useState<string | null>(null);
   const [projectErrors, setProjectErrors] = useState<Record<string, string>>({});
 
-  const workDirValue = (p: Project) => (p.id in workDirDrafts ? workDirDrafts[p.id] : p.work_dir);
+  const localPathValue = (p: Project) => (p.id in localPathDrafts ? localPathDrafts[p.id] : p.local_path);
   const nameValue = (p: Project) => (p.id in nameDrafts ? nameDrafts[p.id] : p.name);
-  const isProjectDirty = (p: Project) => workDirValue(p) !== p.work_dir || nameValue(p) !== p.name;
-  const isProjectInvalid = (p: Project) => !nameValue(p).trim() || !workDirValue(p).trim();
+  const isProjectDirty = (p: Project) => localPathValue(p) !== p.local_path || nameValue(p) !== p.name;
+  // An empty local path is valid: saving it unsets the path in this
+  // environment. Only the (shared) name is required.
+  const isProjectInvalid = (p: Project) => !nameValue(p).trim();
 
   const formDirty = JSON.stringify(form) !== JSON.stringify(savedForm);
   const anyProjectDirty = projects.some(isProjectDirty);
@@ -218,7 +223,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
   };
 
   const handleSaveProject = async (p: Project) => {
-    const workDir = workDirValue(p);
+    const localPath = localPathValue(p).trim();
     const name = nameValue(p).trim();
     setProjectSavingId(p.id);
     setProjectErrors(prev => {
@@ -231,10 +236,10 @@ export const AppSettingsEditor: React.FC<Props> = ({
       const res = await apiFetch(`/api/projects/${p.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, work_dir: workDir })
+        body: JSON.stringify({ name, local_path: localPath })
       });
       if (!res.ok) throw new Error(await localizedApiErrorMessage(t, res));
-      setWorkDirDrafts(prev => {
+      setLocalPathDrafts(prev => {
         const next = { ...prev };
         delete next[p.id];
         return next;
@@ -419,8 +424,10 @@ export const AppSettingsEditor: React.FC<Props> = ({
         <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('settings.appSettings.storage.title')}</h3>
 
         <div>
-          <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.dbBackendLabel')}</label>
-          <div className="flex gap-3">
+          <span id={`${fieldId}-db-backend`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+            {t('settings.appSettings.storage.dbBackendLabel')}
+          </span>
+          <div role="radiogroup" aria-labelledby={`${fieldId}-db-backend`} className="flex gap-3">
             {(['sqlite', 'mysql'] as DBBackend[]).map(backend => (
               <label key={backend} className="flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-300">
                 <input
@@ -442,8 +449,9 @@ export const AppSettingsEditor: React.FC<Props> = ({
 
         {form.dbBackend === 'sqlite' ? (
           <div>
-            <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.dbPathLabel')}</label>
+            <label htmlFor={`${fieldId}-db-path`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.dbPathLabel')}</label>
             <input
+              id={`${fieldId}-db-path`}
               value={form.dbPath}
               onChange={e => setForm(f => ({ ...f, dbPath: e.target.value }))}
               placeholder={effective?.dbPath}
@@ -640,9 +648,10 @@ export const AppSettingsEditor: React.FC<Props> = ({
         )}
 
         <div>
-          <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.artifactsDirLabel')}</label>
+          <label htmlFor={`${fieldId}-artifacts-dir`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.artifactsDirLabel')}</label>
           <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-1">{t('settings.appSettings.storage.artifactsDirHint')}</p>
           <input
+            id={`${fieldId}-artifacts-dir`}
             value={form.artifactsDir}
             onChange={e => setForm(f => ({ ...f, artifactsDir: e.target.value }))}
             placeholder={effective?.artifactsDir}
@@ -659,8 +668,9 @@ export const AppSettingsEditor: React.FC<Props> = ({
         <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('settings.appSettings.myProfile.title')}</h3>
         <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.appSettings.myProfile.description')}</p>
         <div>
-          <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.myProfile.nameLabel')}</label>
+          <label htmlFor={`${fieldId}-my-name`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.myProfile.nameLabel')}</label>
           <input
+            id={`${fieldId}-my-name`}
             value={form.myName}
             onChange={e => setForm(f => ({ ...f, myName: e.target.value }))}
             placeholder={t('settings.appSettings.myProfile.namePlaceholder')}
@@ -673,8 +683,9 @@ export const AppSettingsEditor: React.FC<Props> = ({
       <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2">
         <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('settings.appSettings.pagination.title')}</h3>
         <div>
-          <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.pagination.pageSizeLabel')}</label>
+          <label htmlFor={`${fieldId}-page-size`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.pagination.pageSizeLabel')}</label>
           <input
+            id={`${fieldId}-page-size`}
             type="number"
             min={1}
             value={form.paginationPageSize}
@@ -687,9 +698,10 @@ export const AppSettingsEditor: React.FC<Props> = ({
 
       {/* Node/workflow config directory */}
       <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2">
-        <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('settings.appSettings.extensionsDir.title')}</h3>
+        <h3 id={`${fieldId}-extensions-dir`} className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('settings.appSettings.extensionsDir.title')}</h3>
         <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.appSettings.extensionsDir.description')}</p>
         <input
+          aria-labelledby={`${fieldId}-extensions-dir`}
           value={form.userExtensionsDir}
           onChange={e => setForm(f => ({ ...f, userExtensionsDir: e.target.value }))}
           placeholder={effective?.userExtensionsDir}
@@ -728,7 +740,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
           aria-disabled={saveBlocked}
           aria-describedby={saveBlockedReason ? 'save-blocked-reason' : undefined}
           className={`px-4 py-1.5 bg-blue-600 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition ${
-            saveBlocked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-500'
+            saveBlocked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'
           }`}
         >
           {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
@@ -742,6 +754,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
           <FolderCog className="w-3.5 h-3.5" /> {t('settings.appSettings.projects.title')}
         </h3>
         <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.appSettings.projects.description')}</p>
+        <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.appSettings.projects.localPathHint')}</p>
         {projects.length === 0 ? (
           <div className="text-center text-slate-400 dark:text-slate-500 text-xs py-6 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
             {t('settings.appSettings.projects.empty')}
@@ -749,33 +762,54 @@ export const AppSettingsEditor: React.FC<Props> = ({
         ) : (
           <div className="space-y-2">
             {projects.map(p => (
-              <div key={p.id} className="border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 space-y-1.5 bg-white dark:bg-slate-900">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-[10px] px-1.5 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded shrink-0">
+              <div key={p.id} data-testid={`project-row-${p.id}`} className="border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 space-y-1.5 bg-white dark:bg-slate-900">
+                {/* Name and local path each get a small visible label above
+                    the input (the placeholders stay as a hint); items-end
+                    keeps the prefix badge and buttons aligned with the
+                    inputs. */}
+                <div className="flex items-end gap-2">
+                  <span className="mb-1 font-mono text-[10px] px-1.5 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded shrink-0">
                     {p.prefix}
                   </span>
-                  <input
-                    value={nameValue(p)}
-                    onChange={e => setNameDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
-                    placeholder={t('settings.appSettings.projects.nameLabel')}
-                    className="flex-1 min-w-0 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-semibold text-slate-800 dark:text-slate-200"
-                  />
+                  <div className="flex-1 min-w-0 flex flex-col">
+                    <label htmlFor={`${fieldId}-project-${p.id}-name`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+                      {t('settings.appSettings.projects.nameLabel')}
+                    </label>
+                    <input
+                      id={`${fieldId}-project-${p.id}-name`}
+                      value={nameValue(p)}
+                      onChange={e => setNameDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
+                      placeholder={t('settings.appSettings.projects.nameLabel')}
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-semibold text-slate-800 dark:text-slate-200"
+                    />
+                  </div>
                   <button
                     onClick={() => handleDeleteProject(p)}
                     disabled={projectDeletingId === p.id}
                     title={t('settings.appSettings.projects.delete')}
-                    className="ml-auto p-1 text-slate-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40 shrink-0"
+                    className="ml-auto mb-0.5 p-1 text-slate-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40 shrink-0"
                   >
                     {projectDeletingId === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
                   </button>
                 </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    value={workDirValue(p)}
-                    onChange={e => setWorkDirDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
-                    placeholder={t('settings.appSettings.projects.workDirLabel')}
-                    className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
-                  />
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 min-w-0 flex flex-col">
+                    <label htmlFor={`${fieldId}-project-${p.id}-local-path`} className="flex items-center gap-2 text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+                      {t('settings.appSettings.projects.localPathLabel')}
+                      {!localPathValue(p) && (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-medium">
+                          {t('settings.appSettings.projects.notSet')}
+                        </span>
+                      )}
+                    </label>
+                    <input
+                      id={`${fieldId}-project-${p.id}-local-path`}
+                      value={localPathValue(p)}
+                      onChange={e => setLocalPathDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
+                      placeholder={t('settings.appSettings.projects.notSet')}
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+                    />
+                  </div>
                   <button
                     onClick={() => handleSaveProject(p)}
                     disabled={!isProjectDirty(p) || isProjectInvalid(p) || projectSavingId === p.id}

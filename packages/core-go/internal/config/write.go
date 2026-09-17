@@ -192,7 +192,7 @@ func ListNodeTypeOverrideNames(root string) []string {
 }
 
 // ResolveRootsForProjectWorkDir is ResolveRoots, but always resolves the
-// team-tier root starting from projectWorkDir (a DB Project's work_dir)
+// team-tier root starting from projectDir (a project's local path)
 // rather than the caller's own process cwd -- see the execution plan's
 // section on why the settings UI's "project-scoped" tier must be tied to the
 // selected DB Project, not wherever the server/CLI process happens to be
@@ -200,8 +200,8 @@ func ListNodeTypeOverrideNames(root string) []string {
 // in ResolveRoots, so an operator's explicit GRAPH_TEAM_EXTENSIONS_DIR
 // configuration is never silently bypassed by a project-scoped settings
 // edit.
-func ResolveRootsForProjectWorkDir(projectWorkDir, userDirOverride, teamDirOverride string) (Roots, error) {
-	return ResolveRoots(projectWorkDir, userDirOverride, teamDirOverride)
+func ResolveRootsForProjectWorkDir(projectDir, userDirOverride, teamDirOverride string) (Roots, error) {
+	return ResolveRoots(projectDir, userDirOverride, teamDirOverride)
 }
 
 // UserDocumentPath returns the path of the user-tier override Document file
@@ -222,23 +222,23 @@ func TeamDocumentPath(teamRoot string) string {
 }
 
 // ProjectTeamRoot returns the directory a project-scoped ("team-tier")
-// settings write should target for projectWorkDir: the nearest existing
-// .graph-ops directory found by walking up from projectWorkDir, or
+// settings write should target for projectDir: the nearest existing
+// .graph-ops directory found by walking up from projectDir, or
 // (if none exists yet) a new .graph-ops directly under
-// projectWorkDir. Unlike ResolveRootsForProjectWorkDir's Roots.TeamDir
+// projectDir. Unlike ResolveRootsForProjectWorkDir's Roots.TeamDir
 // (which is "" when no such directory exists yet, matching the read-only
 // "extension content is always optional" contract), this never returns ""
 // -- the settings UI always needs somewhere to write project-scoped
 // overrides, even for a project that has never had one before.
-func ProjectTeamRoot(projectWorkDir string) (string, error) {
-	dir, err := findProjectDir(projectWorkDir)
+func ProjectTeamRoot(projectDir string) (string, error) {
+	dir, err := findProjectDir(projectDir)
 	if err != nil {
 		return "", err
 	}
 	if dir != "" {
 		return dir, nil
 	}
-	abs, err := filepath.Abs(projectWorkDir)
+	abs, err := filepath.Abs(projectDir)
 	if err != nil {
 		return "", err
 	}
@@ -246,9 +246,9 @@ func ProjectTeamRoot(projectWorkDir string) (string, error) {
 }
 
 // ProjectTeamConfigPath returns the workflow.yaml path under
-// ProjectTeamRoot(projectWorkDir) -- see its doc comment.
-func ProjectTeamConfigPath(projectWorkDir string) (string, error) {
-	dir, err := ProjectTeamRoot(projectWorkDir)
+// ProjectTeamRoot(projectDir) -- see its doc comment.
+func ProjectTeamConfigPath(projectDir string) (string, error) {
+	dir, err := ProjectTeamRoot(projectDir)
 	if err != nil {
 		return "", err
 	}

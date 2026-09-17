@@ -37,12 +37,15 @@ type FileConfig struct {
 	// Switching this does not migrate data -- each backend keeps its own
 	// data, and switching back and forth just changes which one the app
 	// points at (see DFLT-00020).
-	DBBackend          string `json:"dbBackend,omitempty"`
-	DBPath             string `json:"dbPath,omitempty"`
-	ArtifactsDir       string `json:"artifactsDir,omitempty"`
-	Port               int    `json:"port,omitempty"`
-	ClaudeBinary       string `json:"claudeBinary,omitempty"`
-	TerminalCommand    string `json:"terminalCommand,omitempty"`
+	DBBackend       string `json:"dbBackend,omitempty"`
+	DBPath          string `json:"dbPath,omitempty"`
+	ArtifactsDir    string `json:"artifactsDir,omitempty"`
+	Port            int    `json:"port,omitempty"`
+	ClaudeBinary    string `json:"claudeBinary,omitempty"`
+	TerminalCommand string `json:"terminalCommand,omitempty"`
+	// WorkDir is the terminal-launch fallback working directory
+	// (TERMINAL_WORKDIR). It has nothing to do with a project's local path --
+	// see ProjectPaths for that.
 	WorkDir            string `json:"workDir,omitempty"`
 	UserExtensionsDir  string `json:"userExtensionsDir,omitempty"`
 	TeamExtensionsDir  string `json:"teamExtensionsDir,omitempty"`
@@ -90,6 +93,17 @@ type FileConfig struct {
 	// returned as-is over GET /api/settings/app, never redacted.
 	MySQLTLS   string `json:"mysqlTls,omitempty"`
 	MySQLTLSCA string `json:"mysqlTlsCa,omitempty"`
+
+	// ProjectPaths maps a project ID (the only key) to this environment's
+	// local path for that project -- an absolute directory (DFLT-00080). It
+	// replaced the per-project directory column the DB used to hold: the DB
+	// (possibly a MySQL shared by a whole team) holds the project itself,
+	// while where each member has it checked out is a per-environment
+	// setting kept here. Being
+	// a map, a project can have at most one path per environment; a project
+	// with no entry simply has no local path ("未設定"). Read it through
+	// ProjectPath and write it through SetProjectPath / Update.
+	ProjectPaths map[string]string `json:"projectPaths,omitempty"`
 }
 
 // DefaultHost is the interface `serve` binds to when nothing overrides it:
@@ -353,5 +367,44 @@ func Save(cwd, home string, cfg FileConfig) (string, error) {
 	if err != nil {
 		return path, err
 	}
-	return path, os.WriteFile(path, raw, 0o600)
+	return path, writeFileAtomic(path, raw)
+}
+
+// writeFileAtomic replaces path's contents with raw via a temp file in the
+// same directory plus a rename, so a concurrent Load (which takes no lock --
+// see Update) never observes a truncated, half-written file (DFLT-00080:
+// the server now reads graph-config.json on every project API call while
+// other requests may be saving it). If path is a symlink, the file it points
+// at is replaced rather than the link itself. The result is 0o600, same as
+// before.
+func writeFileAtomic(path string, raw []byte) error {
+	target := path
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		target = resolved
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".graph-config-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { os.Remove(tmpName) }
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		cleanup()
+		return err
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpName, target); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
 }

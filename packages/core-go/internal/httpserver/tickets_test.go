@@ -12,6 +12,7 @@ import (
 	"github.com/graph-ops/core-go/internal/config"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
+	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
 )
 
@@ -37,7 +38,7 @@ func newTestServer(t *testing.T) (*Server, store.GraphRepository, string) {
 	if err := repo.Init(); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	proj, err := repo.CreateProject("Test Project", "TEST", t.TempDir())
+	proj, err := repo.CreateProject("Test Project", "TEST")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
@@ -45,8 +46,26 @@ func newTestServer(t *testing.T) (*Server, store.GraphRepository, string) {
 		t.Fatalf("SetCurrentProjectID: %v", err)
 	}
 	eng := engine.New(repo)
-	cfg := Config{ArtifactsDir: t.TempDir()}
-	return New(repo, eng, cfg), repo, proj.ID
+	// HomeDir is sandboxed so graph-config.json (projectPaths) is written
+	// under a temp dir; the project gets its own temp local path, standing in
+	// for the DB work_dir it had before DFLT-00080.
+	cfg := Config{ArtifactsDir: t.TempDir(), HomeDir: t.TempDir()}
+	s := New(repo, eng, cfg)
+	if _, err := runtimeconfig.SetProjectPath(cfg.WorkDir, cfg.HomeDir, proj.ID, t.TempDir()); err != nil {
+		t.Fatalf("SetProjectPath: %v", err)
+	}
+	return s, repo, proj.ID
+}
+
+// testProjectLocalPath returns projectID's local path in s's graph-config.json,
+// failing the test if none is set.
+func testProjectLocalPath(t *testing.T, s *Server, projectID string) string {
+	t.Helper()
+	p := s.projectLocalPath(projectID)
+	if p == "" {
+		t.Fatalf("project %s has no local path in the test server's graph-config.json", projectID)
+	}
+	return p
 }
 
 // doJSON issues an HTTP request against s's routes and returns the recorded
@@ -293,10 +312,11 @@ func TestHandleCreateArtifact_InlineContentNotValidatedForNonReportNode(t *testi
 // seeded plan/plan_review node names exactly the way the CLI's
 // get-executable/expand-graph would for the same team-tier language
 // setting, since both ultimately resolve through the same
-// config.LoadWithRoots. The project's own work_dir is what
-// loadCatalogForTicket resolves the team tier from here (s.cfg has no
-// TeamExtensionsDir override -- see newTestServer), matching how the
-// settings UI always writes project-scoped overrides under that work_dir.
+// config.LoadWithRoots. The project's local path (graph-config.json's
+// projectPaths) is what loadCatalogForTicket resolves the team tier from
+// here (s.cfg has no TeamExtensionsDir override -- see newTestServer),
+// matching how the settings UI always writes project-scoped overrides under
+// that local path.
 func TestHandleExecutableNodes_SeedsLocalizedNamesFromProjectLanguage(t *testing.T) {
 	s, repo, projectID := newTestServer(t)
 	project, err := repo.GetProject(projectID)
@@ -304,7 +324,7 @@ func TestHandleExecutableNodes_SeedsLocalizedNamesFromProjectLanguage(t *testing
 		t.Fatalf("GetProject: %v", err)
 	}
 
-	teamDir := filepath.Join(project.WorkDir, ".graph-ops")
+	teamDir := filepath.Join(testProjectLocalPath(t, s, project.ID), ".graph-ops")
 	if err := os.MkdirAll(teamDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -340,8 +360,8 @@ func TestHandleExecutableNodes_SeedsLocalizedNamesFromProjectLanguage(t *testing
 
 	// Cross-check against what the CLI's own resolution path
 	// (config.LoadWithRoots, no --language override) would produce for the
-	// same project work_dir -- the two entry points must never disagree.
-	cliCat, err := config.LoadWithRoots(project.WorkDir, "", "", "")
+	// same project local path -- the two entry points must never disagree.
+	cliCat, err := config.LoadWithRoots(testProjectLocalPath(t, s, project.ID), "", "", "")
 	if err != nil {
 		t.Fatalf("config.LoadWithRoots: %v", err)
 	}

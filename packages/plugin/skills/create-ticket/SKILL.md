@@ -5,7 +5,7 @@ description: Creates a new development ticket in the DB. Does not create an exec
 
 # create-ticket Skill
 
-Creates a new ticket using the DB access binary (`graph-engine`). The ticket is created from a title/description that has already been talked through with the user, not from their very first message verbatim.
+Creates a new ticket using the DB access binary (`graph-engine`). The user may start from a free-form request rather than a title/description; the ticket is created from a title/description worked out from that request and confirmed with the user, not from their very first message verbatim.
 
 ## 0. Check for user/team customization of this skill
 
@@ -17,9 +17,11 @@ If the returned `content` is non-empty, follow it as additional rules on top of 
 
 ## 1. Get the user's initial idea for the ticket
 
-A rough title/description is enough to start.
+A free-form request describing the ticket the user wants is enough to start. It does not need to be split into a title and description -- for example, the Web UI's "New Ticket" modal launches this skill with a single free-form request text. A rough title/description is fine too.
 
 ## 2. Firm the idea up with the user before creating anything
+
+If the request is not already in title/description form, first work out a draft title and description from it yourself and present them to the user. Do not reuse the original request text verbatim as the title: write a short title that names the work, and put the details in the description.
 
 Have a short back-and-forth with the user. Depending on what's missing, ask about things like:
 
@@ -27,7 +29,7 @@ Have a short back-and-forth with the user. Depending on what's missing, ask abou
 - Which part of the codebase/feature does this touch?
 - Any known edge cases, constraints, or examples that clarify the intent?
 
-Then propose a concrete title + description back to the user and ask them to confirm or adjust it. Iterate until the user agrees it's ready -- don't treat the first reply as final.
+Then propose a concrete title + description back to the user and ask them to confirm or adjust it. Iterate until the user agrees it's ready -- don't treat the first reply as final. Never create the ticket without the user's confirmation of the title and description, even when the request arrived from the Web UI.
 
 Keep this pass lightweight (a couple of exchanges, not a full requirements interview): it only needs to leave the ticket with a clear, actionable identity of the work, not a settled completion criteria/why -- that's `/graph-ops:refine-ticket`'s job afterward.
 
@@ -44,7 +46,7 @@ graph-engine create-ticket "<title>" "<description>" --priority <HIGH|MEDIUM|LOW
 
 Omit `--priority` entirely when the user chose not to set one -- the ticket is then created with no priority, exactly as before this option existed.
 
-The target project is resolved from the current directory: the project whose registered work_dir is the current directory or contains it (the deepest nested work_dir wins). Only if none matches does it fall back to the current project selected via `use-project` / the Web UI, and it errors if neither exists. Stdout is the ticket JSON only; the resolution is reported as one stderr line:
+The target project is resolved from the current directory: the project whose local path -- this environment's `projectPaths` entry in `graph-config.json`, not a DB value -- is the current directory or contains it (the deepest nested local path wins). Only if none matches does it fall back to the current project selected via `use-project` / the Web UI, and it errors if neither exists. Stdout is the ticket JSON only; the resolution is reported as one stderr line:
 
 - `resolved project: <name> (<id>) from current directory` -- matched by the current directory.
 - `resolved project: <name> (<id>) from current project (use-project)` -- no match, so the fallback was used. Check that this is the project the user meant before reporting.

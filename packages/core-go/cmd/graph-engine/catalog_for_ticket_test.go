@@ -10,11 +10,11 @@ import (
 )
 
 // writeWorkflowYAML writes a minimal team-tier workflow.yaml under
-// <workDir>/.graph-ops/workflow.yaml, matching what the settings
+// <root>/.graph-ops/workflow.yaml, matching what the settings
 // UI's PUT /api/settings/catalog (scope=project) would save.
-func writeWorkflowYAML(t *testing.T, workDir, content string) {
+func writeWorkflowYAML(t *testing.T, root, content string) {
 	t.Helper()
-	dir := filepath.Join(workDir, ".graph-ops")
+	dir := filepath.Join(root, ".graph-ops")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -25,15 +25,15 @@ func writeWorkflowYAML(t *testing.T, workDir, content string) {
 
 // Scenario: プロジェクト単位設定でのワークフロー編集が、そのプロジェクトの
 // チケット実行に反映される -- catalogForTicket resolves the team tier from
-// the ticket's own Project.WorkDir, not the CLI process's cwd, so a project
-// whose settings were edited via the Web UI (always written under that
-// project's work_dir, see internal/httpserver/settings.go) is picked up by
+// the ticket's project's local path (rc.ProjectPaths), not the CLI process's
+// cwd, so a project whose settings were edited via the Web UI (always
+// written under that project's local path, see internal/httpserver/settings.go) is picked up by
 // `get-executable`/`expand-graph` even when this process's cwd is somewhere
 // else entirely.
-func TestCatalogForTicket_UsesProjectWorkDirNotProcessCWD(t *testing.T) {
+func TestCatalogForTicket_UsesProjectLocalPathNotProcessCWD(t *testing.T) {
 	repo := newTestRepo(t)
-	projectWorkDir := t.TempDir()
-	proj, err := repo.CreateProject("P", "PROJ", projectWorkDir)
+	projectLocalPath := t.TempDir()
+	proj, err := repo.CreateProject("P", "PROJ")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
@@ -42,23 +42,85 @@ func TestCatalogForTicket_UsesProjectWorkDirNotProcessCWD(t *testing.T) {
 		t.Fatalf("CreateTicket: %v", err)
 	}
 
-	writeWorkflowYAML(t, projectWorkDir, `version: 1
+	writeWorkflowYAML(t, projectLocalPath, `version: 1
 review_gates:
   code_review:
     max_iterations: 7
 `)
 
 	// rc.WorkDir deliberately points elsewhere (an unrelated temp dir, never
-	// touched by writeWorkflowYAML above) to prove the project's own work_dir
-	// -- not the process cwd -- is what gets resolved.
-	rc := runtimeConfig{WorkDir: t.TempDir(), UserExtensionsDir: t.TempDir()}
+	// touched by writeWorkflowYAML above) to prove the project's own local
+	// path -- not the process cwd -- is what gets resolved.
+	rc := runtimeConfig{WorkDir: t.TempDir(), UserExtensionsDir: t.TempDir(), ProjectPaths: map[string]string{proj.ID: projectLocalPath}}
 	catalog, err := catalogForTicket(repo, rc, ticket.ID, "")
 	if err != nil {
 		t.Fatalf("catalogForTicket: %v", err)
 	}
 	gate, ok := catalog.ReviewGates["code_review"]
 	if !ok || gate.MaxIterations == nil || *gate.MaxIterations != 7 {
-		t.Fatalf("expected code_review.max_iterations=7 from the project's work_dir, got %+v (ok=%v)", gate, ok)
+		t.Fatalf("expected code_review.max_iterations=7 from the project's local path, got %+v (ok=%v)", gate, ok)
+	}
+}
+
+// DFLT-00080: a project with no local path in this environment falls back to
+// the cwd-based resolution instead of failing.
+func TestCatalogForTicket_NoLocalPathFallsBackToCwd(t *testing.T) {
+	repo := newTestRepo(t)
+	proj, err := repo.CreateProject("Beta", "BETA")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	ticket, err := repo.CreateTicket(proj.ID, domain.Ticket{Title: "t", Status: domain.TicketTODO})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	cwd := t.TempDir()
+	writeWorkflowYAML(t, cwd, `version: 1
+review_gates:
+  code_review:
+    max_iterations: 5
+`)
+	rc := runtimeConfig{WorkDir: cwd, UserExtensionsDir: t.TempDir()}
+	catalog, err := catalogForTicket(repo, rc, ticket.ID, "")
+	if err != nil {
+		t.Fatalf("catalogForTicket: %v", err)
+	}
+	gate, ok := catalog.ReviewGates["code_review"]
+	if !ok || gate.MaxIterations == nil || *gate.MaxIterations != 5 {
+		t.Fatalf("expected code_review.max_iterations=5 from the cwd, got %+v (ok=%v)", gate, ok)
+	}
+}
+
+// DFLT-00080: get-language-settings --project reads the team tier from that
+// project's local path, and a project without one keeps the cwd's team root.
+func TestCmdGetLanguageSettings_ProjectLocalPath(t *testing.T) {
+	repo := newTestRepo(t)
+	alpha, _ := repo.CreateProject("Alpha", "ALPHA")
+	beta, _ := repo.CreateProject("Beta", "BETA")
+	alphaDir := t.TempDir()
+	writeWorkflowYAML(t, alphaDir, "version: 1\nlanguage: ja\n")
+	cwd := t.TempDir()
+	writeWorkflowYAML(t, cwd, "version: 1\nlanguage: en\n")
+	rc := runtimeConfig{WorkDir: cwd, UserExtensionsDir: t.TempDir(), ProjectPaths: map[string]string{alpha.ID: alphaDir}}
+
+	for _, tc := range []struct {
+		project, want string
+	}{{alpha.ID, "ja"}, {beta.ID, "en"}} {
+		out := captureStdout(t, func() {
+			if err := cmdGetLanguageSettings(repo, rc, []string{"--project", tc.project}); err != nil {
+				t.Fatalf("cmdGetLanguageSettings(%s): %v", tc.project, err)
+			}
+		})
+		var resp struct {
+			Resolved string `json:"resolved"`
+			Source   string `json:"source"`
+		}
+		if err := json.Unmarshal([]byte(out), &resp); err != nil {
+			t.Fatalf("decode: %v (%s)", err, out)
+		}
+		if resp.Resolved != tc.want || resp.Source != "team" {
+			t.Errorf("project %s: got %+v, want resolved %s source team", tc.project, resp, tc.want)
+		}
 	}
 }
 
@@ -66,8 +128,8 @@ review_gates:
 // そちらが優先される.
 func TestCatalogForTicket_ExplicitTeamExtensionsDirWins(t *testing.T) {
 	repo := newTestRepo(t)
-	projectWorkDir := t.TempDir()
-	proj, err := repo.CreateProject("P", "PROJ", projectWorkDir)
+	projectLocalPath := t.TempDir()
+	proj, err := repo.CreateProject("P", "PROJ")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
@@ -76,7 +138,7 @@ func TestCatalogForTicket_ExplicitTeamExtensionsDirWins(t *testing.T) {
 		t.Fatalf("CreateTicket: %v", err)
 	}
 
-	writeWorkflowYAML(t, projectWorkDir, `version: 1
+	writeWorkflowYAML(t, projectLocalPath, `version: 1
 review_gates:
   code_review:
     max_iterations: 7
@@ -91,7 +153,7 @@ review_gates:
 		t.Fatalf("write explicit workflow.yaml: %v", err)
 	}
 
-	rc := runtimeConfig{WorkDir: t.TempDir(), UserExtensionsDir: t.TempDir(), TeamExtensionsDir: explicitTeamDir}
+	rc := runtimeConfig{WorkDir: t.TempDir(), UserExtensionsDir: t.TempDir(), TeamExtensionsDir: explicitTeamDir, ProjectPaths: map[string]string{proj.ID: projectLocalPath}}
 	catalog, err := catalogForTicket(repo, rc, ticket.ID, "")
 	if err != nil {
 		t.Fatalf("catalogForTicket: %v", err)

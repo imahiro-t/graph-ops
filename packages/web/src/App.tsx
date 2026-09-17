@@ -5,7 +5,6 @@ import {
   RotateCw,
   Plus,
   Terminal,
-  Loader2,
   FolderOpen,
   ChevronDown,
   ChevronLeft,
@@ -23,13 +22,13 @@ import { getPriorityMeta, normalizeTicketPriority } from './priorityMeta';
 import { TicketItem } from './components/TicketItem';
 import { ClaudeRunnerModal } from './components/ClaudeRunnerModal';
 import { SettingsModal } from './components/SettingsModal';
-import { StatusLiveRegion } from './components/StatusLiveRegion';
+import { ProjectSetupModal } from './components/ProjectSetupModal';
+import { CreateTicketModal } from './components/CreateTicketModal';
 import { useClaudeLaunch } from './hooks/useClaudeLaunch';
 import { useTheme, ThemePreference } from './hooks/useTheme';
 import { formatTime } from './i18n/formatDate';
-import { localizedApiErrorMessage, errorMessage } from './lib/apiError';
+import { localizedApiErrorMessage } from './lib/apiError';
 import { apiFetch } from './lib/apiFetch';
-import { isSubmitShortcut } from './lib/keyboardShortcuts';
 import { fetchAppSettings } from './lib/settingsApi';
 import { useLatest } from './hooks/useLatest';
 
@@ -75,11 +74,14 @@ export const App: React.FC = () => {
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
-  const [newProjectName, setNewProjectName] = useState('');
-  const [newProjectPrefix, setNewProjectPrefix] = useState('');
-  const [newProjectWorkDir, setNewProjectWorkDir] = useState('');
-  const [projectFormError, setProjectFormError] = useState('');
-  const [isSavingProject, setIsSavingProject] = useState(false);
+  // The header's project switcher button: where ProjectSetupModal returns
+  // focus on close when the element that opened it is gone (the menu item
+  // unmounts with the menu) or the dialog opened by itself (?newProject=1).
+  const projectMenuButtonRef = useRef<HTMLButtonElement>(null);
+  // The directory `graph-engine ui` asked a project to be set up for (see
+  // the newProject query effect below), or '' when the dialog was opened
+  // from the header's "New project..." entry.
+  const [projectSetupDirectory, setProjectSetupDirectory] = useState('');
 
   // Filters
   const [filterQuery, setFilterQuery] = useState('');
@@ -170,8 +172,6 @@ export const App: React.FC = () => {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isClaudeGlobalOpen, setIsClaudeGlobalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
-  const [newDesc, setNewDesc] = useState('');
 
   // Fetch tickets and their details
   const fetchAllTickets = async () => {
@@ -271,21 +271,20 @@ export const App: React.FC = () => {
 
   // Consumes the `?newProject=1&workDir=<dir>` query the `graph-engine ui`
   // CLI command (the `/ui` slash command's backend) appends to the root URL
-  // when the current directory doesn't match any registered project's
-  // work_dir: auto-open the create-project dialog with that directory
-  // pre-filled, instead of requiring the user to click "new project" and
-  // retype the path themselves. Runs once on mount, and strips the query
-  // from the URL immediately after reading it (via history.replaceState) so
-  // a later manual reload of the same URL doesn't re-trigger the dialog.
+  // when no project's local path (this environment's graph-config.json
+  // projectPaths) covers the current directory: auto-open the project setup
+  // dialog for that directory, where the user either creates a new project
+  // or picks an existing one from the DB (DFLT-00080). Runs once on mount,
+  // and strips the query from the URL immediately after reading it (via
+  // history.replaceState) so a later manual reload of the same URL doesn't
+  // re-trigger the dialog. The query name `workDir` is kept for
+  // compatibility with the CLI.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('newProject') !== '1') return;
 
-    const workDir = params.get('workDir');
+    setProjectSetupDirectory(params.get('workDir') ?? '');
     setIsCreateProjectOpen(true);
-    if (workDir) {
-      setNewProjectWorkDir(workDir);
-    }
 
     const url = new URL(window.location.href);
     url.searchParams.delete('newProject');
@@ -295,7 +294,7 @@ export const App: React.FC = () => {
 
   // switchToProject only changes which project is current -- it must never
   // launch a terminal on its own. Switching used to also open an external
-  // Claude Code terminal in the project's work_dir, but that surprised users
+  // Claude Code terminal in the project's directory, but that surprised users
   // (a terminal popping open just from picking a project in the switcher),
   // so the only path that launches a terminal now is an explicit action
   // like the create-ticket flow.
@@ -321,37 +320,24 @@ export const App: React.FC = () => {
     fetchAllTickets();
   };
 
-  const handleCreateProjectSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newProjectName.trim() || !newProjectWorkDir.trim()) return;
-    setIsSavingProject(true);
-    setProjectFormError('');
-    try {
-      const res = await apiFetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newProjectName,
-          prefix: newProjectPrefix || undefined,
-          work_dir: newProjectWorkDir
-        })
-      });
-      if (!res.ok) {
-        setProjectFormError(await localizedApiErrorMessage(t, res));
-        return;
-      }
-      const created: Project = await res.json();
-      setProjects(prev => [...prev, created]);
-      setIsCreateProjectOpen(false);
-      setNewProjectName('');
-      setNewProjectPrefix('');
-      setNewProjectWorkDir('');
-      await switchToProject(created);
-    } catch (e) {
-      setProjectFormError(errorMessage(e, t('errors.UNKNOWN')));
-    } finally {
-      setIsSavingProject(false);
-    }
+  // ProjectSetupModal's "create new" path: the POST already happened there.
+  const handleProjectCreated = async (created: Project) => {
+    setProjects(prev => [...prev, created]);
+    setIsCreateProjectOpen(false);
+    setProjectSetupDirectory('');
+    await switchToProject(created);
+  };
+
+  // ProjectSetupModal's "choose an existing project" path: the local path was
+  // saved and the project already made current there, so only local state
+  // needs to follow.
+  const handleProjectLinked = async (project: Project) => {
+    setIsCreateProjectOpen(false);
+    setProjectSetupDirectory('');
+    setCurrentProject(project);
+    setPage(1);
+    await fetchProjects();
+    fetchAllTickets();
   };
 
   const handleToggleExpand = (id: string) => {
@@ -371,16 +357,17 @@ export const App: React.FC = () => {
   // those are separate, later steps in the ticket lifecycle now.
   const { isLaunching: isCreating, lastMessage: createStatus, launch: runCreateTicket, reset: resetCreateStatus } = useClaudeLaunch(fetchAllTickets);
 
-  const handleCreateTicket = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim()) return;
+  // Empty/whitespace-only requests never reach here: CreateTicketModal guards
+  // both the button and the Cmd/Ctrl+Enter path. Returns whether the launch
+  // succeeded so the modal keeps the request text after a failure.
+  const handleCreateTicket = async (request: string): Promise<boolean> => {
     // Assignment is deliberately never decided at creation time -- it's set
     // afterward via TicketItem's "assign to me" button (see
-    // ticket.assignee), so the prompt never mentions one.
-    const prompt = t('claudePrompts.createTicket', { title: newTitle, description: newDesc });
+    // ticket.assignee), so the prompt never mentions one. The title and
+    // description aren't decided here either: the create-ticket skill works
+    // them out from this free-form request and confirms them with the user.
+    const prompt = t('claudePrompts.createTicket', { request });
     const succeeded = await runCreateTicket(prompt, undefined, currentProject?.id);
-    setNewTitle('');
-    setNewDesc('');
     // Close automatically once the terminal has launched, instead of
     // leaving the user to hit the (now-relabeled) "close" button -- a
     // failed launch keeps the modal open so the status message is visible.
@@ -388,6 +375,7 @@ export const App: React.FC = () => {
       resetCreateStatus();
       setIsCreateOpen(false);
     }
+    return succeeded;
   };
 
   // Filter calculations
@@ -452,9 +440,10 @@ export const App: React.FC = () => {
           <div className="flex items-center gap-3">
             <div className="relative">
               <button
+                ref={projectMenuButtonRef}
                 onClick={() => setIsProjectMenuOpen(v => !v)}
                 className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 shadow-xs transition max-w-[14rem]"
-                title={currentProject?.work_dir}
+                title={currentProject ? currentProject.local_path || t('settings.appSettings.projects.notSet') : undefined}
               >
                 <FolderOpen className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
                 <span className="truncate">
@@ -485,7 +474,7 @@ export const App: React.FC = () => {
                       <button
                         onClick={() => {
                           setIsProjectMenuOpen(false);
-                          setProjectFormError('');
+                          setProjectSetupDirectory('');
                           setIsCreateProjectOpen(true);
                         }}
                         className="w-full text-left px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 text-blue-700 dark:text-blue-400 font-medium"
@@ -535,9 +524,9 @@ export const App: React.FC = () => {
             <button
               onClick={() => {
                 // Clear any leftover status message from a previous create
-                // attempt before the form reopens -- the form's own fields
-                // (newTitle/newDesc) are already reset to empty strings on
-                // submit, but createStatus otherwise persists
+                // attempt before the form reopens -- the form's own request
+                // field lives in CreateTicketModal and starts out empty on
+                // every open, but createStatus otherwise persists
                 // since this component stays mounted between opens.
                 resetCreateStatus();
                 setIsCreateOpen(true);
@@ -818,7 +807,7 @@ export const App: React.FC = () => {
               <p>{t('projectSwitcher.noProjectYet')}</p>
               <button
                 onClick={() => {
-                  setProjectFormError('');
+                  setProjectSetupDirectory('');
                   setIsCreateProjectOpen(true);
                 }}
                 className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-xs transition"
@@ -881,77 +870,15 @@ export const App: React.FC = () => {
 
       {/* Create Ticket Modal */}
       {isCreateOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md p-6 shadow-2xl">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">{t('createModal.title')}</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-              {t('createModal.descriptionPrefix')} <span className="font-mono">/graph-ops:create-ticket</span> {t('createModal.descriptionSuffix')}
-            </p>
-            <form onSubmit={handleCreateTicket} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('createModal.titleLabel')}</label>
-                <input
-                  type="text"
-                  required
-                  disabled={isCreating}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500 disabled:opacity-60"
-                  value={newTitle}
-                  onChange={e => setNewTitle(e.target.value)}
-                  placeholder={t('createModal.titlePlaceholder')}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('createModal.descriptionLabel')}</label>
-                <textarea
-                  rows={3}
-                  disabled={isCreating}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500 disabled:opacity-60"
-                  value={newDesc}
-                  onChange={e => setNewDesc(e.target.value)}
-                  onKeyDown={e => {
-                    if (isSubmitShortcut(e)) {
-                      e.preventDefault();
-                      e.currentTarget.form?.requestSubmit();
-                    }
-                  }}
-                  placeholder={t('createModal.descriptionPlaceholder')}
-                />
-              </div>
-              {/* 作成／起動の結果はフォーカス移動を伴わずに現れるため、読み上げは
-                  常時マウントの live region が担当する（SC 4.1.3）。 */}
-              <StatusLiveRegion message={createStatus || ''} />
-              {createStatus && (
-                <div
-                  aria-hidden="true"
-                  className="p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] rounded-lg border border-slate-200 dark:border-slate-700"
-                >
-                  {createStatus}
-                </div>
-              )}
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    resetCreateStatus();
-                    setIsCreateOpen(false);
-                  }}
-                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 transition"
-                >
-                  {isCreating || createStatus ? t('createModal.close') : t('createModal.cancel')}
-                </button>
-                <button
-                  type="submit"
-                  disabled={isCreating || !newTitle.trim()}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-xs font-semibold text-white shadow-xs transition flex items-center gap-1.5"
-                >
-                  {isCreating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  {t('createModal.submit')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <CreateTicketModal
+          onSubmit={handleCreateTicket}
+          onClose={() => {
+            resetCreateStatus();
+            setIsCreateOpen(false);
+          }}
+          isCreating={isCreating}
+          status={createStatus}
+        />
       )}
 
       {/* Global Claude Modal */}
@@ -972,77 +899,18 @@ export const App: React.FC = () => {
         onMyNameChanged={setMyName}
       />
 
-      {/* Create Project Modal */}
-      {isCreateProjectOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md p-6 shadow-2xl">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">{t('createProjectModal.title')}</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">{t('createProjectModal.description')}</p>
-            <form onSubmit={handleCreateProjectSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('createProjectModal.nameLabel')}</label>
-                <input
-                  type="text"
-                  required
-                  disabled={isSavingProject}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500 disabled:opacity-60"
-                  value={newProjectName}
-                  onChange={e => setNewProjectName(e.target.value)}
-                  placeholder={t('createProjectModal.namePlaceholder')}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('createProjectModal.prefixLabel')}</label>
-                <input
-                  type="text"
-                  maxLength={5}
-                  disabled={isSavingProject}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500 disabled:opacity-60 font-mono uppercase"
-                  value={newProjectPrefix}
-                  onChange={e => setNewProjectPrefix(e.target.value.toUpperCase())}
-                  placeholder={t('createProjectModal.prefixPlaceholder')}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('createProjectModal.workDirLabel')}</label>
-                <input
-                  type="text"
-                  required
-                  disabled={isSavingProject}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 font-mono focus:outline-none focus:border-blue-500 disabled:opacity-60"
-                  value={newProjectWorkDir}
-                  onChange={e => setNewProjectWorkDir(e.target.value)}
-                  placeholder={t('createProjectModal.workDirPlaceholder')}
-                />
-              </div>
-
-              {projectFormError && (
-                <div className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900">
-                  {projectFormError}
-                </div>
-              )}
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsCreateProjectOpen(false)}
-                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 transition"
-                >
-                  {t('createModal.cancel')}
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingProject || !newProjectName.trim() || !newProjectWorkDir.trim()}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-xs font-semibold text-white shadow-xs transition flex items-center gap-1.5"
-                >
-                  {isSavingProject && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  {t('createModal.submit')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Project setup / create dialog (DFLT-00080) */}
+      <ProjectSetupModal
+        isOpen={isCreateProjectOpen}
+        directory={projectSetupDirectory}
+        offerExisting={projectSetupDirectory !== ''}
+        projects={projects}
+        onClose={() => setIsCreateProjectOpen(false)}
+        onCreated={handleProjectCreated}
+        onLinked={handleProjectLinked}
+        onProjectsChanged={fetchProjects}
+        returnFocusRef={projectMenuButtonRef}
+      />
     </div>
   );
 };

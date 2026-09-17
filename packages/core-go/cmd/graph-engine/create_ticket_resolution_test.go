@@ -3,6 +3,11 @@ package main
 // Tests for DFLT-00025: create-ticket resolving its target project from the
 // CLI's current directory before falling back to the current project. Each
 // test names the Gherkin rule/scenario (art-0a57c869) it covers.
+//
+// Since DFLT-00080 a project's directory is its local path in this
+// environment's graph-config.json (projectPaths), not a DB column, so the
+// tests keep the paths in standardProjects.paths and hand that map to
+// create-ticket as runtimeConfig.ProjectPaths.
 
 import (
 	"encoding/json"
@@ -20,8 +25,8 @@ import (
 
 // resolutionStubRepo wraps a real repository, optionally overriding the two
 // reads project resolution depends on -- for states the real store refuses
-// to hold (an empty/relative work_dir, a dangling current_project_id) or
-// failures it can't be made to produce (ListProjects erroring).
+// to hold (a dangling current_project_id, a project list in a given order)
+// or failures it can't be made to produce (ListProjects erroring).
 type resolutionStubRepo struct {
 	store.GraphRepository
 	listProjects       func() ([]domain.Project, error)
@@ -49,6 +54,8 @@ func (r *resolutionStubRepo) GetCurrentProjectID() (string, error) {
 type standardProjects struct {
 	repo store.GraphRepository
 	ids  map[string]string
+	// paths is the environment's projectPaths: real project ID -> local path.
+	paths map[string]string
 }
 
 func (sp standardProjects) id(t *testing.T, logical string) string {
@@ -60,13 +67,14 @@ func (sp standardProjects) id(t *testing.T, logical string) string {
 	return id
 }
 
-func (sp standardProjects) add(t *testing.T, logical, name, workDir string) domain.Project {
+func (sp standardProjects) add(t *testing.T, logical, name, localPath string) domain.Project {
 	t.Helper()
-	p, err := sp.repo.CreateProject(name, "", workDir)
+	p, err := sp.repo.CreateProject(name, "")
 	if err != nil {
-		t.Fatalf("CreateProject(%s, %q): %v", logical, workDir, err)
+		t.Fatalf("CreateProject(%s, %q): %v", logical, localPath, err)
 	}
 	sp.ids[logical] = p.ID
+	sp.paths[p.ID] = localPath
 	return p
 }
 
@@ -98,7 +106,7 @@ func skipOnWindows(t *testing.T) {
 func newBareResolutionEnv(t *testing.T) standardProjects {
 	t.Helper()
 	skipOnWindows(t)
-	return standardProjects{repo: newTestRepo(t), ids: map[string]string{}}
+	return standardProjects{repo: newTestRepo(t), ids: map[string]string{}, paths: map[string]string{}}
 }
 
 func newStandardResolutionEnv(t *testing.T) standardProjects {
@@ -115,15 +123,16 @@ type cliResult struct {
 	err    error
 }
 
-// runCreateTicket runs cmdCreateTicket with rc.WorkDir = workDir against
-// repo, capturing stdout and stderr separately.
-func runCreateTicket(t *testing.T, repo store.GraphRepository, workDir string, args ...string) cliResult {
+// runCreateTicket runs cmdCreateTicket with rc.WorkDir = cwd and
+// rc.ProjectPaths = paths against repo, capturing stdout and stderr
+// separately.
+func runCreateTicket(t *testing.T, repo store.GraphRepository, paths map[string]string, cwd string, args ...string) cliResult {
 	t.Helper()
 	eng := engine.New(repo)
 	var res cliResult
 	res.stderr = captureStderr(t, func() {
 		res.stdout = captureStdout(t, func() {
-			res.err = cmdCreateTicket(eng, repo, runtimeConfig{WorkDir: workDir}, args)
+			res.err = cmdCreateTicket(eng, repo, runtimeConfig{WorkDir: cwd, ProjectPaths: paths}, args)
 		})
 	})
 	return res
@@ -206,10 +215,13 @@ func assertNoTicketsAnywhere(t *testing.T, repo store.GraphRepository) {
 func assertNoCurrentProjectMessage(t *testing.T, err error) {
 	t.Helper()
 	msg := err.Error()
-	for _, want := range []string{"no current project selected", "create-project", "use-project", "--project"} {
+	for _, want := range []string{"no current project selected", "create-project", "use-project", "--project", "projectPaths"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("expected error message to mention %q, got %q", want, msg)
 		}
+	}
+	if strings.Contains(msg, "work_dir") {
+		t.Errorf("error message must not mention the removed work_dir, got %q", msg)
 	}
 }
 
@@ -223,7 +235,7 @@ func TestCreateTicketResolution_CwdExactMatchBeatsCurrentProject(t *testing.T) {
 	sp := newStandardResolutionEnv(t)
 	sp.setCurrent(t, "proj-blg")
 
-	ticket := mustSucceed(t, runCreateTicket(t, sp.repo, "/work/graph-ops", "タイトル", "説明"))
+	ticket := mustSucceed(t, runCreateTicket(t, sp.repo, sp.paths, "/work/graph-ops", "タイトル", "説明"))
 	assertProject(t, sp, ticket, "proj-ops")
 	if n := sp.ticketCount(t, "proj-blg"); n != 0 {
 		t.Fatalf("expected no ticket in proj-blg, got %d", n)
@@ -234,14 +246,14 @@ func TestCreateTicketResolution_CwdSubdirectoryMatches(t *testing.T) {
 	sp := newStandardResolutionEnv(t)
 	sp.setCurrent(t, "proj-blg")
 
-	ticket := mustSucceed(t, runCreateTicket(t, sp.repo, "/work/graph-ops/packages/core-go/cmd", "タイトル"))
+	ticket := mustSucceed(t, runCreateTicket(t, sp.repo, sp.paths, "/work/graph-ops/packages/core-go/cmd", "タイトル"))
 	assertProject(t, sp, ticket, "proj-ops")
 }
 
 func TestCreateTicketResolution_CwdMatchWithoutCurrentProject(t *testing.T) {
 	sp := newStandardResolutionEnv(t)
 
-	ticket := mustSucceed(t, runCreateTicket(t, sp.repo, "/work/tech-blog", "タイトル"))
+	ticket := mustSucceed(t, runCreateTicket(t, sp.repo, sp.paths, "/work/tech-blog", "タイトル"))
 	assertProject(t, sp, ticket, "proj-blg")
 }
 
@@ -249,7 +261,7 @@ func TestCreateTicketResolution_DoesNotChangeCurrentProject(t *testing.T) {
 	sp := newStandardResolutionEnv(t)
 	sp.setCurrent(t, "proj-blg")
 
-	ticket := mustSucceed(t, runCreateTicket(t, sp.repo, "/work/graph-ops", "タイトル"))
+	ticket := mustSucceed(t, runCreateTicket(t, sp.repo, sp.paths, "/work/graph-ops", "タイトル"))
 	assertProject(t, sp, ticket, "proj-ops")
 	cur, err := sp.repo.GetCurrentProjectID()
 	if err != nil || cur != sp.id(t, "proj-blg") {
@@ -258,10 +270,10 @@ func TestCreateTicketResolution_DoesNotChangeCurrentProject(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Rule 2: nested work_dirs -> the deepest match wins.
+// Rule 2: nested local paths -> the deepest match wins.
 // ---------------------------------------------------------------------------
 
-func TestCreateTicketResolution_NestedWorkDirDeepestWins(t *testing.T) {
+func TestCreateTicketResolution_NestedLocalPathDeepestWins(t *testing.T) {
 	cases := []struct {
 		cwd  string
 		want string
@@ -277,7 +289,7 @@ func TestCreateTicketResolution_NestedWorkDirDeepestWins(t *testing.T) {
 			sp.add(t, "proj-sub", "サブ", "/work/graph-ops/packages/sub")
 			sp.setCurrent(t, "proj-blg")
 
-			ticket := mustSucceed(t, runCreateTicket(t, sp.repo, tc.cwd, "タイトル"))
+			ticket := mustSucceed(t, runCreateTicket(t, sp.repo, sp.paths, tc.cwd, "タイトル"))
 			assertProject(t, sp, ticket, tc.want)
 		})
 	}
@@ -305,7 +317,7 @@ func TestCreateTicketResolution_DeepestWinsRegardlessOfListOrder(t *testing.T) {
 				listProjects:    func() ([]domain.Project, error) { return ordered, nil },
 			}
 
-			ticket := mustSucceed(t, runCreateTicket(t, stub, "/work/graph-ops/packages/sub", "タイトル"))
+			ticket := mustSucceed(t, runCreateTicket(t, stub, sp.paths, "/work/graph-ops/packages/sub", "タイトル"))
 			assertProject(t, sp, ticket, "proj-sub")
 		})
 	}
@@ -317,9 +329,9 @@ func TestCreateTicketResolution_DeepestWinsRegardlessOfListOrder(t *testing.T) {
 
 func TestCreateTicketResolution_SeparatorBoundary(t *testing.T) {
 	cases := []struct {
-		workDir string
-		cwd     string
-		want    string
+		localPath string
+		cwd       string
+		want      string
 	}{
 		{"/a/foo", "/a/foobar", "proj-blg"},
 		{"/a/foo", "/a/foobar/baz", "proj-blg"},
@@ -328,21 +340,21 @@ func TestCreateTicketResolution_SeparatorBoundary(t *testing.T) {
 		{"/a/foo/bar", "/a/foo", "proj-blg"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.workDir+"@"+tc.cwd, func(t *testing.T) {
+		t.Run(tc.localPath+"@"+tc.cwd, func(t *testing.T) {
 			sp := newStandardResolutionEnv(t)
-			sp.add(t, "proj-foo", "Foo", tc.workDir)
+			sp.add(t, "proj-foo", "Foo", tc.localPath)
 			sp.setCurrent(t, "proj-blg")
 
-			ticket := mustSucceed(t, runCreateTicket(t, sp.repo, tc.cwd, "タイトル"))
+			ticket := mustSucceed(t, runCreateTicket(t, sp.repo, sp.paths, tc.cwd, "タイトル"))
 			assertProject(t, sp, ticket, tc.want)
 		})
 	}
 }
 
-func TestCreateTicketResolution_WorkDirIsCleaned(t *testing.T) {
+func TestCreateTicketResolution_LocalPathIsCleaned(t *testing.T) {
 	cases := []struct {
-		workDir string
-		cwd     string
+		localPath string
+		cwd       string
 	}{
 		{"/a/foo/", "/a/foo"},
 		{"/a/foo//", "/a/foo/bar"},
@@ -350,25 +362,34 @@ func TestCreateTicketResolution_WorkDirIsCleaned(t *testing.T) {
 		{"/a/./foo", "/a/foo/bar"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.workDir+"@"+tc.cwd, func(t *testing.T) {
+		t.Run(tc.localPath+"@"+tc.cwd, func(t *testing.T) {
 			sp := newStandardResolutionEnv(t)
-			sp.add(t, "proj-foo", "Foo", tc.workDir)
+			sp.add(t, "proj-foo", "Foo", tc.localPath)
 			sp.setCurrent(t, "proj-blg")
 
-			ticket := mustSucceed(t, runCreateTicket(t, sp.repo, tc.cwd, "タイトル"))
+			ticket := mustSucceed(t, runCreateTicket(t, sp.repo, sp.paths, tc.cwd, "タイトル"))
 			assertProject(t, sp, ticket, "proj-foo")
 		})
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Rule 4: empty / relative work_dirs are never candidates. The store refuses
-// to persist either, so they are injected through a ListProjects stub (as
-// rows written before that validation, or via a path that skipped it, would
-// look).
+// Rule 4: empty / relative local paths are never candidates. SetProjectPath
+// refuses to persist a relative one, so they are injected straight into the
+// projectPaths map (as a hand-edited graph-config.json would look), with the
+// projects themselves added through a ListProjects stub.
 // ---------------------------------------------------------------------------
 
-func withExtraProjects(sp standardProjects, extra ...domain.Project) *resolutionStubRepo {
+type extraProject struct {
+	ID, Name, Path string
+}
+
+func withExtraProjects(sp standardProjects, extras ...extraProject) *resolutionStubRepo {
+	var extra []domain.Project
+	for _, e := range extras {
+		extra = append(extra, domain.Project{ID: e.ID, Name: e.Name})
+		sp.paths[e.ID] = e.Path
+	}
 	return &resolutionStubRepo{
 		GraphRepository: sp.repo,
 		listProjects: func() ([]domain.Project, error) {
@@ -383,42 +404,42 @@ func withExtraProjects(sp standardProjects, extra ...domain.Project) *resolution
 	}
 }
 
-func TestCreateTicketResolution_EmptyWorkDirNeverMatches(t *testing.T) {
+func TestCreateTicketResolution_EmptyLocalPathNeverMatches(t *testing.T) {
 	sp := newStandardResolutionEnv(t)
 	sp.setCurrent(t, "proj-blg")
-	stub := withExtraProjects(sp, domain.Project{ID: "proj-empty", Name: "Empty", WorkDir: ""})
+	stub := withExtraProjects(sp, extraProject{ID: "proj-empty", Name: "Empty", Path: ""})
 
-	ticket := mustSucceed(t, runCreateTicket(t, stub, "/somewhere/else", "タイトル"))
+	ticket := mustSucceed(t, runCreateTicket(t, stub, sp.paths, "/somewhere/else", "タイトル"))
 	assertProject(t, sp, ticket, "proj-blg")
 }
 
-func TestCreateTicketResolution_RelativeWorkDirExcluded(t *testing.T) {
+func TestCreateTicketResolution_RelativeLocalPathExcluded(t *testing.T) {
 	cases := []struct {
-		workDir string
-		cwd     string
+		localPath string
+		cwd       string
 	}{
 		{".", "/somewhere/else"},
 		{"graph-ops", "/somewhere/graph-ops"},
 		{"./tech-blog2", "/somewhere"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.workDir+"@"+tc.cwd, func(t *testing.T) {
+		t.Run(tc.localPath+"@"+tc.cwd, func(t *testing.T) {
 			sp := newStandardResolutionEnv(t)
 			sp.setCurrent(t, "proj-blg")
-			stub := withExtraProjects(sp, domain.Project{ID: "proj-rel", Name: "Rel", WorkDir: tc.workDir})
+			stub := withExtraProjects(sp, extraProject{ID: "proj-rel", Name: "Rel", Path: tc.localPath})
 
-			ticket := mustSucceed(t, runCreateTicket(t, stub, tc.cwd, "タイトル"))
+			ticket := mustSucceed(t, runCreateTicket(t, stub, sp.paths, tc.cwd, "タイトル"))
 			assertProject(t, sp, ticket, "proj-blg")
 		})
 	}
 }
 
-// In the real CLI rc.WorkDir is os.Getwd(), so a relative work_dir resolved
+// In the real CLI rc.WorkDir is os.Getwd(), so a relative local path resolved
 // with filepath.Abs would land exactly on the cwd and match. The virtual
 // cwd paths above can't expose that (Abs resolves against the test
 // process's real cwd), so this chdirs to a symlink-resolved D and passes D
 // as rc.WorkDir too.
-func TestCreateTicketResolution_RelativeWorkDirExcludedEvenWhenItResolvesToCwd(t *testing.T) {
+func TestCreateTicketResolution_RelativeLocalPathExcludedEvenWhenItResolvesToCwd(t *testing.T) {
 	sp := newStandardResolutionEnv(t)
 	sp.setCurrent(t, "proj-blg")
 	d, err := filepath.EvalSymlinks(t.TempDir())
@@ -439,8 +460,8 @@ func TestCreateTicketResolution_RelativeWorkDirExcludedEvenWhenItResolvesToCwd(t
 			if wd == "sub" {
 				cwd = filepath.Join(d, "sub")
 			}
-			stub := withExtraProjects(sp, domain.Project{ID: "proj-rel", Name: "Rel", WorkDir: wd})
-			ticket := mustSucceed(t, runCreateTicket(t, stub, cwd, "タイトル"))
+			stub := withExtraProjects(sp, extraProject{ID: "proj-rel", Name: "Rel", Path: wd})
+			ticket := mustSucceed(t, runCreateTicket(t, stub, sp.paths, cwd, "タイトル"))
 			assertProject(t, sp, ticket, "proj-blg")
 		})
 	}
@@ -450,11 +471,11 @@ func TestCreateTicketResolution_ExcludedProjectsDoNotBlockAbsoluteMatch(t *testi
 	sp := newStandardResolutionEnv(t)
 	sp.setCurrent(t, "proj-blg")
 	stub := withExtraProjects(sp,
-		domain.Project{ID: "proj-rel", Name: "Rel", WorkDir: "."},
-		domain.Project{ID: "proj-empty", Name: "Empty", WorkDir: ""},
+		extraProject{ID: "proj-rel", Name: "Rel", Path: "."},
+		extraProject{ID: "proj-empty", Name: "Empty", Path: ""},
 	)
 
-	ticket := mustSucceed(t, runCreateTicket(t, stub, "/work/graph-ops", "タイトル"))
+	ticket := mustSucceed(t, runCreateTicket(t, stub, sp.paths, "/work/graph-ops", "タイトル"))
 	assertProject(t, sp, ticket, "proj-ops")
 }
 
@@ -466,14 +487,14 @@ func TestCreateTicketResolution_NoCwdMatchFallsBackToCurrentProject(t *testing.T
 	sp := newStandardResolutionEnv(t)
 	sp.setCurrent(t, "proj-blg")
 
-	ticket := mustSucceed(t, runCreateTicket(t, sp.repo, "/tmp/unrelated", "タイトル"))
+	ticket := mustSucceed(t, runCreateTicket(t, sp.repo, sp.paths, "/tmp/unrelated", "タイトル"))
 	assertProject(t, sp, ticket, "proj-blg")
 }
 
 func TestCreateTicketResolution_NoCwdMatchNoCurrentProjectFails(t *testing.T) {
 	sp := newStandardResolutionEnv(t)
 
-	res := runCreateTicket(t, sp.repo, "/tmp/unrelated", "タイトル")
+	res := runCreateTicket(t, sp.repo, sp.paths, "/tmp/unrelated", "タイトル")
 	mustFail(t, res)
 	assertNoCurrentProjectMessage(t, res.err)
 	assertNoTicketsAnywhere(t, sp.repo)
@@ -487,7 +508,7 @@ func TestCreateTicketResolution_ListProjectsErrorDoesNotFallBack(t *testing.T) {
 		listProjects:    func() ([]domain.Project, error) { return nil, errors.New("boom: projects table unreadable") },
 	}
 
-	res := runCreateTicket(t, stub, "/work/graph-ops", "タイトル")
+	res := runCreateTicket(t, stub, sp.paths, "/work/graph-ops", "タイトル")
 	mustFail(t, res)
 	if !strings.Contains(res.err.Error(), "boom: projects table unreadable") {
 		t.Errorf("expected the ListProjects error to be surfaced, got %q", res.err)
@@ -503,7 +524,7 @@ func TestCreateTicketResolution_DanglingCurrentProjectFails(t *testing.T) {
 	sp := newStandardResolutionEnv(t)
 	stub := &resolutionStubRepo{GraphRepository: sp.repo, currentProjectID: stringPtr("proj-gone")}
 
-	res := runCreateTicket(t, stub, "/tmp/unrelated", "タイトル")
+	res := runCreateTicket(t, stub, sp.paths, "/tmp/unrelated", "タイトル")
 	mustFail(t, res)
 	if !strings.Contains(res.err.Error(), "proj-gone") {
 		t.Errorf("expected error to mention proj-gone, got %q", res.err)
@@ -515,7 +536,7 @@ func TestCreateTicketResolution_DanglingCurrentProjectFails(t *testing.T) {
 // D is symlink-resolved and the precondition os.Getwd() == D is asserted: on
 // macOS t.TempDir() lives under /var -> /private/var, and without this a
 // buggy os.Getwd()-based implementation would miss the match and pass anyway.
-func TestCreateTicketResolution_EmptyWorkDirIgnoresProcessCwd(t *testing.T) {
+func TestCreateTicketResolution_EmptyCwdIgnoresProcessCwd(t *testing.T) {
 	sp := newStandardResolutionEnv(t)
 	d, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -526,12 +547,12 @@ func TestCreateTicketResolution_EmptyWorkDirIgnoresProcessCwd(t *testing.T) {
 	if got, err := os.Getwd(); err != nil || got != d {
 		t.Fatalf("precondition: expected os.Getwd() == %q after chdir, got %q (err=%v)", d, got, err)
 	}
-	if m := findProjectForDir(mustListProjects(t, sp.repo), d); m == nil || m.ID != sp.id(t, "proj-tmp") {
+	if m := findProjectForDir(mustListProjects(t, sp.repo), sp.paths, d); m == nil || m.ID != sp.id(t, "proj-tmp") {
 		t.Fatalf("precondition: D should match proj-tmp if it were used as the cwd, got %+v", m)
 	}
 	sp.setCurrent(t, "proj-blg")
 
-	ticket := mustSucceed(t, runCreateTicket(t, sp.repo, "", "タイトル"))
+	ticket := mustSucceed(t, runCreateTicket(t, sp.repo, sp.paths, "", "タイトル"))
 	assertProject(t, sp, ticket, "proj-blg")
 	if n := sp.ticketCount(t, "proj-tmp"); n != 0 {
 		t.Fatalf("expected no ticket in proj-tmp, got %d", n)
@@ -554,7 +575,7 @@ func mustListProjects(t *testing.T, repo store.GraphRepository) []domain.Project
 func TestCreateTicketResolution_NoProjectsFails(t *testing.T) {
 	sp := newBareResolutionEnv(t)
 
-	res := runCreateTicket(t, sp.repo, "/work/graph-ops", "タイトル")
+	res := runCreateTicket(t, sp.repo, sp.paths, "/work/graph-ops", "タイトル")
 	mustFail(t, res)
 	assertNoCurrentProjectMessage(t, res.err)
 	assertNoTicketsAnywhere(t, sp.repo)
@@ -568,7 +589,7 @@ func TestCreateTicketResolution_ExplicitProjectBeatsCwdMatch(t *testing.T) {
 	sp := newStandardResolutionEnv(t)
 	sp.setCurrent(t, "proj-ops")
 
-	ticket := mustSucceed(t, runCreateTicket(t, sp.repo, "/work/graph-ops", "タイトル", "説明", "--project", sp.id(t, "proj-blg")))
+	ticket := mustSucceed(t, runCreateTicket(t, sp.repo, sp.paths, "/work/graph-ops", "タイトル", "説明", "--project", sp.id(t, "proj-blg")))
 	assertProject(t, sp, ticket, "proj-blg")
 }
 
@@ -579,7 +600,7 @@ func TestCreateTicketResolution_ExplicitProjectSkipsListProjects(t *testing.T) {
 		listProjects:    func() ([]domain.Project, error) { return nil, errors.New("must not be called") },
 	}
 
-	ticket := mustSucceed(t, runCreateTicket(t, stub, "/work/graph-ops", "タイトル", "--project", sp.id(t, "proj-blg")))
+	ticket := mustSucceed(t, runCreateTicket(t, stub, sp.paths, "/work/graph-ops", "タイトル", "--project", sp.id(t, "proj-blg")))
 	assertProject(t, sp, ticket, "proj-blg")
 	if stub.listProjectsCalled != 0 {
 		t.Fatalf("expected ListProjects not to be called with --project, called %d time(s)", stub.listProjectsCalled)
@@ -590,7 +611,7 @@ func TestCreateTicketResolution_ExplicitProjectWritesNothingToStderr(t *testing.
 	sp := newStandardResolutionEnv(t)
 	sp.setCurrent(t, "proj-ops")
 
-	res := runCreateTicket(t, sp.repo, "/work/graph-ops", "タイトル", "--project", sp.id(t, "proj-blg"))
+	res := runCreateTicket(t, sp.repo, sp.paths, "/work/graph-ops", "タイトル", "--project", sp.id(t, "proj-blg"))
 	ticket := mustSucceed(t, res)
 	assertProject(t, sp, ticket, "proj-blg")
 	if res.stderr != "" {
@@ -616,7 +637,7 @@ func TestCreateTicketResolution_StderrReportsCwdResolution(t *testing.T) {
 	sp := newStandardResolutionEnv(t)
 	sp.setCurrent(t, "proj-blg")
 
-	res := runCreateTicket(t, sp.repo, "/work/graph-ops", "タイトル")
+	res := runCreateTicket(t, sp.repo, sp.paths, "/work/graph-ops", "タイトル")
 	ticket := mustSucceed(t, res)
 	assertProject(t, sp, ticket, "proj-ops")
 	line := singleStderrLine(t, res.stderr)
@@ -631,7 +652,7 @@ func TestCreateTicketResolution_StderrReportsCurrentProjectFallback(t *testing.T
 	sp := newStandardResolutionEnv(t)
 	sp.setCurrent(t, "proj-blg")
 
-	res := runCreateTicket(t, sp.repo, "/tmp/unrelated", "タイトル")
+	res := runCreateTicket(t, sp.repo, sp.paths, "/tmp/unrelated", "タイトル")
 	ticket := mustSucceed(t, res)
 	assertProject(t, sp, ticket, "proj-blg")
 	line := singleStderrLine(t, res.stderr)
@@ -651,26 +672,50 @@ func TestCreateTicketResolution_StderrReportsCurrentProjectFallback(t *testing.T
 
 func TestFindProjectForDir_EdgeCases(t *testing.T) {
 	skipOnWindows(t)
-	projects := []domain.Project{
-		{ID: "root", WorkDir: "/"},
-		{ID: "a", WorkDir: "/a"},
+	projects := []domain.Project{{ID: "root"}, {ID: "a"}}
+	paths := map[string]string{"root": "/", "a": "/a"}
+	if got := findProjectForDir(projects, paths, "/b/c"); got == nil || got.ID != "root" {
+		t.Errorf("expected a root local path to contain /b/c, got %+v", got)
 	}
-	if got := findProjectForDir(projects, "/b/c"); got == nil || got.ID != "root" {
-		t.Errorf("expected a root work_dir to contain /b/c, got %+v", got)
-	}
-	if got := findProjectForDir(projects, "/a/b"); got == nil || got.ID != "a" {
+	if got := findProjectForDir(projects, paths, "/a/b"); got == nil || got.ID != "a" {
 		t.Errorf("expected /a to beat / for /a/b, got %+v", got)
 	}
-	if got := findProjectForDir(projects, "a/b"); got != nil {
+	if got := findProjectForDir(projects, paths, "a/b"); got != nil {
 		t.Errorf("expected a relative dir to match nothing, got %+v", got)
 	}
-	if got := findProjectForDir(projects, ""); got != nil {
+	if got := findProjectForDir(projects, paths, ""); got != nil {
 		t.Errorf("expected an empty dir to match nothing, got %+v", got)
 	}
-	if got := findProjectForDir(projects, "/a/b/../../a/"); got == nil || got.ID != "a" {
+	if got := findProjectForDir(projects, paths, "/a/b/../../a/"); got == nil || got.ID != "a" {
 		t.Errorf("expected dir to be cleaned before comparison, got %+v", got)
 	}
-	if got := findProjectForDir(nil, "/a"); got != nil {
+	if got := findProjectForDir(nil, paths, "/a"); got != nil {
 		t.Errorf("expected no match with no projects, got %+v", got)
+	}
+}
+
+// DFLT-00080: two environments sharing one DB, each with its own
+// projectPaths, both resolve their own directory to the same project.
+func TestCreateTicketResolution_TwoEnvironmentsResolveSameProject(t *testing.T) {
+	sp := newBareResolutionEnv(t)
+	shared := sp.add(t, "proj-shared", "Shared", "/home/a/shared")
+	sp.add(t, "proj-other", "Other", "/elsewhere")
+	sp.setCurrent(t, "proj-other")
+	envA := map[string]string{shared.ID: "/home/a/shared"}
+	envB := map[string]string{shared.ID: "/home/b/shared"}
+
+	for _, tc := range []struct {
+		name  string
+		paths map[string]string
+		cwd   string
+	}{{"A", envA, "/home/a/shared/src"}, {"B", envB, "/home/b/shared"}} {
+		p, source, err := resolveCreateTicketProject(sp.repo, tc.cwd, tc.paths)
+		if err != nil || p == nil || p.ID != shared.ID || source != resolvedFromCurrentDirectory {
+			t.Errorf("env %s: got %+v via %q (err %v), want Shared from the current directory", tc.name, p, source, err)
+		}
+	}
+	// Env A's path means nothing in env B.
+	if p, source, _ := resolveCreateTicketProject(sp.repo, "/home/a/shared", envB); p == nil || p.ID == shared.ID || source != resolvedFromCurrentProject {
+		t.Errorf("env B must not resolve env A's directory to Shared, got %+v via %q", p, source)
 	}
 }

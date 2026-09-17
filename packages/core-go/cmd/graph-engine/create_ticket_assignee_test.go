@@ -125,7 +125,7 @@ func TestUpdateTicketCommandIsUnknown(t *testing.T) {
 	if err := repo.Init(); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	proj, err := repo.CreateProject("P", "TEST", dir)
+	proj, err := repo.CreateProject("P", "TEST")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}

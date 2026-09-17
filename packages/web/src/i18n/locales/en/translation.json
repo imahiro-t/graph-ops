@@ -1,6 +1,7 @@
 {
   "common": {
-    "justNow": "just now"
+    "justNow": "just now",
+    "closeDialog": "Close"
   },
   "header": {
     "subtitle": "Ticket & Execution Graph Management",
@@ -60,22 +61,35 @@
   },
   "createProjectModal": {
     "title": "Create New Project",
-    "description": "A project scopes its own ticket list, working directory, and ticket/node ID prefix.",
+    "description": "A project scopes its own ticket list and ticket/node ID prefix. The local path is saved only in this environment's settings file (graph-config.json), not in the DB.",
     "nameLabel": "Name *",
     "namePlaceholder": "e.g. Payments Service",
     "prefixLabel": "ID prefix (optional, up to 5 alphanumeric characters)",
     "prefixPlaceholder": "Auto-generated from the name if left blank",
-    "workDirLabel": "Working folder (absolute path) *",
-    "workDirPlaceholder": "e.g. /Users/me/dev/payments-service"
+    "localPathLabel": "Local path (this environment, absolute path, optional)",
+    "localPathPlaceholder": "e.g. /Users/me/dev/payments-service"
+  },
+  "projectSetupModal": {
+    "title": "Set Up a Project for This Directory",
+    "description": "No project is mapped to {{dir}} in this environment's local settings. Create a new project, or pick an existing one from the DB (for example, one a teammate already created). Either way, the mapping to this directory is saved to this environment's graph-config.json.",
+    "modeLabel": "How to set up",
+    "modeCreate": "Create new",
+    "modeExisting": "Choose an existing project",
+    "noExistingProjects": "There are no projects in the DB yet, so there is nothing to choose from.",
+    "existingListLabel": "Project",
+    "notSet": "Not set",
+    "overwriteWarning": "This project's local path {{current}} will be replaced with {{next}}.",
+    "confirmExisting": "Use this project",
+    "createdButLocalPathNotSavedChooseExisting": "Project \"{{name}}\" was created in the DB, but saving its local path for this environment failed. Creating it again would duplicate the project, so choose \"{{name}}\" in the list below and press \"Use this project\" to set its local path.",
+    "createdButLocalPathNotSavedUseSettings": "Project \"{{name}}\" was created in the DB, but saving its local path for this environment failed. Creating it again would duplicate the project, so instead set its local path under Project Management in the App Settings tab (Global Settings)."
   },
   "createModal": {
     "title": "Create New Ticket",
     "descriptionPrefix": "The input is passed to the",
-    "descriptionSuffix": "skill, and Claude Code creates the ticket (no graph is built yet).",
-    "titleLabel": "Title *",
-    "titlePlaceholder": "e.g. Revisit the account-unlock flow after a failed login",
-    "descriptionLabel": "Description",
-    "descriptionPlaceholder": "Describe the requirements and background...",
+    "descriptionSuffix": "skill, and Claude Code works out a title and description and creates the ticket once you confirm them (no graph is built yet).",
+    "requestLabel": "What kind of ticket do you want to create? *",
+    "requestPlaceholder": "e.g. I want to revisit the account-unlock flow after a failed login. Right now users have to contact support to unlock…",
+    "shortcutHint": "Press Cmd (⌘) / Ctrl + Enter to create",
     "close": "Close",
     "cancel": "Cancel",
     "submit": "Create"
@@ -175,7 +189,9 @@
     "title": "Launch Claude Code",
     "descriptionPrefix": "The prompt you enter starts",
     "descriptionSuffix": "interactively in an external terminal. Handle permission prompts and any further interaction there.",
+    "promptLabel": "Prompt",
     "placeholder": "Command or prompt to send to Claude Code...",
+    "shortcutHint": "Press Cmd (⌘) / Ctrl + Enter to launch",
     "launch": "Launch"
   },
   "claudeLaunch": {
@@ -187,7 +203,7 @@
     "executeIncompleteNodes": "Please execute the incomplete nodes of ticket {{ticketId}}.",
     "refineTicket": "/graph-ops:refine-ticket {{ticketId}} Pin down the completion criteria and the Why (background and purpose).",
     "processTicket": "/graph-ops:process-ticket {{ticketId}}",
-    "createTicket": "/graph-ops:create-ticket Create a ticket with title \"{{title}}\", description \"{{description}}\"."
+    "createTicket": "/graph-ops:create-ticket Create a ticket, working out its title and description from the following request.\n\nRequest:\n{{request}}"
   },
   "graphViewer": {
     "manualNode": "Manual operation node",
@@ -234,8 +250,10 @@
       "label": "Scope",
       "global": "Global Settings",
       "project": "Project Settings",
+      "projectLabel": "Project",
       "projectPlaceholder": "Select a project",
-      "noProjectSelected": "No project is selected in the app. Select a project from the switcher first to edit project-scoped settings."
+      "noProjectSelected": "No project is selected in the app. Select a project from the switcher first to edit project-scoped settings.",
+      "localPathNotSet": "This project has no local path in this environment, so its project settings cannot be read or written. Set its local path under Project Management in the App Settings tab (Global Settings)."
     },
     "tabs": {
       "nodeTypes": "Node Types",
@@ -267,6 +285,7 @@
       "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the layer below.",
       "addType": "Add Node Type",
       "newTypePlaceholder": "e.g. custom_lint",
+      "newTypeLabel": "New node type name",
       "invalidTypeName": "Enter a name with no \"/\", \"\\\", \".\" or \"..\".",
       "deleteType": "Delete this node type's override",
       "defaultBadge": "Default",
@@ -395,11 +414,13 @@
       },
       "projects": {
         "title": "Project Management",
-        "description": "Edit each project's name and working directory (where Claude Code is launched), or delete a project.",
+        "description": "Edit each project's name and local path (where Claude Code is launched and project settings are stored), or delete a project.",
         "empty": "No projects yet.",
         "delete": "Delete project",
         "nameLabel": "Project name",
-        "workDirLabel": "Working directory",
+        "localPathLabel": "Local path (this environment)",
+        "localPathHint": "The local path is not stored in the DB -- only in this environment's graph-config.json -- so it never affects teammates sharing the same DB. Save it empty to unset it.",
+        "notSet": "Not set",
         "confirmDelete": "This will delete project \"{{name}}\" ({{id}}). Every ticket, node, and artifact under this project will be permanently deleted, and this action cannot be undone. Are you sure you want to delete it?"
       }
     }
@@ -425,6 +446,8 @@
     "INVALID_MAX_ITERATIONS": "Max iterations must be an integer of 1 or greater.",
     "WORKFLOW_NODES_LOCKED": "The workflow's node structure (skeleton) is defined by the plugin default only and can't be overridden. Add or edit review gates from the Review Gates tab instead.",
     "INVALID_REPORT_TEMPLATE": "The report template is missing required structural markers.",
+    "PROJECT_LOCAL_PATH_NOT_SET": "This project has no local path in this environment. Set its local path under Project Management in the App Settings tab (Global Settings).",
+    "PROJECT_CREATED_LOCAL_PATH_NOT_SAVED": "The project was created in the DB, but saving its local path for this environment failed. Do not create it again; set its local path under Project Management in the App Settings tab (Global Settings) instead.",
     "UNKNOWN": "An unexpected error occurred. Please try again."
   }
 }
