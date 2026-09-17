@@ -23,27 +23,26 @@
 // the new project preselected, so confirming saves the path via PATCH; the
 // header entry points the user at the settings screen instead.
 //
-// Focus (WCAG 2.4.3 / 2.1.2): opening moves focus into the dialog, Tab and
-// Shift+Tab wrap inside it, Escape closes it, and closing returns focus to
-// the element that had it before opening -- or, when that element is gone
-// (the header menu item unmounts as the menu closes; the `graph-engine ui`
-// entry opens with nothing focused), to `returnFocusRef`.
+// Focus (WCAG 2.4.3 / 2.1.2) is the shared useModalDialog hook (DFLT-00074):
+// opening moves focus into the dialog, Tab and Shift+Tab wrap inside it,
+// Escape closes it (but not while an IME composition is in progress), and
+// closing returns focus to the element that had it before opening -- or,
+// when that element is gone (the header menu item unmounts as the menu
+// closes; the `graph-engine ui` entry opens with nothing focused), to
+// `returnFocusRef`.
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { Project } from '../types';
 import { apiFetch } from '../lib/apiFetch';
 import { errorMessage, localizedApiErrorMessage, parseApiError, translateErrorCode } from '../lib/apiError';
-import { useLatest } from '../hooks/useLatest';
+import { useModalDialog } from '../hooks/useModalDialog';
 
 type Mode = 'create' | 'existing';
 
 // Error code POST /api/projects returns when the DB insert succeeded but the
 // local path could not be saved (see internal/httpserver/projects.go).
 const CREATED_LOCAL_PATH_NOT_SAVED = 'PROJECT_CREATED_LOCAL_PATH_NOT_SAVED';
-
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 interface Props {
   isOpen: boolean;
@@ -65,46 +64,11 @@ interface Props {
   onProjectsChanged?: () => void | Promise<void>;
   // Where focus goes on close when the element focused before opening is no
   // longer in the document (or nothing was focused).
-  returnFocusRef?: React.RefObject<HTMLElement | null>;
+  returnFocusRef?: React.RefObject<HTMLElement>;
 }
 
 const inputClass =
-  'w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500 disabled:opacity-60';
-
-// Tab stops inside `root`, in DOM order. A radio group is one stop: only its
-// checked radio (or its first one when none is checked) is kept.
-function tabStops(root: HTMLElement): HTMLElement[] {
-  const all = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
-  const seenGroups = new Set<string>();
-  const stops: HTMLElement[] = [];
-  for (const el of all) {
-    if (el instanceof HTMLInputElement && el.type === 'radio' && el.name) {
-      if (seenGroups.has(el.name)) continue;
-      seenGroups.add(el.name);
-      const group = all.filter(
-        (o): o is HTMLInputElement => o instanceof HTMLInputElement && o.type === 'radio' && o.name === el.name
-      );
-      stops.push(group.find(r => r.checked) ?? group[0]);
-      continue;
-    }
-    stops.push(el);
-  }
-  return stops;
-}
-
-// Whether `active` is the tab stop `stop` (any radio of the same group counts).
-function isStop(active: Element | null, stop: HTMLElement | undefined): boolean {
-  if (!active || !stop) return false;
-  if (active === stop) return true;
-  return (
-    active instanceof HTMLInputElement &&
-    stop instanceof HTMLInputElement &&
-    active.type === 'radio' &&
-    stop.type === 'radio' &&
-    active.name !== '' &&
-    active.name === stop.name
-  );
-}
+  'w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60';
 
 export const ProjectSetupModal: React.FC<Props> = ({
   isOpen,
@@ -130,10 +94,16 @@ export const ProjectSetupModal: React.FC<Props> = ({
   // before that create (to find the new one once the list is re-fetched).
   const [partialCreate, setPartialCreate] = useState<{ name: string; knownIds: string[] } | null>(null);
 
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useLatest(onClose);
-  const offerExistingRef = useLatest(offerExisting);
-  const returnFocusRefRef = useLatest(returnFocusRef);
+  // Initial focus target: the "create" mode radio for the `graph-engine ui`
+  // entry, the name input for the create-only header entry. The re-seed
+  // below always starts in "create" mode, so both exist on open.
+  const initialFocusRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useModalDialog<HTMLDivElement>({
+    isOpen,
+    onEscape: onClose,
+    initialFocusRef,
+    returnFocusFallbackRef: returnFocusRef
+  });
 
   // Re-seed the form whenever the dialog is (re)opened for a directory.
   useEffect(() => {
@@ -146,67 +116,6 @@ export const ProjectSetupModal: React.FC<Props> = ({
     setError('');
     setPartialCreate(null);
   }, [isOpen, directory]);
-
-  // Focus management while open: initial focus, Tab trap, Escape, and
-  // returning focus on close.
-  useEffect(() => {
-    if (!isOpen) return;
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    // The RefObject itself is stable; its .current is read at close time.
-    const fallbackHolder = returnFocusRefRef.current;
-    const dialog = dialogRef.current;
-    if (dialog) {
-      // The re-seed above always starts in "create" mode.
-      const initial = offerExistingRef.current
-        ? dialog.querySelector<HTMLElement>('input[name="project-setup-mode"][value="create"]')
-        : dialog.querySelector<HTMLElement>('#project-setup-name');
-      (initial ?? tabStops(dialog)[0])?.focus();
-    }
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        // Escape during IME composition cancels the conversion; it must not
-        // close the dialog (and throw away the typed name).
-        if (e.isComposing || e.keyCode === 229) return;
-        e.preventDefault();
-        e.stopPropagation();
-        onCloseRef.current();
-        return;
-      }
-      if (e.key !== 'Tab') return;
-      const root = dialogRef.current;
-      if (!root) return;
-      const stops = tabStops(root);
-      if (stops.length === 0) {
-        e.preventDefault();
-        return;
-      }
-      const first = stops[0];
-      const last = stops[stops.length - 1];
-      const active = document.activeElement;
-      if (!active || !root.contains(active)) {
-        e.preventDefault();
-        (e.shiftKey ? last : first).focus();
-      } else if (e.shiftKey && isStop(active, first)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && isStop(active, last)) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', onKeyDown, true);
-
-    return () => {
-      document.removeEventListener('keydown', onKeyDown, true);
-      const fallback = fallbackHolder?.current ?? null;
-      const target =
-        previouslyFocused && previouslyFocused !== document.body && previouslyFocused.isConnected
-          ? previouslyFocused
-          : fallback;
-      target?.focus();
-    };
-  }, [isOpen, onCloseRef, offerExistingRef, returnFocusRefRef]);
 
   // After a partial create, preselect the new project once the re-fetched
   // list contains it (`graph-engine ui` entry only -- it has the list).
@@ -305,6 +214,7 @@ export const ProjectSetupModal: React.FC<Props> = ({
       } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
       <input
+        ref={value === 'create' ? initialFocusRef : undefined}
         type="radio"
         name="project-setup-mode"
         value={value}
@@ -352,7 +262,7 @@ export const ProjectSetupModal: React.FC<Props> = ({
       <button
         type="submit"
         disabled={saving || submitDisabled}
-        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-xs font-semibold text-white shadow-xs transition flex items-center gap-1.5"
+        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white shadow-xs transition flex items-center gap-1.5"
       >
         {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />}
         {submitLabel}
@@ -367,7 +277,8 @@ export const ProjectSetupModal: React.FC<Props> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby="project-setup-title"
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md p-6 shadow-2xl"
+        tabIndex={-1}
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md p-6 shadow-2xl focus:outline-none"
       >
         <h2 id="project-setup-title" className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">
           {offerExisting ? t('projectSetupModal.title') : t('createProjectModal.title')}
@@ -404,6 +315,7 @@ export const ProjectSetupModal: React.FC<Props> = ({
                 {t('createProjectModal.nameLabel')}
               </label>
               <input
+                ref={offerExisting ? undefined : initialFocusRef}
                 id="project-setup-name"
                 type="text"
                 required

@@ -244,6 +244,22 @@ describe('ProjectSetupModal', () => {
       expect(screen.getByRole('button', { name: 'opener' })).toHaveFocus();
     });
 
+    // Carried over from the removed CreateProjectModal (DFLT-00074), whose
+    // role ProjectSetupModal's create-only header entry took over.
+    it('header entry: is a modal dialog named by its title with the three inputs labelled, and Cancel closes it', async () => {
+      const user = userEvent.setup();
+      const { onClose } = renderModal({ directory: '', offerExisting: false });
+
+      const dialog = screen.getByRole('dialog', { name: i18n.t('createProjectModal.title') });
+      expect(dialog).toHaveAttribute('aria-modal', 'true');
+      expect(screen.getByLabelText(i18n.t('createProjectModal.nameLabel'))).toHaveAttribute('placeholder', i18n.t('createProjectModal.namePlaceholder'));
+      expect(screen.getByLabelText(i18n.t('createProjectModal.prefixLabel'))).toHaveAttribute('maxLength', '5');
+      expect(screen.getByLabelText(i18n.t('createProjectModal.localPathLabel'))).toHaveAttribute('placeholder', i18n.t('createProjectModal.localPathPlaceholder'));
+
+      await user.click(screen.getByRole('button', { name: i18n.t('createModal.cancel') }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
     it('does not close on Escape while an IME composition is in progress (isComposing / keyCode 229)', () => {
       const { onClose } = renderModal();
       const nameInput = screen.getByLabelText(i18n.t('createProjectModal.nameLabel'));
