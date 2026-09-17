@@ -121,13 +121,14 @@ Once both seed nodes (`plan`, `plan_review`) pass, `get-executable` returns an e
         ```bash
         graph-engine wait-node "<nodeId>" ["<nodeId>" ...]
         ```
-        It polls the DB and exits as soon as any given node leaves `TODO`, printing `{"result":"changed","nodes":[{"id","status","rejection_reason"?}]}` (exit 0). Exit 2 means it timed out, exit 1 an error.
+        It polls the DB and exits as soon as any given node leaves `TODO`, printing `{"result":"changed","nodes":[{"id","status","rejection_reason"?}]}` (exit 0). Without `--timeout` it never times out; exit 1 means an error, e.g. `node <id> not found` when the gate was deleted while waiting.
      2. Tell the user, **in plain text**, what is being approved (the gate's name and the gist of the artifacts right before it) and that they can either answer approve/reject here in the terminal or approve/reject it in the Web UI. Then end your turn. **Do not use AskUserQuestion here**: it keeps the turn open, so the background watcher's completion notification could never resume the session when the decision is made in the Web UI.
      3. You resume either because the user answered in the terminal or because the `wait-node` notification arrived. Either way, **first run `get-ticket` and check the gate's current status** before calling anything:
         - Still `TODO` and the user answered in the terminal: record their answer with `graph-engine complete-node "<nodeId>" true`, or for a rejection `graph-engine complete-node "<nodeId>" false --reason "<text>"` (a rejection requires a reason; this call records it as the node's `rejection_reason` artifact). Then continue as for the matching case below.
         - Already `DONE` (approved in the Web UI): **do not call `complete-node`** -- go straight back to `get-executable` (this step 3 loop).
         - Already `REJECTED` (rejected in the Web UI): **do not call `complete-node`** -- go to step 4's triage.
-        - Still `TODO` and `wait-node` ended with exit 2 or 1: re-check, then start the watcher again, or tell the user what happened if it keeps failing.
+        - The gate no longer exists (`wait-node` exited 1 with `not found`, e.g. the graph was rebuilt while waiting): **do not restart the watcher** -- go back to `get-executable` (this step 3 loop), which works from the ticket's current graph.
+        - Still `TODO` and `wait-node` ended with exit 1 for another reason: re-check, then start the watcher again, or tell the user what happened if it keeps failing.
      4. A leftover notification can arrive after the session has already moved on (for example the user answered in the terminal first, and the watcher then saw that same change). Check with `get-ticket` as above; if the gate was already handled, do nothing -- never call `complete-node` or `reopen-nodes` twice for one decision. If the session moves on while a watcher is still running, you may stop that background task.
      Do not ask the user *which nodes to redo* -- that triage is this skill's job, not theirs (see step 4).
    - If it's empty and only a manual `release` node remains, ask the user to confirm the release/deployment has actually been carried out, then complete it.

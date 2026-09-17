@@ -293,7 +293,7 @@ Commands:
                                            and exits 2. An unknown node id is an error (exit 1) before any
                                            waiting starts. process-ticket runs this in the background at an
                                            approval_gate so a Web UI approve/reject resumes the session.)
-  ui                                     (opens the local Web UI, in the default browser, on the project
+  ui                                      (opens the local Web UI, in the default browser, on the project
                                            whose work_dir matches the current directory -- auto-starting the
                                            UI server first if it isn't already running. If no project matches,
                                            opens the Web UI's new-project dialog pre-filled with the current
