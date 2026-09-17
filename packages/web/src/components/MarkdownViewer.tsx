@@ -82,8 +82,11 @@ export const MarkdownViewer: React.FC<Props> = ({ content, scrollable = false, l
       data-testid="markdown-viewer"
       // max-h-64 (not h-64) so a short artifact still renders at its own
       // height instead of being stretched to 16rem with dead space below.
+      // blue-500 focus ring rather than indigo-400 -- see GherkinViewer for
+      // the contrast numbers; outline-none leaves the ring as the only focus
+      // indicator, so it has to clear 3:1 on the light theme too.
       className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3 text-xs overflow-x-auto shadow-inner${
-        scrollable ? ' max-h-64 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400' : ''
+        scrollable ? ' max-h-64 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500' : ''
       }`}
       tabIndex={scrollable ? 0 : undefined}
       role={scrollable && label ? 'region' : undefined}

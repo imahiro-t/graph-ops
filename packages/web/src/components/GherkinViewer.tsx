@@ -142,8 +142,15 @@ export const GherkinViewer: React.FC<Props> = ({ content, scrollable = false, la
       data-testid="gherkin-viewer"
       // max-h-64 (not h-64) so a short artifact still renders at its own
       // height instead of being stretched to 16rem with dead space below.
+      // The focus ring is blue-500 (not indigo-400): outline-none removes the
+      // UA's own focus indicator, so the ring alone has to clear WCAG 1.4.11 /
+      // 2.4.11's 3:1 against what it sits on. indigo-400 (#818cf8) only
+      // reached 2.85-2.98:1 on the light theme's white/slate-50 backgrounds;
+      // blue-500 (#3b82f6) is 3.68:1 / 3.52:1 there and 3.98:1 / 4.85:1 on
+      // dark slate-800/900 -- and it matches settings/TemplateTextEditor,
+      // the other scroll region in this app.
       className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3 font-mono text-xs overflow-x-auto shadow-inner${
-        scrollable ? ' max-h-64 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400' : ''
+        scrollable ? ' max-h-64 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500' : ''
       }`}
       tabIndex={scrollable ? 0 : undefined}
       role={scrollable && label ? 'region' : undefined}

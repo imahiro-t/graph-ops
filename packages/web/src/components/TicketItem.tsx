@@ -387,6 +387,21 @@ export const TicketItem: React.FC<Props> = ({
     );
   };
 
+  // Accessible name for a capped inline preview (GherkinViewer /
+  // MarkdownViewer with `scrollable`). The artifact name alone is not unique:
+  // a review loop-back re-runs a node, so the same node -- and even more so
+  // the Artifacts tab, which lists the whole ticket -- can hold several
+  // artifacts sharing a name (two "実装メモ", two review verdicts, ...).
+  // Sighted users tell those apart by position and by the timestamp the
+  // Gherkin tab already prints; adding created_at to the name gives assistive
+  // technology the same distinguishing information, in the same wording the
+  // UI shows (DFLT-00085 accessibility review, condition 2).
+  const artifactScrollLabel = (artifact: { name: string; created_at: string }) =>
+    t('ticketItem.artifactScrollRegion', {
+      name: artifact.name,
+      timestamp: formatDateTime(artifact.created_at, i18n.language)
+    });
+
   const description = ticket.description || '';
 
   const totalNodes = ticket.nodes.length;
@@ -1309,7 +1324,7 @@ export const TicketItem: React.FC<Props> = ({
                                         <GherkinViewer
                                           content={art.content}
                                           scrollable
-                                          label={t('ticketItem.artifactScrollRegion', { name: art.name })}
+                                          label={artifactScrollLabel(art)}
                                         />
                                       </div>
                                     )}
@@ -1332,7 +1347,7 @@ export const TicketItem: React.FC<Props> = ({
                                         <MarkdownViewer
                                           content={art.content}
                                           scrollable
-                                          label={t('ticketItem.artifactScrollRegion', { name: art.name })}
+                                          label={artifactScrollLabel(art)}
                                         />
                                       </div>
                                     )}
@@ -1366,7 +1381,7 @@ export const TicketItem: React.FC<Props> = ({
                             <GherkinViewer
                               content={g.content}
                               scrollable
-                              label={t('ticketItem.artifactScrollRegion', { name: g.name })}
+                              label={artifactScrollLabel(g)}
                             />
                           )}
                         </div>
@@ -1435,7 +1450,7 @@ export const TicketItem: React.FC<Props> = ({
                               <GherkinViewer
                                 content={a.content}
                                 scrollable
-                                label={t('ticketItem.artifactScrollRegion', { name: a.name })}
+                                label={artifactScrollLabel(a)}
                               />
                             </div>
                           ) : a.type === 'text' && a.content ? (
@@ -1444,7 +1459,7 @@ export const TicketItem: React.FC<Props> = ({
                               <MarkdownViewer
                                 content={a.content}
                                 scrollable
-                                label={t('ticketItem.artifactScrollRegion', { name: a.name })}
+                                label={artifactScrollLabel(a)}
                               />
                             </div>
                           ) : a.type === 'image' ? (
