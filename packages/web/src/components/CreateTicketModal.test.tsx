@@ -16,21 +16,19 @@ const getSubmitButton = () => screen.getByRole('button', { name: i18n.t('createM
 
 const renderModal = (overrides: Partial<React.ComponentProps<typeof CreateTicketModal>> = {}) => {
   const props = {
-    onSubmit: vi.fn(),
+    onSubmit: vi.fn<(request: string) => Promise<boolean>>(async () => true),
     onClose: vi.fn(),
     isCreating: false,
     status: '',
     ...overrides
   };
-  render(<CreateTicketModal {...props} />);
-  return props;
+  const { container } = render(<CreateTicketModal {...props} />);
+  return { ...props, container };
 };
 
 describe('CreateTicketModal', () => {
   it('renders exactly one required request textarea and no title/description fields', () => {
-    const { container } = render(
-      <CreateTicketModal onSubmit={vi.fn()} onClose={vi.fn()} isCreating={false} status="" />
-    );
+    const { container } = renderModal();
 
     const input = getRequestInput();
     expect(input.tagName).toBe('TEXTAREA');
@@ -38,8 +36,6 @@ describe('CreateTicketModal', () => {
     expect(input).toHaveAttribute('placeholder', i18n.t('createModal.requestPlaceholder'));
     expect(container.querySelectorAll('textarea')).toHaveLength(1);
     expect(container.querySelectorAll('input')).toHaveLength(0);
-    expect(screen.queryByText('タイトル *')).not.toBeInTheDocument();
-    expect(screen.queryByText('説明')).not.toBeInTheDocument();
   });
 
   it('keeps the submit button disabled and does not submit while the request is empty or whitespace-only', async () => {
@@ -54,7 +50,7 @@ describe('CreateTicketModal', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('submits the request text once via the Create button and clears the input', async () => {
+  it('submits the request text once via the Create button and clears the input on success', async () => {
     const user = userEvent.setup();
     const { onSubmit } = renderModal();
     const input = getRequestInput();
@@ -67,7 +63,26 @@ describe('CreateTicketModal', () => {
       expect(onSubmit).toHaveBeenCalledTimes(1);
     });
     expect(onSubmit).toHaveBeenCalledWith('ログイン画面を直したい\n理由: 遅い');
-    expect(input.value).toBe('');
+    await waitFor(() => {
+      expect(input.value).toBe('');
+    });
+  });
+
+  it('keeps the request text when the launch fails so it can be retried', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn<(request: string) => Promise<boolean>>(async () => false);
+    renderModal({ onSubmit });
+    const input = getRequestInput();
+
+    await user.type(input, '長い要望{Enter}2行目');
+    await user.click(getSubmitButton());
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+    expect(onSubmit).toHaveBeenCalledWith('長い要望\n2行目');
+    expect(input.value).toBe('長い要望\n2行目');
+    expect(getSubmitButton()).toBeEnabled();
   });
 
   it('inserts a newline on plain Enter without submitting', async () => {

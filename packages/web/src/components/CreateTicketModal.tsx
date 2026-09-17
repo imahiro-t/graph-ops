@@ -10,7 +10,9 @@ interface Props {
   // launches the terminal, and closes this modal itself on success -- that's
   // why the launch state (isCreating/status) is passed in rather than owned
   // here: App.tsx also resets it right before reopening the modal.
-  onSubmit: (request: string) => Promise<void> | void;
+  // Resolves to whether the launch succeeded, so a failed launch can keep
+  // the request text for a retry.
+  onSubmit: (request: string) => Promise<boolean>;
   onClose: () => void;
   isCreating: boolean;
   status: string;
@@ -31,9 +33,11 @@ export const CreateTicketModal: React.FC<Props> = ({ onSubmit, onClose, isCreati
     // The button's disabled state doesn't cover the Cmd/Ctrl+Enter path, so
     // guard here too -- a whitespace/newline-only request is never sent.
     if (isCreating || !request.trim()) return;
-    const submitted = request;
-    setRequest('');
-    await onSubmit(submitted);
+    const succeeded = await onSubmit(request);
+    // Only clear the input on success (same as ClaudeRunnerModal) -- a
+    // failed launch keeps the modal open with the request intact so the user
+    // can retry without retyping a possibly long, multi-line request.
+    if (succeeded) setRequest('');
   };
 
   return (

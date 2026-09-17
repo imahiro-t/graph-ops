@@ -368,8 +368,10 @@ export const App: React.FC = () => {
   // those are separate, later steps in the ticket lifecycle now.
   const { isLaunching: isCreating, lastMessage: createStatus, launch: runCreateTicket, reset: resetCreateStatus } = useClaudeLaunch(fetchAllTickets);
 
-  const handleCreateTicket = async (request: string) => {
-    if (!request.trim()) return;
+  // Empty/whitespace-only requests never reach here: CreateTicketModal guards
+  // both the button and the Cmd/Ctrl+Enter path. Returns whether the launch
+  // succeeded so the modal keeps the request text after a failure.
+  const handleCreateTicket = async (request: string): Promise<boolean> => {
     // Assignment is deliberately never decided at creation time -- it's set
     // afterward via TicketItem's "assign to me" button (see
     // ticket.assignee), so the prompt never mentions one. The title and
@@ -384,6 +386,7 @@ export const App: React.FC = () => {
       resetCreateStatus();
       setIsCreateOpen(false);
     }
+    return succeeded;
   };
 
   // Filter calculations
