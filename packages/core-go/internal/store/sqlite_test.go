@@ -120,12 +120,11 @@ func TestTicketCRUD(t *testing.T) {
 	}
 }
 
-// TestTicketPriorityCRUD covers DFLT-00048's completion criteria: a ticket
-// created without a priority reads back unset (nil), can be set to each of
-// the three levels, changed between them, and explicitly cleared back to
-// unset -- exercising TicketPatch.Priority's double-pointer three-state
-// contract (nil patch = unchanged, *patch == nil = clear, *patch != nil =
-// set) the same way TestTicketCRUD exercises Title.
+// TestTicketPriorityCRUD covers DFLT-00048's completion criteria as revised
+// by DFLT-00083: a ticket created without a priority reads back as MEDIUM
+// (there is no unset state), can be changed between levels, and a patch
+// that doesn't touch Priority leaves it unchanged -- TicketPatch.Priority's
+// two-state contract (nil = unchanged, non-nil = set).
 func TestTicketPriorityCRUD(t *testing.T) {
 	repo, proj := newTestRepoWithProject(t)
 
@@ -135,34 +134,32 @@ func TestTicketPriorityCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
-	if created.Priority != nil {
-		t.Errorf("a newly created ticket should have no priority set, got %+v", created.Priority)
+	if created.Priority != domain.TicketPriorityMedium {
+		t.Errorf("a newly created ticket should default to MEDIUM, got %q", created.Priority)
 	}
 
 	high := domain.TicketPriorityHigh
-	highPtr := &high
-	updated, err := repo.UpdateTicket(created.ID, TicketPatch{Priority: &highPtr})
+	updated, err := repo.UpdateTicket(created.ID, TicketPatch{Priority: &high})
 	if err != nil {
 		t.Fatalf("UpdateTicket(priority=HIGH): %v", err)
 	}
-	if updated.Priority == nil || *updated.Priority != domain.TicketPriorityHigh {
-		t.Fatalf("expected priority HIGH, got %+v", updated.Priority)
+	if updated.Priority != domain.TicketPriorityHigh {
+		t.Fatalf("expected priority HIGH, got %q", updated.Priority)
 	}
 
 	got, err := repo.GetTicket(created.ID)
-	if err != nil || got == nil || got.Priority == nil || *got.Priority != domain.TicketPriorityHigh {
+	if err != nil || got == nil || got.Priority != domain.TicketPriorityHigh {
 		t.Fatalf("GetTicket after setting priority: %v, %+v", err, got)
 	}
 
 	// Change to another value.
 	low := domain.TicketPriorityLow
-	lowPtr := &low
-	updated, err = repo.UpdateTicket(created.ID, TicketPatch{Priority: &lowPtr})
+	updated, err = repo.UpdateTicket(created.ID, TicketPatch{Priority: &low})
 	if err != nil {
 		t.Fatalf("UpdateTicket(priority=LOW): %v", err)
 	}
-	if updated.Priority == nil || *updated.Priority != domain.TicketPriorityLow {
-		t.Fatalf("expected priority LOW after change, got %+v", updated.Priority)
+	if updated.Priority != domain.TicketPriorityLow {
+		t.Fatalf("expected priority LOW after change, got %q", updated.Priority)
 	}
 
 	// A patch that doesn't touch Priority at all must leave it unchanged.
@@ -171,22 +168,12 @@ func TestTicketPriorityCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateTicket(title only): %v", err)
 	}
-	if updated.Priority == nil || *updated.Priority != domain.TicketPriorityLow {
-		t.Errorf("priority should be untouched by an unrelated patch, got %+v", updated.Priority)
-	}
-
-	// Explicitly clear back to unset.
-	var clearedPtr *domain.TicketPriority
-	updated, err = repo.UpdateTicket(created.ID, TicketPatch{Priority: &clearedPtr})
-	if err != nil {
-		t.Fatalf("UpdateTicket(priority=nil): %v", err)
-	}
-	if updated.Priority != nil {
-		t.Errorf("expected priority to be cleared, got %+v", updated.Priority)
+	if updated.Priority != domain.TicketPriorityLow {
+		t.Errorf("priority should be untouched by an unrelated patch, got %q", updated.Priority)
 	}
 	got, err = repo.GetTicket(created.ID)
-	if err != nil || got == nil || got.Priority != nil {
-		t.Fatalf("GetTicket after clearing priority: %v, %+v", err, got)
+	if err != nil || got == nil || got.Priority != domain.TicketPriorityLow {
+		t.Fatalf("GetTicket after unrelated patch: %v, %+v", err, got)
 	}
 }
 

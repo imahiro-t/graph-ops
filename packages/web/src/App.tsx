@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { Ticket, TicketDetail, TicketStatus, TicketPriority, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
 import { getStatusMeta, normalizeTicketStatus } from './statusMeta';
-import { getPriorityMeta, normalizeTicketPriority } from './priorityMeta';
+import { getPriorityMeta, matchesPriorityFilter } from './priorityMeta';
 import { TicketItem } from './components/TicketItem';
 import { ClaudeRunnerModal } from './components/ClaudeRunnerModal';
 import { SettingsModal } from './components/SettingsModal';
@@ -132,19 +132,17 @@ export const App: React.FC = () => {
   // Priority multi-select (DFLT-00048). Same trigger + panel + checkbox-group
   // structure as the status filter above -- several priorities can be
   // combined, matching filterStatuses rather than filterAssignee's
-  // single-choice radio group. 'UNSET' is a filter-only pseudo-value (there
-  // is no such TicketPriority member -- see types.ts) standing in for
-  // t.priority being null/undefined, so the "no priority set" bucket can be
-  // selected/deselected exactly like the three real levels. Starts with
-  // every value selected (including UNSET), matching filterStatuses's
-  // "everything visible until narrowed" default.
-  const PRIORITY_FILTER_VALUES: readonly (TicketPriority | 'UNSET')[] = [...TICKET_PRIORITIES, 'UNSET'];
-  const [filterPriorities, setFilterPriorities] = useState<(TicketPriority | 'UNSET')[]>(() => [
+  // single-choice radio group. The choices are exactly the three levels --
+  // there is no unset bucket (DFLT-00083). Starts with every value
+  // selected, matching filterStatuses's "everything visible until narrowed"
+  // default.
+  const PRIORITY_FILTER_VALUES: readonly TicketPriority[] = TICKET_PRIORITIES;
+  const [filterPriorities, setFilterPriorities] = useState<TicketPriority[]>(() => [
     ...PRIORITY_FILTER_VALUES
   ]);
   const [isPriorityMenuOpen, setIsPriorityMenuOpen] = useState(false);
   const priorityMenuButtonRef = useRef<HTMLButtonElement>(null);
-  const toggleFilterPriority = (p: TicketPriority | 'UNSET') => {
+  const toggleFilterPriority = (p: TicketPriority) => {
     // Re-derive from PRIORITY_FILTER_VALUES when adding so the array always
     // stays in display order, matching toggleFilterStatus.
     setFilterPriorities(prev =>
@@ -383,7 +381,8 @@ export const App: React.FC = () => {
     // Unexpected DB values count as TODO, matching the badge (statusMeta.ts).
     if (!filterStatuses.includes(normalizeTicketStatus(t.status))) return false;
     if (filterAssignee && t.assignee !== filterAssignee) return false;
-    if (!filterPriorities.includes(normalizeTicketPriority(t.priority) ?? 'UNSET')) return false;
+    // Unexpected values count as MEDIUM, matching the badge (priorityMeta.ts).
+    if (!matchesPriorityFilter(t.priority, filterPriorities)) return false;
     if (filterQuery) {
       const q = filterQuery.toLowerCase();
       const matchId = t.id.toLowerCase().includes(q);
@@ -734,11 +733,10 @@ export const App: React.FC = () => {
                           onChange={() => toggleFilterPriority(p)}
                           className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0"
                         />
-                        {/* 'UNSET' shares its wording with the ticket badge's
-                            "no priority" state via getPriorityMeta/
-                            priority.unset; the three real levels share
-                            priority.high/medium/low the same way. */}
-                        {t(p === 'UNSET' ? 'priority.unset' : getPriorityMeta(p).labelKey)}
+                        {/* Same symbol + label wording as the ticket badge's
+                            selector options (PrioritySelect.tsx), both via
+                            getPriorityMeta. */}
+                        {`${getPriorityMeta(p).symbol} ${t(getPriorityMeta(p).labelKey)}`}
                       </label>
                     ))}
                   </div>

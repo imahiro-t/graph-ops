@@ -436,12 +436,16 @@ func (r *MySQLRepository) Init() error {
 	// Checking first keeps Init idempotent; a DROP that loses a race with
 	// another member's (or process's) concurrent Init is not an error (see
 	// dropLegacyProjectsWorkDirColumn).
-	return dropLegacyProjectsWorkDirColumn("mysql", func() (bool, error) {
+	if err := dropLegacyProjectsWorkDirColumn("mysql", func() (bool, error) {
 		return r.mysqlColumnExists("projects", "work_dir")
 	}, func() error {
 		_, err := r.db.Exec(`ALTER TABLE projects DROP COLUMN work_dir`)
 		return err
-	})
+	}); err != nil {
+		return err
+	}
+	// DFLT-00083 migration: tickets whose priority is NULL become MEDIUM.
+	return backfillNullTicketPriority(r.db)
 }
 
 // mysqlColumnExists checks INFORMATION_SCHEMA.COLUMNS for the current
@@ -493,7 +497,7 @@ func (r *MySQLRepository) CreateTicket(projectID string, t domain.Ticket) (domai
 		`INSERT INTO tickets (id, project_id, title, description, status, auto_executable, blocked, node_seq, assignee_name, priority, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
 		id, projectID, t.Title, t.Description, t.Status,
-		boolToInt(t.AutoExecutable), boolToInt(t.Blocked), nullableString(t.Assignee), nullableTicketPriority(t.Priority), now, now,
+		boolToInt(t.AutoExecutable), boolToInt(t.Blocked), nullableString(t.Assignee), ticketPriorityOrDefault(t.Priority), now, now,
 	)
 	if err != nil {
 		return domain.Ticket{}, fmt.Errorf("inserting ticket: %w", err)
@@ -618,7 +622,7 @@ func (r *MySQLRepository) UpdateTicket(id string, patch TicketPatch) (domain.Tic
 		`UPDATE tickets SET title=?, description=?, status=?, auto_executable=?, blocked=?, refined_at=?, closed_reason=?, assignee_name=?, graph_expanded_at=?, priority=?, updated_at=?
 		 WHERE id=?`,
 		cur.Title, cur.Description, cur.Status,
-		boolToInt(cur.AutoExecutable), boolToInt(cur.Blocked), nullableString(cur.RefinedAt), nullableString(cur.ClosedReason), nullableString(cur.Assignee), nullableString(cur.GraphExpandedAt), nullableTicketPriority(cur.Priority), cur.UpdatedAt, cur.ID,
+		boolToInt(cur.AutoExecutable), boolToInt(cur.Blocked), nullableString(cur.RefinedAt), nullableString(cur.ClosedReason), nullableString(cur.Assignee), nullableString(cur.GraphExpandedAt), string(cur.Priority), cur.UpdatedAt, cur.ID,
 	)
 	if err != nil {
 		return domain.Ticket{}, fmt.Errorf("updating ticket %s: %w", id, err)

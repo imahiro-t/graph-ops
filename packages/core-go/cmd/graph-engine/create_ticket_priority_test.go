@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
 )
 
@@ -47,7 +48,10 @@ func TestCmdCreateTicket_PriorityFlag(t *testing.T) {
 	}
 }
 
-func TestCmdCreateTicket_NoPriorityFlagLeavesPriorityUnset(t *testing.T) {
+// TestCmdCreateTicket_NoPriorityFlagDefaultsToMedium: DFLT-00083 removed the
+// unset state, so omitting --priority creates a MEDIUM ticket and stdout
+// always carries the priority key.
+func TestCmdCreateTicket_NoPriorityFlagDefaultsToMedium(t *testing.T) {
 	repo, projectID := newTestRepoWithProject(t)
 	eng := engine.New(repo)
 
@@ -60,8 +64,33 @@ func TestCmdCreateTicket_NoPriorityFlagLeavesPriorityUnset(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &m); err != nil {
 		t.Fatalf("stdout is not JSON: %v\n%s", err, out)
 	}
-	if _, ok := m["priority"]; ok {
-		t.Errorf("stdout JSON must not contain a priority key when --priority is omitted: %v", m)
+	if m["priority"] != "MEDIUM" {
+		t.Errorf("omitting --priority should create a MEDIUM ticket, got %v", m)
+	}
+	got, err := repo.GetTicket(m["id"].(string))
+	if err != nil || got == nil || got.Priority != domain.TicketPriorityMedium {
+		t.Errorf("stored priority should be MEDIUM, got %v, %+v", err, got)
+	}
+}
+
+func TestCmdCreateTicket_EachPriorityValue(t *testing.T) {
+	for _, p := range []string{"HIGH", "MEDIUM", "LOW"} {
+		t.Run(p, func(t *testing.T) {
+			repo, projectID := newTestRepoWithProject(t)
+			eng := engine.New(repo)
+			out := captureStdout(t, func() {
+				if err := cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"t1", "--project", projectID, "--priority", p}); err != nil {
+					t.Fatalf("cmdCreateTicket: %v", err)
+				}
+			})
+			var m map[string]any
+			if err := json.Unmarshal([]byte(out), &m); err != nil {
+				t.Fatalf("stdout is not JSON: %v\n%s", err, out)
+			}
+			if m["priority"] != p {
+				t.Errorf("priority = %v, want %s", m["priority"], p)
+			}
+		})
 	}
 }
 
@@ -83,7 +112,17 @@ func TestPrintUsage_MentionsPriorityFlags(t *testing.T) {
 	if !strings.Contains(out, "create-ticket <title> [description] [--project <id>] [--priority <HIGH|MEDIUM|LOW>]") {
 		t.Errorf("usage should list create-ticket's --priority flag:\n%s", out)
 	}
-	if !strings.Contains(out, "refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW|none>]") {
+	if !strings.Contains(out, "refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>]") {
 		t.Errorf("usage should list refine-ticket's --priority flag:\n%s", out)
+	}
+	// DFLT-00083: the default is documented, and nothing offers to leave
+	// the priority unset or clear it.
+	if !strings.Contains(out, "--priority omitted -> created with priority MEDIUM") {
+		t.Errorf("usage should say an omitted --priority means MEDIUM:\n%s", out)
+	}
+	for _, stale := range []string{"LOW|none", "no priority set", `"none" clears`, "back to\n                                           unset"} {
+		if strings.Contains(out, stale) {
+			t.Errorf("usage must not mention %q any more:\n%s", stale, out)
+		}
 	}
 }

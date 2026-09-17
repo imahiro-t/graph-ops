@@ -208,16 +208,16 @@ Commands:
                                            <name> (<id>) from current directory" or "... from current
                                            project (use-project)"; stdout stays the ticket JSON only.
                                            --project given -> used as-is, nothing on stderr.
-                                           --priority omitted -> created with no priority set; given ->
+                                           --priority omitted -> created with priority MEDIUM; given ->
                                            validated (HIGH/MEDIUM/LOW only) before the ticket is created.
                                            Tickets start unassigned; use the Web UI's assign button)
-  refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW|none>]
+  refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>]
                                           (replaces the ticket's description with the refined text; builds
                                            no graph. --priority is independent of the description: omitted
-                                           leaves the stored priority untouched, "none" clears it back to
-                                           unset, HIGH/MEDIUM/LOW sets it -- so "refine-ticket <id>
-                                           --priority LOW" with no description positional changes only the
-                                           priority)
+                                           leaves the stored priority untouched, HIGH/MEDIUM/LOW sets it --
+                                           so "refine-ticket <id> --priority LOW" with no description
+                                           positional changes only the priority. A priority can't be
+                                           removed; any other value is an error and changes nothing)
   close-ticket <ticketId> [--reason "<text>"]
                                           (withdraws the ticket without marking it complete: sets status to
                                            CLOSED from ANY status, including one with nodes IN PROGRESS/IN
@@ -369,7 +369,7 @@ func printJSON(v any) error {
 // before anything is written, same as the HTTP API's create/update paths --
 // an invalid value fails the whole command rather than creating the ticket
 // with priority silently dropped. Omitting --priority creates the ticket
-// with no priority set, exactly like before this flag existed.
+// with domain.DefaultTicketPriority (MEDIUM, DFLT-00083).
 //
 // More than two positionals is a usage error rather than silently dropping
 // the extras: the third positional used to be the (since removed) assignee,
@@ -542,13 +542,15 @@ func cmdUseProject(repo store.GraphRepository, args []string) error {
 // positional, and interspersed the same way create-ticket's --project/
 // --priority flags are: omitted -> engine.NoPriorityChange() (leave the
 // stored priority untouched, the same behavior as before this flag
-// existed); "none" -> engine.ClearPriority() (reset to unset); any other
-// value is validated with domain.ParseTicketPriority and, if valid, becomes
-// engine.SetPriority(...). This lets a caller change only the priority
+// existed); any value is validated with domain.ParseTicketPriority and, if
+// valid, becomes engine.SetPriority(...). There is no value that clears the
+// priority (DFLT-00083): the former "none" is rejected like any other
+// invalid value, before stdin is read or the ticket is touched. This lets a
+// caller change only the priority
 // (`refine-ticket <id> --priority LOW`, description omitted so it too is
 // left unchanged) as easily as only the description.
 func cmdRefineTicket(eng *engine.GraphEngine, args []string) error {
-	const usage = `usage: graph-engine refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW|none>]`
+	const usage = `usage: graph-engine refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>]`
 	if len(args) < 1 {
 		return fmt.Errorf(usage)
 	}
@@ -574,6 +576,15 @@ func cmdRefineTicket(eng *engine.GraphEngine, args []string) error {
 		return fmt.Errorf(usage)
 	}
 
+	priority := engine.NoPriorityChange()
+	if priorityGiven {
+		parsed, err := domain.ParseTicketPriority(priorityFlag)
+		if err != nil {
+			return fmt.Errorf("%s: %w", usage, err)
+		}
+		priority = engine.SetPriority(parsed)
+	}
+
 	description := ""
 	if len(positional) > 0 {
 		if positional[0] == "-" {
@@ -584,20 +595,6 @@ func cmdRefineTicket(eng *engine.GraphEngine, args []string) error {
 			description = string(raw)
 		} else {
 			description = positional[0]
-		}
-	}
-
-	priority := engine.NoPriorityChange()
-	if priorityGiven {
-		switch priorityFlag {
-		case "none":
-			priority = engine.ClearPriority()
-		default:
-			parsed, err := domain.ParseTicketPriority(priorityFlag)
-			if err != nil {
-				return fmt.Errorf("%s: %w", usage, err)
-			}
-			priority = engine.SetPriority(parsed)
 		}
 	}
 

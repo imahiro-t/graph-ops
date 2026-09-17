@@ -129,21 +129,21 @@ func TestMySQLRepository_ProjectTicketNodeEdgeArtifactCRUD(t *testing.T) {
 		t.Fatalf("UpdateTicket: %v, %+v", err, updatedTicket)
 	}
 
-	// DFLT-00048: priority round-trips through set/change/clear the same way
-	// on MySQL as on SQLite (see TestTicketPriorityCRUD).
-	if ticket.Priority != nil {
-		t.Errorf("a newly created ticket should have no priority set, got %+v", ticket.Priority)
+	// DFLT-00048/DFLT-00083: priority defaults to MEDIUM and round-trips
+	// through set/change the same way on MySQL as on SQLite (see
+	// TestTicketPriorityCRUD).
+	if ticket.Priority != domain.TicketPriorityMedium {
+		t.Errorf("a newly created ticket should default to MEDIUM, got %q", ticket.Priority)
 	}
 	high := domain.TicketPriorityHigh
-	highPtr := &high
-	updatedTicket, err = repo.UpdateTicket(ticket.ID, TicketPatch{Priority: &highPtr})
-	if err != nil || updatedTicket.Priority == nil || *updatedTicket.Priority != domain.TicketPriorityHigh {
+	updatedTicket, err = repo.UpdateTicket(ticket.ID, TicketPatch{Priority: &high})
+	if err != nil || updatedTicket.Priority != domain.TicketPriorityHigh {
 		t.Fatalf("UpdateTicket(priority=HIGH): %v, %+v", err, updatedTicket)
 	}
-	var clearedPtr *domain.TicketPriority
-	updatedTicket, err = repo.UpdateTicket(ticket.ID, TicketPatch{Priority: &clearedPtr})
-	if err != nil || updatedTicket.Priority != nil {
-		t.Fatalf("UpdateTicket(priority=nil): %v, %+v", err, updatedTicket)
+	low := domain.TicketPriorityLow
+	updatedTicket, err = repo.UpdateTicket(ticket.ID, TicketPatch{Priority: &low})
+	if err != nil || updatedTicket.Priority != domain.TicketPriorityLow {
+		t.Fatalf("UpdateTicket(priority=LOW): %v, %+v", err, updatedTicket)
 	}
 
 	node, err := repo.CreateNode(domain.GraphNode{TicketID: ticket.ID, Name: "n", Type: domain.NodeTypePlan, Status: domain.NodeTODO, MaxIterations: 3})
@@ -287,4 +287,19 @@ func TestMySQLRepository_InitLegacyWorkDirDroppedConcurrentlyIsNotAnError(t *tes
 	if exists, err := repo.mysqlColumnExists("projects", "work_dir"); err != nil || exists {
 		t.Fatalf("projects.work_dir should be gone (exists=%v, err=%v)", exists, err)
 	}
+}
+
+// TestMySQLRepository_InitBackfillsNullTicketPriority is the MySQL half of
+// the DFLT-00083 migration test (see assertNullPriorityBackfill): NULL
+// priorities become MEDIUM, HIGH/LOW and updated_at are untouched, and a
+// second Init changes nothing.
+func TestMySQLRepository_InitBackfillsNullTicketPriority(t *testing.T) {
+	repo := newTestMySQLRepo(t)
+	proj, err := repo.CreateProject("Priority Backfill", "PRIB")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	ids := insertLegacyPriorityTickets(t, repo.db, proj.ID, proj.Prefix)
+
+	assertNullPriorityBackfill(t, repo.db, repo.Init, ids)
 }

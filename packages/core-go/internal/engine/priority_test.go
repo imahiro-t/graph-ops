@@ -7,6 +7,8 @@ import (
 )
 
 // DFLT-00059: CreateTicketWithPriority and RefineTicket's priority parameter.
+// DFLT-00083: no unset state -- nil at creation means MEDIUM, and there is
+// no way to clear a priority.
 
 func TestCreateTicketWithPriority_SetsPriority(t *testing.T) {
 	e, _, projectID := newTestEngine(t)
@@ -15,19 +17,30 @@ func TestCreateTicketWithPriority_SetsPriority(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTicketWithPriority: %v", err)
 	}
-	if ticket.Priority == nil || *ticket.Priority != domain.TicketPriorityHigh {
-		t.Errorf("expected priority HIGH, got %+v", ticket.Priority)
+	if ticket.Priority != domain.TicketPriorityHigh {
+		t.Errorf("expected priority HIGH, got %q", ticket.Priority)
 	}
 }
 
-func TestCreateTicketWithPriority_NilLeavesPriorityUnset(t *testing.T) {
+func TestCreateTicketWithPriority_NilDefaultsToMedium(t *testing.T) {
 	e, _, projectID := newTestEngine(t)
 	ticket, err := e.CreateTicketWithPriority(projectID, "title", "desc", nil)
 	if err != nil {
 		t.Fatalf("CreateTicketWithPriority: %v", err)
 	}
-	if ticket.Priority != nil {
-		t.Errorf("expected no priority, got %+v", ticket.Priority)
+	if ticket.Priority != domain.TicketPriorityMedium {
+		t.Errorf("expected default priority MEDIUM, got %q", ticket.Priority)
+	}
+}
+
+func TestCreateTicket_DefaultsToMedium(t *testing.T) {
+	e, _, projectID := newTestEngine(t)
+	ticket, err := e.CreateTicket(projectID, "title", "desc")
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if ticket.Priority != domain.TicketPriorityMedium {
+		t.Errorf("expected default priority MEDIUM, got %q", ticket.Priority)
 	}
 }
 
@@ -57,8 +70,8 @@ func TestRefineTicket_PriorityNoChangeLeavesItUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RefineTicket: %v", err)
 	}
-	if updated.Priority == nil || *updated.Priority != domain.TicketPriorityHigh {
-		t.Errorf("expected priority to stay HIGH, got %+v", updated.Priority)
+	if updated.Priority != domain.TicketPriorityHigh {
+		t.Errorf("expected priority to stay HIGH, got %q", updated.Priority)
 	}
 }
 
@@ -68,27 +81,11 @@ func TestRefineTicket_PrioritySet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
-	updated, err := e.RefineTicket(ticket.ID, "", SetPriority(domain.TicketPriorityMedium))
+	updated, err := e.RefineTicket(ticket.ID, "", SetPriority(domain.TicketPriorityLow))
 	if err != nil {
 		t.Fatalf("RefineTicket: %v", err)
 	}
-	if updated.Priority == nil || *updated.Priority != domain.TicketPriorityMedium {
-		t.Errorf("expected priority MEDIUM, got %+v", updated.Priority)
-	}
-}
-
-func TestRefineTicket_PriorityClear(t *testing.T) {
-	e, _, projectID := newTestEngine(t)
-	high := domain.TicketPriorityHigh
-	ticket, err := e.CreateTicketWithPriority(projectID, "title", "desc", &high)
-	if err != nil {
-		t.Fatalf("CreateTicketWithPriority: %v", err)
-	}
-	updated, err := e.RefineTicket(ticket.ID, "", ClearPriority())
-	if err != nil {
-		t.Fatalf("RefineTicket: %v", err)
-	}
-	if updated.Priority != nil {
-		t.Errorf("expected priority to be cleared, got %+v", updated.Priority)
+	if updated.Priority != domain.TicketPriorityLow {
+		t.Errorf("expected priority LOW, got %q", updated.Priority)
 	}
 }

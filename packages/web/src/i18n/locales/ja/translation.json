@@ -241,8 +241,7 @@
   "priority": {
     "high": "高",
     "medium": "中",
-    "low": "低",
-    "unset": "未設定"
+    "low": "低"
   },
   "settings": {
     "modalTitle": "設定",
