@@ -22,12 +22,12 @@ import {
   Archive,
   RotateCcw
 } from 'lucide-react';
-import { TicketDetail, TicketPriority, TICKET_PRIORITIES } from '../types';
+import { TicketDetail, TicketPriority } from '../types';
 import { getStatusMeta, TODO_META } from '../statusMeta';
-import { getPriorityMeta } from '../priorityMeta';
 import { GherkinViewer } from './GherkinViewer';
 import { MarkdownViewer } from './MarkdownViewer';
 import { NodeTypeBadge } from './NodeTypeBadge';
+import { PrioritySelect } from './PrioritySelect';
 import { StatusLiveRegion } from './StatusLiveRegion';
 import { useClaudeLaunch } from '../hooks/useClaudeLaunch';
 import { formatDateTime, formatTime } from '../i18n/formatDate';
@@ -129,18 +129,14 @@ export const TicketItem: React.FC<Props> = ({
     }
   };
 
-  // Priority (DFLT-00048): set/changed/cleared from the detail view via
-  // PATCH /api/tickets/{id}'s "priority" field, the same nullableString
-  // mechanism the assignee PATCH above uses -- `null` explicitly clears it
-  // back to unset, distinct from omitting the field entirely.
+  // Priority (DFLT-00048): changed from the ticket header via PATCH
+  // /api/tickets/{id}'s "priority" field. Always one of the three levels --
+  // a priority can't be cleared (DFLT-00083; the backend rejects null).
   const [prioritySaving, setPrioritySaving] = useState(false);
   const [priorityError, setPriorityError] = useState('');
 
-  const handleChangePriority = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    e.stopPropagation();
-    const value = e.target.value;
-    const nextPriority: TicketPriority | null = value === '' ? null : (value as TicketPriority);
-    if (prioritySaving || nextPriority === (ticket.priority ?? null)) return;
+  const handleChangePriority = async (nextPriority: TicketPriority) => {
+    if (prioritySaving || nextPriority === ticket.priority) return;
     setPrioritySaving(true);
     setPriorityError('');
     try {
@@ -514,7 +510,6 @@ export const TicketItem: React.FC<Props> = ({
   };
 
   const ticketStatusMeta = getStatusMeta(ticket.status);
-  const ticketPriorityMeta = getPriorityMeta(ticket.priority);
 
   return (
     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs transition-all overflow-clip mb-4">
@@ -540,32 +535,16 @@ export const TicketItem: React.FC<Props> = ({
             {t(ticketStatusMeta.labelKey)}
           </span>
 
-          {/* Priority badge/selector (DFLT-00048). A native <select> rather
-              than a custom dropdown so it stays keyboard/screen-reader
-              operable for free (Tab, arrow keys, typeahead) -- it is styled
-              to read as a colored chip like the status badge above, using
-              the same getPriorityMeta colors the list's priority filter
-              uses, but is always an actual <select> underneath. The visually
-              hidden <label> gives it an accessible name without adding
-              visible text next to every ticket's badge row. */}
+          {/* Priority badge/selector (DFLT-00048, DFLT-00083): a
+              one-character chip over a native <select> -- see
+              PrioritySelect.tsx. Clicks must not toggle the row. */}
           <span className="shrink-0" onClick={e => e.stopPropagation()}>
-            <label htmlFor={`priority-select-${ticket.id}`} className="sr-only">
-              {t('ticketItem.priority.label')}
-            </label>
-            <select
-              id={`priority-select-${ticket.id}`}
-              value={ticket.priority ?? ''}
-              onChange={handleChangePriority}
+            <PrioritySelect
+              ticketId={ticket.id}
+              priority={ticket.priority}
               disabled={prioritySaving}
-              className={`text-xs pl-2.5 pr-1.5 py-0.5 rounded-full font-bold whitespace-nowrap border-0 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-blue-500 ${ticketPriorityMeta.chip.bg} ${ticketPriorityMeta.chip.text}`}
-            >
-              <option value="">{t('priority.unset')}</option>
-              {TICKET_PRIORITIES.map(p => (
-                <option key={p} value={p}>
-                  {t(getPriorityMeta(p).labelKey)}
-                </option>
-              ))}
-            </select>
+              onChange={handleChangePriority}
+            />
           </span>
           {priorityError && (
             <span className="text-red-600 dark:text-red-400 font-medium text-xs shrink-0" onClick={e => e.stopPropagation()}>

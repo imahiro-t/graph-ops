@@ -28,12 +28,14 @@ Based on the ticket's title and description, work with the user to clarify:
 - **Completion criteria**: the concrete bar this ticket must clear to be considered "done" (acceptance criteria, numeric targets, etc.)
 - **Why**: why this work is needed (background, purpose, the problem this ticket solves)
 
-## 3. Check whether the priority needs to be set or revisited
+## 3. Check whether the priority needs to be revisited
 
 Look at the ticket's current priority (from step 1's `get-ticket` output) against what you now know about the ticket:
 
-- If it's **unset**, or looks like it no longer matches the ticket's content (urgency, blast radius, whether it blocks other work), judge the priority (`HIGH`/`MEDIUM`/`LOW`) yourself, present it to the user together with your reasoning, and ask them to confirm or override it. If the user decides no priority is needed, leave it unset.
-- If it's **already set and still looks right**, confirm with the user that no change is needed and skip setting it -- don't force a re-judgment every time.
+Every ticket always has one of `HIGH`/`MEDIUM`/`LOW`; a ticket created without an explicit judgment has the default `MEDIUM`.
+
+- If it looks like it doesn't match the ticket's content (urgency, blast radius, whether it blocks other work) -- including a default `MEDIUM` that was never really judged -- judge the priority (`HIGH`/`MEDIUM`/`LOW`) yourself, present it to the user together with your reasoning, and ask them to confirm or override it.
+- If it **still looks right**, confirm with the user that no change is needed and skip setting it -- don't force a re-judgment every time.
 
 ## 4. Compose and write the full, updated description
 
@@ -41,7 +43,7 @@ Fold whatever from the current description (step 1) still applies together with 
 
 ```bash
 graph-engine refine-ticket "<ticketId>" "<full updated description, including completion criteria and why>"
-graph-engine refine-ticket "<ticketId>" "<full updated description, including completion criteria and why>" --priority <HIGH|MEDIUM|LOW|none>
+graph-engine refine-ticket "<ticketId>" "<full updated description, including completion criteria and why>" --priority <HIGH|MEDIUM|LOW>
 ```
 
 For longer text, you can also pipe it in via stdin (`--priority` still works the same way, placed after the `-`):
@@ -52,7 +54,9 @@ graph-engine refine-ticket "<ticketId>" - <<'EOF'
 EOF
 ```
 
-If only the priority needs to change and the description doesn't, omit the description positional entirely -- `graph-engine refine-ticket "<ticketId>" --priority <HIGH|MEDIUM|LOW|none>` leaves the description untouched.
+If only the priority needs to change and the description doesn't, omit the description positional entirely -- `graph-engine refine-ticket "<ticketId>" --priority <HIGH|MEDIUM|LOW>` leaves the description untouched.
+
+A priority can be changed to another level but can never be emptied or cleared: any value other than `HIGH`/`MEDIUM`/`LOW` is an error that leaves the ticket unchanged.
 
 ## 5. Report the result and suggest the next step
 

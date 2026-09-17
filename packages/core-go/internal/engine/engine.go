@@ -36,16 +36,20 @@ func (e *GraphEngine) CreateTicket(projectID, title, description string) (domain
 }
 
 // CreateTicketWithPriority is CreateTicket plus an optional priority set at
-// creation time (DFLT-00059): priority == nil creates the ticket with no
-// priority set, exactly like CreateTicket. A non-nil priority is validated
+// creation time (DFLT-00059): priority == nil creates the ticket with
+// domain.DefaultTicketPriority (MEDIUM, DFLT-00083), exactly like
+// CreateTicket. A non-nil priority is validated
 // here (not just trusted from the caller) so this method is safe to call
 // directly -- e.g. from a future call site that doesn't already funnel
 // through the CLI/HTTP validation this ticket's other entry points perform.
 func (e *GraphEngine) CreateTicketWithPriority(projectID, title, description string, priority *domain.TicketPriority) (domain.Ticket, error) {
+	value := domain.DefaultTicketPriority
 	if priority != nil {
-		if _, err := domain.ParseTicketPriority(string(*priority)); err != nil {
+		parsed, err := domain.ParseTicketPriority(string(*priority))
+		if err != nil {
 			return domain.Ticket{}, err
 		}
+		value = parsed
 	}
 	return e.repo.CreateTicket(projectID, domain.Ticket{
 		Title:          title,
@@ -53,23 +57,21 @@ func (e *GraphEngine) CreateTicketWithPriority(projectID, title, description str
 		Status:         domain.TicketTODO,
 		AutoExecutable: true,
 		Blocked:        false,
-		Priority:       priority,
+		Priority:       value,
 	})
 }
 
 // PriorityChange describes what RefineTicket should do to a ticket's
 // priority, alongside its description update (DFLT-00059). The zero value
-// (also NoPriorityChange()) leaves the stored priority untouched; use
-// ClearPriority() to reset it to unset, or SetPriority(p) to set it to p.
+// (also NoPriorityChange()) leaves the stored priority untouched;
+// SetPriority(p) sets it to p. There is no way to clear a priority
+// (DFLT-00083): a ticket's priority is always one of HIGH/MEDIUM/LOW.
 //
-// This mirrors store.TicketPatch.Priority's tri-state double-pointer
-// (**domain.TicketPriority), but as a small named type with constructors
-// instead: RefineTicket's call sites (the CLI, handleRefine, and several
-// engine tests) would otherwise each have to build a double pointer by hand
-// to express "no change" vs. "clear" vs. "set".
+// It is a small named type with constructors rather than a bare
+// *domain.TicketPriority so RefineTicket's call sites (the CLI,
+// handleRefine, and several engine tests) say "no change" explicitly.
 type PriorityChange struct {
-	change bool
-	value  *domain.TicketPriority
+	value *domain.TicketPriority
 }
 
 // NoPriorityChange leaves the ticket's stored priority untouched. It is the
@@ -77,15 +79,12 @@ type PriorityChange struct {
 // can say so explicitly.
 func NoPriorityChange() PriorityChange { return PriorityChange{} }
 
-// ClearPriority resets the ticket's priority back to unset.
-func ClearPriority() PriorityChange { return PriorityChange{change: true} }
-
 // SetPriority sets the ticket's priority to p. Callers are expected to have
 // already validated p (e.g. via domain.ParseTicketPriority) the same way
 // every other write path in this codebase validates at its entry point
 // before handing a typed value inward.
 func SetPriority(p domain.TicketPriority) PriorityChange {
-	return PriorityChange{change: true, value: &p}
+	return PriorityChange{value: &p}
 }
 
 // RefineTicket is what `refine-ticket` now does: it no longer builds any
@@ -133,10 +132,7 @@ func (e *GraphEngine) RefineTicket(ticketID string, description string, priority
 	refined := domain.TicketRefined
 	patch.Description = &newDescription
 	patch.Status = &refined
-	if priority.change {
-		value := priority.value
-		patch.Priority = &value
-	}
+	patch.Priority = priority.value
 	updated, err := e.repo.UpdateTicket(ticketID, patch)
 	if err != nil {
 		return nil, err

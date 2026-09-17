@@ -98,9 +98,12 @@ func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 //
 // Priority (DFLT-00059) is a plain optional *string, unlike PATCH's
 // nullableString: at creation time there is no existing value to leave
-// unchanged, so the only two states that matter are "omitted" (created with
-// no priority) and "a level" (created with that priority) -- there is no
-// third "explicitly clear" state to distinguish here.
+// unchanged or clear, so the only two states that matter are "not given"
+// and "a level". "Not given" -- the key omitted, or an explicit
+// `"priority": null`, which decodes to the same nil -- creates the ticket
+// with domain.DefaultTicketPriority (MEDIUM, DFLT-00083), applied by the
+// engine. Any other value must be HIGH/MEDIUM/LOW, or the request is a 400
+// and no ticket is created.
 func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Title       string  `json:"title"`
@@ -179,9 +182,10 @@ func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 		// buttons, the ticket's only form of assignment.
 		Assignee nullableString `json:"assignee"`
 		// Priority: same nullableString mechanism as Assignee, so a caller
-		// can distinguish "leave unchanged" (key absent) from "clear to
-		// unset" (`"priority": null`) from "set" (`"priority": "HIGH"`).
-		// See domain.Ticket.Priority's doc comment.
+		// can distinguish "leave unchanged" (key absent) from "set"
+		// (`"priority": "HIGH"`). An explicit `"priority": null` is a 400
+		// (DFLT-00083): a priority can't be cleared, see
+		// domain.Ticket.Priority's doc comment.
 		Priority nullableString `json:"priority"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -198,17 +202,17 @@ func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Priority.Present {
 		if body.Priority.Value == nil {
-			var cleared *domain.TicketPriority
-			patch.Priority = &cleared
-		} else {
-			priority, err := domain.ParseTicketPriority(*body.Priority.Value)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation, "%s, or null", err))
-				return
-			}
-			set := &priority
-			patch.Priority = &set
+			writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation,
+				"priority cannot be cleared: must be one of %q, %q, %q",
+				domain.TicketPriorityHigh, domain.TicketPriorityMedium, domain.TicketPriorityLow))
+			return
 		}
+		priority, err := domain.ParseTicketPriority(*body.Priority.Value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation, "%s", err))
+			return
+		}
+		patch.Priority = &priority
 	}
 
 	updated, err := s.repo.UpdateTicket(id, patch)

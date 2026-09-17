@@ -47,9 +47,8 @@ export type NodeType =
 
 export type ArtifactType = 'text' | 'gherkin' | 'html' | 'image' | 'json';
 
-// A ticket's optional priority (DFLT-00048): one of three fixed levels.
-// There is no 'UNSET' member here -- absence is represented by
-// Ticket.priority being null/undefined, the same design as assignee.
+// A ticket's priority (DFLT-00048): one of three fixed levels. There is no
+// unset state (DFLT-00083) -- a ticket created without one is MEDIUM.
 export type TicketPriority = 'HIGH' | 'MEDIUM' | 'LOW';
 
 // Every TicketPriority in display order (high to low). Kept next to the type
@@ -88,13 +87,13 @@ export interface Ticket {
   // its plan/plan_review seed. Not used for display; kept here only so this
   // type stays in sync with domain.Ticket.
   graph_expanded_at?: string | null;
-  // Optional priority (DFLT-00048): null/absent means unset -- always a
-  // valid, ordinary state (e.g. every ticket created before this field
-  // existed), never treated as an error. Set/changed/cleared via PATCH
-  // /api/tickets/{id}'s "priority" field from the ticket detail view (see
-  // TicketItem.tsx), and used to filter the ticket list (see priorityMeta.ts
-  // and App.tsx's filterPriorities).
-  priority?: TicketPriority | null;
+  // Priority (DFLT-00048): always present and one of HIGH/MEDIUM/LOW --
+  // MEDIUM when none was given at creation, with pre-existing NULL rows
+  // backfilled by the backend's migration (DFLT-00083). Changed via PATCH
+  // /api/tickets/{id}'s "priority" field from the ticket header (see
+  // PrioritySelect.tsx; it can't be cleared), and used to filter the ticket
+  // list (see priorityMeta.ts and App.tsx's filterPriorities).
+  priority: TicketPriority;
 }
 
 export interface GraphNode {

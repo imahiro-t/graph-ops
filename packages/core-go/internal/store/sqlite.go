@@ -158,7 +158,11 @@ func (r *SQLiteRepository) Init() error {
 	if _, err := r.db.Exec(schemaDDL); err != nil {
 		return fmt.Errorf("applying schema: %w", err)
 	}
-	return r.dropLegacyProjectsWorkDir()
+	if err := r.dropLegacyProjectsWorkDir(); err != nil {
+		return err
+	}
+	// DFLT-00083 migration: tickets whose priority is NULL become MEDIUM.
+	return backfillNullTicketPriority(r.db)
 }
 
 // dropLegacyProjectsWorkDir is the DFLT-00080 migration: a DB created before
@@ -219,14 +223,17 @@ func nullableString(s *string) sql.NullString {
 	return sql.NullString{String: *s, Valid: true}
 }
 
-// nullableTicketPriority is nullableString's counterpart for
-// domain.TicketPriority, whose underlying type is a distinct string type
-// rather than string itself.
-func nullableTicketPriority(p *domain.TicketPriority) sql.NullString {
-	if p == nil {
-		return sql.NullString{}
+// ticketPriorityOrDefault returns p, or domain.DefaultTicketPriority when p
+// is empty (DFLT-00083). CreateTicket and UpdateTicket use it so a direct
+// store call that leaves Priority zero (tests, or any caller bypassing the
+// engine), or an update of a row still holding a legacy NULL, never writes a
+// NULL/empty priority. It is only applied on write -- reads
+// return the stored value as-is.
+func ticketPriorityOrDefault(p domain.TicketPriority) string {
+	if p == "" {
+		return string(domain.DefaultTicketPriority)
 	}
-	return sql.NullString{String: string(*p), Valid: true}
+	return string(p)
 }
 
 func boolToInt(b bool) int {
@@ -272,7 +279,7 @@ func (r *SQLiteRepository) CreateTicket(projectID string, t domain.Ticket) (doma
 		`INSERT INTO tickets (id, project_id, title, description, status, auto_executable, blocked, node_seq, assignee_name, priority, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
 		id, projectID, t.Title, t.Description, t.Status,
-		boolToInt(t.AutoExecutable), boolToInt(t.Blocked), nullableString(t.Assignee), nullableTicketPriority(t.Priority), now, now,
+		boolToInt(t.AutoExecutable), boolToInt(t.Blocked), nullableString(t.Assignee), ticketPriorityOrDefault(t.Priority), now, now,
 	)
 	if err != nil {
 		return domain.Ticket{}, fmt.Errorf("inserting ticket: %w", err)
@@ -314,10 +321,9 @@ func scanTicket(row interface {
 	if assigneeName.Valid {
 		t.Assignee = &assigneeName.String
 	}
-	if priority.Valid {
-		p := domain.TicketPriority(priority.String)
-		t.Priority = &p
-	}
+	// No NULL -> MEDIUM read-time substitution (DFLT-00083): NULL rows are
+	// normalized by Init's backfillNullTicketPriority migration instead.
+	t.Priority = domain.TicketPriority(priority.String)
 	return &t, nil
 }
 
@@ -426,13 +432,18 @@ func (r *SQLiteRepository) UpdateTicket(id string, patch TicketPatch) (domain.Ti
 	if patch.Priority != nil {
 		cur.Priority = *patch.Priority
 	}
+	// A row still NULL/empty (e.g. written by an older graph-engine sharing
+	// this DB after Init's backfill ran) must not be written back as '': fill
+	// the default on write, as CreateTicket does, so any update -- even one
+	// that doesn't touch priority -- leaves the row with a valid level.
+	cur.Priority = domain.TicketPriority(ticketPriorityOrDefault(cur.Priority))
 	cur.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 
 	_, err = r.db.Exec(
 		`UPDATE tickets SET title=?, description=?, status=?, auto_executable=?, blocked=?, refined_at=?, closed_reason=?, assignee_name=?, graph_expanded_at=?, priority=?, updated_at=?
 		 WHERE id=?`,
 		cur.Title, cur.Description, cur.Status,
-		boolToInt(cur.AutoExecutable), boolToInt(cur.Blocked), nullableString(cur.RefinedAt), nullableString(cur.ClosedReason), nullableString(cur.Assignee), nullableString(cur.GraphExpandedAt), nullableTicketPriority(cur.Priority), cur.UpdatedAt, cur.ID,
+		boolToInt(cur.AutoExecutable), boolToInt(cur.Blocked), nullableString(cur.RefinedAt), nullableString(cur.ClosedReason), nullableString(cur.Assignee), nullableString(cur.GraphExpandedAt), string(cur.Priority), cur.UpdatedAt, cur.ID,
 	)
 	if err != nil {
 		return domain.Ticket{}, fmt.Errorf("updating ticket %s: %w", id, err)

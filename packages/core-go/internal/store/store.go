@@ -13,10 +13,9 @@ import "github.com/graph-ops/core-go/internal/domain"
 // at a nil *string explicitly clears it, and a non-nil Assignee pointing at
 // a non-nil *string sets it. This lets PATCH /api/tickets/{id} clear
 // assignee without disturbing a PATCH that merely omits the field.
-// Priority is a double pointer for the same reason as Assignee above: nil
-// leaves the stored value unchanged, a non-nil Priority pointing at a nil
-// *domain.TicketPriority explicitly clears it back to unset, and a non-nil
-// Priority pointing at a non-nil *domain.TicketPriority sets it.
+// Priority is a single pointer (DFLT-00083): nil leaves the stored value
+// unchanged and a non-nil Priority sets it. A priority can't be cleared --
+// there is no unset state to clear it to.
 type TicketPatch struct {
 	Title           *string
 	Description     *string
@@ -27,7 +26,7 @@ type TicketPatch struct {
 	ClosedReason    *string
 	Assignee        **string
 	GraphExpandedAt *string
-	Priority        **domain.TicketPriority
+	Priority        *domain.TicketPriority
 }
 
 // NodePatch carries optional field updates for UpdateNode; nil fields are

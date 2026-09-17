@@ -27,11 +27,10 @@ const (
 	TicketClosed TicketStatus = "CLOSED"
 )
 
-// TicketPriority is the ticket's own optional priority (DFLT-00048): one of
-// three fixed levels, or unset (nil on Ticket.Priority) -- there is no
-// "NONE"/"UNSET" member here, the same design as domain.Ticket.Assignee,
-// where absence is represented by the pointer being nil rather than by a
-// sentinel value of the enum itself.
+// TicketPriority is the ticket's priority (DFLT-00048): always one of three
+// fixed levels. There is no "unset" state (DFLT-00083): a ticket created
+// without an explicit priority gets DefaultTicketPriority, and rows written
+// before that change are backfilled to it by the store's Init migration.
 type TicketPriority string
 
 const (
@@ -40,16 +39,20 @@ const (
 	TicketPriorityLow    TicketPriority = "LOW"
 )
 
+// DefaultTicketPriority is the priority a ticket gets when none is given at
+// creation time (DFLT-00083). It is the single definition of that default:
+// the engine applies it for CLI/HTTP creation, and the store applies it as a
+// safety net for direct CreateTicket calls and in its NULL backfill.
+const DefaultTicketPriority = TicketPriorityMedium
+
 // ParseTicketPriority validates s against the three allowed priority levels
 // and is the single place that validation rule lives (DFLT-00059): every
 // entry point that accepts a priority value from outside the process --
 // PATCH /api/tickets/{id} and POST /api/tickets (internal/httpserver/
 // tickets.go) and the CLI's create-ticket/refine-ticket --priority flags
 // (cmd/graph-engine/main.go) -- calls this instead of open-coding its own
-// switch. There is no "unset"/"clear" value here: callers represent that
-// through whatever tri-state wrapper surrounds this call (nullableString,
-// engine.PriorityChange, or a plain nil *TicketPriority at creation time),
-// not through a value this function would return.
+// switch. There is no "unset"/"clear" value: a priority can be changed to
+// another level but never removed (DFLT-00083).
 func ParseTicketPriority(s string) (TicketPriority, error) {
 	switch p := TicketPriority(s); p {
 	case TicketPriorityHigh, TicketPriorityMedium, TicketPriorityLow:
@@ -211,13 +214,11 @@ type Ticket struct {
 	// deriveTicketStatus needs to avoid calling a ticket DONE while it only
 	// has the plan/plan_review seed sitting at DONE.
 	GraphExpandedAt *string `json:"graph_expanded_at,omitempty"`
-	// Priority is the ticket's optional priority (DFLT-00048): nil means
-	// unset, otherwise one of TicketPriorityHigh/Medium/Low. A ticket that
-	// never had a priority set reads back as nil, which must always be
-	// handled as a valid, ordinary state rather than as an error -- there is
-	// no fourth "NONE" enum member for it, the same design as Assignee
-	// above.
-	Priority *TicketPriority `json:"priority,omitempty"`
+	// Priority is the ticket's priority (DFLT-00048): always one of
+	// TicketPriorityHigh/Medium/Low, DefaultTicketPriority (MEDIUM) when
+	// none was given at creation (DFLT-00083). It is always serialized --
+	// there is no null/omitted "unset" state.
+	Priority TicketPriority `json:"priority"`
 }
 
 // Project scopes a set of tickets to one prefix-based ID namespace. Where

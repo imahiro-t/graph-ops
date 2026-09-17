@@ -1,8 +1,11 @@
 package store
 
 import (
+	"database/sql"
 	"fmt"
 	"log/slog"
+
+	"github.com/graph-ops/core-go/internal/domain"
 )
 
 // testHookBeforeLegacyWorkDirDrop, when non-nil, runs after the DFLT-00080
@@ -48,5 +51,34 @@ func dropLegacyProjectsWorkDirColumn(backend string, columnExists func() (bool, 
 	slog.Info("dropped legacy projects.work_dir column; its values were not migrated (set each project's local path again per environment)",
 		slog.String("event", "legacy_projects_work_dir_dropped"),
 		slog.String("backend", backend))
+	return nil
+}
+
+// backfillNullTicketPriority is the DFLT-00083 migration, shared by SQLite
+// and MySQL Init: tickets created while "no priority" was a valid state have
+// a NULL priority column, which is now set to domain.DefaultTicketPriority
+// (MEDIUM). Empty-string priorities are normalized the same way: an
+// UpdateTicket from a build before its write-side default could have turned
+// a NULL row into ”. The data is normalized here, once, rather than by
+// substituting MEDIUM on every read.
+//
+// It is idempotent and safe under concurrent Init calls: the WHERE clause
+// only ever matches NULL/empty rows, so a second (or racing) run updates nothing
+// and never touches an explicitly set priority. updated_at is left alone on
+// purpose, so the migration alone doesn't reorder ticket lists or change
+// their "last updated" display. The column DDL itself stays nullable:
+// tightening it would need a table rebuild on SQLite and would make new and
+// migrated schemas diverge.
+func backfillNullTicketPriority(db *sql.DB) error {
+	res, err := db.Exec(`UPDATE tickets SET priority = ? WHERE priority IS NULL OR priority = ''`, string(domain.DefaultTicketPriority))
+	if err != nil {
+		return fmt.Errorf("backfilling NULL/empty ticket priority: %w", err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n > 0 {
+		slog.Info("backfilled tickets with no priority to the default priority",
+			slog.String("event", "ticket_priority_backfilled"),
+			slog.String("priority", string(domain.DefaultTicketPriority)),
+			slog.Int64("tickets", n))
+	}
 	return nil
 }

@@ -3,28 +3,41 @@ package httpserver
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/graph-ops/core-go/internal/domain"
 )
 
-// DFLT-00048: tickets carry an optional priority (json:"priority", one of
-// "HIGH"/"MEDIUM"/"LOW", null when unset). These tests mirror
-// ticket_assignee_test.go's shape for the same PATCH/create/list contract:
-// PATCH can set/change/clear it via the same nullableString present/null/
-// value mechanism, an invalid value is rejected as 400 without changing the
-// stored ticket, and GET/list both reflect whatever is stored.
+// DFLT-00048: tickets carry a priority (json:"priority", one of
+// "HIGH"/"MEDIUM"/"LOW"). These tests mirror ticket_assignee_test.go's shape
+// for the PATCH/create/list contract.
 //
-// DFLT-00059: creation itself can now also set the priority via an optional
-// "priority" body field -- TestCreateTicket_ResponsePriorityIsNullAndBodyIgnored
-// (this file's former name/behavior) used to assert the opposite, that
-// creation-time priority was always silently dropped; that guarantee was the
-// very thing this ticket asked to remove, so the test below asserts the new
-// contract instead: the field sets priority at creation when given and
-// present, is validated the same way PATCH's is, and creating without it at
-// all still yields an unset priority.
+// DFLT-00059: creation can set the priority via an optional "priority" body
+// field, validated the same way PATCH's is.
+//
+// DFLT-00083: there is no unset state any more. A ticket created without a
+// priority -- key omitted, or an explicit `"priority": null`, which POST
+// treats the same as omitted -- is MEDIUM; the "priority" key is always
+// present in responses; and PATCH with `"priority": null` is a 400 that
+// leaves the stored value unchanged, like any other invalid value.
 
-func TestCreateTicket_PrioritySetAtCreationOrOmitted(t *testing.T) {
+// priorityErrorBody decodes a 400 response's {"error": {"code", "message"}}.
+func priorityErrorBody(t *testing.T, body []byte) (code, message string) {
+	t.Helper()
+	var payload struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decoding error body %s: %v", body, err)
+	}
+	return payload.Error.Code, payload.Error.Message
+}
+
+func TestCreateTicket_PrioritySetAtCreationOrDefaultsToMedium(t *testing.T) {
 	s, _, _ := newTestServer(t)
 
 	rec := doJSON(t, s, http.MethodPost, "/api/tickets", map[string]any{
@@ -52,8 +65,32 @@ func TestCreateTicket_PrioritySetAtCreationOrOmitted(t *testing.T) {
 	if recNoPriority.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", recNoPriority.Code, recNoPriority.Body.String())
 	}
-	if got := decodeObject(t, recNoPriority)["priority"]; got != nil {
-		t.Errorf("a ticket created with no priority field should start unset, got %v", got)
+	noPriority := decodeObject(t, recNoPriority)
+	if got := noPriority["priority"]; got != "MEDIUM" {
+		t.Errorf("a ticket created with no priority field should default to MEDIUM, got %v", got)
+	}
+	getNoPriority := doJSON(t, s, http.MethodGet, "/api/tickets/"+noPriority["id"].(string), nil)
+	if got := decodeObject(t, getNoPriority)["priority"]; got != "MEDIUM" {
+		t.Errorf("GET of a ticket created without priority: priority = %v, want MEDIUM", got)
+	}
+}
+
+// TestCreateTicket_NullPriorityDefaultsToMedium pins the decision for an
+// explicit `"priority": null` on POST: there is no stored value to clear at
+// creation time, so null means "not given" -- the same as omitting the key
+// -- and the ticket is created as MEDIUM (201), not rejected. This
+// deliberately differs from PATCH, where null would mean "clear" and is a 400.
+func TestCreateTicket_NullPriorityDefaultsToMedium(t *testing.T) {
+	s, _, _ := newTestServer(t)
+
+	rec := doJSON(t, s, http.MethodPost, "/api/tickets", map[string]any{
+		"title": "null の優先度", "priority": nil,
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := decodeObject(t, rec)["priority"]; got != "MEDIUM" {
+		t.Errorf("POST with priority:null should create a MEDIUM ticket, got %v", got)
 	}
 }
 
@@ -64,11 +101,16 @@ func TestCreateTicket_PrioritySetAtCreationOrOmitted(t *testing.T) {
 func TestCreateTicket_InvalidPriorityIs400AndNothingCreated(t *testing.T) {
 	s, repo, projectID := newTestServer(t)
 
-	rec := doJSON(t, s, http.MethodPost, "/api/tickets", map[string]any{
-		"title": "不正な優先度", "priority": "URGENT",
-	})
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	for _, invalid := range []string{"URGENT", "", "high"} {
+		rec := doJSON(t, s, http.MethodPost, "/api/tickets", map[string]any{
+			"title": "不正な優先度", "priority": invalid,
+		})
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("priority %q: expected 400, got %d: %s", invalid, rec.Code, rec.Body.String())
+		}
+		if code, _ := priorityErrorBody(t, rec.Body.Bytes()); code != string(domain.ErrCodeValidation) {
+			t.Errorf("priority %q: error code = %q, want %s", invalid, code, domain.ErrCodeValidation)
+		}
 	}
 
 	tickets, err := repo.ListTicketsByProject(projectID)
@@ -80,7 +122,7 @@ func TestCreateTicket_InvalidPriorityIs400AndNothingCreated(t *testing.T) {
 	}
 }
 
-func TestUpdateTicket_PrioritySetChangedCleared(t *testing.T) {
+func TestUpdateTicket_PrioritySetAndChanged(t *testing.T) {
 	s, repo, projectID := newTestServer(t)
 	tk, err := repo.CreateTicket(projectID, domain.Ticket{Title: "タイトル", Status: domain.TicketTODO})
 	if err != nil {
@@ -105,25 +147,50 @@ func TestUpdateTicket_PrioritySetChangedCleared(t *testing.T) {
 		t.Errorf("change: priority = %v, want LOW", got)
 	}
 
-	// Explicit null clears it back to unset.
-	rec = doJSON(t, s, http.MethodPatch, "/api/tickets/"+tk.ID, map[string]any{"priority": nil})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("clear: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	get := doJSON(t, s, http.MethodGet, "/api/tickets/"+tk.ID, nil)
+	if got := decodeObject(t, get)["priority"]; got != "LOW" {
+		t.Errorf("GET after change: priority = %v, want LOW", got)
 	}
-	if got := decodeObject(t, rec)["priority"]; got != nil {
-		t.Errorf("clear: priority = %v, want nil", got)
+}
+
+// TestUpdateTicket_NullPriorityIs400AndUnchanged: clearing a priority is no
+// longer possible (DFLT-00083).
+func TestUpdateTicket_NullPriorityIs400AndUnchanged(t *testing.T) {
+	s, repo, projectID := newTestServer(t)
+	high := domain.TicketPriorityHigh
+	tk, err := repo.CreateTicket(projectID, domain.Ticket{Title: "タイトル", Status: domain.TicketTODO, Priority: high})
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	rec := doJSON(t, s, http.MethodPatch, "/api/tickets/"+tk.ID, map[string]any{"priority": nil})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if code, _ := priorityErrorBody(t, rec.Body.Bytes()); code != string(domain.ErrCodeValidation) {
+		t.Errorf("error code = %q, want %s", code, domain.ErrCodeValidation)
 	}
 
 	get := doJSON(t, s, http.MethodGet, "/api/tickets/"+tk.ID, nil)
-	if got := decodeObject(t, get)["priority"]; got != nil {
-		t.Errorf("GET after clearing: priority = %v, want nil", got)
+	if got := decodeObject(t, get)["priority"]; got != "HIGH" {
+		t.Errorf("a rejected null PATCH must not change the stored priority, got %v", got)
+	}
+
+	// The whole PATCH is rejected: other fields in the same body don't apply.
+	rec = doJSON(t, s, http.MethodPatch, "/api/tickets/"+tk.ID, map[string]any{"title": "変えてはいけない", "priority": nil})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("with title: expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	got, err := repo.GetTicket(tk.ID)
+	if err != nil || got == nil || got.Title != "タイトル" || got.Priority != domain.TicketPriorityHigh {
+		t.Errorf("a rejected PATCH must leave the ticket unchanged, got %v, %+v", err, got)
 	}
 }
 
 func TestUpdateTicket_PriorityOmittedLeavesItUnchanged(t *testing.T) {
 	s, repo, projectID := newTestServer(t)
-	high := domain.TicketPriorityHigh
-	tk, err := repo.CreateTicket(projectID, domain.Ticket{Title: "旧タイトル", Status: domain.TicketTODO, Priority: &high})
+	low := domain.TicketPriorityLow
+	tk, err := repo.CreateTicket(projectID, domain.Ticket{Title: "旧タイトル", Status: domain.TicketTODO, Priority: low})
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
@@ -132,16 +199,21 @@ func TestUpdateTicket_PriorityOmittedLeavesItUnchanged(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	m := decodeObject(t, rec)
-	if m["title"] != "新タイトル" || m["priority"] != "HIGH" {
+	if m["title"] != "新タイトル" || m["priority"] != "LOW" {
 		t.Errorf("priority should be left unchanged by an update that omits it, got %v", m)
+	}
+	get := doJSON(t, s, http.MethodGet, "/api/tickets/"+tk.ID, nil)
+	if got := decodeObject(t, get)["priority"]; got != "LOW" {
+		t.Errorf("GET after unrelated PATCH: priority = %v, want LOW", got)
 	}
 }
 
 // TestUpdateTicket_InvalidPriorityIs400AndUnchanged covers the Gherkin
-// scenario "APIで不正な優先度の値を指定すると更新が拒否される".
+// scenario "HTTP API の PATCH で priority に不正な値を送ると 400 になり、優先度は変わらない".
 func TestUpdateTicket_InvalidPriorityIs400AndUnchanged(t *testing.T) {
 	s, repo, projectID := newTestServer(t)
-	tk, err := repo.CreateTicket(projectID, domain.Ticket{Title: "タイトル", Status: domain.TicketTODO})
+	high := domain.TicketPriorityHigh
+	tk, err := repo.CreateTicket(projectID, domain.Ticket{Title: "タイトル", Status: domain.TicketTODO, Priority: high})
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
@@ -150,20 +222,22 @@ func TestUpdateTicket_InvalidPriorityIs400AndUnchanged(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
+	if _, message := priorityErrorBody(t, rec.Body.Bytes()); strings.Contains(message, "null") {
+		t.Errorf("the error message must no longer offer null as a valid value, got %q", message)
+	}
 
 	got, err := repo.GetTicket(tk.ID)
 	if err != nil || got == nil {
 		t.Fatalf("GetTicket: %v, %+v", err, got)
 	}
-	if got.Priority != nil {
-		t.Errorf("a rejected PATCH must not change the stored priority, got %+v", got.Priority)
+	if got.Priority != domain.TicketPriorityHigh {
+		t.Errorf("a rejected PATCH must not change the stored priority, got %q", got.Priority)
 	}
 }
 
-func TestListAndGetTicket_PriorityReflectsStoredValue(t *testing.T) {
+func TestListAndGetTicket_PriorityAlwaysPresent(t *testing.T) {
 	s, repo, projectID := newTestServer(t)
-	high := domain.TicketPriorityHigh
-	tks := map[string]*domain.TicketPriority{"優先度あり": &high, "優先度なし": nil}
+	tks := map[string]domain.TicketPriority{"優先度あり": domain.TicketPriorityHigh, "優先度なし": ""}
 	ids := map[string]string{}
 	for title, p := range tks {
 		tk, err := repo.CreateTicket(projectID, domain.Ticket{Title: title, Status: domain.TicketTODO, Priority: p})
@@ -183,17 +257,23 @@ func TestListAndGetTicket_PriorityReflectsStoredValue(t *testing.T) {
 	}
 	gotPriority := map[string]any{}
 	for _, tk := range tickets {
-		gotPriority[tk["title"].(string)] = tk["priority"]
+		p, ok := tk["priority"]
+		if !ok {
+			t.Errorf("GET /api/tickets: ticket %v has no priority key", tk["title"])
+		}
+		gotPriority[tk["title"].(string)] = p
 	}
-	if gotPriority["優先度あり"] != "HIGH" || gotPriority["優先度なし"] != nil {
+	if gotPriority["優先度あり"] != "HIGH" || gotPriority["優先度なし"] != "MEDIUM" {
 		t.Errorf("GET /api/tickets: unexpected priority values: %v", gotPriority)
 	}
 
-	detail := doJSON(t, s, http.MethodGet, "/api/tickets/"+ids["優先度あり"], nil)
-	if detail.Code != http.StatusOK {
-		t.Fatalf("GET /api/tickets/{id} expected 200, got %d", detail.Code)
-	}
-	if got := decodeObject(t, detail)["priority"]; got != "HIGH" {
-		t.Errorf("GET /api/tickets/{id}: priority = %v, want HIGH", got)
+	for title, want := range map[string]string{"優先度あり": "HIGH", "優先度なし": "MEDIUM"} {
+		detail := doJSON(t, s, http.MethodGet, "/api/tickets/"+ids[title], nil)
+		if detail.Code != http.StatusOK {
+			t.Fatalf("GET /api/tickets/{id} expected 200, got %d", detail.Code)
+		}
+		if got := decodeObject(t, detail)["priority"]; got != want {
+			t.Errorf("GET /api/tickets/{id} (%s): priority = %v, want %s", title, got, want)
+		}
 	}
 }

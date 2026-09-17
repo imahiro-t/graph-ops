@@ -241,8 +241,7 @@
   "priority": {
     "high": "High",
     "medium": "Medium",
-    "low": "Low",
-    "unset": "Unset"
+    "low": "Low"
   },
   "settings": {
     "modalTitle": "Settings",
