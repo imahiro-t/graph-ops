@@ -56,6 +56,11 @@ type runtimeConfig struct {
 	// means "use the default for that tier" -- see config.ResolveRoots.
 	UserExtensionsDir string
 	TeamExtensionsDir string
+	// ProjectPaths is graph-config.json's projectPaths as loaded at startup:
+	// project ID -> this environment's local path for that project
+	// (DFLT-00080). It is nil when nothing is set. Writes go through
+	// runtimeconfig.SetProjectPath(WorkDir, HomeDir, ...), not this copy.
+	ProjectPaths map[string]string
 	// PaginationPageSize is how many tickets the web UI's ticket list shows
 	// per page. Unlike every other field here, it has no env var override --
 	// it's only ever set via graph-config.json (by hand, or through the web
@@ -254,6 +259,7 @@ func loadRuntimeConfig() (runtimeConfig, error) {
 		TeamExtensionsDir:  teamExtensionsDir,
 		PaginationPageSize: paginationPageSize,
 		HomeDir:            home,
+		ProjectPaths:       fileCfg.ProjectPaths,
 	}, nil
 }
 

@@ -108,7 +108,7 @@ func TestMySQLRepository_InitIsIdempotent(t *testing.T) {
 func TestMySQLRepository_ProjectTicketNodeEdgeArtifactCRUD(t *testing.T) {
 	repo := newTestMySQLRepo(t)
 
-	proj, err := repo.CreateProject("MySQL Test Project", "MYSQ", t.TempDir())
+	proj, err := repo.CreateProject("MySQL Test Project", "MYSQ")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestMySQLRepository_ProjectTicketNodeEdgeArtifactCRUD(t *testing.T) {
 	}
 	// Upsert path (ON DUPLICATE KEY UPDATE): setting it again must update
 	// in place, not fail on a duplicate primary key.
-	proj2, err := repo.CreateProject("Second", "SCND", t.TempDir())
+	proj2, err := repo.CreateProject("Second", "SCND")
 	if err != nil {
 		t.Fatalf("CreateProject 2: %v", err)
 	}
@@ -215,5 +215,76 @@ func TestMySQLRepository_ProjectTicketNodeEdgeArtifactCRUD(t *testing.T) {
 	}
 	if got, err := repo.GetTicket(ticket.ID); err != nil || got != nil {
 		t.Errorf("expected ticket cascaded away with its project, got %+v (err=%v)", got, err)
+	}
+}
+
+// TestMySQLRepository_InitDropsLegacyWorkDirColumnAndKeepsData is the MySQL
+// counterpart of TestSQLiteInit_DropsLegacyWorkDirColumnAndKeepsData
+// (DFLT-00080): starting from a projects table that still has the old
+// `work_dir TEXT NOT NULL` column (re-added here after a normal Init, which
+// is exactly the pre-DFLT-00080 table shape), Init run twice must drop the
+// column, keep the project and its ticket, and leave CreateProject working.
+// Skipped like every other MySQL test when GRAPH_TEST_MYSQL_HOST is unset.
+func TestMySQLRepository_InitDropsLegacyWorkDirColumnAndKeepsData(t *testing.T) {
+	repo := newTestMySQLRepo(t)
+	if _, err := repo.db.Exec(`ALTER TABLE projects ADD COLUMN work_dir TEXT NOT NULL AFTER prefix`); err != nil {
+		t.Fatalf("re-adding legacy work_dir column: %v", err)
+	}
+	if _, err := repo.db.Exec(
+		`INSERT INTO projects (id, name, prefix, work_dir, ticket_seq, created_at, updated_at) VALUES ('proj-legacy', 'Alpha', 'ALPHA', '/home/a/alpha', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+	); err != nil {
+		t.Fatalf("inserting legacy project: %v", err)
+	}
+	ticket, err := repo.CreateTicket("proj-legacy", domain.Ticket{Title: "legacy ticket", Status: domain.TicketTODO})
+	if err != nil {
+		t.Fatalf("CreateTicket on legacy schema: %v", err)
+	}
+
+	for i := 1; i <= 2; i++ {
+		if err := repo.Init(); err != nil {
+			t.Fatalf("Init #%d: %v", i, err)
+		}
+	}
+
+	if exists, err := repo.mysqlColumnExists("projects", "work_dir"); err != nil || exists {
+		t.Fatalf("projects.work_dir should have been dropped (exists=%v, err=%v)", exists, err)
+	}
+	got, err := repo.GetProject("proj-legacy")
+	if err != nil || got == nil || got.Name != "Alpha" || got.Prefix != "ALPHA" {
+		t.Fatalf("project after migration: %v, %+v", err, got)
+	}
+	if gotTicket, err := repo.GetTicket(ticket.ID); err != nil || gotTicket == nil || gotTicket.Title != "legacy ticket" {
+		t.Errorf("ticket after migration: %v, %+v", err, gotTicket)
+	}
+	if _, err := repo.CreateProject("Beta", ""); err != nil {
+		t.Errorf("CreateProject after migration: %v", err)
+	}
+}
+
+// Same race as TestSQLiteInit_LegacyWorkDirDroppedConcurrentlyIsNotAnError,
+// on a shared MySQL: another member's Init drops work_dir between this
+// Init's column check and its DROP (which then fails with error 1091).
+func TestMySQLRepository_InitLegacyWorkDirDroppedConcurrentlyIsNotAnError(t *testing.T) {
+	repo := newTestMySQLRepo(t)
+	if _, err := repo.db.Exec(`ALTER TABLE projects ADD COLUMN work_dir TEXT NOT NULL AFTER prefix`); err != nil {
+		t.Fatalf("re-adding legacy work_dir column: %v", err)
+	}
+	other, err := NewMySQLRepository(mysqlTestConfig(t))
+	if err != nil {
+		t.Fatalf("NewMySQLRepository: %v", err)
+	}
+	t.Cleanup(func() { other.db.Close() })
+
+	setLegacyWorkDirDropHook(t, func() {
+		if err := other.Init(); err != nil {
+			t.Errorf("concurrent Init: %v", err)
+		}
+	})
+
+	if err := repo.Init(); err != nil {
+		t.Fatalf("Init should treat the already-dropped column as success, got %v", err)
+	}
+	if exists, err := repo.mysqlColumnExists("projects", "work_dir"); err != nil || exists {
+		t.Fatalf("projects.work_dir should be gone (exists=%v, err=%v)", exists, err)
 	}
 }

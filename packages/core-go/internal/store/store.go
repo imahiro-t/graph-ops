@@ -57,8 +57,7 @@ type NodePatch struct {
 // are left unchanged. Prefix is deliberately not patchable (see
 // domain.Project's doc comment): it is fixed at creation time.
 type ProjectPatch struct {
-	Name    *string
-	WorkDir *string
+	Name *string
 }
 
 type GraphRepository interface {
@@ -97,11 +96,11 @@ type GraphRepository interface {
 
 	// CreateProject resolves prefix (validating it if explicit, deriving
 	// and de-duplicating one from name if empty -- see
-	// internal/project.ResolvePrefix) and persists a new Project. workDir
-	// must be a non-empty absolute path; callers (HTTP/CLI) are expected to
-	// have already checked this, but the store re-validates since it's the
-	// one place that can't be bypassed.
-	CreateProject(name, prefix, workDir string) (domain.Project, error)
+	// internal/project.ResolvePrefix) and persists a new Project. A
+	// project's local path is not stored in the DB (DFLT-00080): it is a
+	// per-environment setting in graph-config.json's projectPaths (see
+	// internal/runtimeconfig).
+	CreateProject(name, prefix string) (domain.Project, error)
 	GetProject(id string) (*domain.Project, error)
 	ListProjects() ([]domain.Project, error)
 	UpdateProject(id string, patch ProjectPatch) (domain.Project, error)

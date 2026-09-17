@@ -3,6 +3,7 @@ package runtimeconfig
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -207,7 +208,7 @@ func TestLoad_MalformedJSONYieldsZeroConfig(t *testing.T) {
 	if path == "" {
 		t.Error("Load returned an empty path; the resolved path must be reported even on error")
 	}
-	if cfg != (FileConfig{}) {
+	if !reflect.DeepEqual(cfg, FileConfig{}) {
 		t.Errorf("Load returned %+v on error, want the zero FileConfig", cfg)
 	}
 }
@@ -220,7 +221,7 @@ func TestLoad_MissingFileIsNotAnError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg != (FileConfig{}) {
+	if !reflect.DeepEqual(cfg, FileConfig{}) {
 		t.Errorf("Load returned %+v, want the zero FileConfig", cfg)
 	}
 	if path == "" {

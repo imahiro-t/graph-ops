@@ -1,6 +1,7 @@
 // Top-level "設定" modal: lets the user switch between "全体設定" (global,
 // user tier) and "プロジェクト単位設定" (project, team tier resolved from
-// the selected Project's work_dir) and, within a scope, edit node-type
+// the selected project's local path in this environment -- see
+// Project.local_path) and, within a scope, edit node-type
 // instructions / the workflow graph / review-gate configuration / the
 // plan, review and report templates. See the
 // execution plan (art-2aaa5d92 on DFLT-00010-00001) for the scope/tab
@@ -97,6 +98,8 @@ export const SettingsModal: React.FC<Props> = ({
     setSelectedProjectId(id);
   };
 
+  const selectedProject = projects.find(p => p.id === selectedProjectId) ?? null;
+
   // Editing is disabled entirely when scope=project and no project is
   // selected -- see the Gherkin scenario "プロジェクトが選択されていない状態
   // ではプロジェクト単位設定タブが無効化される".
@@ -181,6 +184,17 @@ export const SettingsModal: React.FC<Props> = ({
         {scope === 'project' && !selectedProjectId && (
           <div className="mx-6 mt-3 p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[11px] rounded-lg border border-amber-200 dark:border-amber-800 shrink-0">
             {t('settings.scope.noProjectSelected')}
+          </div>
+        )}
+
+        {/* DFLT-00080: a project with no local path in this environment has no
+            team tier to edit (the API answers PROJECT_LOCAL_PATH_NOT_SET).
+            Only the project-scoped editors are affected -- the modal, the
+            global scope and the App Settings tab (where the path is set)
+            keep working. */}
+        {scope === 'project' && selectedProject && !selectedProject.local_path && (
+          <div role="status" className="mx-6 mt-3 p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[11px] rounded-lg border border-amber-200 dark:border-amber-800 shrink-0">
+            {t('settings.scope.localPathNotSet')}
           </div>
         )}
 

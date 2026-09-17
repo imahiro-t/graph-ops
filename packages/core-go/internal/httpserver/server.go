@@ -67,6 +67,10 @@ type Server struct {
 	engine    *engine.GraphEngine
 	cfg       Config
 	rejectLog *rejectLogger
+	// logger is the same logger rejectLog writes to, for this package's
+	// other operational warnings (e.g. a best-effort graph-config.json
+	// cleanup that failed -- see handleDeleteProject).
+	logger *slog.Logger
 }
 
 func New(repo store.GraphRepository, eng *engine.GraphEngine, cfg Config) *Server {
@@ -74,7 +78,7 @@ func New(repo store.GraphRepository, eng *engine.GraphEngine, cfg Config) *Serve
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
-	return &Server{repo: repo, engine: eng, cfg: cfg, rejectLog: newRejectLogger(logger)}
+	return &Server{repo: repo, engine: eng, cfg: cfg, rejectLog: newRejectLogger(logger), logger: logger}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -399,11 +403,13 @@ func (s *Server) loadCatalog() (config.Catalog, error) {
 }
 
 // loadCatalogForTicket is loadCatalog, but -- when ticketID resolves to a
-// ticket whose Project has a work_dir -- resolves the team tier from that
-// Project's work_dir instead of the server process's own cwd (s.cfg.WorkDir).
+// ticket whose Project has a local path in this environment (graph-config.json's
+// projectPaths, DFLT-00080) -- resolves the team tier from that local path
+// instead of the server process's own cwd (s.cfg.WorkDir). A project with no
+// local path falls back to loadCatalog, never an error.
 //
 // Without this, editing a project's settings through the settings UI (which
-// always writes under that Project's work_dir, see settingsScope in
+// always writes under that project's local path, see settingsScope in
 // settings.go) would never actually affect that project's tickets unless the
 // server process happened to be running with the project's directory as its
 // cwd -- silently breaking the "変更が実際のチケット実行に反映される"
@@ -420,12 +426,12 @@ func (s *Server) loadCatalogForTicket(ticketID string) (config.Catalog, error) {
 	if err != nil || ticket == nil {
 		return s.loadCatalog()
 	}
-	project, err := s.repo.GetProject(ticket.ProjectID)
-	if err != nil || project == nil || project.WorkDir == "" {
+	localPath := s.projectLocalPath(ticket.ProjectID)
+	if localPath == "" {
 		return s.loadCatalog()
 	}
 	// languageOverride "" -- see loadCatalog's doc comment above.
-	return config.LoadWithRoots(project.WorkDir, s.cfg.UserExtensionsDir, "", "")
+	return config.LoadWithRoots(localPath, s.cfg.UserExtensionsDir, "", "")
 }
 
 // resolveRoots resolves the same user-/team-tier roots the CLI resolves from
@@ -449,7 +455,7 @@ func statusForError(err error, fallback int) int {
 			domain.ErrCodeNoCurrentProject, domain.ErrCodeValidation, domain.ErrCodeTitleRequired,
 			domain.ErrCodeInvalidScope, domain.ErrCodeCatalogCycleDetected, domain.ErrCodeCatalogUnknownReference,
 			domain.ErrCodeCatalogDuplicateNode, domain.ErrCodeCatalogInvalidDocument, domain.ErrCodeInvalidMaxIterations,
-			domain.ErrCodeInvalidReportTemplate:
+			domain.ErrCodeInvalidReportTemplate, domain.ErrCodeProjectLocalPathNotSet:
 			return http.StatusBadRequest
 		case domain.ErrCodeProjectNotFound, domain.ErrCodeTicketNotFound, domain.ErrCodeNodeNotFound, domain.ErrCodeArtifactNotFound:
 			return http.StatusNotFound

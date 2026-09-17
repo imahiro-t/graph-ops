@@ -1,7 +1,8 @@
 // "全体設定" の appSettings タブ: graph-config.json 由来のサーバー/CLI設定
 // （DBパス・作業ファイル置き場・ノード/ワークフロー設定用ディレクトリの上書き・
-// チケット一覧のページング行数）と、プロジェクト管理（作業ディレクトリ編集・
-// 削除）をまとめて扱う。node-types/workflow/reviewGates の各タブと違い、
+// チケット一覧のページング行数）と、プロジェクト管理（名前とローカルパスの編集・
+// 削除）をまとめて扱う。ローカルパスは DB ではなくこの環境の graph-config.json
+// （projectPaths）に保存される（DFLT-00080）。node-types/workflow/reviewGates の各タブと違い、
 // スコープに関わらず内容自体は変わらない（プロジェクト単位の版は存在しない）
 // ため、scope !== 'global' のときは編集そのものを無効化し、切り替えを促す
 // メッセージだけを表示する。
@@ -140,16 +141,18 @@ export const AppSettingsEditor: React.FC<Props> = ({
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
-  const [workDirDrafts, setWorkDirDrafts] = useState<Record<string, string>>({});
+  const [localPathDrafts, setLocalPathDrafts] = useState<Record<string, string>>({});
   const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({});
   const [projectSavingId, setProjectSavingId] = useState<string | null>(null);
   const [projectDeletingId, setProjectDeletingId] = useState<string | null>(null);
   const [projectErrors, setProjectErrors] = useState<Record<string, string>>({});
 
-  const workDirValue = (p: Project) => (p.id in workDirDrafts ? workDirDrafts[p.id] : p.work_dir);
+  const localPathValue = (p: Project) => (p.id in localPathDrafts ? localPathDrafts[p.id] : p.local_path);
   const nameValue = (p: Project) => (p.id in nameDrafts ? nameDrafts[p.id] : p.name);
-  const isProjectDirty = (p: Project) => workDirValue(p) !== p.work_dir || nameValue(p) !== p.name;
-  const isProjectInvalid = (p: Project) => !nameValue(p).trim() || !workDirValue(p).trim();
+  const isProjectDirty = (p: Project) => localPathValue(p) !== p.local_path || nameValue(p) !== p.name;
+  // An empty local path is valid: saving it unsets the path in this
+  // environment. Only the (shared) name is required.
+  const isProjectInvalid = (p: Project) => !nameValue(p).trim();
 
   const formDirty = JSON.stringify(form) !== JSON.stringify(savedForm);
   const anyProjectDirty = projects.some(isProjectDirty);
@@ -220,7 +223,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
   };
 
   const handleSaveProject = async (p: Project) => {
-    const workDir = workDirValue(p);
+    const localPath = localPathValue(p).trim();
     const name = nameValue(p).trim();
     setProjectSavingId(p.id);
     setProjectErrors(prev => {
@@ -233,10 +236,10 @@ export const AppSettingsEditor: React.FC<Props> = ({
       const res = await apiFetch(`/api/projects/${p.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, work_dir: workDir })
+        body: JSON.stringify({ name, local_path: localPath })
       });
       if (!res.ok) throw new Error(await localizedApiErrorMessage(t, res));
-      setWorkDirDrafts(prev => {
+      setLocalPathDrafts(prev => {
         const next = { ...prev };
         delete next[p.id];
         return next;
@@ -751,6 +754,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
           <FolderCog className="w-3.5 h-3.5" /> {t('settings.appSettings.projects.title')}
         </h3>
         <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.appSettings.projects.description')}</p>
+        <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.appSettings.projects.localPathHint')}</p>
         {projects.length === 0 ? (
           <div className="text-center text-slate-400 dark:text-slate-500 text-xs py-6 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
             {t('settings.appSettings.projects.empty')}
@@ -758,11 +762,11 @@ export const AppSettingsEditor: React.FC<Props> = ({
         ) : (
           <div className="space-y-2">
             {projects.map(p => (
-              <div key={p.id} className="border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 space-y-1.5 bg-white dark:bg-slate-900">
-                {/* Name and working directory each get a small visible label
-                    above the input (the placeholders stay as a hint);
-                    items-end keeps the prefix badge and buttons aligned
-                    with the inputs. */}
+              <div key={p.id} data-testid={`project-row-${p.id}`} className="border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 space-y-1.5 bg-white dark:bg-slate-900">
+                {/* Name and local path each get a small visible label above
+                    the input (the placeholders stay as a hint); items-end
+                    keeps the prefix badge and buttons aligned with the
+                    inputs. */}
                 <div className="flex items-end gap-2">
                   <span className="mb-1 font-mono text-[10px] px-1.5 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded shrink-0">
                     {p.prefix}
@@ -790,14 +794,19 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 </div>
                 <div className="flex items-end gap-2">
                   <div className="flex-1 min-w-0 flex flex-col">
-                    <label htmlFor={`${fieldId}-project-${p.id}-workdir`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
-                      {t('settings.appSettings.projects.workDirLabel')}
+                    <label htmlFor={`${fieldId}-project-${p.id}-local-path`} className="flex items-center gap-2 text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+                      {t('settings.appSettings.projects.localPathLabel')}
+                      {!localPathValue(p) && (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-medium">
+                          {t('settings.appSettings.projects.notSet')}
+                        </span>
+                      )}
                     </label>
                     <input
-                      id={`${fieldId}-project-${p.id}-workdir`}
-                      value={workDirValue(p)}
-                      onChange={e => setWorkDirDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
-                      placeholder={t('settings.appSettings.projects.workDirLabel')}
+                      id={`${fieldId}-project-${p.id}-local-path`}
+                      value={localPathValue(p)}
+                      onChange={e => setLocalPathDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
+                      placeholder={t('settings.appSettings.projects.notSet')}
                       className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
                     />
                   </div>

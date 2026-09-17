@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -18,12 +19,14 @@ import (
 //     GRAPH_USER_EXTENSIONS_DIR) -- team is still resolved (so mergedCatalog
 //     previews can include it when a project happens to be given) but
 //     writes never touch it.
-//   - scope "project" edits the team tier resolved from the given DB
-//     Project's work_dir -- see internal/config.ResolveRootsForProjectWorkDir
-//     and the execution plan's "重要な設計課題" section: this is
+//   - scope "project" edits the team tier resolved from the given project's
+//     local path in this environment (graph-config.json's projectPaths,
+//     DFLT-00080) -- see internal/config.ProjectTeamRoot: this is
 //     deliberately NOT the server process's own cwd, so the settings UI's
 //     "project-scoped" tier tracks whichever DB Project is selected in the
-//     UI, not wherever the server binary happens to be running.
+//     UI, not wherever the server binary happens to be running. A project
+//     with no local path is a PROJECT_LOCAL_PATH_NOT_SET error (400) rather
+//     than a silent fallback to that cwd.
 type settingsScope struct {
 	Scope     string // "global" | "project"
 	UserRoot  string
@@ -33,7 +36,7 @@ type settingsScope struct {
 
 // resolveSettingsScope validates scope/project_id query (or body) values and
 // resolves the corresponding roots. teamDirOverride (GRAPH_TEAM_EXTENSIONS_DIR
-// / graph-config.json) always wins over a project's work_dir, mirroring
+// / graph-config.json) always wins over a project's local path, mirroring
 // ResolveRoots' own precedence, so an operator's explicit configuration is
 // never silently bypassed by picking a different project in the UI.
 func (s *Server) resolveSettingsScope(scope, projectID string) (settingsScope, error) {
@@ -61,7 +64,18 @@ func (s *Server) resolveSettingsScope(scope, projectID string) (settingsScope, e
 			if project == nil {
 				return settingsScope{}, domain.NewAPIError(domain.ErrCodeProjectNotFound, "project not found: %s", projectID)
 			}
-			teamRoot, err := config.ProjectTeamRoot(project.WorkDir)
+			fileCfg, err := s.loadProjectPaths()
+			if err != nil {
+				return settingsScope{}, err
+			}
+			localPath := fileCfg.ProjectPath(project.ID)
+			if localPath == "" {
+				// config.ProjectTeamRoot("") would resolve against the server's
+				// own cwd and quietly read/write settings there instead.
+				return settingsScope{}, domain.NewAPIError(domain.ErrCodeProjectLocalPathNotSet,
+					"project %s has no local path in this environment; set it under Settings > Projects", project.ID)
+			}
+			teamRoot, err := config.ProjectTeamRoot(localPath)
 			if err != nil {
 				return settingsScope{}, err
 			}
@@ -135,11 +149,17 @@ func scopeAndProjectFromQuery(r *http.Request) (string, string) {
 func (s *Server) listScopeRoots(w http.ResponseWriter, r *http.Request) (userRoot, teamRoot string, ok bool) {
 	if projectID := r.URL.Query().Get("project_id"); projectID != "" {
 		sc, err := s.resolveSettingsScope("project", projectID)
-		if err != nil {
+		switch {
+		case isAPIErrorCode(err, domain.ErrCodeProjectLocalPathNotSet):
+			// A project with no local path in this environment has no team
+			// tier to list, the same as "no project context" -- not an error
+			// that would break the whole settings screen (DFLT-00080).
+		case err != nil:
 			writeError(w, statusForError(err, http.StatusBadRequest), err)
 			return "", "", false
+		default:
+			teamRoot = sc.TeamRoot
 		}
-		teamRoot = sc.TeamRoot
 	}
 	roots, err := s.resolveRoots()
 	if err != nil {
@@ -764,4 +784,11 @@ func (s *Server) writeMarkdownTemplateState(w http.ResponseWriter, sc settingsSc
 		"tier_text":   tierText,
 		"merged_text": target.resolve(sc.mergeRoots()),
 	})
+}
+
+// isAPIErrorCode reports whether err is (or wraps) a *domain.APIError with
+// the given code.
+func isAPIErrorCode(err error, code domain.ErrorCode) bool {
+	var apiErr *domain.APIError
+	return errors.As(err, &apiErr) && apiErr.Code == code
 }

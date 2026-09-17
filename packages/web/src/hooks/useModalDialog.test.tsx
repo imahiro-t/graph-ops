@@ -216,6 +216,24 @@ describe('useModalDialog', () => {
     expect(btn('first')).toHaveFocus();
   });
 
+  it('treats any radio of the edge radio group as that tab stop when wrapping', () => {
+    render(
+      <Dialog onEscape={vi.fn()}>
+        <input type="radio" name="g" aria-label="r1" readOnly />
+        <input type="radio" name="g" aria-label="r2" readOnly />
+        <button type="button">last</button>
+      </Dialog>
+    );
+
+    // No radio is checked, so r1 is the group's tab stop, but focus sits on r2.
+    screen.getByLabelText('r2').focus();
+    fireEvent.keyDown(screen.getByLabelText('r2'), { key: 'Tab', shiftKey: true });
+    expect(btn('last')).toHaveFocus();
+
+    fireEvent.keyDown(btn('last'), { key: 'Tab' });
+    expect(screen.getByLabelText('r1')).toHaveFocus();
+  });
+
   it('calls onEscape on Escape', async () => {
     const user = userEvent.setup();
     const onEscape = vi.fn();

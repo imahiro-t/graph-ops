@@ -46,7 +46,7 @@ graph-engine create-ticket "<title>" "<description>" --priority <HIGH|MEDIUM|LOW
 
 Omit `--priority` entirely when the user chose not to set one -- the ticket is then created with no priority, exactly as before this option existed.
 
-The target project is resolved from the current directory: the project whose registered work_dir is the current directory or contains it (the deepest nested work_dir wins). Only if none matches does it fall back to the current project selected via `use-project` / the Web UI, and it errors if neither exists. Stdout is the ticket JSON only; the resolution is reported as one stderr line:
+The target project is resolved from the current directory: the project whose local path -- this environment's `projectPaths` entry in `graph-config.json`, not a DB value -- is the current directory or contains it (the deepest nested local path wins). Only if none matches does it fall back to the current project selected via `use-project` / the Web UI, and it errors if neither exists. Stdout is the ticket JSON only; the resolution is reported as one stderr line:
 
 - `resolved project: <name> (<id>) from current directory` -- matched by the current directory.
 - `resolved project: <name> (<id>) from current project (use-project)` -- no match, so the fallback was used. Check that this is the project the user meant before reporting.

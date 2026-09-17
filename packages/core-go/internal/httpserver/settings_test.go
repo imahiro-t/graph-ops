@@ -10,13 +10,14 @@ import (
 	"testing"
 
 	"github.com/graph-ops/core-go/internal/engine"
+	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
 )
 
 // newSettingsTestServer is newTestServer, but with cfg.UserExtensionsDir
 // pinned to a fresh temp dir (so "global" scope tests never touch the real
 // $HOME/.graph-ops) and cfg.TeamExtensionsDir left empty, so
-// scope=project resolution goes through the project's own work_dir (see
+// scope=project resolution goes through the project's own local path (see
 // settingsScope/resolveSettingsScope) rather than any explicit override.
 func newSettingsTestServer(t *testing.T) (*Server, store.GraphRepository, string) {
 	t.Helper()
@@ -27,7 +28,7 @@ func newSettingsTestServer(t *testing.T) (*Server, store.GraphRepository, string
 	if err := repo.Init(); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	proj, err := repo.CreateProject("Test Project", "TEST", t.TempDir())
+	proj, err := repo.CreateProject("Test Project", "TEST")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
@@ -35,8 +36,12 @@ func newSettingsTestServer(t *testing.T) (*Server, store.GraphRepository, string
 		t.Fatalf("SetCurrentProjectID: %v", err)
 	}
 	eng := engine.New(repo)
-	cfg := Config{ArtifactsDir: t.TempDir(), UserExtensionsDir: t.TempDir()}
-	return New(repo, eng, cfg), repo, proj.ID
+	cfg := Config{ArtifactsDir: t.TempDir(), UserExtensionsDir: t.TempDir(), HomeDir: t.TempDir()}
+	s := New(repo, eng, cfg)
+	if _, err := runtimeconfig.SetProjectPath(cfg.WorkDir, cfg.HomeDir, proj.ID, t.TempDir()); err != nil {
+		t.Fatalf("SetProjectPath: %v", err)
+	}
+	return s, repo, proj.ID
 }
 
 // Scenario: 全体設定スコープでノード種別の指示文を追加・保存できる -- and
@@ -86,14 +91,17 @@ func TestSettingsNodeType_GlobalScopeSaveAndClear(t *testing.T) {
 
 // Scenario: プロジェクト単位設定スコープでノード種別の指示文を追加・保存でき、
 // 別プロジェクトには反映されない -- and the write actually lands under that
-// project's work_dir/.graph-ops/, matching the plan's design fix for
+// project's local path/.graph-ops/, matching the plan's design fix for
 // per-project team-tier resolution.
 func TestSettingsNodeType_ProjectScopeIsolatedPerProject(t *testing.T) {
 	s, repo, projA := newSettingsTestServer(t)
-	workDirB := t.TempDir()
-	projB, err := repo.CreateProject("Project B", "PB", workDirB)
+	localPathB := t.TempDir()
+	projB, err := repo.CreateProject("Project B", "PB")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
+	}
+	if _, err := runtimeconfig.SetProjectPath(s.cfg.WorkDir, s.cfg.HomeDir, projB.ID, localPathB); err != nil {
+		t.Fatalf("SetProjectPath(B): %v", err)
 	}
 
 	projectA, err := repo.GetProject(projA)
@@ -108,8 +116,8 @@ func TestSettingsNodeType_ProjectScopeIsolatedPerProject(t *testing.T) {
 		t.Fatalf("PUT expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// The override file actually lives under project A's work_dir.
-	expected := filepath.Join(projectA.WorkDir, ".graph-ops", "extensions", "node-types", "implementation.md")
+	// The override file actually lives under project A's local path.
+	expected := filepath.Join(testProjectLocalPath(t, s, projectA.ID), ".graph-ops", "extensions", "node-types", "implementation.md")
 	raw, err := os.ReadFile(expected)
 	if err != nil {
 		t.Fatalf("expected override file at %s: %v", expected, err)

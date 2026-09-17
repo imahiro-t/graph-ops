@@ -61,13 +61,27 @@
   },
   "createProjectModal": {
     "title": "新規プロジェクト作成",
-    "description": "プロジェクトごとにチケット一覧・作業フォルダ・チケット/ノードIDのプレフィックスが分離されます。",
+    "description": "プロジェクトごとにチケット一覧とチケット/ノードIDのプレフィックスが分離されます。ローカルパスはDBではなく、この環境の設定ファイル（graph-config.json）にだけ保存されます。",
     "nameLabel": "プロジェクト名 *",
     "namePlaceholder": "例: 決済サービス",
     "prefixLabel": "IDプレフィックス（任意、英数字5文字以内）",
     "prefixPlaceholder": "省略時はプロジェクト名から自動生成",
-    "workDirLabel": "作業フォルダ（絶対パス） *",
-    "workDirPlaceholder": "例: /Users/me/dev/payments-service"
+    "localPathLabel": "ローカルパス（この環境・絶対パス、任意）",
+    "localPathPlaceholder": "例: /Users/me/dev/payments-service"
+  },
+  "projectSetupModal": {
+    "title": "このディレクトリのプロジェクトを設定",
+    "description": "ディレクトリ {{dir}} に対応するプロジェクトがこの環境のローカル設定にありません。新しく作成するか、DBにある既存のプロジェクト（他のメンバーが作成したものなど）を選んでください。どちらを選んでも、このディレクトリとの対応がこの環境の graph-config.json に保存されます。",
+    "modeLabel": "設定方法",
+    "modeCreate": "新規作成",
+    "modeExisting": "既存プロジェクトから選ぶ",
+    "noExistingProjects": "DBにプロジェクトがまだないため、既存プロジェクトは選べません。",
+    "existingListLabel": "プロジェクト",
+    "notSet": "未設定",
+    "overwriteWarning": "このプロジェクトのローカルパス {{current}} は {{next}} で上書きされます。",
+    "confirmExisting": "このプロジェクトを使う",
+    "createdButLocalPathNotSavedChooseExisting": "プロジェクト「{{name}}」はDBに作成されましたが、この環境のローカルパスの保存に失敗しました。もう一度作成すると同じプロジェクトが重複するため、下の一覧で「{{name}}」を選んで「このプロジェクトを使う」を押し、ローカルパスを設定してください。",
+    "createdButLocalPathNotSavedUseSettings": "プロジェクト「{{name}}」はDBに作成されましたが、この環境のローカルパスの保存に失敗しました。もう一度作成すると同じプロジェクトが重複するため、作成し直さずに「アプリ設定」タブ（全体設定）のプロジェクト管理でローカルパスを設定してください。"
   },
   "createModal": {
     "title": "新規チケット作成",
@@ -237,7 +251,8 @@
       "project": "プロジェクト単位設定",
       "projectLabel": "対象プロジェクト",
       "projectPlaceholder": "プロジェクトを選択",
-      "noProjectSelected": "アプリ全体でプロジェクトが選択されていません。プロジェクト単位設定を編集するには、先にプロジェクトスイッチャーからプロジェクトを選択してください。"
+      "noProjectSelected": "アプリ全体でプロジェクトが選択されていません。プロジェクト単位設定を編集するには、先にプロジェクトスイッチャーからプロジェクトを選択してください。",
+      "localPathNotSet": "このプロジェクトはこの環境でローカルパスが未設定のため、プロジェクト単位設定を読み書きできません。「アプリ設定」タブ（全体設定）のプロジェクト管理でローカルパスを設定してください。"
     },
     "tabs": {
       "nodeTypes": "ノード種別",
@@ -398,11 +413,13 @@
       },
       "projects": {
         "title": "プロジェクト管理",
-        "description": "各プロジェクトの名前や作業ディレクトリ（Claude Codeを起動する対象フォルダ）の編集、プロジェクトの削除ができます。",
+        "description": "各プロジェクトの名前とローカルパス（Claude Codeを起動するフォルダ・プロジェクト単位設定の保存先）の編集、プロジェクトの削除ができます。",
         "empty": "プロジェクトがまだありません。",
         "delete": "プロジェクトを削除",
         "nameLabel": "プロジェクト名",
-        "workDirLabel": "作業ディレクトリ",
+        "localPathLabel": "ローカルパス（この環境）",
+        "localPathHint": "ローカルパスはDBには保存されず、この環境の graph-config.json にだけ保存されます。同じDBを使う他のメンバーには影響しません。空にして保存すると未設定に戻ります。",
+        "notSet": "未設定",
         "confirmDelete": "プロジェクト「{{name}}」（{{id}}）を削除します。このプロジェクトに属するすべてのチケット・ノード・成果物が完全に削除され、この操作は取り消せません。本当に削除しますか？"
       }
     }
@@ -428,6 +445,8 @@
     "INVALID_MAX_ITERATIONS": "最大イテレーション数は1以上の整数で指定してください。",
     "WORKFLOW_NODES_LOCKED": "ワークフローのノード構成（骨格）はプラグイン既定でのみ定義され、上書きできません。レビューゲートの追加・編集はレビューゲートタブから行ってください。",
     "INVALID_REPORT_TEMPLATE": "レポートテンプレートに必要な構造マーカーが含まれていません。",
+    "PROJECT_LOCAL_PATH_NOT_SET": "このプロジェクトはこの環境でローカルパスが未設定です。「アプリ設定」タブ（全体設定）のプロジェクト管理でローカルパスを設定してください。",
+    "PROJECT_CREATED_LOCAL_PATH_NOT_SAVED": "プロジェクトはDBに作成されましたが、この環境のローカルパスの保存に失敗しました。作成し直さずに、「アプリ設定」タブ（全体設定）のプロジェクト管理でローカルパスを設定してください。",
     "UNKNOWN": "予期しないエラーが発生しました。再度お試しください。"
   }
 }

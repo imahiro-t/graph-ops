@@ -30,7 +30,7 @@ func newTestRepo(t *testing.T) store.GraphRepository {
 func newTestRepoWithProject(t *testing.T) (store.GraphRepository, string) {
 	t.Helper()
 	repo := newTestRepo(t)
-	proj, err := repo.CreateProject("Test Project", "TEST", t.TempDir())
+	proj, err := repo.CreateProject("Test Project", "TEST")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}

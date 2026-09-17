@@ -82,6 +82,24 @@ export function getFocusableElements(container: HTMLElement): HTMLElement[] {
   });
 }
 
+// Whether `active` is the tab stop `stop`. Any radio of the same named group
+// counts as that group's stop: focus can sit on a radio other than the one
+// getFocusableElements picked (for example an unchecked radio of a group with
+// no checked member yet, reached by clicking it while it stays unchecked), and
+// Tab from there still leaves the whole group, so wrapping must treat it like
+// the picked radio.
+function isSameTabStop(active: Element | null, stop: HTMLElement): boolean {
+  if (active === stop) return true;
+  return (
+    active instanceof HTMLInputElement &&
+    stop instanceof HTMLInputElement &&
+    active.type === 'radio' &&
+    stop.type === 'radio' &&
+    active.name !== '' &&
+    active.name === stop.name
+  );
+}
+
 // Reads ref.current at call time on purpose: the fallback element is looked
 // up when the dialog closes, not when it opened, since the one that exists at
 // close time is the one that can take focus.
@@ -148,10 +166,10 @@ export function useModalDialog<T extends HTMLElement = HTMLDivElement>({
         (e.shiftKey ? last : first).focus();
         return;
       }
-      if (e.shiftKey && active === first) {
+      if (e.shiftKey && isSameTabStop(active, first)) {
         e.preventDefault();
         last.focus();
-      } else if (!e.shiftKey && active === last) {
+      } else if (!e.shiftKey && isSameTabStop(active, last)) {
         e.preventDefault();
         first.focus();
       }
