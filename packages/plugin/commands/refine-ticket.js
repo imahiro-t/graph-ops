@@ -3,5 +3,6 @@ const { spawnSync } = require('child_process');
 const { resolveBinary } = require('../scripts/resolve-binary');
 
 const args = process.argv.slice(2);
-const res = spawnSync(resolveBinary(), ['refine-ticket', ...args], { stdio: 'inherit' });
+const { command, args: prefixArgs } = resolveBinary();
+const res = spawnSync(command, [...prefixArgs, 'refine-ticket', ...args], { stdio: 'inherit' });
 process.exit(res.status || 0);

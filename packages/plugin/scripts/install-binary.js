@@ -1,31 +1,45 @@
 #!/usr/bin/env node
 // Fetches the pre-built graph-engine Go binary for the current OS/arch from
-// GitHub Releases and places it under <pluginRoot>/bin/, so that plugin.json
-// (whose plugin root gets added to PATH by Claude Code while the plugin is
-// enabled) exposes a bare `graph-engine` command with no other setup.
+// GitHub Releases, verifies it against the release's checksums.txt, and
+// resolves which graph-engine binary the plugin should run.
 //
-// This is the production counterpart to the monorepo's local `go build`:
-// nothing here depends on packages/core-go existing on disk, so it works
-// when `packages/plugin` runs on its own -- in production, from inside the
-// tag-pinned clone that the marketplace's `command` source keeps under
-// `~/.cache/graph-ops/<tag>` (see scripts/claude-plugin-path.js).
+// Where binaries live (see findLocalEngine / ensureEngine for the order):
+//   - <pluginRoot>/libexec/graph-engine[.exe] (+ libexec/.version): filled by
+//     `npm run build:go` in the monorepo, and by claude-plugin-path.js for the
+//     marketplace's `command` source (a tag-pinned clone under
+//     `~/.cache/graph-ops/<tag>`). Never tracked by git.
+//   - <engineCacheRoot>/v<version>/graph-engine[.exe]: the per-user cache the
+//     committed bin/graph-engine shim downloads into on first run when the
+//     plugin was installed without a binary (e.g. through a `git-subdir`
+//     source such as the community catalog, where gitignored files never
+//     arrive and no install-time script runs).
 //
-// Deliberately zero npm dependencies: this runs straight out of that fresh
-// git clone, where `npm install` has never been run, so there is no
+// bin/ itself only holds the committed shims (bin/graph-engine for sh,
+// bin/graph-engine.cmd for cmd/PowerShell). Claude Code adds bin/ to the
+// Bash tool's PATH while the plugin is enabled, so skills keep calling a bare
+// `graph-engine` and the shim picks the actual binary.
+//
+// Where a download comes from is fixed by the installed commit's
+// .claude-plugin/plugin.json alone ("repository" + "version"): nothing in the
+// environment can redirect it. GRAPH_OPS_ENGINE_DIR only relocates the
+// per-user cache directory.
+//
+// Deliberately zero npm dependencies: this runs straight out of a fresh git
+// clone / plugin cache where `npm install` has never been run, so there is no
 // `node_modules` to load anything from.
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
+const { pruneStaleEngineVersions } = require('./prune-plugin-cache');
 
 // Idle-socket timeout applied to every GET (including each redirect hop):
 // without this, a hung connection (dead proxy, captive portal, stalled TLS
 // handshake, ...) leaves the request's Promise pending forever, which in
-// turn hangs claude-plugin-path.js -- and that script is invoked in the
-// background on every session start while the plugin is enabled, so a hang
-// here is a silent, hard-to-diagnose availability failure for the user.
+// turn hangs claude-plugin-path.js or the bin/graph-engine shim.
 const REQUEST_TIMEOUT_MS = 10000;
 
 // A fresh install (no cached binary yet) has no fallback to fall back to, so
@@ -63,8 +77,8 @@ function assetNameForCurrentTarget() {
   return asset;
 }
 
-function localExeName() {
-  return process.platform === 'win32' ? 'graph-engine.exe' : 'graph-engine';
+function localExeName(platform = process.platform) {
+  return platform === 'win32' ? 'graph-engine.exe' : 'graph-engine';
 }
 
 // Reads .claude-plugin/plugin.json, returning both the parsed manifest and
@@ -86,18 +100,17 @@ function pluginVersion(pluginRoot) {
   return pluginJson.version;
 }
 
-// The GitHub repo to fetch releases from, as "owner/repo". Resolution order:
-//   1. GRAPH_OPS_RELEASE_REPO env var (escape hatch / testing).
-//   2. .claude-plugin/plugin.json's "repository" field.
+// The GitHub repo to fetch releases from, as "owner/repo", taken only from
+// .claude-plugin/plugin.json's "repository" field. There is intentionally no
+// environment-variable override: the download source must be determined by
+// the installed plugin content itself, not by the environment graph-engine
+// happens to be launched from.
 function releaseRepo(pluginRoot) {
-  if (process.env.GRAPH_OPS_RELEASE_REPO) {
-    return process.env.GRAPH_OPS_RELEASE_REPO;
-  }
   const { pluginJsonPath, pluginJson } = readPluginJson(pluginRoot);
   const repoUrl = typeof pluginJson.repository === 'string' ? pluginJson.repository : pluginJson.repository && pluginJson.repository.url;
   if (!repoUrl) {
     throw new Error(
-      `${pluginJsonPath} has no "repository" field, and GRAPH_OPS_RELEASE_REPO is not set -- ` +
+      `${pluginJsonPath} has no "repository" field -- ` +
         `don't know which GitHub repo to download release binaries from.`
     );
   }
@@ -211,9 +224,9 @@ function parseChecksums(text) {
 // or one missing this platform's entry, is treated the same as a corrupt
 // download (see ensureBinary's existing offline/cached-binary fallback,
 // which still applies on top of this).
-async function fetchExpectedChecksum(pluginRoot, assetName) {
+async function fetchExpectedChecksum(pluginRoot, assetName, fetchText = httpGetTextFollowingRedirects) {
   const url = `${releaseBaseUrl(pluginRoot)}/checksums.txt`;
-  const text = await httpGetTextFollowingRedirects(url);
+  const text = await fetchText(url);
   const digest = parseChecksums(text).get(assetName);
   if (!digest) {
     throw new Error(`checksums.txt fetched from ${url} has no entry for ${assetName}`);
@@ -239,16 +252,24 @@ function writeCachedVersion(binDir, version) {
 // match. Integrity verification is not optional/best-effort: a binary that
 // fails this check is treated exactly like a failed download by the caller
 // (see ensureBinary's cached-binary fallback / hard failure), never used.
-async function downloadAndVerify(pluginRoot, tmpPath) {
+//
+// fetchFile/fetchText exist only so tests can exercise this without a
+// network. The URLs are always built from plugin.json; the hooks are not
+// reachable from the environment or the command line.
+async function downloadAndVerify(
+  pluginRoot,
+  tmpPath,
+  { fetchFile = httpGetFollowingRedirects, fetchText = httpGetTextFollowingRedirects } = {}
+) {
   const baseUrl = releaseBaseUrl(pluginRoot);
   const asset = assetNameForCurrentTarget();
   const url = `${baseUrl}/${asset}`;
-  await httpGetFollowingRedirects(url, tmpPath);
+  await fetchFile(url, tmpPath);
   const stat = fs.statSync(tmpPath);
   if (stat.size === 0) {
     throw new Error(`downloaded file from ${url} is empty`);
   }
-  const expectedDigest = await fetchExpectedChecksum(pluginRoot, asset);
+  const expectedDigest = await fetchExpectedChecksum(pluginRoot, asset, fetchText);
   const actualDigest = await sha256File(tmpPath);
   if (actualDigest !== expectedDigest) {
     throw new Error(
@@ -259,8 +280,15 @@ async function downloadAndVerify(pluginRoot, tmpPath) {
 }
 
 /**
- * Ensures <pluginRoot>/bin/graph-engine[.exe] exists and matches the
- * plugin's own version, downloading it from GitHub Releases if needed.
+ * Ensures <binDir>/graph-engine[.exe] exists and matches the plugin's own
+ * version, downloading it from GitHub Releases if needed. binDir defaults to
+ * <pluginRoot>/libexec -- never bin/, which only holds the committed shims.
+ *
+ * With versionMarker (the default) the version is tracked by a
+ * <binDir>/.version file, for a directory that holds "whatever version was
+ * last installed" (libexec/). With versionMarker: false the directory itself
+ * is version-specific (the per-user cache's v<version>/), so the binary
+ * existing is enough and no marker is written.
  *
  * Every download is verified against the SHA256 checksum published
  * alongside it in the release's checksums.txt before it is ever chmod'd or
@@ -270,21 +298,34 @@ async function downloadAndVerify(pluginRoot, tmpPath) {
  * retried a couple of times with a short backoff before giving up, since a
  * fresh install has no cached binary to fall back to.
  *
+ * The download goes to a per-process temporary file inside binDir and is
+ * renamed into place only after verification, so concurrent first runs never
+ * expose a partial or unverified binary.
+ *
  * Returns the absolute path to the binary. Never re-downloads when the
  * cached binary already matches the plugin's version (so this is cheap and
  * network-free on every run after the first). If every attempt fails (e.g.
  * offline, or the release's checksums.txt doesn't match) and a
- * previously-downloaded binary of *any* version is still present, that
- * binary is kept and used, with a warning on stderr -- only throws when
+ * previously-downloaded binary of *any* version is still present in binDir,
+ * that binary is kept and used, with a warning on stderr -- only throws when
  * there is no usable binary at all.
+ *
+ * fetchFile/fetchText/retryBackoffMs are test-only hooks (see
+ * downloadAndVerify).
  */
-async function ensureBinary({ pluginRoot }) {
-  const binDir = path.join(pluginRoot, 'bin');
+async function ensureBinary({
+  pluginRoot,
+  binDir = path.join(pluginRoot, 'libexec'),
+  versionMarker = true,
+  fetchFile,
+  fetchText,
+  retryBackoffMs = RETRY_BACKOFF_MS,
+}) {
   const exe = localExeName();
   const binPath = path.join(binDir, exe);
   const version = pluginVersion(pluginRoot);
 
-  if (fs.existsSync(binPath) && readCachedVersion(binDir) === version) {
+  if (fs.existsSync(binPath) && (!versionMarker || readCachedVersion(binDir) === version)) {
     return binPath; // already up to date, no network needed
   }
 
@@ -293,12 +334,14 @@ async function ensureBinary({ pluginRoot }) {
   let lastErr;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      await downloadAndVerify(pluginRoot, tmpPath);
-      fs.renameSync(tmpPath, binPath);
+      await downloadAndVerify(pluginRoot, tmpPath, { fetchFile, fetchText });
       if (process.platform !== 'win32') {
-        fs.chmodSync(binPath, 0o755);
+        fs.chmodSync(tmpPath, 0o755);
       }
-      writeCachedVersion(binDir, version);
+      fs.renameSync(tmpPath, binPath);
+      if (versionMarker) {
+        writeCachedVersion(binDir, version);
+      }
       return binPath;
     } catch (err) {
       lastErr = err;
@@ -308,7 +351,7 @@ async function ensureBinary({ pluginRoot }) {
         // the partial download may never have been created; nothing to clean up
       }
       if (attempt < MAX_ATTEMPTS) {
-        await sleep(RETRY_BACKOFF_MS * attempt);
+        await sleep(retryBackoffMs * attempt);
       }
     }
   }
@@ -323,13 +366,186 @@ async function ensureBinary({ pluginRoot }) {
   throw new Error(`failed to install graph-engine binary after ${MAX_ATTEMPTS} attempts: ${lastErr.message}`);
 }
 
-module.exports = { ensureBinary, assetNameForCurrentTarget, releaseRepo, pluginVersion, parseChecksums };
+/**
+ * The per-user directory that holds one v<version>/ subdirectory per
+ * downloaded graph-engine version. Resolution order:
+ *   1. GRAPH_OPS_ENGINE_DIR (relocates the cache only; never the download
+ *      source).
+ *   2. win32: %LOCALAPPDATA%\graph-ops\engine
+ *   3. otherwise: ${XDG_CACHE_HOME:-$HOME/.cache}/graph-ops/engine
+ *      (a relative XDG_CACHE_HOME is ignored, as the XDG spec requires).
+ *
+ * CLAUDE_PLUGIN_DATA is deliberately not consulted: Claude Code does not pass
+ * it to Bash tool commands, so the shim could never rely on it, and using it
+ * only sometimes would split the cache in two.
+ *
+ * The bin/graph-engine sh shim mirrors this; keep them in sync.
+ */
+function engineCacheRoot({ env = process.env, platform = process.platform } = {}) {
+  if (env.GRAPH_OPS_ENGINE_DIR) {
+    return path.resolve(env.GRAPH_OPS_ENGINE_DIR);
+  }
+  if (platform === 'win32') {
+    const localAppData = env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+    return path.join(localAppData, 'graph-ops', 'engine');
+  }
+  const xdg = env.XDG_CACHE_HOME;
+  const cacheHome = xdg && path.isAbsolute(xdg) ? xdg : path.join(env.HOME || os.homedir(), '.cache');
+  return path.join(cacheHome, 'graph-ops', 'engine');
+}
 
+function engineCacheDir(pluginRoot, options = {}) {
+  return path.join(engineCacheRoot(options), `v${pluginVersion(pluginRoot)}`);
+}
+
+/**
+ * Looks for an already-present binary without touching the network, in this
+ * order (the first hit wins):
+ *   1. <pluginRoot>/libexec/graph-engine[.exe], only when libexec/.version
+ *      equals plugin.json's version.
+ *   2. <pluginRoot>/../core-go/graph-engine[.exe] -- the monorepo's own
+ *      `go build` output; only exists when running from a checkout. Its
+ *      version is not checked (same as the previous resolve-binary.js).
+ *   3. <engineCacheRoot>/v<version>/graph-engine[.exe] -- only ever holds a
+ *      checksum-verified binary renamed into place, so presence is enough.
+ * Returns the absolute path, or null when nothing usable is present.
+ *
+ * Used by ensureEngine and resolve-binary.js, and mirrored by the
+ * bin/graph-engine sh shim; keep all of them in sync.
+ */
+function findLocalEngine({ pluginRoot, env = process.env, platform = process.platform } = {}) {
+  const exe = localExeName(platform);
+  let version = null;
+  try {
+    version = pluginVersion(pluginRoot);
+  } catch {
+    // without a readable version only the unversioned monorepo build applies
+  }
+
+  const libexecDir = path.join(pluginRoot, 'libexec');
+  const libexecBin = path.join(libexecDir, exe);
+  if (version && fs.existsSync(libexecBin) && readCachedVersion(libexecDir) === version) {
+    return libexecBin;
+  }
+
+  const monorepoBuild = path.resolve(pluginRoot, '..', 'core-go', exe);
+  if (fs.existsSync(monorepoBuild)) {
+    return monorepoBuild;
+  }
+
+  if (version) {
+    const cached = path.join(engineCacheRoot({ env, platform }), `v${version}`, exe);
+    if (fs.existsSync(cached)) {
+      return cached;
+    }
+  }
+  return null;
+}
+
+function describeAssetName() {
+  try {
+    return assetNameForCurrentTarget();
+  } catch {
+    return `graph-engine build for ${currentTargetKey()}`;
+  }
+}
+
+/**
+ * Returns the path of the graph-engine binary to run, downloading it into
+ * the per-user cache first when nothing usable is present:
+ *   1-3. findLocalEngine (libexec with matching .version, monorepo build,
+ *        per-user cache).
+ *   4.   Download into <engineCacheRoot>/v<version>/ via ensureBinary
+ *        (checksum-verified). After a successful download, other versions'
+ *        cache directories untouched for an hour are pruned (best-effort).
+ *   5.   If the download fails: a libexec binary of *any* version is used
+ *        with a warning; otherwise this throws with the reason and where a
+ *        binary can be placed by hand.
+ *
+ * Progress, warnings and errors only ever go to `log` (stderr by default):
+ * stdout belongs to graph-engine itself, whose JSON output the skills parse.
+ */
+async function ensureEngine({ pluginRoot, env = process.env, now, log = (message) => process.stderr.write(message), ...installOptions }) {
+  const local = findLocalEngine({ pluginRoot, env });
+  if (local) {
+    return local;
+  }
+
+  const version = pluginVersion(pluginRoot);
+  const engineRoot = engineCacheRoot({ env });
+  const cacheDir = path.join(engineRoot, `v${version}`);
+  const exe = localExeName();
+  const libexecBin = path.join(pluginRoot, 'libexec', exe);
+
+  let binPath;
+  try {
+    log(`graph-ops: downloading graph-engine v${version} (${assetNameForCurrentTarget()}) into ${cacheDir} (first run only)...\n`);
+    binPath = await ensureBinary({ pluginRoot, binDir: cacheDir, versionMarker: false, ...installOptions });
+  } catch (err) {
+    if (fs.existsSync(libexecBin)) {
+      log(
+        `graph-ops: warning: ${err.message}; falling back to ${libexecBin}, ` +
+          `which was not built for plugin version ${version}.\n`
+      );
+      return libexecBin;
+    }
+    let source = 'the GitHub release';
+    try {
+      source = releaseBaseUrl(pluginRoot);
+    } catch {
+      // plugin.json is broken; the original error already says so
+    }
+    throw new Error(
+      `graph-ops: could not obtain graph-engine v${version}: ${err.message}\n` +
+        `graph-ops: to install it by hand, download ${describeAssetName()} from ${source}, ` +
+        `verify it against checksums.txt in the same release, and save it as ${path.join(cacheDir, exe)} (executable).`
+    );
+  }
+
+  log(`graph-ops: graph-engine v${version} ready at ${binPath}\n`);
+  pruneStaleEngineVersions({
+    engineRoot,
+    keepVersion: version,
+    now,
+    warn: (message) => log(`graph-ops: warning: ${message}\n`),
+  });
+  return binPath;
+}
+
+module.exports = {
+  ensureBinary,
+  ensureEngine,
+  findLocalEngine,
+  engineCacheRoot,
+  engineCacheDir,
+  assetNameForCurrentTarget,
+  releaseRepo,
+  releaseBaseUrl,
+  pluginVersion,
+  parseChecksums,
+  localExeName,
+  MAX_ATTEMPTS,
+  REQUEST_TIMEOUT_MS,
+  RETRY_BACKOFF_MS,
+};
+
+// Command line:
+//   node install-binary.js               install into <pluginRoot>/libexec/
+//   node install-binary.js --print-path  resolve the binary to run (downloading
+//                                        into the per-user cache if needed)
+//                                        and print only its path on stdout;
+//                                        used by the bin/graph-engine shim
 if (require.main === module) {
   const pluginRoot = path.resolve(__dirname, '..');
-  ensureBinary({ pluginRoot })
+  const printPath = process.argv.slice(2).includes('--print-path');
+  const run = printPath ? ensureEngine({ pluginRoot }) : ensureBinary({ pluginRoot });
+  run
     .then((binPath) => {
-      process.stderr.write(`graph-engine binary ready at ${binPath}\n`);
+      if (printPath) {
+        process.stdout.write(`${binPath}\n`);
+      } else {
+        process.stderr.write(`graph-engine binary ready at ${binPath}\n`);
+      }
     })
     .catch((err) => {
       process.stderr.write(`${err.message}\n`);

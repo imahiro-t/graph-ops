@@ -9,7 +9,12 @@ packages/core-go/graph-engine.exe
 packages/core-go/*.db*
 packages/core-go/internal/httpserver/webdist/*
 !packages/core-go/internal/httpserver/webdist/.gitkeep
-packages/plugin/bin/
+# bin/ only ships the committed graph-engine shims; the real binary lives in
+# libexec/ (local builds, `command` source) or in the per-user cache.
+packages/plugin/bin/*
+!packages/plugin/bin/graph-engine
+!packages/plugin/bin/graph-engine.cmd
+packages/plugin/libexec/
 # Reports/artifacts occasionally get generated or copy-pasted into a
 # repo-root artifacts/ directory by mistake. The engine's actual default
 # artifacts directory is $HOME/.graph-ops/artifacts (outside the repo), so

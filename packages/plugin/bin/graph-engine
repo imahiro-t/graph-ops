@@ -1,0 +1,97 @@
+#!/bin/sh
+# graph-engine shim for the GraphOps plugin (committed; the real Go binary is
+# never stored in bin/).
+#
+# Claude Code adds this plugin's bin/ to the Bash tool's PATH, so skills run
+# a bare `graph-engine`. This script finds the real binary and execs it with
+# the same arguments. Lookup order (mirrors findLocalEngine/ensureEngine in
+# scripts/install-binary.js -- keep them in sync):
+#
+#   1. <root>/libexec/graph-engine, if libexec/.version matches plugin.json
+#   2. <root>/../core-go/graph-engine (monorepo checkout)
+#   3. <engine cache>/v<version>/graph-engine, where <engine cache> is
+#      $GRAPH_OPS_ENGINE_DIR or ${XDG_CACHE_HOME:-$HOME/.cache}/graph-ops/engine
+#   4. otherwise `node scripts/install-binary.js --print-path`, which
+#      downloads the release binary for plugin.json's version into the cache
+#      (SHA256-verified against the release's checksums.txt), falling back to
+#      a libexec binary of any version if that fails
+#   5. without node: a libexec binary of any version, else exit 127
+#
+# Everything this script prints goes to stderr; stdout is graph-engine's own.
+set -eu
+
+self=$0
+case $self in
+  */*) ;;
+  *) [ -f "$self" ] || self=$(command -v "$self") ;;
+esac
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+    *) self=$(dirname "$self")/$link ;;
+  esac
+done
+root=$(cd "$(dirname "$self")/.." && pwd -P)
+
+exe=graph-engine
+engine_root=
+case $(uname -s 2>/dev/null || true) in
+  MINGW* | MSYS* | CYGWIN*)
+    exe=graph-engine.exe
+    if [ -n "${GRAPH_OPS_ENGINE_DIR:-}" ]; then
+      engine_root=$GRAPH_OPS_ENGINE_DIR
+    elif [ -n "${LOCALAPPDATA:-}" ] && command -v cygpath >/dev/null 2>&1; then
+      engine_root=$(cygpath -u "$LOCALAPPDATA")/graph-ops/engine
+    fi
+    ;;
+  *)
+    if [ -n "${GRAPH_OPS_ENGINE_DIR:-}" ]; then
+      engine_root=$GRAPH_OPS_ENGINE_DIR
+    else
+      case ${XDG_CACHE_HOME:-} in
+        /*) engine_root=$XDG_CACHE_HOME/graph-ops/engine ;;
+        *) [ -n "${HOME:-}" ] && engine_root=$HOME/.cache/graph-ops/engine ;;
+      esac
+    fi
+    ;;
+esac
+
+version=$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$root/.claude-plugin/plugin.json" 2>/dev/null | head -n 1 || true)
+
+libexec_bin=$root/libexec/$exe
+
+# 1. libexec, when built for this exact version
+if [ -n "$version" ] && [ -f "$libexec_bin" ]; then
+  libexec_version=$(tr -d ' \t\r\n' <"$root/libexec/.version" 2>/dev/null || true)
+  if [ "$libexec_version" = "$version" ]; then
+    exec "$libexec_bin" "$@"
+  fi
+fi
+
+# 2. monorepo build
+if [ -f "$root/../core-go/$exe" ]; then
+  exec "$root/../core-go/$exe" "$@"
+fi
+
+# 3. per-user cache
+if [ -n "$version" ] && [ -n "$engine_root" ] && [ -f "$engine_root/v$version/$exe" ]; then
+  exec "$engine_root/v$version/$exe" "$@"
+fi
+
+# 4. download via Node (install-binary.js reports its own errors on stderr)
+if command -v node >/dev/null 2>&1; then
+  if bin=$(node "$root/scripts/install-binary.js" --print-path </dev/null); then
+    exec "$bin" "$@"
+  fi
+  exit 1
+fi
+
+# 5. no Node.js
+if [ -f "$libexec_bin" ]; then
+  echo "graph-ops: warning: Node.js not found; using $libexec_bin, which was not built for plugin version ${version:-unknown}." >&2
+  exec "$libexec_bin" "$@"
+fi
+echo "graph-ops: graph-engine is not installed yet, and downloading it on first run requires Node.js (\`node\` was not found on PATH)." >&2
+echo "graph-ops: install Node.js and retry, or place the graph-engine binary for plugin version ${version:-unknown} from https://github.com/imahiro-t/graph-ops/releases at ${engine_root:-<cache dir>}/v${version:-<version>}/$exe (verify it against checksums.txt in the same release)." >&2
+exit 127
