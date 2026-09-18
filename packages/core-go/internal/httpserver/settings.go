@@ -39,6 +39,13 @@ type settingsScope struct {
 // / graph-config.json) always wins over a project's local path, mirroring
 // ResolveRoots' own precedence, so an operator's explicit configuration is
 // never silently bypassed by picking a different project in the UI.
+//
+// A scope=project request whose team root would be the same directory as
+// the user root (the project's local path is $HOME itself, or the team-root
+// override names the user root) is a PROJECT_TEAM_ROOT_IS_USER_ROOT error
+// (400): ResolveRoots never treats one directory as both tiers, and writing
+// "project" settings there would silently overwrite the global ones
+// (DFLT-00068).
 func (s *Server) resolveSettingsScope(scope, projectID string) (settingsScope, error) {
 	if scope != "global" && scope != "project" {
 		return settingsScope{}, domain.NewAPIError(domain.ErrCodeInvalidScope, "scope must be \"global\" or \"project\", got %q", scope)
@@ -76,14 +83,30 @@ func (s *Server) resolveSettingsScope(scope, projectID string) (settingsScope, e
 					"project %s has no local path in this environment; set it under Settings > Projects", project.ID)
 			}
 			teamRoot, err := config.ProjectTeamRoot(localPath)
+			if errors.Is(err, config.ErrTeamRootIsUserRoot) {
+				return settingsScope{}, teamRootIsUserRootError(project.ID)
+			}
 			if err != nil {
 				return settingsScope{}, err
 			}
 			out.TeamRoot = teamRoot
 		}
+		// ProjectTeamRoot only knows the default user root, and the override
+		// branch above isn't checked at all, so compare against the user root
+		// actually in effect here too.
+		if config.SameDir(out.TeamRoot, out.UserRoot) {
+			return settingsScope{}, teamRootIsUserRootError(projectID)
+		}
 	}
 
 	return out, nil
+}
+
+// teamRootIsUserRootError is resolveSettingsScope's
+// PROJECT_TEAM_ROOT_IS_USER_ROOT error for projectID.
+func teamRootIsUserRootError(projectID string) error {
+	return domain.NewAPIError(domain.ErrCodeProjectTeamRootIsUserRoot,
+		"project %s's team settings directory would be the user settings directory (its local path is the home directory, or the team root override names the user root); it has no project-scoped settings of its own", projectID)
 }
 
 // mergedDocuments returns def plus every tier up to and including this
@@ -150,10 +173,12 @@ func (s *Server) listScopeRoots(w http.ResponseWriter, r *http.Request) (userRoo
 	if projectID := r.URL.Query().Get("project_id"); projectID != "" {
 		sc, err := s.resolveSettingsScope("project", projectID)
 		switch {
-		case isAPIErrorCode(err, domain.ErrCodeProjectLocalPathNotSet):
-			// A project with no local path in this environment has no team
-			// tier to list, the same as "no project context" -- not an error
-			// that would break the whole settings screen (DFLT-00080).
+		case isAPIErrorCode(err, domain.ErrCodeProjectLocalPathNotSet),
+			isAPIErrorCode(err, domain.ErrCodeProjectTeamRootIsUserRoot):
+			// A project with no local path in this environment (DFLT-00080),
+			// or whose team root would be the user root (DFLT-00068), has no
+			// team tier to list, the same as "no project context" -- not an
+			// error that would break the whole settings screen.
 		case err != nil:
 			writeError(w, statusForError(err, http.StatusBadRequest), err)
 			return "", "", false

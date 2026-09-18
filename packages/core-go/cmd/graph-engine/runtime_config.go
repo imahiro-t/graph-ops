@@ -52,8 +52,10 @@ type runtimeConfig struct {
 	MySQLTLSCAFile string
 	// UserExtensionsDir/TeamExtensionsDir override the default roots
 	// internal/config.ResolveRoots would otherwise pick ($HOME/.graph-ops
-	// and the nearest ancestor .graph-ops directory, respectively). Empty
-	// means "use the default for that tier" -- see config.ResolveRoots.
+	// and the nearest ancestor .graph-ops directory other than
+	// $HOME/.graph-ops, respectively). Empty means "use the default for that
+	// tier" -- see config.ResolveRoots, which also drops a team root that is
+	// the same directory as the user root.
 	UserExtensionsDir string
 	TeamExtensionsDir string
 	// ProjectPaths is graph-config.json's projectPaths as loaded at startup:
