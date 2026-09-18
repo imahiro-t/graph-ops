@@ -1,0 +1,8 @@
+# Built binary
+/jira-datasource
+# Local state (registered projects, current project). Never commit it.
+/jira-datasource-state.json
+.jira-datasource-state-*.tmp
+# Anything holding credentials for a local run
+.env
+*.env
