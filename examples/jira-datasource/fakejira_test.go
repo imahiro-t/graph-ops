@@ -86,6 +86,61 @@ func (f *fakeJira) issue(key string) *fakeIssue {
 	return f.issues[key]
 }
 
+// seedIssue creates an issue directly in the fake (as a Jira user could,
+// outside the plugin) and returns its key.
+func (f *fakeJira) seedIssue(project string, labels []string, props map[string]string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seq[project]++
+	issue := &fakeIssue{
+		Key: fmt.Sprintf("%s-%d", project, f.seq[project]), Project: project, Summary: "seeded",
+		Labels: labels, Properties: map[string]json.RawMessage{},
+		Created: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(len(f.order)) * time.Second),
+	}
+	for k, v := range props {
+		issue.Properties[k] = json.RawMessage(v)
+	}
+	f.issues[issue.Key] = issue
+	f.order = append(f.order, issue.Key)
+	return issue.Key
+}
+
+// seedAttachment stores an attachment on an issue and returns its ID.
+func (f *fakeJira) seedAttachment(issueKey string, data []byte) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := strconv.Itoa(20000 + len(f.attachments) + 1)
+	f.attachments[id] = data
+	f.issues[issueKey].Attachments = append(f.issues[issueKey].Attachments, id)
+	return id
+}
+
+// seedComment adds a comment with the given properties and returns its ID.
+func (f *fakeJira) seedComment(issueKey string, props map[string]string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.commentSeq++
+	cm := &fakeComment{ID: strconv.Itoa(10000 + f.commentSeq), Body: "seeded", Properties: map[string]json.RawMessage{}, Created: time.Now().UTC().Format(time.RFC3339)}
+	for k, v := range props {
+		cm.Properties[k] = json.RawMessage(v)
+	}
+	f.issues[issueKey].Comments = append(f.issues[issueKey].Comments, cm)
+	return cm.ID
+}
+
+func (f *fakeJira) hasAttachment(id string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.attachments[id]
+	return ok
+}
+
+func (f *fakeJira) deleteIssue(key string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.issues, key)
+}
+
 func (f *fakeJira) requestsMatching(method string, pathPattern string) []fakeRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()

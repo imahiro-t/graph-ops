@@ -16,6 +16,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -23,7 +24,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -105,14 +108,51 @@ func main() {
 		logger.Printf("warning: listening on %s without TLS; graph-engine will only connect to it over https:// through a TLS-terminating proxy", cfg.ListenAddr)
 	}
 
-	store := newStore(newJiraClient(cfg.JiraBaseURL, cfg.JiraEmail, cfg.JiraAPIToken), cfg.StateFile, cfg.IssueType)
-	srv := &http.Server{
-		Addr:              cfg.ListenAddr,
-		Handler:           newHandler(store, cfg.DataSourceToken, logger),
-		ReadHeaderTimeout: 10 * time.Second,
+	if len(cfg.DataSourceToken) < minRecommendedTokenLength {
+		logger.Printf("warning: GRAPHOPS_DATASOURCE_TOKEN is shorter than %d characters; use a long random value (e.g. openssl rand -hex 32)", minRecommendedTokenLength)
 	}
+
+	jira := newJiraClient(cfg.JiraBaseURL, cfg.JiraEmail, cfg.JiraAPIToken)
+	jira.logf = logger.Printf
+	store := newStore(jira, cfg.StateFile, cfg.IssueType)
+	store.logf = logger.Printf
+	srv := newServer(cfg.ListenAddr, newHandler(store, cfg.DataSourceToken, logger))
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	errc := make(chan error, 1)
+	go func() { errc <- srv.ListenAndServe() }()
 	logger.Printf("serving the GraphOps data source protocol %s on http://%s (state file %s)", protocolVersion, cfg.ListenAddr, cfg.StateFile)
-	if err := srv.ListenAndServe(); err != nil {
+	select {
+	case err := <-errc:
 		logger.Fatal(err)
+	case <-ctx.Done():
+	}
+	// Graceful shutdown: stop accepting connections and let requests in
+	// flight finish (each is bounded by requestDeadline anyway).
+	logger.Printf("shutting down")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), requestDeadline+5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Printf("shutdown: %v", err)
+	}
+}
+
+// minRecommendedTokenLength is the bearer token length below which the
+// plugin warns at startup (64 hex characters = 32 random bytes is a good
+// value; the warning threshold is lower so that other encodings pass).
+const minRecommendedTokenLength = 32
+
+// newServer returns the HTTP server with timeouts on every phase of a
+// connection, so a slow or idle client cannot hold one open indefinitely.
+// WriteTimeout leaves room for requestDeadline plus writing the answer.
+func newServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       2 * time.Minute, // request bodies are up to 64 MiB
+		WriteTimeout:      requestDeadline + 2*time.Minute,
+		IdleTimeout:       2 * time.Minute,
 	}
 }

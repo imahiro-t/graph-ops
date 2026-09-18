@@ -112,10 +112,51 @@ issue and reuses it, labels included.
   labels != graphops-meta ORDER BY created DESC`, through the
   `/rest/api/3/search/jql` API (paged with `nextPageToken`), requesting the
   `graphops.ticket` property in the same call, so listing is not one request
-  per issue.
+  per issue. A registered project whose metadata issue was deleted in Jira is
+  left out of both the project list and the ticket list (instead of making
+  the whole listing fail). Its label definitions were in that issue, so do
+  not delete metadata issues.
 
-Rate limiting: a `429` or `503` answer from Jira is retried up to 4 times,
-waiting for `Retry-After` (at most 30 seconds per wait).
+- **Get artifact / list a node's artifacts**: first checks that the issue is
+  a managed ticket of a registered project (label `graphops` and the
+  `graphops.ticket` property), exactly like every other read. An artifact ID
+  that points at any other issue -- one in a Jira project that is not
+  registered, one never created through GraphOps, or a deleted (detached)
+  ticket -- is `ARTIFACT_NOT_FOUND` (an empty list for the node listing), and
+  neither its comments nor its attachments are read.
+- **Create artifact**: if the comment cannot be created after the content
+  was uploaded as an attachment, the attachment is deleted again, so a
+  failed call leaves nothing behind.
+
+### Deadlines, cancellation and rate limiting
+
+graph-engine gives up on a request after 30 seconds and never retries it
+(see the protocol description in `openapi.yaml`). A write the plugin
+finishes *after* that would still take effect, and a user or agent who saw
+the timeout and ran the command again would create a second ticket, node or
+artifact. The plugin therefore bounds its own work:
+
+- Every protocol request has a **25-second deadline**, covering all of its
+  Jira calls, retries and waits. The request's context is passed to every
+  Jira call, so when graph-engine disconnects (or the deadline passes) no
+  further Jira call is made -- in particular no write that was still to come.
+  A single Jira call in flight at that moment is aborted from the plugin's
+  side, but Jira may already have applied it.
+- A `429` or `503` answer from Jira is retried up to 4 times, waiting for
+  `Retry-After` (at most 30 seconds per wait) -- but only when the wait ends
+  before the request's deadline. Otherwise the plugin stops at once and
+  answers `INTERNAL_ERROR` with Jira's status in the message, well before
+  graph-engine's timeout. Under sustained rate limiting a command therefore
+  fails instead of hanging; run it again once Jira recovers (check first
+  whether a create went through).
+- One Jira call attempt is limited to 20 seconds.
+- Each retry, and each request that takes longer than 5 seconds, is logged
+  as one line on stderr.
+
+The HTTP server itself limits reading headers (10 s), reading a request
+(2 min, bodies are up to 64 MiB), writing the answer and idle keep-alive
+connections, and shuts down gracefully on `SIGINT`/`SIGTERM`, letting
+requests in flight finish.
 
 ## Limitations
 
@@ -124,11 +165,40 @@ waiting for `Retry-After` (at most 30 seconds per wait).
   writing the same issue could lose each other's update.
 - **Project keys of at most 5 characters.** GraphOps prefixes are 1-5
   letters/digits and the prefix is the Jira key.
-- **32 KB per property.** Jira limits an issue property to 32768 bytes. The
-  `graphops.graph` property holds a ticket's whole graph, including each
-  review gate's criteria text, so a very large graph can hit the limit; the
-  write then fails with `VALIDATION_ERROR` and the stored graph is left as it
-  was.
+- **32 KB per property.** Jira limits an issue property to 32768 bytes of
+  JSON, and the write then fails with `VALIDATION_ERROR`, leaving the stored
+  property as it was. Two properties can reach it:
+  - `graphops.ticket` holds the ticket's **Markdown description verbatim**
+    (plus the title and other fields). A ticket whose description is longer
+    than roughly 30 KB of UTF-8 -- less if it has many characters that JSON
+    escapes, such as `<`, `>`, `&`, quotes or newlines -- can be neither
+    created nor updated.
+  - `graphops.graph` holds a ticket's whole graph, including each review
+    gate's criteria text, so a very large graph can hit the limit.
+- **Jira users can change GraphOps data (trust boundary).** Everything the
+  plugin stores is ordinary Jira data: anyone who can edit an issue can
+  change its `graphops.ticket` / `graphops.graph` properties (ticket status,
+  the execution graph, review gate criteria), and anyone who can comment on
+  it can add a comment carrying a `graphops.artifact` property, which the
+  plugin returns as an artifact -- including review verdicts. The plugin
+  does not check who wrote a property or comment (it does not compare a
+  comment's author with its own account). GraphOps agents read tickets and
+  artifacts as input, so such edits are a **prompt-injection path**: only use
+  Jira projects whose editors and commenters you trust as much as the people
+  who run GraphOps, and restrict who can edit and comment accordingly.
+- **The bearer token is the only protection of the plugin's API.** Anyone
+  who has `GRAPHOPS_DATASOURCE_TOKEN` can do everything the Jira account can
+  do through the plugin. Use a long random value (at least 32 random bytes,
+  e.g. `openssl rand -hex 32`); the plugin warns at startup when the token
+  is shorter than 32 characters.
+- **Attachment-backed artifacts cost one request each when listed.** Text
+  artifacts larger than 16 KiB are stored as attachments, and the protocol
+  requires text content in ticket listings, so listing a ticket's artifacts
+  (the Web UI's ticket view, which refreshes periodically) downloads each
+  such attachment every time.
+- **A sample, not a hardened service.** It serves plain HTTP (put a
+  TLS-terminating proxy in front of it for anything but loopback), keeps its
+  state in a local file and assumes a single process.
 - **No workflow synchronization.** GraphOps statuses live only in
   `graphops.ticket`; moving an issue across the Jira board does not change
   its GraphOps status, and vice versa.
@@ -145,7 +215,10 @@ waiting for `Retry-After` (at most 30 seconds per wait).
 (`fakejira_test.go`); it never contacts a real Jira, needs no credentials, and
 is what CI runs. It covers the storage mapping above, a conformance pass over
 all 32 protocol endpoints, bearer-token checks, the 32 KB property limit,
-concurrent node creation, attachment round trips and retries on `429`.
+concurrent node creation, attachment round trips, retries on `429`, the
+request deadline under persistent rate limiting, no Jira writes after
+graph-engine disconnects, and artifact reads refusing issues that are not
+managed tickets of a registered project.
 
 ## Verification
 

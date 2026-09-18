@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -41,7 +42,7 @@ func newHarness(t *testing.T) *harness {
 
 func (h *harness) newStore() *Store {
 	c := newJiraClient(h.jira.srv.URL, h.jira.email, h.jira.token)
-	c.sleep = func(time.Duration) {}
+	c.sleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
 	return newStore(c, h.statePath, "Task")
 }
 
@@ -746,7 +747,8 @@ func TestArtifactIsACommentWithAParsableID(t *testing.T) {
 		t.Fatalf("GetArtifact = %+v", got)
 	}
 	for _, r := range h.jira.requestsMatching("GET", `^/rest/api/3/issue/`) {
-		if !strings.HasPrefix(r.Path, "/rest/api/3/issue/"+tk.ID+"/comment") {
+		// The ticket issue itself (the managed-ticket check) and its comment.
+		if r.Path != "/rest/api/3/issue/"+tk.ID && !strings.HasPrefix(r.Path, "/rest/api/3/issue/"+tk.ID+"/comment") {
 			t.Fatalf("GetArtifact read %s", r.Path)
 		}
 	}
@@ -857,7 +859,12 @@ func TestRateLimitedRequestsAreRetried(t *testing.T) {
 	var mu sync.Mutex
 	failures := 2
 	var waits []time.Duration
-	h.store.jira.sleep = func(d time.Duration) { mu.Lock(); waits = append(waits, d); mu.Unlock() }
+	h.store.jira.sleep = func(_ context.Context, d time.Duration) error {
+		mu.Lock()
+		waits = append(waits, d)
+		mu.Unlock()
+		return nil
+	}
 	h.jira.failWith = func(w http.ResponseWriter, r *http.Request) bool {
 		mu.Lock()
 		defer mu.Unlock()
