@@ -4,7 +4,9 @@
 //   - TicketItem.tsx: the ticket status badge, the node status badge and the
 //     progress indicator tooltip (getStatusMeta)
 //   - App.tsx: the option labels of the toolbar's status filter dropdown
-//     (getStatusMeta) and the status filter itself (normalizeTicketStatus)
+//     (getStatusMeta) and the status filter predicate itself
+//     (matchesStatusFilter, which applies the same unexpected-value
+//     substitution the badge does)
 // so a status shared by tickets and nodes (TODO / IN PROGRESS / IN REVIEW /
 // DONE) is guaranteed the same wording and colors on every surface rather
 // than several hard-coded switches happening to agree (DFLT-00030).
@@ -97,9 +99,25 @@ export function getStatusMeta(status: string): StatusMeta {
 }
 
 // A ticket's status as the status filter should see it: itself when it is one
-// of TICKET_STATUSES (the filter's options), FALLBACK_STATUS otherwise. Without
-// this, a ticket whose DB value is outside TICKET_STATUSES could never be
-// selected by any filter state (not even "all") and would vanish from the list.
-export function normalizeTicketStatus(status: string): TicketStatus {
+// of TICKET_STATUSES (the filter's options), FALLBACK_STATUS otherwise.
+// Without this, a ticket whose DB value is outside TICKET_STATUSES could
+// never be selected by any filter state and would vanish the moment the
+// filter was narrowed at all. Module-private since DFLT-00086: App.tsx used
+// to call it directly, and now goes through matchesStatusFilter, which is
+// the only place that has to know about the substitution.
+function normalizeTicketStatus(status: string): TicketStatus {
   return (TICKET_STATUSES as readonly string[]).includes(status) ? (status as TicketStatus) : FALLBACK_STATUS;
+}
+
+// Whether a ticket with this status passes the toolbar's status filter
+// (App.tsx), given the statuses currently checked there. Nothing selected
+// means "don't filter by status" (every ticket passes) rather than "match
+// nothing" -- see components/MultiSelectFilter.tsx for why all four toolbar
+// filters share that contract since DFLT-00086. Otherwise a ticket passes
+// when its status is one of the selected ones (OR), compared after the same
+// normalization the badge uses, so a ticket is always filtered under the
+// status it is displayed as.
+export function matchesStatusFilter(status: string, selected: readonly TicketStatus[]): boolean {
+  if (selected.length === 0) return true;
+  return selected.includes(normalizeTicketStatus(status));
 }

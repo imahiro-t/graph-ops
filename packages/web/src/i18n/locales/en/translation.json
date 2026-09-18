@@ -23,14 +23,13 @@
   "toolbar": {
     "searchPlaceholder": "Search tickets (ID / title)...",
     "statusAll": "Status: All",
-    "statusNone": "Status: None",
     "statusSelected": "Status: {{count}} selected",
     "statusGroupLabel": "Filter by status",
     "assigneeAll": "Assignee: All",
-    "assigneeSelected": "Assignee: {{name}}",
+    "assigneeSelected": "Assignee: {{count}} selected",
     "assigneeGroupLabel": "Filter by assignee",
+    "assigneeUnassigned": "Unassigned",
     "priorityAll": "Priority: All",
-    "priorityNone": "Priority: None selected",
     "prioritySelected": "Priority: {{count}} selected",
     "priorityGroupLabel": "Filter by priority",
     "refreshTitle": "Refresh to the latest state",
@@ -38,8 +37,8 @@
     "labelAll": "Labels: All",
     "labelSelected": "Labels: {{count}} selected",
     "labelGroupLabel": "Filter by label",
-    "labelClear": "Clear selection",
-    "labelEmpty": "This project has no labels"
+    "labelEmpty": "This project has no labels",
+    "filterClear": "Clear selection"
   },
   "summary": {
     "title": "All Tickets Overview",

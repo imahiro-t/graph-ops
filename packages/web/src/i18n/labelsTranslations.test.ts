@@ -38,7 +38,9 @@ describe('label translations', () => {
       'toolbar.labelAll',
       'toolbar.labelSelected',
       'toolbar.labelGroupLabel',
-      'toolbar.labelClear',
+      // The label panel's clear button now uses toolbar.filterClear, shared
+      // with the other three filters (DFLT-00086) -- it is no longer a
+      // label-specific key, so filterTranslations.test.ts covers it instead.
       'errors.LABEL_NOT_FOUND',
       'errors.LABEL_NAME_TAKEN',
       'errors.INVALID_LABEL_NAME',

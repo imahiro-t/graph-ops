@@ -76,7 +76,8 @@ A project itself (name, prefix, tickets) lives in the database and can be shared
 ![Ticket list with the overview and filters](docs/images/ticket-list.png)
 
 - "All Tickets Overview" shows the total number of tickets, how many are in progress, in review, and done, and the node progress.
-- Search by ticket ID or title, filter by status, assignee, priority, and label, and page through the list. Selecting several labels shows tickets that have any of them, and the label filter combines with the other filters.
+- Search by ticket ID or title, filter by status, assignee, priority, and label, and page through the list.
+- The four filters all work the same way: nothing selected means "All" (no filtering), and selecting several options within one filter shows the tickets that match any of them, while different filters narrow the list together. "Clear selection" at the bottom of a panel empties that filter back to All. The assignee filter takes several assignees too, and its "Unassigned" option narrows the list to tickets with nobody assigned.
 - A ticket's status (`TODO` / `REFINED` / `IN PROGRESS` / `IN REVIEW` / `IN RELEASE` / `DONE` / `CLOSED`) is derived automatically from its execution graph.
 - You can change a ticket's priority, assign it to yourself with "Assign to me", close it without completing it (with an optional reason), reopen it, or delete it (after a confirmation).
 - "Assign to me" appears once you set your name under Settings > App Settings > "My Profile".
@@ -220,7 +221,8 @@ claude plugin update graph-ops@graph-ops
 ![全チケット概要とフィルタを含むチケット一覧](docs/images/ticket-list.png)
 
 - 「全チケット概要」に、総チケット数、進行中・レビュー中・完了の件数、ノード進捗が表示されます。
-- チケット ID やタイトルで検索し、ステータス・担当者・優先度・ラベルで絞り込み、ページを切り替えられます。ラベルを複数選ぶと、そのいずれかが付いたチケットが表示されます。ラベルの絞り込みはほかの絞り込みと併用できます。
+- チケット ID やタイトルで検索し、ステータス・担当者・優先度・ラベルで絞り込み、ページを切り替えられます。
+- 4つの絞り込みはどれも同じ操作です。何も選んでいない状態が「すべて」（絞り込みなし）で、同じ絞り込みの中で複数選ぶと、そのいずれかに一致するチケットが表示されます。異なる絞り込みどうしは、すべてに一致するチケットに絞られます。パネル下部の「選択を解除」を押すと、その絞り込みの選択が空（＝すべて）に戻ります。担当者も複数選べ、「未割り当て」を選ぶと担当者が未設定のチケットだけに絞り込めます。
 - チケットのステータス（`TODO`／`REFINED`／`IN PROGRESS`／`IN REVIEW`／`IN RELEASE`／`DONE`／`CLOSED`）は、実行グラフから自動的に決まります。
 - チケットの優先度の変更、「担当する」での自分への割り当て、完了せずにクローズ（理由は任意）、再オープン、削除（確認あり）ができます。
 - 「担当する」ボタンは、設定 > アプリ設定 > 「自分の情報」で名前を設定すると表示されます。

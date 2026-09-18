@@ -75,12 +75,18 @@ export function getPriorityMeta(priority: string | null | undefined): PriorityMe
 }
 
 // Whether a ticket with this priority passes the toolbar's priority filter
-// (App.tsx), given the levels currently checked there. Uses the same
-// normalization as the badge, so a ticket is always filtered under the
+// (App.tsx), given the levels currently checked there. Nothing selected
+// means "don't filter by priority" (every ticket passes) rather than "match
+// nothing": since DFLT-00086 all four toolbar filters share that contract,
+// so unchecking everything always widens the list instead of emptying it
+// (see components/MultiSelectFilter.tsx). Otherwise a ticket passes when
+// its level is one of the selected ones, compared after the same
+// normalization the badge uses, so a ticket is always filtered under the
 // level it is displayed as.
 export function matchesPriorityFilter(
   priority: string | null | undefined,
   selected: readonly TicketPriority[]
 ): boolean {
+  if (selected.length === 0) return true;
   return selected.includes(normalizeTicketPriority(priority));
 }

@@ -17,11 +17,13 @@ import {
   Languages
 } from 'lucide-react';
 import { Label, Ticket, TicketDetail, TicketStatus, TicketPriority, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
-import { getStatusMeta, normalizeTicketStatus } from './statusMeta';
+import { getStatusMeta, matchesStatusFilter } from './statusMeta';
 import { getPriorityMeta, matchesPriorityFilter } from './priorityMeta';
 import { matchesLabelFilter } from './labelMeta';
+import { assigneeFilterOptions, isUnassignedOption, matchesAssigneeFilter } from './assigneeFilter';
 import { TicketItem } from './components/TicketItem';
 import { LabelFilter } from './components/LabelFilter';
+import { MultiSelectFilter } from './components/MultiSelectFilter';
 import { fetchLabels } from './lib/labelsApi';
 import { ClaudeRunnerModal } from './components/ClaudeRunnerModal';
 import { SettingsModal } from './components/SettingsModal';
@@ -87,83 +89,59 @@ export const App: React.FC = () => {
   const [projectSetupDirectory, setProjectSetupDirectory] = useState('');
 
   // Filters
+  //
+  // All four toolbar filters (status / assignee / priority / label) are the
+  // same control -- components/MultiSelectFilter.tsx -- over the same
+  // contract since DFLT-00086: the state is a list of selected values,
+  // EMPTY means "don't filter by this" rather than "match nothing", and a
+  // non-empty selection matches with OR while the filters combine with AND
+  // (see filteredTickets). None of them is persisted: a reload resets them.
+  //
+  // Status and priority used to start fully checked, which made "uncheck
+  // everything" empty the list with no way back, and assignee used to be a
+  // single-choice radio group with an explicit "All" entry and no way to
+  // ask for unassigned tickets; MultiSelectFilter.tsx has the reasoning.
+  // Each filter's own state below therefore only differs in its value type
+  // and where its options come from.
   const [filterQuery, setFilterQuery] = useState('');
-  // Status multi-select: starts with every status selected (the full list,
-  // same as before this filter existed). Not persisted -- a reload resets it.
-  // Unchecking only DONE reproduces the old "hide completed" checkbox.
-  const [filterStatuses, setFilterStatuses] = useState<TicketStatus[]>(() => [...TICKET_STATUSES]);
-  const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
-  const statusMenuButtonRef = useRef<HTMLButtonElement>(null);
-  const toggleFilterStatus = (s: TicketStatus) => {
-    // Re-derive from TICKET_STATUSES when adding so the array always stays in
-    // display order, whatever order the user clicked in.
-    setFilterStatuses(prev =>
-      prev.includes(s) ? prev.filter(x => x !== s) : TICKET_STATUSES.filter(x => x === s || prev.includes(x))
-    );
-    setPage(1);
-  };
 
-  // Assignee single-select (DFLT-00047): null means no filter ("all"). Same
-  // trigger-button + panel structure as the status filter above (completion
-  // criterion: same look/feel), but single-select rather than a checkbox
-  // group -- "pick one assignee to narrow the list to" reads as one choice,
-  // not several to combine. Not persisted, same as filterStatuses.
-  const [filterAssignee, setFilterAssignee] = useState<string | null>(null);
-  const [isAssigneeMenuOpen, setIsAssigneeMenuOpen] = useState(false);
-  const assigneeMenuButtonRef = useRef<HTMLButtonElement>(null);
-  // Options are derived from whichever tickets are currently loaded, not a
-  // fixed list (there is no server-side catalog of assignee names) --
-  // unlike TICKET_STATUSES, this can shrink or grow as tickets are
-  // (un)assigned. If the selected name later drops out of this list, the
-  // filter itself is left alone (still narrows to that now-invisible name,
-  // matching how filterStatuses behaves) -- only the panel's option list
-  // reflects the current ticket set.
-  const assigneeOptions = Array.from(
-    new Set(tickets.map(t => t.assignee).filter((v): v is string => !!v))
-  ).sort();
-  const selectFilterAssignee = (name: string | null) => {
-    setFilterAssignee(name);
-    setIsAssigneeMenuOpen(false);
-    setPage(1);
-    // Closing the panel unmounts the radio the user just interacted with, so
-    // without this the focus that was on it simply vanishes (falls back to
-    // <body>) instead of moving anywhere -- same failure the Escape-key
-    // handler above already guards against with the same focus() call.
-    assigneeMenuButtonRef.current?.focus();
-  };
+  // Options: the fixed TICKET_STATUSES catalog. Checking every status but
+  // DONE reproduces the old "hide completed" checkbox.
+  const [filterStatuses, setFilterStatuses] = useState<TicketStatus[]>([]);
 
-  // Priority multi-select (DFLT-00048). Same trigger + panel + checkbox-group
-  // structure as the status filter above -- several priorities can be
-  // combined, matching filterStatuses rather than filterAssignee's
-  // single-choice radio group. The choices are exactly the three levels --
-  // there is no unset bucket (DFLT-00083). Starts with every value
-  // selected, matching filterStatuses's "everything visible until narrowed"
-  // default.
-  const PRIORITY_FILTER_VALUES: readonly TicketPriority[] = TICKET_PRIORITIES;
-  const [filterPriorities, setFilterPriorities] = useState<TicketPriority[]>(() => [
-    ...PRIORITY_FILTER_VALUES
-  ]);
-  const [isPriorityMenuOpen, setIsPriorityMenuOpen] = useState(false);
-  const priorityMenuButtonRef = useRef<HTMLButtonElement>(null);
-  const toggleFilterPriority = (p: TicketPriority) => {
-    // Re-derive from PRIORITY_FILTER_VALUES when adding so the array always
-    // stays in display order, matching toggleFilterStatus.
-    setFilterPriorities(prev =>
-      prev.includes(p) ? prev.filter(x => x !== p) : PRIORITY_FILTER_VALUES.filter(x => x === p || prev.includes(x))
-    );
-    setPage(1);
-  };
+  // Options: derived from whichever tickets are currently loaded plus an
+  // "unassigned" bucket, not a fixed list -- there is no server-side
+  // catalog of assignee names, so unlike TICKET_STATUSES this can shrink or
+  // grow as tickets are (un)assigned. A selected name that later drops out
+  // is deliberately left in the selection (the filter keeps narrowing to
+  // it); only the panel's option list follows the current ticket set. See
+  // assigneeFilter.ts, which also owns the unassigned bucket's value.
+  const [filterAssignees, setFilterAssignees] = useState<string[]>([]);
+  const assigneeOptions = assigneeFilterOptions(tickets.map(t => t.assignee));
 
-  // Label multi-select (DFLT-00084), see components/LabelFilter.tsx. Unlike
-  // the status/priority filters it starts EMPTY, meaning "no label
-  // filtering": starting with every label checked would, read as OR, hide
-  // every unlabeled ticket, and would need re-syncing whenever a label is
-  // added. Not persisted, same as the other filters.
+  // Options: exactly the three levels -- there is no unset bucket
+  // (DFLT-00083).
+  const [filterPriorities, setFilterPriorities] = useState<TicketPriority[]>([]);
+
+  // Options: the current project's labels, see components/LabelFilter.tsx.
   const [filterLabelIds, setFilterLabelIds] = useState<string[]>([]);
-  const changeFilterLabelIds = (next: string[]) => {
-    setFilterLabelIds(next);
-    setPage(1);
-  };
+
+  // Every filter change also returns to page 1, so a narrowing can never
+  // leave the user on a now out-of-range page. Written once here rather
+  // than in four handlers: forgetting the reset in one of them is exactly
+  // the kind of per-filter inconsistency DFLT-00086 is removing. (setPage
+  // is declared further down but only ever read when the returned handler
+  // runs, i.e. long after this render.)
+  function withPageReset<T>(set: React.Dispatch<React.SetStateAction<T[]>>): (next: T[]) => void {
+    return next => {
+      set(next);
+      setPage(1);
+    };
+  }
+  const changeFilterStatuses = withPageReset(setFilterStatuses);
+  const changeFilterAssignees = withPageReset(setFilterAssignees);
+  const changeFilterPriorities = withPageReset(setFilterPriorities);
+  const changeFilterLabelIds = withPageReset(setFilterLabelIds);
 
   // The current project's labels: the label filter's options and the
   // ticket label picker's choices. Re-fetched on project switch, on every
@@ -435,14 +413,17 @@ export const App: React.FC = () => {
     return succeeded;
   };
 
-  // Filter calculations
+  // Filter calculations. The four filters are ANDed: a ticket has to pass
+  // every one of them. Each predicate is OR across its own selection and
+  // passes everything when that selection is empty, so a filter nobody has
+  // touched contributes nothing (see components/MultiSelectFilter.tsx).
   const filteredTickets = tickets.filter(t => {
     // Unexpected DB values count as TODO, matching the badge (statusMeta.ts).
-    if (!filterStatuses.includes(normalizeTicketStatus(t.status))) return false;
-    if (filterAssignee && t.assignee !== filterAssignee) return false;
+    if (!matchesStatusFilter(t.status, filterStatuses)) return false;
+    // Includes the "unassigned" bucket (assigneeFilter.ts).
+    if (!matchesAssigneeFilter(t.assignee, filterAssignees)) return false;
     // Unexpected values count as MEDIUM, matching the badge (priorityMeta.ts).
     if (!matchesPriorityFilter(t.priority, filterPriorities)) return false;
-    // OR across the selected labels; nothing selected passes everything.
     if (!matchesLabelFilter(t.labels, filterLabelIds)) return false;
     if (filterQuery) {
       const q = filterQuery.toLowerCase();
@@ -615,198 +596,61 @@ export const App: React.FC = () => {
               />
             </div>
 
-            {/* Status multi-select. Same open/close pattern as the project
-                switcher above (transparent full-screen overlay closes it on an
-                outside click, so that click can't also hit whatever is
-                underneath). Toggling a checkbox keeps the panel open so several
-                statuses can be changed in a row. The panel is a labelled group
-                of checkboxes rather than an ARIA menu, so the trigger exposes
-                aria-expanded/aria-controls but not aria-haspopup. */}
-            <div
-              className="relative"
-              onKeyDown={e => {
-                if (e.key === 'Escape' && isStatusMenuOpen) {
-                  e.stopPropagation();
-                  setIsStatusMenuOpen(false);
-                  statusMenuButtonRef.current?.focus();
-                }
-              }}
-            >
-              <button
-                ref={statusMenuButtonRef}
-                type="button"
-                onClick={() => setIsStatusMenuOpen(v => !v)}
-                aria-expanded={isStatusMenuOpen}
-                aria-controls="toolbar-status-filter-panel"
-                className="px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5 whitespace-nowrap"
-              >
-                {filterStatuses.length === TICKET_STATUSES.length
-                  ? t('toolbar.statusAll')
-                  : filterStatuses.length === 0
-                    ? t('toolbar.statusNone')
-                    : t('toolbar.statusSelected', { count: filterStatuses.length })}
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" aria-hidden="true" />
-              </button>
+            {/* Status / assignee / priority / label filters. All four are
+                the same MultiSelectFilter (DFLT-00086): same trigger button,
+                same checkbox panel, same clear button, same keyboard and
+                ARIA behaviour, and the same "nothing checked = All" meaning.
+                They are AND-combined with each other and with the search box
+                (see filteredTickets); only the options and the i18n keys
+                differ per filter. */}
+            <MultiSelectFilter
+              panelId="toolbar-status-filter-panel"
+              allKey="toolbar.statusAll"
+              selectedKey="toolbar.statusSelected"
+              groupLabelKey="toolbar.statusGroupLabel"
+              /* Display only: the checkbox state and the filter still use the
+                 DB value. The option text shares the status.* wording with the
+                 ticket badge via statusMeta.ts (DFLT-00030). */
+              options={TICKET_STATUSES.map(s => ({ value: s, label: t(getStatusMeta(s).labelKey) }))}
+              selected={filterStatuses}
+              onChange={changeFilterStatuses}
+            />
 
-              {isStatusMenuOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setIsStatusMenuOpen(false)} />
-                  <div
-                    id="toolbar-status-filter-panel"
-                    role="group"
-                    aria-label={t('toolbar.statusGroupLabel')}
-                    className="absolute left-0 mt-1.5 w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-xs"
-                  >
-                    {TICKET_STATUSES.map(s => (
-                      <label
-                        key={s}
-                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={filterStatuses.includes(s)}
-                          onChange={() => toggleFilterStatus(s)}
-                          className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0"
-                        />
-                        {/* Display only: the checkbox state and filter still
-                            use the DB value `s`. The label shares the
-                            status.* wording with the ticket badge via
-                            statusMeta.ts (DFLT-00030). */}
-                        {t(getStatusMeta(s).labelKey)}
-                      </label>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
+            <MultiSelectFilter
+              panelId="toolbar-assignee-filter-panel"
+              allKey="toolbar.assigneeAll"
+              selectedKey="toolbar.assigneeSelected"
+              groupLabelKey="toolbar.assigneeGroupLabel"
+              /* One option per distinct assignee among the loaded tickets,
+                 plus the unassigned bucket -- which is the only one whose
+                 text isn't its own value, since its value is a sentinel
+                 assigneeFilter.ts owns and no user should ever see. */
+              options={assigneeOptions.map(value => ({
+                value,
+                label: isUnassignedOption(value) ? t('toolbar.assigneeUnassigned') : value
+              }))}
+              selected={filterAssignees}
+              onChange={changeFilterAssignees}
+            />
 
-            {/* Assignee single-select (DFLT-00047). Same trigger + panel
-                structure as the status filter above, but a single choice per
-                click rather than independently toggled checkboxes -- picking
-                a name replaces the previous selection instead of adding to
-                it, and re-picking the same name (or "All") clears it. */}
-            <div
-              className="relative"
-              onKeyDown={e => {
-                if (e.key === 'Escape' && isAssigneeMenuOpen) {
-                  e.stopPropagation();
-                  setIsAssigneeMenuOpen(false);
-                  assigneeMenuButtonRef.current?.focus();
-                }
-              }}
-            >
-              <button
-                ref={assigneeMenuButtonRef}
-                type="button"
-                onClick={() => setIsAssigneeMenuOpen(v => !v)}
-                aria-expanded={isAssigneeMenuOpen}
-                aria-controls="toolbar-assignee-filter-panel"
-                className="px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5 whitespace-nowrap"
-              >
-                {filterAssignee ? t('toolbar.assigneeSelected', { name: filterAssignee }) : t('toolbar.assigneeAll')}
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" aria-hidden="true" />
-              </button>
+            <MultiSelectFilter
+              panelId="toolbar-priority-filter-panel"
+              allKey="toolbar.priorityAll"
+              selectedKey="toolbar.prioritySelected"
+              groupLabelKey="toolbar.priorityGroupLabel"
+              /* Same symbol + label wording as the ticket badge's selector
+                 options (PrioritySelect.tsx), both via getPriorityMeta. */
+              options={TICKET_PRIORITIES.map(p => ({
+                value: p,
+                label: `${getPriorityMeta(p).symbol} ${t(getPriorityMeta(p).labelKey)}`
+              }))}
+              selected={filterPriorities}
+              onChange={changeFilterPriorities}
+            />
 
-              {isAssigneeMenuOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setIsAssigneeMenuOpen(false)} />
-                  <div
-                    id="toolbar-assignee-filter-panel"
-                    role="group"
-                    aria-label={t('toolbar.assigneeGroupLabel')}
-                    className="absolute left-0 mt-1.5 w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-xs"
-                  >
-                    <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap">
-                      <input
-                        type="radio"
-                        name="assignee-filter"
-                        checked={filterAssignee === null}
-                        onChange={() => selectFilterAssignee(null)}
-                        className="border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0"
-                      />
-                      {t('toolbar.assigneeAll')}
-                    </label>
-                    {assigneeOptions.map(name => (
-                      <label
-                        key={name}
-                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap"
-                      >
-                        <input
-                          type="radio"
-                          name="assignee-filter"
-                          checked={filterAssignee === name}
-                          onChange={() => selectFilterAssignee(name)}
-                          className="border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0"
-                        />
-                        {name}
-                      </label>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Priority multi-select (DFLT-00048). Same open/close and
-                checkbox-group pattern as the status filter above. */}
-            <div
-              className="relative"
-              onKeyDown={e => {
-                if (e.key === 'Escape' && isPriorityMenuOpen) {
-                  e.stopPropagation();
-                  setIsPriorityMenuOpen(false);
-                  priorityMenuButtonRef.current?.focus();
-                }
-              }}
-            >
-              <button
-                ref={priorityMenuButtonRef}
-                type="button"
-                onClick={() => setIsPriorityMenuOpen(v => !v)}
-                aria-expanded={isPriorityMenuOpen}
-                aria-controls="toolbar-priority-filter-panel"
-                className="px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5 whitespace-nowrap"
-              >
-                {filterPriorities.length === PRIORITY_FILTER_VALUES.length
-                  ? t('toolbar.priorityAll')
-                  : filterPriorities.length === 0
-                    ? t('toolbar.priorityNone')
-                    : t('toolbar.prioritySelected', { count: filterPriorities.length })}
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" aria-hidden="true" />
-              </button>
-
-              {isPriorityMenuOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setIsPriorityMenuOpen(false)} />
-                  <div
-                    id="toolbar-priority-filter-panel"
-                    role="group"
-                    aria-label={t('toolbar.priorityGroupLabel')}
-                    className="absolute left-0 mt-1.5 w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-xs"
-                  >
-                    {PRIORITY_FILTER_VALUES.map(p => (
-                      <label
-                        key={p}
-                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={filterPriorities.includes(p)}
-                          onChange={() => toggleFilterPriority(p)}
-                          className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0"
-                        />
-                        {/* Same symbol + label wording as the ticket badge's
-                            selector options (PrioritySelect.tsx), both via
-                            getPriorityMeta. */}
-                        {`${getPriorityMeta(p).symbol} ${t(getPriorityMeta(p).labelKey)}`}
-                      </label>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Label multi-select (DFLT-00084), AND-combined with the filters
-                above; see LabelFilter.tsx. */}
+            {/* The label filter needs one extra step -- Label records to
+                options drawing a colored chip -- so it keeps its own
+                component; see LabelFilter.tsx. */}
             <LabelFilter labels={projectLabels} selectedIds={filterLabelIds} onChange={changeFilterLabelIds} />
           </div>
 
