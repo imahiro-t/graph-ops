@@ -21,6 +21,7 @@ import {
 import { fetchAppSettings, saveAppSettings, testMySQLConnection } from '../../lib/settingsApi';
 import { apiFetch } from '../../lib/apiFetch';
 import { localizedApiErrorMessage, errorMessage } from '../../lib/apiError';
+import { httpDataSourceProblem, HTTPDataSourceProblem, normalizeHTTPDataSourceURL } from '../../lib/httpDataSource';
 import { StatusLiveRegion } from '../StatusLiveRegion';
 import { useLatest } from '../../hooks/useLatest';
 
@@ -43,6 +44,8 @@ interface FormState {
   mysqlPassword: string;
   mysqlTls: MySQLTLSMode;
   mysqlTlsCa: string;
+  httpDataSourceUrl: string;
+  httpDataSourceToken: string;
   artifactsDir: string;
   userExtensionsDir: string;
   paginationPageSize: number;
@@ -74,10 +77,25 @@ const emptyForm: FormState = {
   mysqlPassword: '',
   mysqlTls: DEFAULT_MYSQL_TLS,
   mysqlTlsCa: '',
+  httpDataSourceUrl: '',
+  httpDataSourceToken: '',
   artifactsDir: '',
   userExtensionsDir: '',
   paginationPageSize: 10,
   myName: ''
+};
+
+const DB_BACKENDS: DBBackend[] = ['sqlite', 'mysql', 'http'];
+const DB_BACKEND_LABEL_KEYS: Record<DBBackend, string> = {
+  sqlite: 'settings.appSettings.storage.dbBackendSqlite',
+  mysql: 'settings.appSettings.storage.dbBackendMysql',
+  http: 'settings.appSettings.storage.dbBackendHttp'
+};
+const HTTP_PROBLEM_HINT_KEYS: Record<HTTPDataSourceProblem, string> = {
+  urlRequired: 'settings.appSettings.storage.httpUrlRequiredHint',
+  urlInvalid: 'settings.appSettings.storage.httpUrlInvalidHint',
+  plaintextRemote: 'settings.appSettings.storage.httpPlaintextRemoteHint',
+  tokenRequired: 'settings.appSettings.storage.httpTokenRequiredHint'
 };
 
 const toForm = (file: AppSettingsFile): FormState => ({
@@ -90,6 +108,8 @@ const toForm = (file: AppSettingsFile): FormState => ({
   mysqlPassword: file.mysqlPassword || '',
   mysqlTls: (file.mysqlTls || DEFAULT_MYSQL_TLS) as MySQLTLSMode,
   mysqlTlsCa: file.mysqlTlsCa || '',
+  httpDataSourceUrl: file.httpDataSourceUrl || '',
+  httpDataSourceToken: file.httpDataSourceToken || '',
   artifactsDir: file.artifactsDir || '',
   userExtensionsDir: file.userExtensionsDir || '',
   paginationPageSize: file.paginationPageSize || 10,
@@ -317,6 +337,35 @@ export const AppSettingsEditor: React.FC<Props> = ({
   // saveBlockedReason below spells out how to clear it from that screen.
   const mysqlPasswordRetypeRequired = mysqlPasswordUnchangedFromSaved && mysqlTargetChanged;
 
+  // HTTP custom data source (DFLT-00088). The token follows the MySQL
+  // password's rule (see resolveSubmittedHTTPDataSourceToken in
+  // internal/httpserver/app_settings.go): the saved token -- the redacted
+  // placeholder or the "${ENV_VAR}" reference the GET returned -- is only
+  // honoured for the URL it was saved for. So when the URL is changed while
+  // the token field still holds that saved value, the field is emptied
+  // (handleHTTPURLChange) and the user is asked to type the token for the
+  // new URL; putting the URL back restores the saved value.
+  const httpSelected = form.dbBackend === 'http';
+  const httpURLChanged =
+    normalizeHTTPDataSourceURL(form.httpDataSourceUrl) !== normalizeHTTPDataSourceURL(savedForm.httpDataSourceUrl);
+  const httpTokenRetypeNeeded = httpURLChanged && savedForm.httpDataSourceToken !== '' && form.httpDataSourceToken === '';
+  const httpTokenState = passwordFieldState(form.httpDataSourceToken);
+  const httpTokenEnvVar = ENV_VAR_REF_PATTERN.exec(form.httpDataSourceToken)?.[1];
+  const httpProblem = httpSelected ? httpDataSourceProblem(form.httpDataSourceUrl, form.httpDataSourceToken !== '') : null;
+
+  const handleHTTPURLChange = (value: string) => {
+    setForm(f => {
+      const changed = normalizeHTTPDataSourceURL(value) !== normalizeHTTPDataSourceURL(savedForm.httpDataSourceUrl);
+      let token = f.httpDataSourceToken;
+      if (changed && savedForm.httpDataSourceToken !== '' && token === savedForm.httpDataSourceToken) {
+        token = '';
+      } else if (!changed && token === '') {
+        token = savedForm.httpDataSourceToken;
+      }
+      return { ...f, httpDataSourceUrl: value, httpDataSourceToken: token };
+    });
+  };
+
   const handleTestConnection = async () => {
     setTestingConnection(true);
     setConnectionTestResult(null);
@@ -376,7 +425,8 @@ export const AppSettingsEditor: React.FC<Props> = ({
   }
 
   const pageSizeInvalid = !Number.isInteger(form.paginationPageSize) || form.paginationPageSize < 1;
-  const saveBlocked = saving || !formDirty || pageSizeInvalid || mysqlRequiredMissing || mysqlPasswordRetypeRequired;
+  const saveBlocked =
+    saving || !formDirty || pageSizeInvalid || mysqlRequiredMissing || mysqlPasswordRetypeRequired || httpProblem !== null;
   const testConnectionBlocked = testingConnection || mysqlRequiredMissing || mysqlPasswordRetypeRequired;
 
   // Why the save button will not act, as text. A `disabled` button is removed
@@ -401,7 +451,11 @@ export const AppSettingsEditor: React.FC<Props> = ({
               ? 'settings.appSettings.storage.mysqlPasswordRetypeHint'
               : 'settings.appSettings.storage.mysqlPasswordRetypeOtherBackendHint'
           )
-        : pageSizeInvalid
+        : httpProblem
+          ? t(httpTokenRetypeNeeded && httpProblem === 'tokenRequired'
+              ? 'settings.appSettings.storage.httpTokenRetypeHint'
+              : HTTP_PROBLEM_HINT_KEYS[httpProblem])
+          : pageSizeInvalid
           ? t('settings.appSettings.pagination.invalidPageSize')
           : !formDirty
             ? t('settings.common.noChangesToSave')
@@ -428,7 +482,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
             {t('settings.appSettings.storage.dbBackendLabel')}
           </span>
           <div role="radiogroup" aria-labelledby={`${fieldId}-db-backend`} className="flex gap-3">
-            {(['sqlite', 'mysql'] as DBBackend[]).map(backend => (
+            {DB_BACKENDS.map(backend => (
               <label key={backend} className="flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-300">
                 <input
                   type="radio"
@@ -439,7 +493,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                     setConnectionTestResult(null);
                   }}
                 />
-                {t(backend === 'sqlite' ? 'settings.appSettings.storage.dbBackendSqlite' : 'settings.appSettings.storage.dbBackendMysql')}
+                {t(DB_BACKEND_LABEL_KEYS[backend])}
               </label>
             ))}
           </div>
@@ -459,7 +513,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
             />
             {effective && <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{t('settings.appSettings.currentlyInEffect', { value: effective.dbPath })}</p>}
           </div>
-        ) : (
+        ) : form.dbBackend === 'mysql' ? (
           <div className="space-y-2 border border-slate-100 dark:border-slate-800 rounded-lg p-2.5 bg-slate-50/50 dark:bg-slate-900/50">
             <div className="grid grid-cols-3 gap-2">
               <div className="col-span-2">
@@ -644,6 +698,75 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 </span>
               )}
             </div>
+          </div>
+        ) : (
+          <div className="space-y-2 border border-slate-100 dark:border-slate-800 rounded-lg p-2.5 bg-slate-50/50 dark:bg-slate-900/50">
+            <div>
+              <label htmlFor={`${fieldId}-http-url`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+                {t('settings.appSettings.storage.httpUrlLabel')}
+              </label>
+              <input
+                id={`${fieldId}-http-url`}
+                type="url"
+                value={form.httpDataSourceUrl}
+                onChange={e => handleHTTPURLChange(e.target.value)}
+                placeholder="https://example.com/graphops"
+                aria-invalid={httpProblem !== null && httpProblem !== 'tokenRequired'}
+                aria-describedby={`${fieldId}-http-url-hint${httpProblem && httpProblem !== 'tokenRequired' ? ` ${fieldId}-http-problem` : ''}`}
+                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+              />
+              <p id={`${fieldId}-http-url-hint`} className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+                {t('settings.appSettings.storage.httpUrlHint')}
+              </p>
+              {effective?.httpDataSourceUrl && (
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+                  {t('settings.appSettings.currentlyInEffect', { value: effective.httpDataSourceUrl })}
+                </p>
+              )}
+            </div>
+            <div>
+              <label htmlFor={`${fieldId}-http-token`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+                {t('settings.appSettings.storage.httpTokenLabel')}
+              </label>
+              {/* Same 'redacted' handling as the MySQL password field: the
+                  saved token is never sent to this UI, so the field renders
+                  empty with a "saved" placeholder while the form state keeps
+                  the placeholder token (which is what keeps the stored token
+                  on save). */}
+              <input
+                id={`${fieldId}-http-token`}
+                type="password"
+                autoComplete="off"
+                value={httpTokenState === 'redacted' ? '' : form.httpDataSourceToken}
+                placeholder={httpTokenState === 'redacted' ? t('settings.appSettings.storage.mysqlPasswordSavedPlaceholder') : undefined}
+                onChange={e => setForm(f => ({ ...f, httpDataSourceToken: e.target.value }))}
+                aria-invalid={httpProblem === 'tokenRequired'}
+                aria-describedby={`${fieldId}-http-token-hint${httpTokenRetypeNeeded ? ` ${fieldId}-http-token-retype` : ''}${httpProblem === 'tokenRequired' ? ` ${fieldId}-http-problem` : ''}`}
+                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+              />
+              <p id={`${fieldId}-http-token-hint`} className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+                {httpTokenState === 'redacted'
+                  ? t('settings.appSettings.storage.httpTokenSavedHint')
+                  : httpTokenEnvVar
+                    ? t('settings.appSettings.storage.httpTokenFromEnvHint', { envVar: httpTokenEnvVar })
+                    : t('settings.appSettings.storage.httpTokenPlaintextHint')}
+              </p>
+              {httpTokenRetypeNeeded && (
+                <p
+                  id={`${fieldId}-http-token-retype`}
+                  role="status"
+                  aria-live="polite"
+                  className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5"
+                >
+                  {t('settings.appSettings.storage.httpTokenRetypeHint')}
+                </p>
+              )}
+            </div>
+            {httpProblem && (
+              <p id={`${fieldId}-http-problem`} role="status" aria-live="polite" className="text-[10px] text-red-600 dark:text-red-400">
+                {t(HTTP_PROBLEM_HINT_KEYS[httpProblem])}
+              </p>
+            )}
           </div>
         )}
 

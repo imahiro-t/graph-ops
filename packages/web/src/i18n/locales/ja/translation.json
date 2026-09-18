@@ -400,7 +400,19 @@
         "testConnection": "接続テスト",
         "testingConnection": "接続確認中...",
         "testConnectionSuccess": "接続に成功しました。",
-        "testConnectionFailure": "接続に失敗しました: {{error}}"
+        "testConnectionFailure": "接続に失敗しました: {{error}}",
+        "dbBackendHttp": "HTTP カスタムデータソース",
+        "httpUrlLabel": "エンドポイント URL",
+        "httpUrlHint": "プラグイン（HTTP サーバー）のベース URL です。平文の http:// はループバック（localhost / 127.0.0.1 / ::1）の場合だけ使えます。それ以外は https:// を指定してください。",
+        "httpTokenLabel": "Bearer トークン",
+        "httpTokenPlaintextHint": "この値は graph-config.json に平文で保存されます。環境変数から読み込むには \"${ENV_VAR_NAME}\" の形式で入力してください。",
+        "httpTokenFromEnvHint": "環境変数 \"{{envVar}}\" から読み込まれます（平文では保存されません）。",
+        "httpTokenSavedHint": "トークンは保存済みです。サーバーはこの画面に値を返さないため、変更しない場合は空欄のままにしてください。変更する場合のみ新しい値を入力します。",
+        "httpTokenRetypeHint": "エンドポイント URL を変更したため、保存済みのトークン（または \"${ENV_VAR}\" 参照）は使えません。新しい URL 用のトークンを入力し直してください。",
+        "httpUrlRequiredHint": "HTTP カスタムデータソースを選択する場合、エンドポイント URL は必須です。",
+        "httpUrlInvalidHint": "エンドポイント URL は http:// または https:// で始まる URL で、ユーザー情報・クエリ・フラグメントを含めないでください。",
+        "httpPlaintextRemoteHint": "平文の http:// はループバック（localhost / 127.0.0.1 / ::1）にしか使えません。https:// を使用してください。",
+        "httpTokenRequiredHint": "リモートのデータソースには Bearer トークンが必要です。"
       },
       "myProfile": {
         "title": "自分の情報",
@@ -478,7 +490,8 @@
     "LABEL_NAME_TAKEN": "同じ名前のラベルがすでにあります（大文字小文字は区別しません）。",
     "INVALID_LABEL_NAME": "ラベル名は 1〜50 文字で入力してください。",
     "INVALID_LABEL_COLOR": "ラベルの色が不正です。パレットから選んでください。",
-    "UNKNOWN": "予期しないエラーが発生しました。再度お試しください。"
+    "UNKNOWN": "予期しないエラーが発生しました。再度お試しください。",
+    "HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED": "保存済みのトークンは別のエンドポイント URL には使用できません。URL を変更した場合はトークンを再入力してください。"
   },
   "labels": {
     "colors": {

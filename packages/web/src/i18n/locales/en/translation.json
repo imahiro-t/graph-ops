@@ -400,7 +400,19 @@
         "testConnection": "Test Connection",
         "testingConnection": "Testing connection...",
         "testConnectionSuccess": "Connection succeeded.",
-        "testConnectionFailure": "Connection failed: {{error}}"
+        "testConnectionFailure": "Connection failed: {{error}}",
+        "dbBackendHttp": "HTTP custom data source",
+        "httpUrlLabel": "Endpoint URL",
+        "httpUrlHint": "The base URL of the plugin (an HTTP server). Plaintext http:// is only allowed for a loopback address (localhost / 127.0.0.1 / ::1); use https:// for anything else.",
+        "httpTokenLabel": "Bearer token",
+        "httpTokenPlaintextHint": "This value is stored in plaintext in graph-config.json. To load it from an environment variable instead, enter it as \"${ENV_VAR_NAME}\".",
+        "httpTokenFromEnvHint": "Loaded from the environment variable \"{{envVar}}\" (not stored in plaintext).",
+        "httpTokenSavedHint": "A token is already saved. The server never sends it back to this screen, so leave this field empty to keep it, or type a new value to replace it.",
+        "httpTokenRetypeHint": "You have changed the endpoint URL, so the saved token (or \"${ENV_VAR}\" reference) can no longer be used. Enter the token for the new URL.",
+        "httpUrlRequiredHint": "The endpoint URL is required when the HTTP custom data source is selected.",
+        "httpUrlInvalidHint": "The endpoint URL must start with http:// or https:// and must not contain user information, a query or a fragment.",
+        "httpPlaintextRemoteHint": "Plaintext http:// is only allowed for a loopback address (localhost / 127.0.0.1 / ::1). Use https:// instead.",
+        "httpTokenRequiredHint": "A remote data source requires a bearer token."
       },
       "myProfile": {
         "title": "My Profile",
@@ -478,7 +490,8 @@
     "LABEL_NAME_TAKEN": "A label with the same name already exists (case-insensitive).",
     "INVALID_LABEL_NAME": "Label names must be 1 to 50 characters.",
     "INVALID_LABEL_COLOR": "Invalid label color. Choose one from the palette.",
-    "UNKNOWN": "An unexpected error occurred. Please try again."
+    "UNKNOWN": "An unexpected error occurred. Please try again.",
+    "HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED": "The saved token cannot be used for a different endpoint URL. Enter the token again after changing the URL."
   },
   "labels": {
     "colors": {
