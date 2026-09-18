@@ -34,8 +34,11 @@ type appSettingsResponse struct {
 }
 
 type effectiveAppSettings struct {
-	DBBackend          string `json:"dbBackend"`
-	DBPath             string `json:"dbPath"`
+	DBBackend string `json:"dbBackend"`
+	DBPath    string `json:"dbPath"`
+	// HTTPDataSourceURL is the data source URL in effect when DBBackend is
+	// "http" (empty otherwise). The token is never part of this block.
+	HTTPDataSourceURL  string `json:"httpDataSourceUrl,omitempty"`
 	ArtifactsDir       string `json:"artifactsDir"`
 	UserExtensionsDir  string `json:"userExtensionsDir"`
 	PaginationPageSize int    `json:"paginationPageSize"`
@@ -68,6 +71,7 @@ type redactedFileConfig runtimeconfig.FileConfig
 // modified here).
 func newRedactedFileConfig(cfg runtimeconfig.FileConfig) redactedFileConfig {
 	cfg.MySQLPassword = runtimeconfig.RedactSecret(cfg.MySQLPassword)
+	cfg.HTTPDataSourceToken = runtimeconfig.RedactSecret(cfg.HTTPDataSourceToken)
 	return redactedFileConfig(cfg)
 }
 
@@ -286,6 +290,47 @@ func isPasswordRetypeRequired(err error) bool {
 	return errors.As(err, &apiErr) && apiErr.Code == domain.ErrCodeMySQLPasswordRetypeRequired
 }
 
+// resolveSubmittedHTTPDataSourceToken is resolveSubmittedMySQLPassword's
+// counterpart for the HTTP custom data source token (DFLT-00088), with the
+// same rule for the same reason: a submission equal to
+// RedactSecret(stored) -- the placeholder for a stored plaintext token, or
+// the stored "${ENV_VAR}" reference's own text -- is a resend of the stored
+// secret, and is only honoured while the (normalized) httpDataSourceUrl is
+// the one it was saved for. Otherwise anyone able to make one request could
+// point the URL at a server they control and have graph-engine hand it the
+// stored token at the next startup. Any other submission is a fresh value,
+// used as submitted.
+//
+// URLs are compared with store.NormalizeHTTPDataSourceURL (case of scheme
+// and host, an explicit default port and a trailing slash do not count as a
+// change); a change of scheme, host, port or path does.
+func resolveSubmittedHTTPDataSourceToken(cfg runtimeconfig.FileConfig, targetURL, submitted string) (string, error) {
+	stored := cfg.HTTPDataSourceToken
+	if stored == "" || submitted != runtimeconfig.RedactSecret(stored) {
+		return submitted, nil
+	}
+	if store.NormalizeHTTPDataSourceURL(targetURL) != store.NormalizeHTTPDataSourceURL(cfg.HTTPDataSourceURL) {
+		return "", domain.NewAPIError(domain.ErrCodeHTTPDataSourceTokenRetypeRequired,
+			"the saved HTTP data source token (or \"${ENV_VAR}\" reference) can only be reused for the URL "+
+				"it was saved for; retype it to use a different httpDataSourceUrl")
+	}
+	return stored, nil
+}
+
+// logHTTPDataSourceTokenRetypeRejected records an
+// HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED rejection. Neither URL nor the token
+// is logged -- only which endpoint rejected the request.
+func (s *Server) logHTTPDataSourceTokenRetypeRejected(r *http.Request) {
+	endpoint := r.Pattern
+	if endpoint == "" {
+		endpoint = r.Method + " " + r.URL.Path
+	}
+	s.rejectLog.log(r, domain.ErrCodeHTTPDataSourceTokenRetypeRequired, http.StatusBadRequest,
+		slog.String("endpoint", endpoint),
+		slog.String("changed_fields", "httpDataSourceUrl"),
+	)
+}
+
 func (s *Server) effectiveAppSettings() (effectiveAppSettings, error) {
 	roots, err := s.resolveRoots()
 	if err != nil {
@@ -295,9 +340,14 @@ func (s *Server) effectiveAppSettings() (effectiveAppSettings, error) {
 	if dbBackend == "" {
 		dbBackend = "sqlite"
 	}
+	httpURL := ""
+	if dbBackend == "http" {
+		httpURL = s.cfg.HTTPDataSourceURL
+	}
 	return effectiveAppSettings{
 		DBBackend:          dbBackend,
 		DBPath:             s.cfg.DBPath,
+		HTTPDataSourceURL:  httpURL,
 		ArtifactsDir:       s.cfg.ArtifactsDir,
 		UserExtensionsDir:  roots.UserDir,
 		PaginationPageSize: s.cfg.PaginationPageSize,
@@ -328,8 +378,9 @@ func (s *Server) handleGetAppSettings(w http.ResponseWriter, r *http.Request) {
 
 // handlePutAppSettings saves the fields this endpoint owns
 // (dbBackend/dbPath/mysqlHost/mysqlPort/mysqlDatabase/mysqlUser/
-// mysqlPassword/mysqlTls/mysqlTlsCa/artifactsDir/userExtensionsDir/
-// paginationPageSize/myName) into graph-config.json, preserving every other
+// mysqlPassword/mysqlTls/mysqlTlsCa/httpDataSourceUrl/httpDataSourceToken/
+// artifactsDir/userExtensionsDir/paginationPageSize/myName) into
+// graph-config.json, preserving every other
 // field already in the file (port/host/claudeBinary/terminalCommand/workDir/
 // teamExtensionsDir/projectPaths) untouched.
 //
@@ -377,19 +428,23 @@ func (s *Server) handleGetAppSettings(w http.ResponseWriter, r *http.Request) {
 // retype this costs a user who is moving the database somewhere else.
 func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		DBBackend          string `json:"dbBackend"`
-		DBPath             string `json:"dbPath"`
-		MySQLHost          string `json:"mysqlHost"`
-		MySQLPort          int    `json:"mysqlPort"`
-		MySQLDatabase      string `json:"mysqlDatabase"`
-		MySQLUser          string `json:"mysqlUser"`
-		MySQLPassword      string `json:"mysqlPassword"`
-		MySQLTLS           string `json:"mysqlTls"`
-		MySQLTLSCA         string `json:"mysqlTlsCa"`
-		ArtifactsDir       string `json:"artifactsDir"`
-		UserExtensionsDir  string `json:"userExtensionsDir"`
-		PaginationPageSize int    `json:"paginationPageSize"`
-		MyName             string `json:"myName"`
+		DBBackend         string `json:"dbBackend"`
+		DBPath            string `json:"dbPath"`
+		MySQLHost         string `json:"mysqlHost"`
+		MySQLPort         int    `json:"mysqlPort"`
+		MySQLDatabase     string `json:"mysqlDatabase"`
+		MySQLUser         string `json:"mysqlUser"`
+		MySQLPassword     string `json:"mysqlPassword"`
+		MySQLTLS          string `json:"mysqlTls"`
+		MySQLTLSCA        string `json:"mysqlTlsCa"`
+		HTTPDataSourceURL string `json:"httpDataSourceUrl"`
+		// HTTPDataSourceToken follows mysqlPassword's rules: see
+		// resolveSubmittedHTTPDataSourceToken.
+		HTTPDataSourceToken string `json:"httpDataSourceToken"`
+		ArtifactsDir        string `json:"artifactsDir"`
+		UserExtensionsDir   string `json:"userExtensionsDir"`
+		PaginationPageSize  int    `json:"paginationPageSize"`
+		MyName              string `json:"myName"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -404,9 +459,8 @@ func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 	if dbBackend == "" {
 		dbBackend = "sqlite"
 	}
-	if dbBackend != "sqlite" && dbBackend != "mysql" {
-		writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation,
-			`dbBackend must be "sqlite" or "mysql", got %q`, body.DBBackend))
+	if err := store.ValidateBackend(body.DBBackend); err != nil {
+		writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation, "%s", err.Error()))
 		return
 	}
 	// MySQL selection requires enough to actually connect; sqlite's dbPath
@@ -444,6 +498,27 @@ func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 			passwordErr = err
 			return err
 		}
+		// The HTTP data source token: first decide whether the submission is
+		// a resend of the stored token (and refuse it for a changed URL),
+		// then validate the URL/token pair -- only when http is selected, so
+		// a leftover URL never blocks saving under sqlite/mysql. The token is
+		// judged as it will be stored: a "${ENV_VAR}" reference is not
+		// resolved at save time and counts as non-empty. The retype check
+		// comes first on purpose, so moving a stored token to e.g. a
+		// plaintext URL is reported as "retype the token", not as a
+		// validation error that would suggest the token itself was fine.
+		httpToken, err := resolveSubmittedHTTPDataSourceToken(*fileCfg, body.HTTPDataSourceURL, body.HTTPDataSourceToken)
+		if err != nil {
+			s.logHTTPDataSourceTokenRetypeRejected(r)
+			passwordErr = err
+			return err
+		}
+		if dbBackend == "http" {
+			if err := store.ValidateHTTPDataSourceSettings(body.HTTPDataSourceURL, httpToken); err != nil {
+				passwordErr = domain.NewAPIError(domain.ErrCodeValidation, "%s", err.Error())
+				return passwordErr
+			}
+		}
 
 		fileCfg.DBBackend = body.DBBackend
 		fileCfg.DBPath = body.DBPath
@@ -454,6 +529,8 @@ func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 		fileCfg.MySQLPassword = password
 		fileCfg.MySQLTLS = body.MySQLTLS
 		fileCfg.MySQLTLSCA = body.MySQLTLSCA
+		fileCfg.HTTPDataSourceURL = body.HTTPDataSourceURL
+		fileCfg.HTTPDataSourceToken = httpToken
 		fileCfg.ArtifactsDir = body.ArtifactsDir
 		fileCfg.UserExtensionsDir = body.UserExtensionsDir
 		fileCfg.PaginationPageSize = body.PaginationPageSize

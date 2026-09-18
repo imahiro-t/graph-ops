@@ -1352,6 +1352,7 @@ func cmdServe(rc runtimeConfig, args []string) error {
 		Host:               host,
 		DBBackend:          rc.DBBackend,
 		DBPath:             rc.DBPath,
+		HTTPDataSourceURL:  rc.HTTPDataSourceURL,
 		ArtifactsDir:       rc.ArtifactsDir,
 		ClaudeBinary:       rc.ClaudeBinary,
 		WorkDir:            rc.WorkDir,

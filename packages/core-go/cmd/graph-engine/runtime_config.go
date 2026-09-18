@@ -19,8 +19,8 @@ import (
 // the web settings UI can read/write the exact same file this merges on top
 // of -- see that package's doc comment.
 type runtimeConfig struct {
-	// DBBackend is "sqlite" or "mysql" -- always normalized to one of these
-	// two (never ""), see loadRuntimeConfig.
+	// DBBackend is "sqlite", "mysql" or "http" -- always normalized to one of
+	// these (never ""), see loadRuntimeConfig.
 	DBBackend    string
 	DBPath       string
 	ArtifactsDir string
@@ -50,6 +50,12 @@ type runtimeConfig struct {
 	// unrecognized value.
 	MySQLTLSMode   string
 	MySQLTLSCAFile string
+	// HTTPDataSourceURL/HTTPDataSourceToken configure the HTTP custom data
+	// source, meaningful only when DBBackend == "http" (DFLT-00088). The
+	// token has already been resolved from a possible "${ENV_VAR_NAME}"
+	// reference, and both have passed store.ValidateHTTPDataSourceSettings.
+	HTTPDataSourceURL   string
+	HTTPDataSourceToken string
 	// UserExtensionsDir/TeamExtensionsDir override the default roots
 	// internal/config.ResolveRoots would otherwise pick ($HOME/.graph-ops
 	// and the nearest ancestor .graph-ops directory, respectively). Empty
@@ -119,8 +125,8 @@ func loadRuntimeConfig() (runtimeConfig, error) {
 	}
 
 	dbBackend := firstNonEmpty(os.Getenv("GRAPH_DB_BACKEND"), fileCfg.DBBackend, "sqlite")
-	if dbBackend != "sqlite" && dbBackend != "mysql" {
-		return runtimeConfig{}, fmt.Errorf(`unsupported dbBackend %q (must be "sqlite" or "mysql")`, dbBackend)
+	if err := store.ValidateBackend(dbBackend); err != nil {
+		return runtimeConfig{}, fmt.Errorf("invalid dbBackend: %w", err)
 	}
 
 	dataDir := defaultDataDir(cwd, home)
@@ -184,6 +190,26 @@ func loadRuntimeConfig() (runtimeConfig, error) {
 		mysqlTLSMode = normalized
 	}
 
+	// HTTP custom data source (DFLT-00088): resolved and validated only when
+	// the http backend is actually selected, exactly like the MySQL password
+	// and TLS settings above -- a leftover httpDataSourceUrl or a token
+	// referencing an unset env var must not block sqlite/mysql startups. Once
+	// http is selected, a non-loopback plaintext URL or a remote URL without
+	// a token stops startup here, before any request is sent.
+	httpDataSourceURL := firstNonEmpty(os.Getenv("GRAPH_HTTP_DATASOURCE_URL"), fileCfg.HTTPDataSourceURL)
+	httpDataSourceToken := ""
+	if dbBackend == "http" {
+		tokenRaw := firstNonEmpty(os.Getenv("GRAPH_HTTP_DATASOURCE_TOKEN"), fileCfg.HTTPDataSourceToken)
+		resolved, _, _, err := runtimeconfig.ResolveSecret(tokenRaw)
+		if err != nil {
+			return runtimeConfig{}, fmt.Errorf("resolving HTTP data source token (httpDataSourceToken / GRAPH_HTTP_DATASOURCE_TOKEN): %w", err)
+		}
+		if err := store.ValidateHTTPDataSourceSettings(httpDataSourceURL, resolved); err != nil {
+			return runtimeConfig{}, fmt.Errorf("invalid HTTP data source settings (httpDataSourceUrl/httpDataSourceToken or GRAPH_HTTP_DATASOURCE_URL/GRAPH_HTTP_DATASOURCE_TOKEN): %w", err)
+		}
+		httpDataSourceToken = resolved
+	}
+
 	port := fileCfg.Port
 	if port == 0 {
 		// 3001 collides too often with other local dev servers (Next.js,
@@ -239,27 +265,29 @@ func loadRuntimeConfig() (runtimeConfig, error) {
 	}
 
 	return runtimeConfig{
-		DBBackend:          dbBackend,
-		DBPath:             dbPath,
-		ArtifactsDir:       artifactsDir,
-		Port:               port,
-		Host:               host,
-		ClaudeBinary:       claudeBinary,
-		WorkDir:            cwd,
-		TerminalCommand:    terminalCommand,
-		TerminalWorkDir:    terminalWorkDir,
-		MySQLHost:          mysqlHost,
-		MySQLPort:          mysqlPort,
-		MySQLDatabase:      mysqlDatabase,
-		MySQLUser:          mysqlUser,
-		MySQLPassword:      mysqlPassword,
-		MySQLTLSMode:       mysqlTLSMode,
-		MySQLTLSCAFile:     mysqlTLSCAFile,
-		UserExtensionsDir:  userExtensionsDir,
-		TeamExtensionsDir:  teamExtensionsDir,
-		PaginationPageSize: paginationPageSize,
-		HomeDir:            home,
-		ProjectPaths:       fileCfg.ProjectPaths,
+		DBBackend:           dbBackend,
+		DBPath:              dbPath,
+		ArtifactsDir:        artifactsDir,
+		Port:                port,
+		Host:                host,
+		ClaudeBinary:        claudeBinary,
+		WorkDir:             cwd,
+		TerminalCommand:     terminalCommand,
+		TerminalWorkDir:     terminalWorkDir,
+		MySQLHost:           mysqlHost,
+		MySQLPort:           mysqlPort,
+		MySQLDatabase:       mysqlDatabase,
+		MySQLUser:           mysqlUser,
+		MySQLPassword:       mysqlPassword,
+		MySQLTLSMode:        mysqlTLSMode,
+		MySQLTLSCAFile:      mysqlTLSCAFile,
+		HTTPDataSourceURL:   httpDataSourceURL,
+		HTTPDataSourceToken: httpDataSourceToken,
+		UserExtensionsDir:   userExtensionsDir,
+		TeamExtensionsDir:   teamExtensionsDir,
+		PaginationPageSize:  paginationPageSize,
+		HomeDir:             home,
+		ProjectPaths:        fileCfg.ProjectPaths,
 	}, nil
 }
 
@@ -319,6 +347,8 @@ func storeConfigFromRuntimeConfig(rc runtimeConfig) store.Config {
 		MySQLPassword:  rc.MySQLPassword,
 		MySQLTLSMode:   rc.MySQLTLSMode,
 		MySQLTLSCAFile: rc.MySQLTLSCAFile,
+		HTTPURL:        rc.HTTPDataSourceURL,
+		HTTPToken:      rc.HTTPDataSourceToken,
 	}
 }
 

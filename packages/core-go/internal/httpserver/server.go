@@ -33,8 +33,13 @@ type Config struct {
 	// effect) block on the app-settings tab -- it plays no role in how this
 	// already-running server talks to its own repo (that was decided once,
 	// at process startup, by cmd/graph-engine's store.Open call).
-	DBBackend          string
-	DBPath             string
+	DBBackend string
+	DBPath    string
+	// HTTPDataSourceURL is the HTTP custom data source URL this server was
+	// started with (DBBackend "http", DFLT-00088) -- like DBBackend, only
+	// shown in the app-settings tab's "currently in effect" block. The token
+	// is deliberately not part of Config at all.
+	HTTPDataSourceURL  string
 	ArtifactsDir       string
 	ClaudeBinary       string
 	WorkDir            string
