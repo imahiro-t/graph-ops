@@ -984,6 +984,12 @@ func TestOpenAPI_DocumentsTheContract(t *testing.T) {
 		"`null`",
 		"recommended",
 		"regardless of the HTTP status",
+		// Timeout budget and retry policy, which plugins must design for.
+		fmt.Sprintf("gives up on each request after %d seconds", int(defaultHTTPDataSourceTimeout/time.Second)),
+		fmt.Sprintf("answer every request within %d seconds", int(defaultHTTPDataSourceTimeout/time.Second)),
+		"never retries a request automatically",
+		"the outcome of a write\n      request is uncertain",
+		"must not blindly repeat a\n      create request",
 	} {
 		if !strings.Contains(raw, phrase) {
 			t.Errorf("openapi.yaml does not mention %q", phrase)

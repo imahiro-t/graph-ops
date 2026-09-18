@@ -40,6 +40,29 @@ info:
       fallback to plaintext, and graph-engine never follows redirects (a 3xx
       answer is an error), so the token cannot be forwarded to another host.
 
+    ## Timeouts and retries
+
+    - graph-engine gives up on each request after 30 seconds (the whole
+      exchange: connecting, sending the request and reading the answer). The
+      value is fixed; it is not configurable.
+    - graph-engine never retries a request automatically, whatever the
+      failure (timeout, connection error, 5xx). The error is reported to the
+      user or agent that ran the command.
+    - A plugin must therefore answer every request within 30 seconds, and
+      should leave itself a margin (the sample Jira plugin uses a 25-second
+      deadline per request). If the plugin calls slow or rate-limited
+      services, it must bound its own retries and waits by that budget
+      rather than keep working past it.
+    - When graph-engine times out or disconnects, the outcome of a write
+      request is uncertain: the plugin may still have applied it, fully
+      (each request is atomic, see below). Callers must not blindly repeat a
+      create request (`createTicket`, `createNode`, `createEdge`,
+      `createArtifact`, `createProject`, `createLabel`) after a timeout;
+      they should first read back whether it took effect. Plugins should stop
+      work on a request as soon as the client disconnects (for example by
+      tying downstream calls to the request's context), so that writes which
+      have not started yet never happen.
+
     ## Atomicity
 
     There are no cross-request transactions. Each request must be processed atomically
