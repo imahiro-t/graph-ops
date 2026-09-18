@@ -29,9 +29,11 @@ name: Release graph-engine binaries
 #   - `web` and `build` check out with `persist-credentials: false`, so the
 #     token is not left in .git/config for later steps to read. Neither job
 #     uses git auth after checkout.
-#   - setup-node runs without `cache: npm`: a tag-triggered workflow can read
-#     caches saved by the default branch, and a release build should not
-#     trust them.
+#   - Neither npm nor Go caches are used: setup-node runs without
+#     `cache: npm` and with `package-manager-cache: false`, and setup-go
+#     runs with `cache: false`. A tag-triggered workflow can read caches
+#     saved by the default branch, and a release build should not trust
+#     them.
 #   - Every job has a `timeout-minutes`, so a hang (e.g. a wedged `npm ci`)
 #     fails fast instead of holding a runner for GitHub's 6 hour default.
 #
@@ -62,14 +64,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      # No `cache: npm` on purpose (see the header comment).
-      - uses: actions/setup-node@v4
+      # No `cache: npm`, and `package-manager-cache: false`, on purpose (see
+      # the header comment).
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
@@ -85,12 +89,12 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: webdist
           path: packages/web/dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: third-party-notices
           path: THIRD_PARTY_NOTICES
@@ -109,7 +113,7 @@ jobs:
           fi
           cp "$notes" RELEASE_NOTES.md
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-notes
           path: RELEASE_NOTES.md
@@ -137,15 +141,17 @@ jobs:
             goarch: amd64
             asset: graph-engine-windows-amd64.exe
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      # `cache: false` on purpose (see the header comment).
+      - uses: actions/setup-go@v7
         with:
           go-version-file: packages/core-go/go.mod
+          cache: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: webdist
           path: packages/core-go/internal/httpserver/webdist
@@ -166,7 +172,7 @@ jobs:
           CGO_ENABLED: '0'
         run: go build -o "../../dist/${{ matrix.asset }}" ./cmd/graph-engine
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset }}
           path: dist/${{ matrix.asset }}
@@ -183,7 +189,7 @@ jobs:
     steps:
       # Only the binaries: without the pattern, the `webdist` artifact would be
       # merged into dist/ too, and end up in checksums.txt and the Release.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: graph-engine-*
           path: dist
@@ -195,12 +201,12 @@ jobs:
 
       # Downloaded into a separate directory (not dist/) so it never enters
       # checksums.txt or affects the pattern-based binaries download above.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: third-party-notices
           path: notices
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-notes
           path: release-notes
