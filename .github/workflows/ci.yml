@@ -95,6 +95,11 @@ jobs:
       - name: Verify version consistency across 5 locations
         run: npm run check:versions
 
+      # release.yml publishes docs/release-notes/v<version>.md as the Release
+      # body; this catches a version bump that forgot its notes.
+      - name: Verify release notes exist for the current version
+        run: npm run check:release-notes
+
   web-lint:
     name: Web lint
     runs-on: ubuntu-latest
