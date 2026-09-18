@@ -95,6 +95,25 @@ jobs:
           name: third-party-notices
           path: THIRD_PARTY_NOTICES
 
+      # The Release body is docs/release-notes/<tag>.md. Fail here, before any
+      # binary is built, if the tagged commit has no notes for this tag. The
+      # tag name is passed through env so the shell never interprets it.
+      - name: Check the release notes for this tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          notes="docs/release-notes/$TAG.md"
+          if [ ! -f "$notes" ] || [ -z "$(tr -d '[:space:]' < "$notes")" ]; then
+            echo "$notes is missing or empty; every release must have release notes." >&2
+            exit 1
+          fi
+          cp "$notes" RELEASE_NOTES.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: RELEASE_NOTES.md
+
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
     needs: web
@@ -181,9 +200,16 @@ jobs:
           name: third-party-notices
           path: notices
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes
+
       - name: Create release and upload assets
         # The tag name is passed through env rather than expanded into the
         # script, so nothing in it is ever interpreted by the shell.
+        # --generate-notes appends GitHub's generated notes (PR list and the
+        # "Full Changelog" link) after the hand-written notes.
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
@@ -192,4 +218,5 @@ jobs:
           gh release create "$TAG" dist/* notices/THIRD_PARTY_NOTICES \
             --repo "$REPO" \
             --title "$TAG" \
+            --notes-file release-notes/RELEASE_NOTES.md \
             --generate-notes

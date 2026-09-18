@@ -33,6 +33,31 @@ Do not proceed to tagging until this passes. A tag whose version doesn't
 match one of the 5 locations produces a release that disagrees with what
 the plugin itself reports as its version.
 
+## 1b. Pre-flight: write the release notes
+
+Every release **must** have hand-written release notes, in English, at
+`docs/release-notes/vX.Y.Z.md`, committed together with the version bump.
+Summarize what changed since the previous release (`git log vPREV..HEAD`)
+for users, grouped under headings such as `## Highlights`, `## Changes`,
+`## Fixes`, `## Accessibility`, `## Documentation` and `## Upgrade notes`
+(omit headings with nothing under them). Call out anything users must do
+when upgrading.
+
+Run:
+
+```sh
+npm run check:release-notes
+```
+
+This runs `scripts/check-release-notes.js`, which fails if the notes file
+for `package.json`'s version is missing or empty. CI runs the same check,
+and `release.yml` refuses to build a tag whose notes file is missing, so a
+release can no longer be published with an empty body.
+
+GitHub's `--generate-notes` output only lists merged pull requests, and
+most changes here are merged locally from worktrees, so without these
+notes a Release would contain nothing but a "Full Changelog" link.
+
 ## 2. Create and push the tag
 
 ```sh
@@ -83,10 +108,14 @@ Pushing a `v*` tag runs three jobs in sequence:
    runs:
    ```sh
    gh release create "$TAG" dist/* notices/THIRD_PARTY_NOTICES \
-     --repo "$REPO" --title "$TAG" --generate-notes
+     --repo "$REPO" --title "$TAG" \
+     --notes-file release-notes/RELEASE_NOTES.md --generate-notes
    ```
    creating the GitHub Release and attaching all 4 platform binaries, plus
    `checksums.txt`, plus `THIRD_PARTY_NOTICES`, as separate Release assets.
+   The Release body is `docs/release-notes/<tag>.md` (checked and uploaded
+   as the `release-notes` artifact by the `web` job), followed by GitHub's
+   generated notes.
 
    This is the only job in the workflow with `contents: write` permission
    (every other job is read-only), and it checks out no code and runs no
@@ -120,6 +149,11 @@ are attached:
 - `graph-engine-windows-amd64.exe`
 - `checksums.txt`
 - `THIRD_PARTY_NOTICES`
+
+Also confirm the Release body starts with the notes from
+`docs/release-notes/vX.Y.Z.md`. To fix the notes of a published Release,
+update the file on `main` and run
+`gh release edit vX.Y.Z --notes-file docs/release-notes/vX.Y.Z.md`.
 
 ### About `THIRD_PARTY_NOTICES`
 

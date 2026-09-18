@@ -1,6 +1,6 @@
 {
   "name": "graph-ops",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "license": "MIT",
   "workspaces": [
@@ -19,6 +19,7 @@
     "build": "npm run build:web && npm run embed:web && npm run build:go && npm run build --workspace=@graph-ops/plugin --if-present",
     "start": "npm run build && packages/core-go/graph-engine serve",
     "check:versions": "node scripts/check-versions.js",
+    "check:release-notes": "node scripts/check-release-notes.js",
     "test": "npm run sync:defaults && cd packages/core-go && go test ./... && cd ../.. && node --test scripts/*.test.js && npm run test --workspaces --if-present"
   },
   "devDependencies": {
