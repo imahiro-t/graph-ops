@@ -8,7 +8,9 @@ operations into Jira REST API v3 calls.
 
 It is a standalone Go module (standard library only) and does not import
 anything from graph-engine: the only contract between the two is the
-published protocol. Use it as a starting point for your own plugin.
+published protocol. Use it as a starting point for your own plugin; the
+[developer manual](../../docs/http-datasource/README.md) explains the
+protocol, the security rules and how to develop a plugin locally.
 
 ## Running it
 
@@ -174,7 +176,23 @@ requests in flight finish.
     escapes, such as `<`, `>`, `&`, quotes or newlines -- can be neither
     created nor updated.
   - `graphops.graph` holds a ticket's whole graph, including each review
-    gate's criteria text, so a very large graph can hit the limit.
+    gate's criteria text, so a very large graph can hit the limit. Measured
+    against real Jira, it takes about 500 bytes per node (edges and criteria
+    included): a 9-node, 12-edge graph was 4,753 bytes. That puts the limit at
+    roughly **55-60 nodes per ticket**, fewer when many review gates carry
+    long criteria. A typical `process-ticket` graph of about 20 nodes needs
+    around 11-13 KB.
+- **Commands are slower than with SQLite.** Nodes and edges share one
+  issue property, so every graph change reads, modifies and writes
+  `graphops.graph` in Jira, and a command that changes the graph several
+  times pays for each round trip. Measured against Jira Cloud,
+  `get-executable` took 3-6 seconds and `expand-graph` about 11 seconds
+  (most other commands 0.5-3 seconds). Each single protocol request stayed
+  under 5 seconds, well inside the 25-second deadline and graph-engine's
+  30-second timeout, so nothing fails -- it is only slower. Writes to the
+  same issue are serialized by the per-issue lock, so when `process-ticket`
+  runs subagents in parallel on one ticket, their writes queue up and the run
+  feels slower still.
 - **Jira users can change GraphOps data (trust boundary).** Everything the
   plugin stores is ordinary Jira data: anyone who can edit an issue can
   change its `graphops.ticket` / `graphops.graph` properties (ticket status,
@@ -222,5 +240,75 @@ managed tickets of a registered project.
 
 ## Verification
 
-End-to-end verification against a real Jira Cloud site is recorded
-separately (site URL and account are never written to this repository).
+The plugin was verified end to end against a real Jira Cloud site on
+2026-09-18 (UTC), at commit `6fab8ba`. The site URL, the Atlassian account
+and every token are deliberately not recorded here.
+
+Setup: a Jira project with the key `GRAP` and issue type `Task`; the plugin on
+`127.0.0.1` with a 64-character random `GRAPHOPS_DATASOURCE_TOKEN`; the Jira
+credentials passed to the plugin process only, through environment variables;
+graph-engine configured outside the repository with `"dbBackend": "http"` and
+`"httpDataSourceToken": "${GRAPHOPS_DATASOURCE_TOKEN}"`.
+
+What was checked, all with the expected result:
+
+- **Projects**: `create-project --prefix GRAP` registered `jira-GRAP` and
+  created the metadata issue `GRAP-1`; `use-project` and `list-projects`;
+  label create, rename, recolor and delete through the Web UI API.
+- **Tickets**: create with priority and labels (labels resolved
+  case-insensitively; Markdown with `<`, `&` and quotes round-tripped
+  unchanged); an unknown label failed with `LABEL_NOT_FOUND` and created no
+  issue; `refine-ticket` updated status, priority, labels and description;
+  `list-tickets` and `get-ticket` matched.
+- **Execution graph**: the `process-ticket` command sequence run by hand
+  (`get-executable` seeding, plan and plan review, `expand-graph --patch` to 9
+  nodes and 12 edges, a failed review gate looping back to implementation,
+  approval gates, release) until the ticket was `DONE`. Artifacts of every
+  kind were stored and read back: text, json, a 40 KB text (stored as an
+  attachment), an 84 KB html report and a PNG image. The html and image
+  bytes read back through the Web UI API were identical to the originals.
+- **Jira side** (read-only REST calls): the `graphops` label and properties
+  on ticket issues, one comment with a `graphops.artifact` property per
+  artifact, the attachments, and no workflow transition.
+- **Web UI**: `graph-engine serve` listed the Jira-backed tickets; ticket
+  detail and artifact content were checked through its API.
+- **Detach**: deleting ticket `GRAP-3` from the Web UI removed it from
+  GraphOps and removed its label and properties in Jira; the issue itself
+  stayed.
+- **Limits**: a 34,000-byte description failed with a clear "over Jira's
+  32768-byte issue property limit" error and left the stored ticket as it
+  was.
+- **Failures and restarts**: a wrong bearer token stopped `list-tickets` and
+  `serve` at startup without printing either token; a request without a
+  token got 401; a stopped plugin gave "connection refused"; `SIGTERM` shut
+  the plugin down cleanly and all data was there after a restart; with the
+  state file removed, registering `GRAP` again reused the existing metadata
+  issue and its labels.
+
+Observations:
+
+- Property sizes: `graphops.graph` was 4,753 bytes for 9 nodes and 12 edges
+  (about 500 bytes per node, see Limitations); `graphops.ticket` was 243-669
+  bytes for ordinary descriptions.
+- Search lag: a ticket listed about 0.1 seconds after its creation was
+  missing, and present about a second later. Reading it by key was not
+  affected.
+- Timing (whole commands, including graph-engine's startup handshake):
+  listing tickets 0.4-0.6 s, `get-ticket` 0.6-1.4 s, `create-ticket`
+  1.7-2.3 s, `add-artifact` 1.2-3 s, `complete-node` 2.3-4.4 s,
+  `get-executable` 3-6 s, `expand-graph` about 11 s. No Jira call needed a
+  retry and no single request took over 5 seconds.
+- Image artifacts are stored as attachments named
+  `graphops-artifact-<id>.bin`, so Jira does not preview them as images;
+  GraphOps reads the original bytes back.
+- Registering a project again replaces its name with the new one.
+
+Not covered against real Jira (covered by the tests above instead):
+`DeleteProject` (it would have removed the verification data), `DeleteNode`
+(not reachable from the CLI or the Web UI), a `graphops.graph` over 32 KB, and
+the `process-ticket` skill itself with parallel subagents -- its CLI command
+sequence was run instead.
+
+No commit was made during verification, and a search of the working tree and
+of the full history found none of the site host name, the account email, the
+Jira API token or the data-source tokens.
