@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -341,7 +342,9 @@ Commands:
 
 User/team extension directories (see README.md "Configuration" section):
   GRAPH_USER_EXTENSIONS_DIR / userExtensionsDir   (default: $HOME/.graph-ops)
-  GRAPH_TEAM_EXTENSIONS_DIR / teamExtensionsDir   (default: nearest ancestor .graph-ops/)
+  GRAPH_TEAM_EXTENSIONS_DIR / teamExtensionsDir   (default: nearest ancestor .graph-ops/,
+                                                   excluding $HOME/.graph-ops; a team root that is
+                                                   the same directory as the user root is ignored)
 
 Help:
   graph-engine help | --help | -h         (prints this list)
@@ -1163,7 +1166,11 @@ func catalogForTicket(repo store.GraphRepository, rc runtimeConfig, ticketID, la
 // never an error -- so the answer matches what get-executable/expand-graph would
 // actually use for tickets under that project; omitting it falls back to
 // rc's own team root (rc.TeamExtensionsDir / the nearest ancestor
-// .graph-ops), matching get-workflow-catalog.
+// .graph-ops other than $HOME/.graph-ops), matching get-workflow-catalog.
+// A project whose local path is $HOME itself (config.ErrTeamRootIsUserRoot)
+// has no team tier, and a team root that is the same directory as the user
+// root is dropped, so the user tier's config.yaml is never also read as the
+// team tier (DFLT-00068).
 //
 // The returned "resolved" value never reflects a call-scoped --language
 // override (there is none here -- this command exists precisely to answer
@@ -1194,10 +1201,20 @@ func cmdGetLanguageSettings(repo store.GraphRepository, rc runtimeConfig, args [
 		}
 		if localPath := (runtimeconfig.FileConfig{ProjectPaths: rc.ProjectPaths}).ProjectPath(project.ID); localPath != "" {
 			teamRoot, err := config.ProjectTeamRoot(localPath)
-			if err != nil {
+			switch {
+			case errors.Is(err, config.ErrTeamRootIsUserRoot):
+				// The local path is $HOME itself: no team tier of its own.
+				teamRoot = ""
+			case err != nil:
 				return err
 			}
 			roots.TeamDir = teamRoot
+		}
+		// ProjectTeamRoot only knows the default user root; with a user-root
+		// override the project's team root could still be the user root, and
+		// ResolveRoots never reads one directory as both tiers.
+		if config.SameDir(roots.UserDir, roots.TeamDir) {
+			roots.TeamDir = ""
 		}
 	}
 
@@ -1232,7 +1249,8 @@ func cmdGetLanguageSettings(repo store.GraphRepository, rc runtimeConfig, args [
 
 // extensionRoots resolves rc's user-/team-extensions directories (env vars /
 // graph-config.json overrides, falling back to $HOME/.graph-ops and
-// the nearest ancestor .graph-ops directory respectively -- see
+// the nearest ancestor .graph-ops directory other than $HOME/.graph-ops
+// respectively -- see
 // internal/config.ResolveRoots).
 func extensionRoots(rc runtimeConfig) (config.Roots, error) {
 	return config.ResolveRoots(rc.WorkDir, rc.UserExtensionsDir, rc.TeamExtensionsDir)

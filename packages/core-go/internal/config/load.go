@@ -21,7 +21,8 @@ var defaultYAML []byte
 // configDirName is the directory name used for both tiers' root: the
 // per-user root is $HOME/.graph-ops, the per-team (formerly called
 // "project") root is a .graph-ops directory found by walking up from
-// the working directory. Both roots share one internal layout (see Roots'
+// the working directory, other than $HOME/.graph-ops itself (see
+// findProjectDir). Both roots share one internal layout (see Roots'
 // doc comment): a workflow-override file, plus an extensions/ subtree for
 // skill/node-type/report content. One root per tier, not two parallel path
 // systems.
@@ -57,19 +58,65 @@ func UserConfigPath() (string, error) {
 	return filepath.Join(home, userConfigRelPath), nil
 }
 
+// DefaultUserRoot returns the user tier's default root, $HOME/.graph-ops,
+// or "" when no home directory is resolvable. It ignores any explicit
+// user-root override (GRAPH_USER_EXTENSIONS_DIR / graph-config.json) on
+// purpose: this location is reserved for the user tier (it also holds the
+// DB, config.json and saved artifacts), so it is never a team root even
+// when the user tier itself has been moved elsewhere.
+func DefaultUserRoot() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, configDirName)
+}
+
+// canonicalDir normalizes path for SameDir: absolute and cleaned, then with
+// symlinks resolved when that succeeds (it fails for a path that doesn't
+// exist yet, in which case the cleaned absolute path is used as is).
+func canonicalDir(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	abs = filepath.Clean(abs)
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	return abs
+}
+
+// SameDir reports whether a and b name the same directory, ignoring
+// relative-vs-absolute spelling, trailing separators and symlinks (e.g.
+// macOS's /var vs /private/var). An empty path is never the same as
+// anything. Case-insensitive file systems are not special-cased.
+func SameDir(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	return canonicalDir(a) == canonicalDir(b)
+}
+
 // findProjectDir searches startDir and its ancestors for a directory named
 // ".graph-ops", returning "" if none is found. Unlike the old
 // file-existence check this used to be, it looks for the directory itself,
 // so a team root that only has extensions/ content (no workflow.yaml yet)
 // still gets discovered.
+//
+// The user tier's default root ($HOME/.graph-ops, see DefaultUserRoot) is
+// skipped and the walk continues above it: for any project under $HOME it
+// would otherwise be picked as the team root too, loading the same
+// directory as both tiers and duplicating every extension (DFLT-00068).
 func findProjectDir(startDir string) (string, error) {
 	dir, err := filepath.Abs(startDir)
 	if err != nil {
 		return "", err
 	}
+	userRoot := DefaultUserRoot()
 	for {
 		candidate := filepath.Join(dir, configDirName)
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() && !SameDir(candidate, userRoot) {
 			return candidate, nil
 		}
 		parent := filepath.Dir(dir)
@@ -81,7 +128,9 @@ func findProjectDir(startDir string) (string, error) {
 }
 
 // FindProjectConfigPath searches startDir and its ancestors for
-// .graph-ops/workflow.yaml, returning "" if none is found.
+// .graph-ops/workflow.yaml, returning "" if none is found. Like
+// findProjectDir, it never returns the user tier's default root
+// ($HOME/.graph-ops/workflow.yaml).
 func FindProjectConfigPath(startDir string) (string, error) {
 	dir, err := findProjectDir(startDir)
 	if err != nil || dir == "" {
@@ -108,7 +157,9 @@ func loadOptionalDocument(path string) (Document, error) {
 
 // Roots holds the resolved user- and team-tier extension directories for one
 // call. Either may be "" (no home dir resolvable / no team root found or
-// configured), in which case that tier contributes nothing.
+// configured / team root is the same directory as the user root), in which
+// case that tier contributes nothing. ResolveRoots never returns the same
+// directory for both.
 //
 // Both roots share the same internal layout:
 //
@@ -137,13 +188,16 @@ type Roots struct {
 // and take precedence when non-empty; otherwise the user root defaults to
 // $HOME/.graph-ops and the team root defaults to the nearest
 // .graph-ops directory found by walking up from startDir (typically
-// the process cwd) -- exactly today's hardcoded locations.
+// the process cwd), skipping $HOME/.graph-ops (see findProjectDir).
+//
+// If both roots end up naming the same directory (e.g. both overrides set
+// to one path, or the user override pointing at a project's .graph-ops),
+// that directory is kept as the user root only and TeamDir is "", so it is
+// never read twice.
 func ResolveRoots(startDir, userDirOverride, teamDirOverride string) (Roots, error) {
 	userDir := userDirOverride
 	if userDir == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			userDir = filepath.Join(home, configDirName)
-		}
+		userDir = DefaultUserRoot()
 	}
 
 	teamDir := teamDirOverride
@@ -153,6 +207,10 @@ func ResolveRoots(startDir, userDirOverride, teamDirOverride string) (Roots, err
 			return Roots{}, err
 		}
 		teamDir = dir
+	}
+
+	if SameDir(userDir, teamDir) {
+		teamDir = ""
 	}
 
 	return Roots{UserDir: userDir, TeamDir: teamDir}, nil

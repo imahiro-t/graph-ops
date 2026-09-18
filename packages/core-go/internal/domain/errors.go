@@ -84,6 +84,13 @@ const (
 	// write it to (DFLT-00080). Falling back to the server's own cwd would
 	// silently read/write the wrong place, so this is reported instead.
 	ErrCodeProjectLocalPathNotSet ErrorCode = "PROJECT_LOCAL_PATH_NOT_SET"
+	// ErrCodeProjectTeamRootIsUserRoot: a scope=project settings request
+	// resolved the project's team tier to the same directory as the user
+	// tier -- the project's local path is the home directory itself, or an
+	// explicit team-root override points at the user root (DFLT-00068).
+	// Reading or writing there would edit the global settings under the
+	// project's name, so the project has no team tier to edit.
+	ErrCodeProjectTeamRootIsUserRoot ErrorCode = "PROJECT_TEAM_ROOT_IS_USER_ROOT"
 	// ErrCodeProjectCreatedLocalPathNotSaved: POST /api/projects inserted the
 	// project into the DB but then failed to save its local path to
 	// graph-config.json (DFLT-00080). Returned with a 500. Distinct from

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -230,6 +231,16 @@ func TeamDocumentPath(teamRoot string) string {
 // "extension content is always optional" contract), this never returns ""
 // -- the settings UI always needs somewhere to write project-scoped
 // overrides, even for a project that has never had one before.
+//
+// Like findProjectDir, the walk skips $HOME/.graph-ops, so a project under
+// $HOME with no .graph-ops of its own gets <projectDir>/.graph-ops rather
+// than the user tier's root (DFLT-00068). When projectDir is $HOME itself,
+// that new path would be the user tier's default root, so
+// ErrTeamRootIsUserRoot is returned instead. Only the default user root
+// ($HOME/.graph-ops, see DefaultUserRoot) is checked here: this function
+// doesn't know about a GRAPH_USER_EXTENSIONS_DIR/graph-config.json user-root
+// override, so a caller that has one must compare against it itself (see
+// SameDir).
 func ProjectTeamRoot(projectDir string) (string, error) {
 	dir, err := findProjectDir(projectDir)
 	if err != nil {
@@ -242,8 +253,20 @@ func ProjectTeamRoot(projectDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(abs, configDirName), nil
+	root := filepath.Join(abs, configDirName)
+	if SameDir(root, DefaultUserRoot()) {
+		return "", ErrTeamRootIsUserRoot
+	}
+	return root, nil
 }
+
+// ErrTeamRootIsUserRoot is returned by ProjectTeamRoot (and so
+// ProjectTeamConfigPath) when the project's team root would be the user
+// tier's root -- i.e. the project's local path is the home directory
+// itself. Such a project has no team tier of its own: read-only callers
+// should treat it as "no team root", and writers must refuse rather than
+// silently overwrite the user tier.
+var ErrTeamRootIsUserRoot = errors.New("project team root would be the user tier's root ($HOME/.graph-ops)")
 
 // ProjectTeamConfigPath returns the workflow.yaml path under
 // ProjectTeamRoot(projectDir) -- see its doc comment.

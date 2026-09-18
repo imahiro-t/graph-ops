@@ -460,7 +460,7 @@ func statusForError(err error, fallback int) int {
 			domain.ErrCodeNoCurrentProject, domain.ErrCodeValidation, domain.ErrCodeTitleRequired,
 			domain.ErrCodeInvalidScope, domain.ErrCodeCatalogCycleDetected, domain.ErrCodeCatalogUnknownReference,
 			domain.ErrCodeCatalogDuplicateNode, domain.ErrCodeCatalogInvalidDocument, domain.ErrCodeInvalidMaxIterations,
-			domain.ErrCodeInvalidReportTemplate, domain.ErrCodeProjectLocalPathNotSet,
+			domain.ErrCodeInvalidReportTemplate, domain.ErrCodeProjectLocalPathNotSet, domain.ErrCodeProjectTeamRootIsUserRoot,
 			domain.ErrCodeInvalidLabelName, domain.ErrCodeInvalidLabelColor, domain.ErrCodeLabelNameTaken:
 			return http.StatusBadRequest
 		case domain.ErrCodeProjectNotFound, domain.ErrCodeTicketNotFound, domain.ErrCodeNodeNotFound, domain.ErrCodeArtifactNotFound,
