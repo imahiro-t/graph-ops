@@ -152,6 +152,7 @@
     },
     "artifactsCount": "成果物 {{count}}",
     "noArtifactsForNode": "このノードに紐付く成果物はまだありません",
+    "artifactScrollRegion": "{{name}}（{{timestamp}} 作成・スクロールできる成果物プレビュー）",
     "openInNewTab": "別タブで開く",
     "download": "ダウンロード",
     "downloadAllArtifacts": "成果物を一括ダウンロード",

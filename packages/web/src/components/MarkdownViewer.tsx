@@ -4,6 +4,18 @@ import remarkGfm from 'remark-gfm';
 
 interface Props {
   content: string;
+  // DFLT-00085: when true this bordered box itself becomes a 16rem-capped
+  // scroll container, so inline artifact previews stay skimmable in a list.
+  // The box that owns the border is the scroller on purpose (rather than an
+  // outer wrapper) so the border stays put and only the content moves --
+  // that fixed frame is what makes it read as "there is more inside".
+  // Default false keeps the full-height render used by the ticket
+  // description and by the open-in-a-new-tab preview page.
+  scrollable?: boolean;
+  // Accessible name for that scroll region. A keyboard user has to be able
+  // to reach and scroll the box (WCAG 2.1.1), which means it takes focus --
+  // and a focusable region needs a name saying which artifact it holds.
+  label?: string;
 }
 
 // Tailwind styling per element (no @tailwindcss/typography plugin in this
@@ -64,9 +76,22 @@ const components: Components = {
 // dangerouslySetInnerHTML/raw HTML pass-through), so arbitrary
 // Claude-authored markdown can't smuggle in a stored-XSS payload the way a
 // naive marked()+innerHTML render could.
-export const MarkdownViewer: React.FC<Props> = ({ content }) => {
+export const MarkdownViewer: React.FC<Props> = ({ content, scrollable = false, label }) => {
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3 text-xs overflow-x-auto shadow-inner">
+    <div
+      data-testid="markdown-viewer"
+      // max-h-64 (not h-64) so a short artifact still renders at its own
+      // height instead of being stretched to 16rem with dead space below.
+      // blue-500 focus ring rather than indigo-400 -- see GherkinViewer for
+      // the contrast numbers; outline-none leaves the ring as the only focus
+      // indicator, so it has to clear 3:1 on the light theme too.
+      className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3 text-xs overflow-x-auto shadow-inner${
+        scrollable ? ' max-h-64 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500' : ''
+      }`}
+      tabIndex={scrollable ? 0 : undefined}
+      role={scrollable && label ? 'region' : undefined}
+      aria-label={scrollable ? label : undefined}
+    >
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {content}
       </ReactMarkdown>

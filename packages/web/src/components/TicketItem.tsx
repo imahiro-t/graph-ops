@@ -387,6 +387,21 @@ export const TicketItem: React.FC<Props> = ({
     );
   };
 
+  // Accessible name for a capped inline preview (GherkinViewer /
+  // MarkdownViewer with `scrollable`). The artifact name alone is not unique:
+  // a review loop-back re-runs a node, so the same node -- and even more so
+  // the Artifacts tab, which lists the whole ticket -- can hold several
+  // artifacts sharing a name (two "実装メモ", two review verdicts, ...).
+  // Sighted users tell those apart by position and by the timestamp the
+  // Gherkin tab already prints; adding created_at to the name gives assistive
+  // technology the same distinguishing information, in the same wording the
+  // UI shows (DFLT-00085 accessibility review, condition 2).
+  const artifactScrollLabel = (artifact: { name: string; created_at: string }) =>
+    t('ticketItem.artifactScrollRegion', {
+      name: artifact.name,
+      timestamp: formatDateTime(artifact.created_at, i18n.language)
+    });
+
   const description = ticket.description || '';
 
   const totalNodes = ticket.nodes.length;
@@ -1306,7 +1321,11 @@ export const TicketItem: React.FC<Props> = ({
                                     {art.type === 'gherkin' && art.content && (
                                       <div className="space-y-1">
                                         <div className="flex justify-end">{openInNewTabLink(art)}</div>
-                                        <GherkinViewer content={art.content} />
+                                        <GherkinViewer
+                                          content={art.content}
+                                          scrollable
+                                          label={artifactScrollLabel(art)}
+                                        />
                                       </div>
                                     )}
 
@@ -1325,7 +1344,11 @@ export const TicketItem: React.FC<Props> = ({
                                     {art.type === 'text' && art.content && (
                                       <div className="space-y-1">
                                         <div className="flex justify-end">{openInNewTabLink(art)}</div>
-                                        <MarkdownViewer content={art.content} />
+                                        <MarkdownViewer
+                                          content={art.content}
+                                          scrollable
+                                          label={artifactScrollLabel(art)}
+                                        />
                                       </div>
                                     )}
                                   </div>
@@ -1354,7 +1377,13 @@ export const TicketItem: React.FC<Props> = ({
                               <span className="text-[10px] text-slate-500 dark:text-slate-400">{formatDateTime(g.created_at, i18n.language)}</span>
                             </span>
                           </div>
-                          {g.content && <GherkinViewer content={g.content} />}
+                          {g.content && (
+                            <GherkinViewer
+                              content={g.content}
+                              scrollable
+                              label={artifactScrollLabel(g)}
+                            />
+                          )}
                         </div>
                       ))
                     )}
@@ -1418,12 +1447,20 @@ export const TicketItem: React.FC<Props> = ({
                           {a.type === 'gherkin' && a.content ? (
                             <div className="space-y-1">
                               <div className="flex justify-end">{openInNewTabLink(a)}</div>
-                              <GherkinViewer content={a.content} />
+                              <GherkinViewer
+                                content={a.content}
+                                scrollable
+                                label={artifactScrollLabel(a)}
+                              />
                             </div>
                           ) : a.type === 'text' && a.content ? (
                             <div className="space-y-1">
                               <div className="flex justify-end">{openInNewTabLink(a)}</div>
-                              <MarkdownViewer content={a.content} />
+                              <MarkdownViewer
+                                content={a.content}
+                                scrollable
+                                label={artifactScrollLabel(a)}
+                              />
                             </div>
                           ) : a.type === 'image' ? (
                             // Served from the DB via

@@ -152,6 +152,7 @@
     },
     "artifactsCount": "Artifacts {{count}}",
     "noArtifactsForNode": "No artifacts linked to this node yet",
+    "artifactScrollRegion": "{{name}} (created {{timestamp}}, scrollable artifact preview)",
     "openInNewTab": "Open in new tab",
     "download": "Download",
     "downloadAllArtifacts": "Download all artifacts",
