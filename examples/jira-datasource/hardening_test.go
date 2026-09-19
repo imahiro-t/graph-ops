@@ -248,6 +248,13 @@ func TestArtifactReadsOnlyTouchManagedTickets(t *testing.T) {
 			if len(listed) != 0 {
 				t.Fatalf("ListArtifactsByNode = %+v, want []", listed)
 			}
+			// The ticket-wide listing of the ticket the node ID names.
+			ticketKey, _, _ := parseNodeID(tc.nodeID)
+			listed = nil
+			h.mustCall("GET", "/tickets/"+ticketKey+"/artifacts", nil, &listed, 200)
+			if len(listed) != 0 {
+				t.Fatalf("ListArtifactsByTicket(%s) = %+v, want []", ticketKey, listed)
+			}
 			if rs := h.jira.requestsMatching("GET", `/comment`); len(rs) != 0 {
 				t.Fatalf("comments were read: %+v", rs)
 			}
@@ -256,6 +263,58 @@ func TestArtifactReadsOnlyTouchManagedTickets(t *testing.T) {
 			}
 			if rs := h.jira.requestsMatching("GET", `^/rest/api/3/attachment/`); len(rs) != 0 {
 				t.Fatalf("an attachment was fetched: %+v", rs)
+			}
+		})
+	}
+}
+
+// The ticket-wide artifact listing (GET /tickets/{id}/artifacts) of a
+// ticket detached normally, and of issues GraphOps does not manage, is an
+// empty list, and no comment is read for it.
+func TestTicketArtifactListingOnlyTouchesManagedTickets(t *testing.T) {
+	h := newHarness(t)
+	p := h.registerGOPS()
+	ticketProp := `{"title":"t","status":"TODO","priority":"MEDIUM","label_ids":[]}`
+
+	detached := h.createTicket(p.ID, "detached")
+	var n GraphNode
+	h.mustCall("POST", "/tickets/"+detached.ID+"/nodes", GraphNode{Name: "a", Type: "plan"}, &n, 201)
+	text := "findings"
+	h.mustCall("POST", "/tickets/"+detached.ID+"/artifacts", Artifact{NodeID: n.ID, Name: "notes", Type: "text", Content: &text}, nil, 201)
+	var before []Artifact
+	h.mustCall("GET", "/tickets/"+detached.ID+"/artifacts", nil, &before, 200)
+	if len(before) != 1 {
+		t.Fatalf("setup: listing before detaching = %+v", before)
+	}
+	h.mustCall("DELETE", "/tickets/"+detached.ID, nil, nil, 204)
+
+	// seeded makes an issue with a sub-task that looks like a node, holding
+	// an artifact-looking comment.
+	seeded := func(parent string) string {
+		sub := h.jira.seedSubtask(parent, nil, map[string]string{"graphops.node": `{"name":"x","type":"plan","status":"TODO"}`})
+		nodeID, _ := nodeIDOf(parent, sub)
+		h.jira.seedComment(sub, map[string]string{
+			"graphops.artifact": `{"node_id":"` + nodeID + `","name":"x","type":"text","has_content":true,"content":"secret"}`,
+		})
+		return parent
+	}
+	for name, ticketID := range map[string]string{
+		"detached ticket":      detached.ID,
+		"unmanaged issue":      seeded(h.jira.seedIssue("GOPS", nil, nil)),
+		"unregistered project": seeded(h.jira.seedIssue("DEMO", []string{"graphops"}, map[string]string{"graphops.ticket": ticketProp})),
+	} {
+		t.Run(name, func(t *testing.T) {
+			h.jira.resetRequests()
+			var listed []Artifact
+			status := h.call("GET", "/tickets/"+ticketID+"/artifacts", nil, &listed)
+			if status != 200 || listed == nil || len(listed) != 0 {
+				t.Fatalf("GET /tickets/%s/artifacts = %d %+v, want 200 []", ticketID, status, listed)
+			}
+			if rs := h.jira.requestsMatching("GET", `/comment`); len(rs) != 0 {
+				t.Fatalf("comments were read: %+v", rs)
+			}
+			if rs := h.jira.requestsMatching("POST", `^/rest/api/3/comment/list$`); len(rs) != 0 {
+				t.Fatalf("comments were read: %+v", rs)
 			}
 		})
 	}

@@ -38,6 +38,10 @@ type fakeJira struct {
 	subtaskTypes  map[string]bool
 	// workflow maps a status name to the transitions available from it.
 	workflow map[string][]fakeTransition
+	// readOnlyStatuses are the workflow statuses whose issues cannot be
+	// edited (a status with jira.issue.editable=false): PUT /issue/{key}
+	// on such an issue is refused with 400.
+	readOnlyStatuses map[string]bool
 	// commentSelf, when it has an entry for a comment ID, replaces that
 	// comment's self URL in answers.
 	commentSelf map[string]string
@@ -97,6 +101,7 @@ func newFakeJira(t *testing.T) *fakeJira {
 		attachments: map[string][]byte{}, pageSize: 50,
 		standardTypes: map[string]bool{"Task": true}, subtaskTypes: map[string]bool{"Subtask": true},
 		workflow: defaultFakeWorkflow(), commentSelf: map[string]string{},
+		readOnlyStatuses: map[string]bool{},
 	}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
@@ -516,6 +521,10 @@ func (f *fakeJira) serve(w http.ResponseWriter, r *http.Request) {
 			}
 			fjWrite(w, 200, f.issueJSON(issue, fields, props))
 		case http.MethodPut:
+			if f.readOnlyStatuses[issue.Status] {
+				fjError(w, 400, "You do not have permission to edit issues in this status (jira.issue.editable=false).")
+				return
+			}
 			var in struct {
 				Fields map[string]json.RawMessage `json:"fields"`
 				Update map[string][]map[string]string

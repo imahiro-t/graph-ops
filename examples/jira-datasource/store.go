@@ -144,6 +144,9 @@ type Store struct {
 	transitionTimeout time.Duration
 	// detachParallelism is how many sub-tasks DeleteTicket cleans up at once.
 	detachParallelism int
+	// detachCleanupTimeout bounds the whole sub-task clean-up of one
+	// DeleteTicket or DeleteProject request (cleanUpDetached).
+	detachCleanupTimeout time.Duration
 
 	locksMu sync.Mutex
 	locks   map[string]*sync.Mutex
@@ -151,13 +154,14 @@ type Store struct {
 
 func newStore(jira *jiraClient, statePath string, opts storeOptions) *Store {
 	return &Store{
-		jira:              jira,
-		state:             &stateFile{path: statePath},
-		opts:              opts,
-		now:               func() string { return time.Now().UTC().Format(time.RFC3339Nano) },
-		transitionTimeout: defaultTransitionTimeout,
-		detachParallelism: 4,
-		locks:             map[string]*sync.Mutex{},
+		jira:                 jira,
+		state:                &stateFile{path: statePath},
+		opts:                 opts,
+		now:                  func() string { return time.Now().UTC().Format(time.RFC3339Nano) },
+		transitionTimeout:    defaultTransitionTimeout,
+		detachParallelism:    4,
+		detachCleanupTimeout: defaultDetachCleanupTimeout,
+		locks:                map[string]*sync.Mutex{},
 	}
 }
 
@@ -173,10 +177,11 @@ func (s *Store) log(format string, args ...any) {
 // README.md, "Limitations").
 //
 // Lock order: an operation that needs both a ticket's lock and one of its
-// node sub-tasks' locks (CreateNode, DeleteNode, DeleteTicket) always takes
-// the ticket's first. Operations on one node (UpdateNode, CreateArtifact)
-// take only the sub-task's lock, so no two operations can wait on each other
-// in opposite orders.
+// node sub-tasks' locks (CreateNode, DeleteNode) always takes the ticket's
+// first. Operations on one node (UpdateNode, CreateArtifact) and the
+// sub-task clean-up after detaching a ticket (detachSubtasks, which runs
+// after the ticket's lock was released) take only the sub-task's lock, so
+// no two operations can wait on each other in opposite orders.
 func (s *Store) lock(issueKey string) func() {
 	s.locksMu.Lock()
 	m, ok := s.locks[issueKey]
@@ -440,6 +445,13 @@ func (s *Store) UpdateProject(ctx context.Context, id string, name *string) (Pro
 // GraphOps (see DeleteTicket), its metadata issue is deleted, and it is
 // removed from the local state (clearing the current project if it pointed
 // here). The Jira project itself is untouched. A missing project is a no-op.
+//
+// What the request's success means -- every ticket detached, the project
+// unregistered -- is done first, for all tickets; only then are the node
+// sub-tasks of all of them cleaned up (cleanUpDetached), best effort and
+// within detachCleanupTimeout. The clean-up grows with the number of nodes,
+// so doing it ticket by ticket in between could use up the request's
+// deadline and fail the detaching of the later tickets.
 func (s *Store) DeleteProject(ctx context.Context, id string) error {
 	key, ok := projectKeyFromID(id)
 	if !ok {
@@ -456,12 +468,21 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 	if err != nil {
 		return jiraFailure(err)
 	}
+	var detached []*jiraIssue
 	for _, issue := range issues {
-		if err := s.DeleteTicket(ctx, issue.Key); err != nil {
+		ticket, err := s.detachTicket(ctx, issue.Key)
+		if err != nil {
+			// The tickets detached so far are gone from GraphOps; clean up
+			// their sub-tasks now, as a retry will not find them again.
+			s.cleanUpDetached(ctx, detached)
 			return err
+		}
+		if ticket != nil {
+			detached = append(detached, ticket)
 		}
 	}
 	if err := s.jira.deleteIssue(ctx, reg.MetaIssueKey); err != nil && !isJiraStatus(err, http.StatusNotFound) {
+		s.cleanUpDetached(ctx, detached)
 		return jiraFailure(err)
 	}
 	if err := s.state.update(func(st *localState) error {
@@ -477,8 +498,10 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 		}
 		return nil
 	}); err != nil {
+		s.cleanUpDetached(ctx, detached)
 		return jiraFailure(err)
 	}
+	s.cleanUpDetached(ctx, detached)
 	return nil
 }
 
@@ -1086,33 +1109,44 @@ func (s *Store) UpdateTicket(ctx context.Context, id string, p TicketPatch) (Tic
 
 // DeleteTicket detaches the issue from GraphOps instead of deleting it from
 // Jira. First the graphops label and the graphops.ticket/graphops.edges
-// properties are removed from the ticket's issue: from then on the ticket,
-// its nodes, edges and artifacts are gone from GraphOps (every read checks
-// the ticket first), and that is what the request's success means. Then,
-// best effort, each node sub-task loses its graphops.node property and its
-// graphops-status-* label (see detachSubtasks); the sub-tasks themselves,
-// their artifact comments and attachments stay for the humans who use
-// Jira. A missing ticket is a no-op.
+// properties are removed from the ticket's issue (detachTicket): from then
+// on the ticket, its nodes, edges and artifacts are gone from GraphOps
+// (every read checks the ticket first), and that is what the request's
+// success means. Then, best effort, each node sub-task loses its
+// graphops.node property and its graphops-status-* label (cleanUpDetached);
+// the sub-tasks themselves, their artifact comments and attachments stay for
+// the humans who use Jira. A missing ticket is a no-op.
 func (s *Store) DeleteTicket(ctx context.Context, id string) error {
+	ticket, err := s.detachTicket(ctx, id)
+	if err != nil || ticket == nil {
+		return err
+	}
+	s.cleanUpDetached(ctx, []*jiraIssue{ticket})
+	return nil
+}
+
+// detachTicket removes the graphops label and the graphops.ticket and
+// graphops.edges properties from a ticket's issue, under the ticket's lock,
+// and returns the issue as it was read before (with its sub-tasks), or nil
+// when there is no such ticket.
+func (s *Store) detachTicket(ctx context.Context, id string) (*jiraIssue, error) {
 	defer s.lock(id)()
 	issue, _, err := s.readTicketFields(ctx, id, ticketFieldsWithSubtasks)
 	if err != nil {
-		var apiErr *apiError
-		if errors.As(err, &apiErr) && apiErr.Code == "TICKET_NOT_FOUND" {
-			return nil
+		if isTicketNotFound(err) {
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
 	if err := s.jira.editIssue(ctx, issue.Key, map[string]any{
 		"update": map[string]any{"labels": []map[string]string{{"remove": jiraLabelManaged}}},
 	}); err != nil {
-		return jiraFailure(err)
+		return nil, jiraFailure(err)
 	}
 	for _, prop := range []string{propTicket, propEdges} {
 		if err := s.jira.deleteIssueProperty(ctx, issue.Key, prop); err != nil {
-			return jiraFailure(err)
+			return nil, jiraFailure(err)
 		}
 	}
-	s.detachSubtasks(ctx, issue)
-	return nil
+	return issue, nil
 }

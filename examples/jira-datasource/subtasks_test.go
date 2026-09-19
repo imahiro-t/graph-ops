@@ -668,22 +668,32 @@ func TestBackToTodoKeepsTheWorkflowStatus(t *testing.T) {
 }
 
 func TestNoTransitionWhenAlreadyThere(t *testing.T) {
-	h := newHarness(t)
-	tk := h.newTicket()
-	n := h.createNode(tk.ID, GraphNode{Name: "a", Type: "plan", Status: "IN PROGRESS"})
-	sub := subOf(t, n.ID)
-	h.jira.resetRequests()
-	h.patchNode(n.ID, map[string]any{"status": "IN REVIEW"})
-	if gets, posts := transitionRequests(h, sub); gets+posts != 0 {
-		t.Fatalf("transition requests: %d GET, %d POST", gets, posts)
-	}
-	// Status names compare without regard to case.
-	h.jira.setStatus(sub, "IN PROGRESS")
-	h.jira.resetRequests()
-	h.patchNode(n.ID, map[string]any{"status": "AWAITING FIX"})
-	if _, posts := transitionRequests(h, sub); posts != 0 {
-		t.Fatalf("%d transition POSTs", posts)
-	}
+	t.Run("same status name", func(t *testing.T) {
+		h := newHarness(t)
+		tk := h.newTicket()
+		n := h.createNode(tk.ID, GraphNode{Name: "a", Type: "plan", Status: "IN PROGRESS"})
+		sub := subOf(t, n.ID)
+		h.jira.resetRequests()
+		h.patchNode(n.ID, map[string]any{"status": "IN REVIEW"})
+		if gets, posts := transitionRequests(h, sub); gets+posts != 0 {
+			t.Fatalf("transition requests: %d GET, %d POST", gets, posts)
+		}
+	})
+	t.Run("status names compare without regard to case", func(t *testing.T) {
+		h := newHarness(t)
+		tk := h.newTicket()
+		n := h.createNode(tk.ID, GraphNode{Name: "a", Type: "plan", Status: "IN PROGRESS"})
+		sub := subOf(t, n.ID)
+		h.jira.setStatus(sub, "IN PROGRESS") // configured as "In Progress"
+		h.jira.resetRequests()
+		h.patchNode(n.ID, map[string]any{"status": "AWAITING FIX"})
+		if gets, posts := transitionRequests(h, sub); gets+posts != 0 {
+			t.Fatalf("transition requests: %d GET, %d POST", gets, posts)
+		}
+		if got := h.jira.issue(sub).Status; got != "IN PROGRESS" {
+			t.Fatalf("workflow status = %q, want it untouched", got)
+		}
+	})
 }
 
 func TestConfiguredStatusNamesAreUsed(t *testing.T) {
@@ -859,6 +869,75 @@ func TestTransitionComesAfterThePropertyAndLabelWrites(t *testing.T) {
 	want := []string{"PUT /properties/graphops.node", "PUT ", "POST /transitions"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("writes = %q, want %q", order, want)
+	}
+}
+
+// A workflow whose "done" status makes issues read-only (QA review, point
+// 1): a node sent back from DONE is moved out of "Done" before its label is
+// edited, so the update succeeds.
+func TestNodesLeaveAReadOnlyDoneStatusBeforeTheirLabelsChange(t *testing.T) {
+	for _, status := range []string{"IN PROGRESS", "REJECTED", "AWAITING FIX"} {
+		t.Run(status, func(t *testing.T) {
+			h := newHarness(t)
+			h.jira.readOnlyStatuses["Done"] = true
+			tk := h.newTicket()
+			n := h.createNode(tk.ID, GraphNode{Name: "a", Type: "plan", Status: "IN PROGRESS"})
+			sub := subOf(t, n.ID)
+			h.patchNode(n.ID, map[string]any{"status": "DONE"})
+			if got := h.jira.issue(sub); got.Status != "Done" || !reflect.DeepEqual(statusLabelsOf(got.Labels), []string{"graphops-status-done"}) {
+				t.Fatalf("setup: sub-task = %+v", got)
+			}
+			// Still read-only: an edit now is refused.
+			if err := h.store.jira.editIssue(context.Background(), sub, map[string]any{"fields": map[string]any{"summary": "x"}}); err == nil {
+				t.Fatal("setup: the fake let a Done issue be edited")
+			}
+
+			h.jira.resetRequests()
+			got := h.patchNode(n.ID, map[string]any{"status": status, "iteration_count": 1})
+			if got.Status != status {
+				t.Fatalf("PATCH answered %+v", got)
+			}
+			issue := h.jira.issue(sub)
+			if issue.Status != "In Progress" || !reflect.DeepEqual(statusLabelsOf(issue.Labels), []string{statusLabel(status)}) {
+				t.Fatalf("sub-task = %+v", issue)
+			}
+			if np := h.nodePropOf(sub); np.Status != status || np.IterationCount != 1 {
+				t.Fatalf("graphops.node = %+v", np)
+			}
+			var order []string
+			for _, r := range h.requestsFor("/rest/api/3/issue/" + sub) {
+				if r.Method != "GET" {
+					order = append(order, r.Method+" "+strings.TrimPrefix(r.Path, "/rest/api/3/issue/"+sub))
+				}
+			}
+			want := []string{"POST /transitions", "PUT /properties/graphops.node", "PUT "}
+			if !reflect.DeepEqual(order, want) {
+				t.Fatalf("writes = %q, want %q", order, want)
+			}
+		})
+	}
+}
+
+// Marking a node DONE, and updating a DONE node without changing its
+// status, still work on a read-only "done" status: the label edit comes
+// before the move into it, and no edit is needed afterwards.
+func TestReadOnlyDoneStatusStillTakesDoneNodes(t *testing.T) {
+	h := newHarness(t)
+	h.jira.readOnlyStatuses["Done"] = true
+	tk := h.newTicket()
+	n := h.createNode(tk.ID, GraphNode{Name: "a", Type: "plan", Status: "IN PROGRESS"})
+	sub := subOf(t, n.ID)
+	h.patchNode(n.ID, map[string]any{"status": "DONE"})
+	h.jira.resetRequests()
+	h.patchNode(n.ID, map[string]any{"iteration_count": 2})
+	if rs := h.jira.requestsMatching("PUT", `^/rest/api/3/issue/`+sub+`$`); len(rs) != 0 {
+		t.Fatalf("an edit was sent to the Done sub-task: %+v", rs)
+	}
+	if gets, posts := transitionRequests(h, sub); gets+posts != 0 {
+		t.Fatalf("transition requests: %d GET, %d POST", gets, posts)
+	}
+	if np := h.nodePropOf(sub); np.Status != "DONE" || np.IterationCount != 2 {
+		t.Fatalf("graphops.node = %+v", np)
 	}
 }
 
@@ -1709,6 +1788,110 @@ func TestDeleteProjectDetachesEveryTicketsSubtasks(t *testing.T) {
 		if _, ok := sub.Properties["graphops.node"]; ok || len(statusLabelsOf(sub.Labels)) != 0 {
 			t.Fatalf("sub-task kept its GraphOps data: %+v", sub)
 		}
+	}
+}
+
+// Code review, point 1: the best-effort sub-task clean-up must not use up
+// the time the detaching of later tickets needs. Every ticket is detached
+// and the project unregistered before any sub-task is cleaned up, and the
+// clean-up has its own, shorter time limit.
+func TestDeleteProjectDetachesAllTicketsBeforeCleaningUp(t *testing.T) {
+	h := newHarness(t)
+	p := h.registerGOPS()
+	var tickets []Ticket
+	var nodes []GraphNode
+	for i := 0; i < 3; i++ {
+		tk := h.createTicket(p.ID, fmt.Sprint(i))
+		tickets = append(tickets, tk)
+		for j := 0; j < 2; j++ {
+			nodes = append(nodes, h.createNode(tk.ID, GraphNode{Name: fmt.Sprint(j), Type: "plan", Status: "IN PROGRESS"}))
+		}
+	}
+	const deadline = 3 * time.Second
+	h.useDeadline(deadline, nil)
+	h.store.detachCleanupTimeout = 300 * time.Millisecond
+	// Every sub-task clean-up hangs until the plugin gives up on it.
+	h.jira.setFailWith(hang(func(r *http.Request) bool {
+		return r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/properties/graphops.node")
+	}))
+	h.jira.resetRequests()
+	h.clearLogs()
+	start := time.Now()
+	h.mustCall("DELETE", "/projects/"+p.ID, nil, nil, 204)
+	if took := time.Since(start); took >= deadline {
+		t.Fatalf("DeleteProject took %s, the whole request deadline", took)
+	}
+	h.jira.setFailWith(nil)
+
+	for _, tk := range tickets {
+		parent := h.jira.issue(tk.ID)
+		if parent == nil || containsString(parent.Labels, "graphops") || parent.Properties["graphops.ticket"] != nil || parent.Properties["graphops.edges"] != nil {
+			t.Fatalf("ticket %s still attached: %+v", tk.ID, parent)
+		}
+	}
+	var eb errBody
+	if status := h.call("GET", "/projects/"+p.ID, nil, &eb); status != 404 {
+		t.Fatalf("GetProject after DeleteProject = %d", status)
+	}
+	// The detaching of every ticket came before the first clean-up request.
+	lastDetach, firstCleanup := -1, -1
+	for i, r := range h.jira.allRequests() {
+		switch {
+		case r.Method == http.MethodDelete && strings.HasSuffix(r.Path, "/properties/graphops.edges"):
+			lastDetach = i
+		case r.Method == http.MethodDelete && strings.HasSuffix(r.Path, "/properties/graphops.node") && firstCleanup < 0:
+			firstCleanup = i
+		}
+	}
+	if lastDetach < 0 || firstCleanup < 0 || firstCleanup < lastDetach {
+		t.Fatalf("last ticket detached at request %d, first sub-task cleaned up at %d", lastDetach, firstCleanup)
+	}
+	if len(h.logsContaining("graphops.node")) == 0 {
+		t.Fatalf("the unfinished clean-up was not logged: %q", h.logLines())
+	}
+	// The leftovers cannot be read as nodes.
+	for _, n := range nodes {
+		if status := h.call("GET", "/nodes/"+n.ID, nil, &eb); status != 404 || eb.Error.Code != "NODE_NOT_FOUND" {
+			t.Fatalf("GetNode of %s after DeleteProject = %d %+v", n.ID, status, eb)
+		}
+	}
+}
+
+// Tickets left for after the clean-up time ran out are logged by key.
+func TestDetachCleanupStopsWhenOutOfTime(t *testing.T) {
+	h := newHarness(t)
+	p := h.registerGOPS()
+	var tickets []Ticket
+	for i := 0; i < 3; i++ {
+		tk := h.createTicket(p.ID, fmt.Sprint(i))
+		h.createNode(tk.ID, GraphNode{Name: "a", Type: "plan"})
+		tickets = append(tickets, tk)
+	}
+	h.store.detachCleanupTimeout = 200 * time.Millisecond
+	h.jira.setFailWith(hang(func(r *http.Request) bool {
+		return r.Method == http.MethodPost && r.URL.Path == "/rest/api/3/issue/bulkfetch"
+	}))
+	h.clearLogs()
+	h.mustCall("DELETE", "/projects/"+p.ID, nil, nil, 204)
+	h.jira.setFailWith(nil)
+	if bulk := h.jira.requestsMatching("POST", `^/rest/api/3/issue/bulkfetch$`); len(bulk) != 1 {
+		t.Fatalf("%d bulkfetch requests after the time ran out, want 1", len(bulk))
+	}
+	// The first ticket's sub-tasks could not be read; the other two were
+	// not tried, and one line names them.
+	lines := h.logsContaining("not cleaned up")
+	if len(lines) != 1 {
+		t.Fatalf("log = %q", h.logLines())
+	}
+	keys := strings.Split(strings.TrimPrefix(strings.SplitN(lines[0], " detached", 2)[0], "tickets "), ", ")
+	named := 0
+	for _, tk := range tickets {
+		if containsString(keys, tk.ID) {
+			named++
+		}
+	}
+	if len(keys) != 2 || named != 2 {
+		t.Fatalf("log line %q names %q, want 2 of the tickets", lines[0], keys)
 	}
 }
 

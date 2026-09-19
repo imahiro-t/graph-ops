@@ -707,14 +707,20 @@ func TestConcurrentCreateNodeIsSerialized(t *testing.T) {
 	p := h.registerGOPS()
 	tk := h.createTicket(p.ID, "t")
 	var wg sync.WaitGroup
+	statuses := make([]int, 10)
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			h.call("POST", "/tickets/"+tk.ID+"/nodes", GraphNode{Name: fmt.Sprint(i), Type: "custom"}, nil)
+			statuses[i] = h.call("POST", "/tickets/"+tk.ID+"/nodes", GraphNode{Name: fmt.Sprint(i), Type: "custom"}, nil)
 		}(i)
 	}
 	wg.Wait()
+	for i, status := range statuses {
+		if status != http.StatusCreated {
+			t.Errorf("creating node %d = %d, want 201", i, status)
+		}
+	}
 	var nodes []GraphNode
 	h.mustCall("GET", "/tickets/"+tk.ID+"/nodes", nil, &nodes, 200)
 	ids := map[string]bool{}

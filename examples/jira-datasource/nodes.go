@@ -45,6 +45,12 @@ const (
 	// workflow. It is well under requestDeadline, so a stuck transition
 	// cannot use up the time of the request it is part of.
 	defaultTransitionTimeout = 8 * time.Second
+
+	// defaultDetachCleanupTimeout bounds the best-effort clean-up of node
+	// sub-tasks after DeleteTicket or DeleteProject detached their tickets
+	// (detachSubtasks), so that a large graph cannot use up the time of the
+	// request that detached them.
+	defaultDetachCleanupTimeout = 10 * time.Second
 )
 
 var (
@@ -254,6 +260,14 @@ func (s *Store) moveToStatus(ctx context.Context, nodeID, subtaskKey, current, t
 		names = append(names, strconv.Quote(t.To.Name))
 	}
 	fail("no transition leads there from its current status (reachable: %s)", strings.Join(names, ", "))
+}
+
+// leavesDone reports whether moving a sub-task from workflow status current
+// to target takes it out of the "done" status (see UpdateNode).
+func (s *Store) leavesDone(current, target string) bool {
+	current = strings.TrimSpace(current)
+	return s.opts.DoneStatus != "" && target != "" &&
+		strings.EqualFold(current, s.opts.DoneStatus) && !strings.EqualFold(current, target)
 }
 
 func statusName(issue *jiraIssue) string {
@@ -468,6 +482,13 @@ func (s *Store) ListNodesByTicket(ctx context.Context, ticketID string) ([]Graph
 // summary and the status label in one edit (a failure there fails the
 // request, and re-running it makes them agree), and last the workflow
 // status, best effort (moveToStatus).
+//
+// One exception to that order: a sub-task that leaves the "done" workflow
+// status is moved first. Workflows often make finished issues read-only
+// (jira.issue.editable=false on the status), and the label edit of a node
+// sent back from DONE -- the iteration loop -- would then be refused. The
+// move still happens under the sub-task's lock, so updates of one node keep
+// making their moves in the order they were applied.
 func (s *Store) UpdateNode(ctx context.Context, id string, p NodePatch) (GraphNode, error) {
 	ticketKey, subtaskKey, ok := parseNodeID(id)
 	if !ok {
@@ -515,6 +536,11 @@ func (s *Store) UpdateNode(ctx context.Context, id string, p NodePatch) (GraphNo
 	if err != nil {
 		return GraphNode{}, err
 	}
+	current, target := statusName(n.issue), s.workflowTarget(np.Status)
+	moveFirst := s.leavesDone(current, target)
+	if moveFirst {
+		s.moveToStatus(ctx, id, subtaskKey, current, target)
+	}
 	if err := s.jira.setIssueProperty(ctx, subtaskKey, propNode, raw); err != nil {
 		return GraphNode{}, jiraFailure(err)
 	}
@@ -530,7 +556,9 @@ func (s *Store) UpdateNode(ctx context.Context, id string, p NodePatch) (GraphNo
 			return GraphNode{}, jiraFailure(err)
 		}
 	}
-	s.moveToStatus(ctx, id, subtaskKey, statusName(n.issue), s.workflowTarget(np.Status))
+	if !moveFirst {
+		s.moveToStatus(ctx, id, subtaskKey, current, target)
+	}
 	n.prop = np
 	return n.graphNode(), nil
 }
@@ -570,11 +598,38 @@ func (s *Store) DeleteNode(ctx context.Context, id string) error {
 	return nil
 }
 
+// cleanUpDetached runs detachSubtasks for tickets that were just detached,
+// one ticket after the other, all within detachCleanupTimeout (and the
+// request's own deadline). Tickets whose turn comes after the time ran out
+// are logged and left as they are: their sub-tasks keep graphops.node and
+// their status label, which no read accepts any more, as the ticket is no
+// longer managed.
+func (s *Store) cleanUpDetached(ctx context.Context, tickets []*jiraIssue) {
+	if len(tickets) == 0 {
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, s.detachCleanupTimeout)
+	defer cancel()
+	for i, ticket := range tickets {
+		if err := cctx.Err(); err != nil {
+			var left []string
+			for _, t := range tickets[i:] {
+				left = append(left, t.Key)
+			}
+			s.log("tickets %s detached, but their node sub-tasks were not cleaned up (out of time: %v)", strings.Join(left, ", "), err)
+			return
+		}
+		s.detachSubtasks(cctx, ticket)
+	}
+}
+
 // detachSubtasks removes graphops.node and the graphops-status-* labels
 // from the node sub-tasks of a ticket that was just detached (DeleteTicket),
 // a few sub-tasks at a time. It is best effort: the ticket is already gone
 // from GraphOps, so a sub-task that keeps its data can no longer be read as
-// a node anyway; each failure is logged and the request still succeeds.
+// a node anyway; each failure is logged and the request still succeeds. The
+// ticket's lock is not held (it was released after detaching), only each
+// sub-task's.
 func (s *Store) detachSubtasks(ctx context.Context, ticket *jiraIssue) {
 	var keys []string
 	for _, st := range ticket.Fields.Subtasks {
@@ -960,8 +1015,14 @@ func (s *Store) ticketArtifacts(ctx context.Context, ticketKey string, nodes []m
 	listedBy := map[string][]int{}
 	var ids []string
 	for i, n := range nodes {
-		bySubtask[n.issue.ID] = i
-		bySubtask[n.issue.Key] = i
+		// An empty ID or key (not something Jira answers) must not match
+		// the empty reference of a comment whose self cannot be read.
+		if n.issue.ID != "" {
+			bySubtask[n.issue.ID] = i
+		}
+		if n.issue.Key != "" {
+			bySubtask[n.issue.Key] = i
+		}
 		for _, cid := range n.prop.ArtifactCommentIDs {
 			if len(listedBy[cid]) == 0 {
 				ids = append(ids, cid)
@@ -988,7 +1049,11 @@ func (s *Store) ticketArtifacts(ctx context.Context, ticketKey string, nodes []m
 	var all []found
 	seen := map[string]bool{}
 	for _, cm := range comments {
-		i, ok := bySubtask[issueIDOfCommentSelf(cm.Self)]
+		ref := issueIDOfCommentSelf(cm.Self)
+		if ref == "" {
+			continue // its nodes are read again per sub-task below
+		}
+		i, ok := bySubtask[ref]
 		if !ok || slow[i] || seen[cm.ID] {
 			continue
 		}
