@@ -59,7 +59,7 @@ graph-engine create-ticket "<title>" - --priority HIGH --label "<name>" <<'EOF'
 EOF
 ```
 
-`-` means "read stdin" only when it is the whole description argument, so use it only together with a pipe or heredoc (on its own in a terminal the command just waits for input). If stdin is empty or only whitespace -- or cannot be read -- the command fails and **no ticket is created**; fix the input and run it again.
+`-` means "read stdin" only when it is the whole description argument, so use it only together with a pipe or heredoc (on its own in a terminal the command just waits for input). If stdin is empty or only whitespace -- or cannot be read -- the command fails and **no ticket is created**; fix the input and run it again. A description argument that is only whitespace (e.g. `"   "`) fails the same way; to create a ticket without a description, omit the description (or pass `""`).
 
 Omitting `--priority` creates the ticket with priority `MEDIUM` (the default). Every ticket always has one of `HIGH`/`MEDIUM`/`LOW` -- a priority can never be left empty.
 
