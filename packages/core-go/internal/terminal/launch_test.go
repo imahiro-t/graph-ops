@@ -1,10 +1,12 @@
 package terminal
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestBuildLaunchArgv_TerminalCommandTakesPrecedence(t *testing.T) {
@@ -116,6 +118,7 @@ func TestBuildLaunchArgv_WindowsUsesWtExeWhenAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading generated script: %v", err)
 	}
+	assertUTF8BOM(t, content)
 	got := string(content)
 	if !strings.Contains(got, `Set-Location -LiteralPath 'C:\proj'`) {
 		t.Errorf("script missing quoted cwd: %q", got)
@@ -150,9 +153,11 @@ func TestBuildLaunchArgv_WindowsFallsBackToCmdExeWithoutWtExe(t *testing.T) {
 	}
 	scriptPath := args[len(args)-1]
 	defer os.Remove(scriptPath)
-	if _, err := os.Stat(scriptPath); err != nil {
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
 		t.Fatalf("expected generated script to exist: %v", err)
 	}
+	assertUTF8BOM(t, content)
 }
 
 func TestBuildLaunchArgv_WindowsDoesNotOverrideTerminalCommand(t *testing.T) {
@@ -352,5 +357,51 @@ func TestWriteWindowsCommandScript_PreservesEmbeddedNewline(t *testing.T) {
 	// generated script broke out of the intended single-quoted token.
 	if n := strings.Count(got, "'"); n%2 != 0 {
 		t.Errorf("script has an unbalanced number of single quotes (%d), suggesting the prompt broke out of its quoted token:\n%s", n, got)
+	}
+}
+
+// assertUTF8BOM fails the test unless content starts with exactly one UTF-8
+// byte-order mark (EF BB BF). The generated .ps1 needs it so Windows
+// PowerShell 5.1 reads the script as UTF-8 instead of the system ANSI code
+// page (DFLT-00089).
+func assertUTF8BOM(t *testing.T, content []byte) {
+	t.Helper()
+	bom := []byte{0xEF, 0xBB, 0xBF}
+	if !bytes.HasPrefix(content, bom) {
+		t.Fatalf("generated script does not start with a UTF-8 BOM: % x", content[:min(len(content), 8)])
+	}
+	if bytes.HasPrefix(content[len(bom):], bom) {
+		t.Fatalf("generated script starts with more than one UTF-8 BOM")
+	}
+}
+
+// TestWriteWindowsCommandScript_WritesUTF8WithBOM is the regression test for
+// DFLT-00089: Windows PowerShell 5.1 reads a BOM-less .ps1 in the system
+// ANSI code page (CP932 on a Japanese-locale system), which garbled Japanese
+// prompts and working-directory paths. The script must be UTF-8 with a single
+// leading BOM, followed by the unchanged script body with the Japanese text
+// stored as UTF-8.
+func TestWriteWindowsCommandScript_WritesUTF8WithBOM(t *testing.T) {
+	workDir := `C:\作業\プロジェクト`
+	prompt := "チケット DFLT-00089 の指示です。\n\n文字化けを直してください。"
+	path, err := writeWindowsCommandScript(workDir, "claude", prompt)
+	if err != nil {
+		t.Fatalf("writeWindowsCommandScript: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(path) })
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading generated script: %v", err)
+	}
+	assertUTF8BOM(t, content)
+
+	body := content[3:]
+	if !utf8.Valid(body) {
+		t.Fatalf("script body after the BOM is not valid UTF-8: % x", body)
+	}
+	want := "Set-Location -LiteralPath '" + workDir + "'\r\nclaude '" + prompt + "'\r\n"
+	if string(body) != want {
+		t.Errorf("script body = %q, want %q", body, want)
 	}
 }
