@@ -272,6 +272,30 @@ func TestWriteCommandScript_IsOwnerOnly(t *testing.T) {
 	}
 }
 
+// TestWriteCommandScript_HasNoBOMBeforeShebang guards the darwin path against
+// the DFLT-00089 Windows fix leaking into it: the .command script must start
+// with the "#!/bin/bash" shebang itself. A UTF-8 BOM (or anything else) in
+// front of "#!" stops the kernel from recognising the shebang, so the script
+// would run under whatever shell opened it and print a line-1 error.
+func TestWriteCommandScript_HasNoBOMBeforeShebang(t *testing.T) {
+	path, err := writeCommandScript(t.TempDir(), "claude", "チケットの指示です。")
+	if err != nil {
+		t.Fatalf("writeCommandScript: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(path) })
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading generated script: %v", err)
+	}
+	if bytes.HasPrefix(content, []byte(utf8BOM)) {
+		t.Fatalf("darwin .command script must not start with a UTF-8 BOM: % x", content[:min(len(content), 8)])
+	}
+	if !bytes.HasPrefix(content, []byte("#!/bin/bash\n")) {
+		t.Fatalf("darwin .command script must start with the #!/bin/bash shebang, got %q", content[:min(len(content), 16)])
+	}
+}
+
 // TestPowershellQuote_EscapesSpecialCharacters checks powershellQuote's
 // escaping rule in isolation (there is no PowerShell available in this
 // dev/CI environment to round-trip through, unlike TestShellQuote's
@@ -396,7 +420,7 @@ func TestWriteWindowsCommandScript_WritesUTF8WithBOM(t *testing.T) {
 	}
 	assertUTF8BOM(t, content)
 
-	body := content[3:]
+	body := bytes.TrimPrefix(content, []byte(utf8BOM))
 	if !utf8.Valid(body) {
 		t.Fatalf("script body after the BOM is not valid UTF-8: % x", body)
 	}

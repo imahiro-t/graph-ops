@@ -198,7 +198,7 @@ func writeCommandScript(workDir, claudeBin, prompt string) (string, error) {
 	// Same split as buildLaunchArgv: workDir and prompt are quoted, claudeBin
 	// is interpolated raw so bash word-splits it (DFLT-00023 C-8).
 	script := fmt.Sprintf("#!/bin/bash\ncd %s\n%s %s\n", shellQuote(workDir), claudeBin, shellQuote(prompt))
-	if _, err := f.WriteString(utf8BOM + script); err != nil {
+	if _, err := f.WriteString(script); err != nil {
 		return "", err
 	}
 	path := f.Name()
