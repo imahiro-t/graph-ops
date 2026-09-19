@@ -45,7 +45,7 @@ Look at the ticket's current `labels` in step 1's `get-ticket` output (an array 
 - Omitting `--label` leaves the labels unchanged. There is no CLI way to remove every label -- that is done in the Web UI.
 - Only labels already registered for the ticket's project can be used; they are managed only in the Web UI's settings (設定 → プロジェクト単位設定 → ラベル). Names are matched ignoring surrounding spaces and letter case.
 - If any given name isn't registered, `refine-ticket` fails with `LABEL_NOT_FOUND` and **nothing on the ticket changes** (not the description, priority, labels or status). The error message lists the registered label names.
-- Note: `refine-ticket` always sets the ticket's status to `REFINED`, even when you only change labels. If the ticket is already further along (e.g. `IN PROGRESS`), tell the user about this side effect before running it for a label-only change, or suggest changing the labels in the Web UI instead.
+- Note: `refine-ticket` always sets the ticket's status to `REFINED`, even when you only change labels. If the ticket is already further along (e.g. `IN PROGRESS`), tell the user about this side effect before running it for a label-only change, or suggest changing the labels in the Web UI instead. (`graph-engine update-ticket` keeps the status but cannot change labels.)
 
 ## 4. Compose and write the full, updated description
 
@@ -67,6 +67,8 @@ EOF
 `-` means "read stdin" only when it is the whole description argument, so use it only together with a pipe or heredoc (on its own in a terminal the command just waits for input). The text is saved byte for byte. If stdin is empty or only whitespace -- or cannot be read -- the command fails and **nothing on the ticket changes** (not the description, priority, labels or status; it does not become `REFINED`); fix the input and run it again. A description argument that is only whitespace (e.g. `"   "`) fails the same way.
 
 If only the priority needs to change and the description doesn't, omit the description positional entirely -- `graph-engine refine-ticket "<ticketId>" --priority <HIGH|MEDIUM|LOW>` leaves the description untouched.
+
+If the user only wants to correct the title, description or priority of a ticket that is already further along (e.g. `IN PROGRESS`) and does **not** want it to go back to `REFINED`, this skill is the wrong tool: `refine-ticket` always sets the status to `REFINED`. Use `graph-engine update-ticket "<ticketId>" [--title "<text>"] [--description "<text>"] [--priority <HIGH|MEDIUM|LOW>]` instead -- it changes only the fields given and never the status (`--description -` reads stdin, like above). It cannot change labels.
 
 A priority can be changed to another level but can never be emptied or cleared: any value other than `HIGH`/`MEDIUM`/`LOW` is an error that leaves the ticket unchanged.
 

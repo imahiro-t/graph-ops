@@ -48,6 +48,6 @@ status=0
 for mode in $modes; do
   echo "== TLS mode: $mode"
   # -p 1: the packages share one database and must not run concurrently.
-  GRAPH_TEST_MYSQL_TLS="$mode" go test -count=1 -p 1 ./internal/store/ ./internal/httpserver/ || status=1
+  GRAPH_TEST_MYSQL_TLS="$mode" go test -count=1 -p 1 ./internal/store/ ./internal/httpserver/ ./cmd/graph-engine/ || status=1
 done
 exit $status

@@ -22,8 +22,11 @@ is set. From the repository root (or any worktree):
 
 The script starts the container if needed, creates a throwaway database for
 this run (the tests delete every row before each test, so parallel runs must
-not share one), runs `internal/store` and `internal/httpserver` once per TLS
-mode, and drops the database on exit.
+not share one), runs `internal/store`, `internal/httpserver` and
+`cmd/graph-engine` (the CLI's per-backend tests, e.g. delete-ticket and
+update-ticket) once per TLS mode, one package at a time, and drops the
+database on exit. The CLI tests only touch projects they create themselves
+and delete them afterwards.
 
 ## Start / stop by hand
 
