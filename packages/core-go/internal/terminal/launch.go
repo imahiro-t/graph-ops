@@ -215,6 +215,11 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// utf8BOM is the UTF-8 encoding of U+FEFF (bytes EF BB BF), prepended to the
+// generated .ps1 so Windows PowerShell 5.1 reads it as UTF-8 (see
+// writeWindowsCommandScript).
+const utf8BOM = "\ufeff"
+
 // writeWindowsCommandScript writes a small PowerShell (.ps1) script that cds
 // into workDir and runs claudeBin with prompt, for PowerShell to execute when
 // opened via wt.exe or cmd.exe's `start` (see buildLaunchArgv). It is the
@@ -243,6 +248,16 @@ func shellQuote(s string) string {
 // treated as out of scope for this change; the script body embeds the
 // prompt (ticket text) in plaintext the same way the darwin script does, so
 // this is a known, accepted gap rather than an oversight.
+//
+// The file is written as UTF-8 *with* a byte-order mark (utf8BOM). Windows
+// PowerShell 5.1 -- which is what `powershell` always resolves to -- reads a
+// BOM-less .ps1 in the system ANSI code page (CP932 on a Japanese-locale
+// system) rather than UTF-8, so any non-ASCII text embedded in the script
+// (the prompt, workDir, or a claudeBin install path) would be garbled unless
+// the user enabled the OS-wide "Beta: Use Unicode UTF-8" setting, which
+// breaks other applications. The BOM makes PowerShell read the script as
+// UTF-8 regardless of the system locale; PowerShell 7 also honours it, so it
+// is harmless there.
 func writeWindowsCommandScript(workDir, claudeBin, prompt string) (string, error) {
 	f, err := os.CreateTemp("", "graph-engine-launch-*.ps1")
 	if err != nil {
@@ -257,7 +272,7 @@ func writeWindowsCommandScript(workDir, claudeBin, prompt string) (string, error
 	// path with no wildcard expansion, and switches drives automatically if
 	// workDir is on a different drive than the one PowerShell started on.
 	script := fmt.Sprintf("Set-Location -LiteralPath %s\r\n%s %s\r\n", powershellQuote(workDir), claudeBin, powershellQuote(prompt))
-	if _, err := f.WriteString(script); err != nil {
+	if _, err := f.WriteString(utf8BOM + script); err != nil {
 		return "", err
 	}
 	return filepath.Clean(f.Name()), nil
