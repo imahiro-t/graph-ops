@@ -1,10 +1,38 @@
-# Local MySQL for trying GraphOps' MySQL backend. See README.md in this
-# directory. Not for production: the passwords below are fixed dev values.
+# Local MySQL for trying GraphOps' MySQL backend and running the MySQL store
+# tests. See README.md in this directory. Not for production: the passwords
+# below are fixed dev values.
+#
+# Nothing here is bind-mounted from the checkout (certificates live in a
+# named volume, config is passed as flags), so the one container keeps
+# working when it was started from a git worktree that is later removed, and
+# `up` from any other worktree reuses it instead of recreating it.
 name: graph-ops-mysql
 
 services:
+  # Generates a throwaway CA and a server certificate naming localhost and
+  # 127.0.0.1 (so GraphOps' verify-full mode works) into the certs volume,
+  # once. Uses the mysql image only because it already ships openssl.
+  certs:
+    image: mysql:8.4
+    entrypoint: ["sh", "-euc"]
+    command:
+      - |
+        cd /certs
+        if [ -f ca.pem ]; then exit 0; fi
+        openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=GraphOps Dev MySQL CA" -keyout ca-key.pem -out ca.pem
+        openssl req -newkey rsa:2048 -nodes -subj "/CN=localhost" -keyout server-key.pem -out server.csr
+        printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n' > server-ext.cnf
+        openssl x509 -req -days 3650 -in server.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -extfile server-ext.cnf -out server-cert.pem
+        rm -f server.csr server-ext.cnf ca.srl
+        chown mysql:mysql *.pem
+    volumes:
+      - certs:/certs
+
   mysql:
     image: mysql:8.4
+    depends_on:
+      certs:
+        condition: service_completed_successfully
     ports:
       # 13306 rather than 3306 so this does not clash with a MySQL already
       # running on the machine.
@@ -14,11 +42,15 @@ services:
       MYSQL_DATABASE: graph_ops
       MYSQL_USER: graphops
       MYSQL_PASSWORD: graphops
+    # Plaintext stays allowed so GraphOps' "disabled" TLS mode works too.
+    command:
+      - --ssl-ca=/etc/mysql/certs/ca.pem
+      - --ssl-cert=/etc/mysql/certs/server-cert.pem
+      - --ssl-key=/etc/mysql/certs/server-key.pem
+      - --require-secure-transport=OFF
     volumes:
       - mysql-data:/var/lib/mysql
-      - ./conf/tls.cnf:/etc/mysql/conf.d/tls.cnf:ro
-      - ./certs:/etc/mysql/certs:ro
-      - ./init:/docker-entrypoint-initdb.d:ro
+      - certs:/etc/mysql/certs:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
       interval: 5s
@@ -27,3 +59,4 @@ services:
 
 volumes:
   mysql-data:
+  certs:
