@@ -98,6 +98,10 @@ func run(cmd string, args []string) error {
 		return cmdCloseTicket(eng, args)
 	case "reopen-ticket":
 		return cmdReopenTicket(eng, args)
+	case "delete-ticket":
+		return cmdDeleteTicket(repo, args)
+	case "update-ticket":
+		return cmdUpdateTicket(repo, args)
 	case "get-ticket":
 		return cmdGetTicket(repo, args)
 	case "list-tickets":
@@ -232,7 +236,8 @@ Commands:
                                            exactly the named registered labels -- name existing ones too
                                            to keep them; omitted leaves labels untouched. An unregistered
                                            name is an error and changes nothing. Like any refine, this
-                                           sets the status to REFINED)
+                                           sets the status to REFINED; to fix a title, description or
+                                           priority without changing the status, use update-ticket)
   close-ticket <ticketId> [--reason "<text>"]
                                           (withdraws the ticket without marking it complete: sets status to
                                            CLOSED from ANY status, including one with nodes IN PROGRESS/IN
@@ -248,6 +253,23 @@ Commands:
                                            that yields nothing -- no nodes, or all still TODO -- falls back
                                            to REFINED if the ticket has ever been refined, else TODO. Errors
                                            if the ticket is not currently CLOSED.)
+  delete-ticket <ticketId> --yes         (deletes the ticket together with its nodes, edges, artifacts and
+                                           label attachments -- the same scope as the Web UI's delete. Cannot
+                                           be undone. --yes is required (before or after the id); without it
+                                           nothing is deleted and the command fails. Works from ANY status,
+                                           even with nodes IN PROGRESS. An unknown id is an error
+                                           (TICKET_NOT_FOUND). Prints {"id","deleted":true})
+  update-ticket <ticketId> [--title <text>] [--description <text|->] [--priority <HIGH|MEDIUM|LOW>]
+                                          (changes only the given fields; the status and refined_at are
+                                           NOT changed (unlike refine-ticket), nor are labels, assignee,
+                                           auto_executable or blocked -- labels via refine-ticket --label or
+                                           the Web UI. --description "-" reads stdin byte for byte (empty or
+                                           whitespace-only stdin is an error); --description "" clears it.
+                                           A flag's value is always the next argument, even if it starts
+                                           with "-". No field given, a priority other than HIGH/MEDIUM/LOW,
+                                           an empty title, an unknown flag (e.g. --assignee) or an unknown
+                                           id (TICKET_NOT_FOUND) is an error and changes nothing. Prints the
+                                           updated ticket JSON)
   get-ticket <ticketId>
   list-tickets
   get-executable <ticketId> [--language <code>]
@@ -718,6 +740,166 @@ func cmdReopenTicket(eng *engine.GraphEngine, args []string) error {
 		return fmt.Errorf("usage: graph-engine reopen-ticket <ticketId>")
 	}
 	ticket, err := eng.ReopenTicket(args[0])
+	if err != nil {
+		return err
+	}
+	return printJSON(ticket)
+}
+
+// cmdDeleteTicket (DFLT-00091) deletes a ticket together with its nodes,
+// edges, artifacts and label attachments -- the same scope as the Web UI's
+// DELETE /api/tickets/{id}, because it calls the same store operation
+// (repo.DeleteTicket; SQLite/MySQL cascade through the schema's ON DELETE
+// CASCADE, an HTTP data source is required to do the same).
+//
+// --yes is mandatory: the deletion cannot be undone, and an agent that
+// mistypes an ID should be stopped before anything is removed. Without it
+// the command fails after parsing alone, before the repository is touched
+// at all. --yes may come before or after the ticket ID; any other flag is a
+// usage error rather than silently ignored (same as close-ticket).
+//
+// The ticket's status and whether any node is running are deliberately not
+// checked (the API does not check them either): cleaning up a ticket that
+// is IN PROGRESS is exactly the use case.
+//
+// The existence check is done here, with GetTicket, rather than relying on
+// DeleteTicket: the SQLite/MySQL DeleteTicket succeeds silently for an
+// unknown ID (the Web UI's DELETE is idempotent and must stay so), and an
+// HTTP data source's answer depends on the plugin. Checking first makes an
+// unknown ID a TICKET_NOT_FOUND error on every backend. The check and the
+// delete are two calls, so a ticket removed by someone else in between is
+// reported as deleted; for a local clean-up command that is harmless.
+func cmdDeleteTicket(repo store.GraphRepository, args []string) error {
+	const usage = `usage: graph-engine delete-ticket <ticketId> --yes`
+	var yes bool
+	var positional []string
+	for _, a := range args {
+		switch {
+		case a == "--yes":
+			yes = true
+		case strings.HasPrefix(a, "-"):
+			return fmt.Errorf("%s: unrecognized argument %q", usage, a)
+		default:
+			positional = append(positional, a)
+		}
+	}
+	if len(positional) != 1 {
+		return fmt.Errorf(usage)
+	}
+	ticketID := positional[0]
+	if !yes {
+		return fmt.Errorf("%s: refusing to delete ticket %s without --yes. Deleting a ticket cannot be undone "+
+			"and also deletes its nodes, edges, artifacts and label attachments; pass --yes to confirm", usage, ticketID)
+	}
+
+	ticket, err := repo.GetTicket(ticketID)
+	if err != nil {
+		return err
+	}
+	if ticket == nil {
+		return domain.NewAPIError(domain.ErrCodeTicketNotFound, "ticket %s not found", ticketID)
+	}
+	if err := repo.DeleteTicket(ticketID); err != nil {
+		return err
+	}
+	return printJSON(deleteTicketResult{ID: ticketID, Deleted: true})
+}
+
+// deleteTicketResult is delete-ticket's stdout JSON.
+type deleteTicketResult struct {
+	ID      string `json:"id"`
+	Deleted bool   `json:"deleted"`
+}
+
+// cmdUpdateTicket (DFLT-00091) changes a ticket's title, description and/or
+// priority and nothing else. Unlike refine-ticket it never touches the
+// status or refined_at, so an IN PROGRESS ticket can be corrected without
+// falling back to REFINED. Labels, the assignee, auto_executable and blocked
+// are out of scope (labels: refine-ticket --label or the Web UI; the rest:
+// the Web UI), so a flag such as --assignee or --label is a usage error.
+//
+// Every argument is validated -- including reading stdin for
+// "--description -" -- before the repository is touched, so an error of any
+// kind leaves the ticket unchanged:
+//   - no field given, an unknown flag, a flag with no value, a flag given
+//     twice, or an extra positional is a usage error;
+//   - --priority must be HIGH/MEDIUM/LOW (domain.ParseTicketPriority);
+//   - --title must not be empty or whitespace-only (it is stored as given);
+//   - --description "-" (exactly) reads stdin and, like create-ticket,
+//     empty/whitespace-only stdin or a read error is an error; the text is
+//     stored byte for byte. Any other value -- "" to clear the description,
+//     or "- item" -- is used literally.
+//
+// A flag's value is always the next argument, even when it starts with "-".
+// An unknown ID is TICKET_NOT_FOUND on every backend (checked with GetTicket
+// first, since an HTTP data source's PATCH error depends on the plugin).
+// Prints the updated ticket (with labels) as JSON.
+func cmdUpdateTicket(repo store.GraphRepository, args []string) error {
+	const usage = `usage: graph-engine update-ticket <ticketId> [--title <text>] [--description <text|->] [--priority <HIGH|MEDIUM|LOW>]`
+	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
+		return fmt.Errorf(usage)
+	}
+	ticketID := args[0]
+
+	values := map[string]string{}
+	rest := args[1:]
+	for i := 0; i < len(rest); i++ {
+		flag := rest[i]
+		switch flag {
+		case "--title", "--description", "--priority":
+		default:
+			return fmt.Errorf("%s: unrecognized argument %q", usage, flag)
+		}
+		if i+1 >= len(rest) {
+			return fmt.Errorf("%s: %s requires a value", usage, flag)
+		}
+		if _, dup := values[flag]; dup {
+			return fmt.Errorf("%s: %s given more than once", usage, flag)
+		}
+		values[flag] = rest[i+1]
+		i++
+	}
+	if len(values) == 0 {
+		return fmt.Errorf("%s: specify at least one of --title, --description or --priority", usage)
+	}
+
+	var patch store.TicketPatch
+	if v, ok := values["--priority"]; ok {
+		parsed, err := domain.ParseTicketPriority(v)
+		if err != nil {
+			return fmt.Errorf("%s: %w", usage, err)
+		}
+		patch.Priority = &parsed
+	}
+	if v, ok := values["--title"]; ok {
+		if strings.TrimSpace(v) == "" {
+			return fmt.Errorf("%s: --title must not be empty", usage)
+		}
+		patch.Title = &v
+	}
+	if v, ok := values["--description"]; ok {
+		if v == "-" {
+			raw, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return fmt.Errorf("reading description from stdin: %w", err)
+			}
+			if strings.TrimSpace(string(raw)) == "" {
+				return fmt.Errorf("%s: description from stdin is empty (pipe or heredoc the description when passing -)", usage)
+			}
+			// Stored exactly as read, like create-ticket's "-".
+			v = string(raw)
+		}
+		patch.Description = &v
+	}
+
+	existing, err := repo.GetTicket(ticketID)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return domain.NewAPIError(domain.ErrCodeTicketNotFound, "ticket %s not found", ticketID)
+	}
+	ticket, err := repo.UpdateTicket(ticketID, patch)
 	if err != nil {
 		return err
 	}

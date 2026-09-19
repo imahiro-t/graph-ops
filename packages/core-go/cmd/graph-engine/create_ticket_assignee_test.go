@@ -17,7 +17,8 @@ import (
 
 // DFLT-00024: create-ticket lost its third positional (the free-text
 // assignee) and update-ticket, which existed only to edit that assignee, was
-// removed.
+// removed. DFLT-00091 re-added update-ticket for title/description/priority
+// only; the assignee is still not settable from the CLI.
 
 const createTicketUsage = "usage: graph-engine create-ticket <title> [description|-] [--project <id>]"
 
@@ -91,12 +92,16 @@ func TestCmdCreateTicket_NoPositionalIsUsageError(t *testing.T) {
 	}
 }
 
-func TestPrintUsage_NoUpdateTicketOrAssigneeArg(t *testing.T) {
+// DFLT-00091 brought update-ticket back, but only for title/description/
+// priority: it must still offer no way to set the assignee.
+func TestPrintUsage_NoAssigneeArg(t *testing.T) {
 	out := captureStdout(t, printUsage)
-	if strings.Contains(out, "update-ticket") {
-		t.Errorf("usage must not list update-ticket:\n%s", out)
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "update-ticket <ticketId>") && strings.Contains(line, "--assignee") {
+			t.Errorf("update-ticket's usage line must not offer --assignee: %q", line)
+		}
 	}
-	if strings.Contains(out, "[assignee]") {
+	if strings.Contains(out, "[assignee]") || strings.Contains(out, "[--assignee") {
 		t.Errorf("usage must not mention an [assignee] argument:\n%s", out)
 	}
 	if !strings.Contains(out, "create-ticket <title> [description|-] [--project <id>]") {
@@ -104,18 +109,27 @@ func TestPrintUsage_NoUpdateTicketOrAssigneeArg(t *testing.T) {
 	}
 }
 
-// Subprocess mode for TestUpdateTicketCommandIsUnknown: the unknown-command
-// branch of run() calls os.Exit(1), so it is exercised by re-running this test
-// binary as the CLI itself.
+// Subprocess mode for the tests below: errors from run() end the process via
+// os.Exit (main's exit-code handling), so the real exit code is observed by
+// re-running this test binary as the CLI itself.
 const cliSubprocessEnv = "GRAPH_ENGINE_TEST_RUN_MAIN"
 
-func TestUpdateTicketCommandIsUnknown(t *testing.T) {
+// runMainIfSubprocess turns the current test process into the CLI when it
+// was started by runCLISubprocess. Call it first in every test that
+// runCLISubprocess re-runs.
+func runMainIfSubprocess() {
 	if args := os.Getenv(cliSubprocessEnv); args != "" {
 		os.Args = append([]string{"graph-engine"}, strings.Split(args, "\x1f")...)
 		main()
 		os.Exit(0)
 	}
+}
 
+// newSubprocessSQLiteRepo creates a SQLite DB in a temp dir for
+// runCLISubprocess to point the CLI at, returning the repo (to set up and
+// inspect data from the test itself), the dir and the DB path.
+func newSubprocessSQLiteRepo(t *testing.T) (store.GraphRepository, string, string) {
+	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "graph.db")
 	repo, err := store.NewSQLiteRepository(dbPath)
@@ -125,6 +139,43 @@ func TestUpdateTicketCommandIsUnknown(t *testing.T) {
 	if err := repo.Init(); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
+	return repo, dir, dbPath
+}
+
+// runCLISubprocess runs the CLI (this test binary, re-entering testName and
+// thus runMainIfSubprocess) with args against the SQLite DB at dbPath, and
+// returns its combined output and exit code.
+func runCLISubprocess(t *testing.T, testName, dir, dbPath string, args ...string) (string, int) {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^"+testName+"$")
+	cmd.Env = append(os.Environ(),
+		cliSubprocessEnv+"="+strings.Join(args, "\x1f"),
+		"GRAPH_DB_BACKEND=sqlite",
+		"GRAPH_DB_PATH="+dbPath,
+		"GRAPH_ARTIFACTS_DIR="+filepath.Join(dir, "artifacts"),
+		"HOME="+dir,
+	)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return string(out), 0
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("running the CLI subprocess: %v\n%s", err, out)
+	}
+	return string(out), exitErr.ExitCode()
+}
+
+// DFLT-00024 removed update-ticket because it existed only to edit the
+// assignee. DFLT-00091 re-added update-ticket for title/description/priority
+// only, so the guarantee this test protects is unchanged: the CLI offers no
+// way to change the assignee. "--assignee" is now an unknown flag -- a
+// usage error that exits non-zero and leaves the ticket (assignee included)
+// untouched.
+func TestUpdateTicketRejectsAssignee(t *testing.T) {
+	runMainIfSubprocess()
+
+	repo, dir, dbPath := newSubprocessSQLiteRepo(t)
 	proj, err := repo.CreateProject("P", "TEST")
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
@@ -134,20 +185,16 @@ func TestUpdateTicketCommandIsUnknown(t *testing.T) {
 		t.Fatalf("CreateTicket: %v", err)
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=^TestUpdateTicketCommandIsUnknown$")
-	cmd.Env = append(os.Environ(),
-		cliSubprocessEnv+"="+strings.Join([]string{"update-ticket", ticket.ID, "--assignee", "山田"}, "\x1f"),
-		"GRAPH_DB_PATH="+dbPath,
-		"GRAPH_ARTIFACTS_DIR="+filepath.Join(dir, "artifacts"),
-		"HOME="+dir,
-	)
-	out, err := cmd.CombinedOutput()
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) || exitErr.ExitCode() == 0 {
-		t.Fatalf("update-ticket should exit non-zero, got err=%v\n%s", err, out)
+	out, code := runCLISubprocess(t, "TestUpdateTicketRejectsAssignee", dir, dbPath,
+		"update-ticket", ticket.ID, "--assignee", "山田")
+	if code == 0 {
+		t.Fatalf("update-ticket --assignee should exit non-zero, got 0\n%s", out)
 	}
-	if !strings.Contains(string(out), "Commands:") {
-		t.Errorf("update-ticket should print the usage listing, got:\n%s", out)
+	if !strings.Contains(out, "usage: graph-engine update-ticket <ticketId>") || !strings.Contains(out, `"--assignee"`) {
+		t.Errorf("update-ticket --assignee should fail with update-ticket's usage error naming the flag, got:\n%s", out)
+	}
+	if strings.Contains(out, "Commands:") {
+		t.Errorf("update-ticket is a known command now; the general usage listing should not be printed, got:\n%s", out)
 	}
 
 	after, err := repo.GetTicket(ticket.ID)
