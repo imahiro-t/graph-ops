@@ -11,6 +11,7 @@ import { SettingsSkillInfo, SettingsScope } from '../../types';
 import { fetchSettingsSkill, fetchSettingsSkills, saveSettingsSkill } from '../../lib/settingsApi';
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
+import { useSavedFlash } from '../../hooks/useSavedFlash';
 
 interface Props {
   scope: SettingsScope;
@@ -42,7 +43,7 @@ export const SkillsEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDir
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [savedFlash, setSavedFlash] = useState(false);
+  const { savedFlash, showSavedFlash } = useSavedFlash();
 
   const isDirty = canEdit && tierText !== savedTierText;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
@@ -89,8 +90,7 @@ export const SkillsEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDir
       setTierText(res.tier_text);
       setSavedTierText(res.tier_text);
       setMergedText(res.merged_text);
-      setSavedFlash(true);
-      setTimeout(() => setSavedFlash(false), 2000);
+      showSavedFlash();
       await loadSkills();
     } catch (e) {
       setError(errorMessage(e, t('errors.UNKNOWN')));

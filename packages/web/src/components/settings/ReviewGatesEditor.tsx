@@ -14,6 +14,7 @@ import { ReviewGateDef, SettingsCatalog, SettingsScope } from '../../types';
 import { fetchSettingsCatalog, saveSettingsCatalog } from '../../lib/settingsApi';
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
+import { useSavedFlash } from '../../hooks/useSavedFlash';
 
 interface Props {
   scope: SettingsScope;
@@ -48,7 +49,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ scope, projectId, canEdit, 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [savedFlash, setSavedFlash] = useState(false);
+  const { savedFlash, showSavedFlash } = useSavedFlash();
 
   const isDirty = canEdit && JSON.stringify(gates) !== JSON.stringify(savedGates);
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
@@ -132,8 +133,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ scope, projectId, canEdit, 
       setGates(rows);
       setSavedGates(rows);
       setMergedGates(merged);
-      setSavedFlash(true);
-      setTimeout(() => setSavedFlash(false), 2000);
+      showSavedFlash();
     } catch (e) {
       setError(errorMessage(e, t('errors.UNKNOWN')));
     } finally {

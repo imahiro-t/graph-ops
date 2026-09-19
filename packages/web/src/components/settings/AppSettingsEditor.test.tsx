@@ -196,6 +196,36 @@ describe('AppSettingsEditor', () => {
     await waitFor(() => expect(document.activeElement).toBe(saveButton));
   });
 
+  // DFLT-00094: the "saved" confirmation's 2s auto-hide timer used to outlive
+  // the component, firing after jsdom was torn down ("window is not defined")
+  // and intermittently failing the whole test run.
+  it('does not leave the saved-confirmation timer pending after unmount', async () => {
+    // shouldAdvanceTime keeps waitFor/userEvent moving on real time while
+    // every timer the component registers is still a countable fake one.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      mockedFetchAppSettings.mockResolvedValueOnce(makeResponse({ dbPath: '' }));
+      const { unmount } = renderEditor();
+
+      const dbPathInput = await screen.findByPlaceholderText('/tmp/graph.db');
+      await user.type(dbPathInput, 'custom.db');
+
+      mockedSaveAppSettings.mockResolvedValueOnce(makeResponse({ dbPath: 'custom.db' }));
+      await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
+
+      await waitFor(() => expect(screen.getAllByText(i18n.t('settings.common.saveSuccess')).length).toBeGreaterThan(0));
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+      unmount();
+
+      expect(vi.getTimerCount()).toBe(0);
+      expect(() => vi.advanceTimersByTime(2000)).not.toThrow();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // DFLT-00074: fields that had a visible label (or only a placeholder) but
   // no programmatic association are now labelled.
   it('labels the storage, profile, pagination and extensions-dir fields and the DB backend radio group', async () => {

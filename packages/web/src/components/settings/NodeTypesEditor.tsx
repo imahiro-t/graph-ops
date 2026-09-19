@@ -10,6 +10,7 @@ import { fetchSettingsNodeType, fetchSettingsNodeTypes, saveSettingsNodeType } f
 import { getNodeTypeMeta } from '../../nodeTypeMeta';
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
+import { useSavedFlash } from '../../hooks/useSavedFlash';
 
 // Mirrors config.isSafeExtensionName (packages/core-go/internal/config/
 // extensions.go) so an obviously-invalid name is rejected here with a clear
@@ -38,7 +39,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [savedFlash, setSavedFlash] = useState(false);
+  const { savedFlash, showSavedFlash } = useSavedFlash();
   // Inline "add a node type" affordance -- mirrors レビューゲート's "Add
   // Review Gate" in spirit, but needs a name up front (there's no separate
   // id/name pair here) so it's a small text-entry row rather than a blank
@@ -97,8 +98,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
       setTierText(res.tier_text);
       setSavedTierText(res.tier_text);
       setMergedText(res.merged_text);
-      setSavedFlash(true);
-      setTimeout(() => setSavedFlash(false), 2000);
+      showSavedFlash();
       await loadTypes();
     } catch (e) {
       setError(errorMessage(e, t('errors.UNKNOWN')));
