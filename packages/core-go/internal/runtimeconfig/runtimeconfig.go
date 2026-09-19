@@ -33,7 +33,9 @@ import (
 // only place that actually applies that chain.
 type FileConfig struct {
 	// DBBackend selects which store.GraphRepository implementation is used:
-	// "" or "sqlite" (the default, for backward compatibility) or "mysql".
+	// "" or "sqlite" (the default, for backward compatibility), "mysql", or
+	// "http" (an HTTP custom data source plugin, DFLT-00088 -- see
+	// HTTPDataSourceURL below).
 	// Switching this does not migrate data -- each backend keeps its own
 	// data, and switching back and forth just changes which one the app
 	// points at (see DFLT-00020).
@@ -93,6 +95,15 @@ type FileConfig struct {
 	// returned as-is over GET /api/settings/app, never redacted.
 	MySQLTLS   string `json:"mysqlTls,omitempty"`
 	MySQLTLSCA string `json:"mysqlTlsCa,omitempty"`
+
+	// HTTP custom data source settings, used only when DBBackend == "http"
+	// (DFLT-00088): the plugin's base URL (see docs/http-datasource/) and the
+	// bearer token sent to it. Like MySQLPassword, the token is stored
+	// verbatim -- plaintext or a "${ENV_VAR_NAME}" reference resolved at
+	// startup by ResolveSecret -- and is never handed back out over the
+	// settings API except through RedactSecret. The URL is not a secret.
+	HTTPDataSourceURL   string `json:"httpDataSourceUrl,omitempty"`
+	HTTPDataSourceToken string `json:"httpDataSourceToken,omitempty"`
 
 	// ProjectPaths maps a project ID (the only key) to this environment's
 	// local path for that project -- an absolute directory (DFLT-00080). It

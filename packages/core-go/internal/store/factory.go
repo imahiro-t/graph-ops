@@ -1,10 +1,10 @@
 package store
 
-import "fmt"
+import "time"
 
 // Config selects and configures a GraphRepository backend. Backend is
-// "" or "sqlite" (default, for backward compatibility) or "mysql"; any
-// other value is rejected by Open rather than silently falling back to
+// "" or "sqlite" (default, for backward compatibility), "mysql" or "http"
+// (an HTTP custom data source, DFLT-00088); any other value is rejected by Open rather than silently falling back to
 // sqlite (see DFLT-00020's completion criteria: an unsupported dbBackend
 // must fail loudly at startup, not silently degrade).
 //
@@ -35,6 +35,17 @@ type Config struct {
 	// MySQLTLSVerifyCA; optional for MySQLTLSVerifyFull (unset falls back
 	// to the OS trust store); ignored for MySQLTLSDisabled.
 	MySQLTLSCAFile string
+
+	// HTTPURL is the base URL of an HTTP custom data source (Backend
+	// "http"), and HTTPToken the bearer token sent to it -- already resolved
+	// from a possible "${ENV_VAR}" reference, like MySQLPassword. See
+	// ValidateHTTPDataSourceSettings for the transport rules both must meet.
+	HTTPURL   string
+	HTTPToken string
+	// HTTPTimeout bounds each request to the data source; 0 means the 30s
+	// default. There is no settings-file knob for it -- it exists so tests
+	// can exercise the timeout path quickly.
+	HTTPTimeout time.Duration
 }
 
 // Open constructs the GraphRepository selected by cfg.Backend and
@@ -47,13 +58,16 @@ func Open(cfg Config) (GraphRepository, error) {
 	var repo GraphRepository
 	var err error
 
+	if err := ValidateBackend(cfg.Backend); err != nil {
+		return nil, err
+	}
 	switch cfg.Backend {
 	case "", "sqlite":
 		repo, err = NewSQLiteRepository(cfg.SQLitePath)
 	case "mysql":
 		repo, err = NewMySQLRepository(cfg)
-	default:
-		return nil, fmt.Errorf(`unsupported db backend %q (must be "sqlite" or "mysql")`, cfg.Backend)
+	case "http":
+		repo, err = NewHTTPRepository(cfg)
 	}
 	if err != nil {
 		return nil, err

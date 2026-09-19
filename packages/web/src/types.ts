@@ -342,7 +342,9 @@ export type SettingsReportTemplateResponse = SettingsTemplateTextResponse;
 // surfaced in this UI (projectPaths is edited through the project API as
 // Project.local_path instead). An empty string means "not set, falls back to an env var or a
 // hardcoded default".
-export type DBBackend = 'sqlite' | 'mysql';
+// 'http' is the HTTP custom data source (DFLT-00088): a plugin server that
+// implements docs/http-datasource/openapi.yaml.
+export type DBBackend = 'sqlite' | 'mysql' | 'http';
 
 // Mirrors packages/core-go/internal/store's MySQLTLSVerifyFull/VerifyCA/
 // Disabled constants exactly -- no "preferred"/"skip-verify" is offered
@@ -379,6 +381,13 @@ export interface AppSettingsFile {
   mysqlTls?: MySQLTLSMode | '';
   // Absolute path to a PEM CA file, required when mysqlTls is 'verify-ca'.
   mysqlTlsCa?: string;
+  // HTTP custom data source (dbBackend 'http', DFLT-00088). The URL is not a
+  // secret. The token follows mysqlPassword's rules exactly: the server
+  // sends '', a '${ENV_VAR_NAME}' reference, or REDACTED_SECRET_PLACEHOLDER,
+  // and sending the placeholder (or the reference) back means "keep the
+  // stored token" -- but only while httpDataSourceUrl is unchanged.
+  httpDataSourceUrl?: string;
+  httpDataSourceToken?: string;
   artifactsDir?: string;
   userExtensionsDir?: string;
   paginationPageSize?: number;
@@ -392,6 +401,8 @@ export interface AppSettingsFile {
 export interface EffectiveAppSettings {
   dbBackend: DBBackend;
   dbPath: string;
+  // Present only when dbBackend is 'http'. The token is never included.
+  httpDataSourceUrl?: string;
   artifactsDir: string;
   userExtensionsDir: string;
   paginationPageSize: number;

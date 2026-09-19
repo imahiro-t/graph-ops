@@ -209,7 +209,8 @@ describe('AppSettingsEditor', () => {
     expect(screen.getByLabelText(i18n.t('settings.appSettings.extensionsDir.title'))).toHaveValue('ext');
 
     const group = screen.getByRole('radiogroup', { name: i18n.t('settings.appSettings.storage.dbBackendLabel') });
-    expect(group.querySelectorAll('input[type="radio"]')).toHaveLength(2);
+    // sqlite, mysql and (DFLT-00088) the HTTP custom data source.
+    expect(group.querySelectorAll('input[type="radio"]')).toHaveLength(3);
   });
 
   it('labels each project row name and local path input', async () => {

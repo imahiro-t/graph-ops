@@ -52,6 +52,15 @@ jobs:
         working-directory: packages/core-go
         run: go vet ./...
 
+      # The Jira data source sample (DFLT-00088) is its own Go module. Its
+      # tests run against an in-memory fake of the Jira API -- CI never talks
+      # to a real Jira and needs no credentials. `npm test` below runs them
+      # too (npm run test:examples); vetting here keeps a vet failure
+      # reported as such.
+      - name: Vet the Jira data source sample
+        working-directory: examples/jira-datasource
+        run: go vet ./...
+
       # `npm test` runs sync:defaults, then the Go test suite, then each
       # workspace's own tests.
       - name: Test

@@ -113,6 +113,15 @@ const (
 	// connection, so it (the password, or the "${ENV_VAR}" reference) has to
 	// be retyped before it can be used against a different destination.
 	ErrCodeMySQLPasswordRetypeRequired ErrorCode = "MYSQL_PASSWORD_RETYPE_REQUIRED"
+	// ErrCodeHTTPDataSourceTokenRetypeRequired: an app-settings save resent
+	// the stored HTTP data source token -- the "keep the stored secret"
+	// placeholder, or the stored "${ENV_VAR}" reference's own text -- together
+	// with an httpDataSourceUrl that is not the one the token was saved for
+	// (DFLT-00088). Same rule, and same reason, as
+	// ErrCodeMySQLPasswordRetypeRequired: a stored secret is only ever sent
+	// to the destination it was saved for, so pointing it at a new URL
+	// requires typing it again.
+	ErrCodeHTTPDataSourceTokenRetypeRequired ErrorCode = "HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED"
 	// ErrCodeLabelNotFound: the requested label does not exist, or it
 	// belongs to a different project than the ticket it was to be attached
 	// to, or (CLI --label) no label with that name is registered in the

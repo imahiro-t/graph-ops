@@ -1,0 +1,937 @@
+openapi: 3.1.0
+info:
+  title: GraphOps HTTP data source protocol
+  version: "1.0"
+  license:
+    name: MIT
+    identifier: MIT
+  description: |
+    The protocol an HTTP custom data source ("plugin") implements so that
+    graph-engine (the GraphOps CLI and Web UI server) can store tickets,
+    execution graphs, artifacts, projects and labels in it instead of SQLite or
+    MySQL. Select it with `dbBackend: "http"` and `httpDataSourceUrl` in
+    graph-config.json.
+
+    Every operation of graph-engine's storage interface (`GraphRepository`,
+    32 methods) maps to exactly one request below. The `operationId` of each
+    request is the Go method name in lowerCamelCase; `protocol` is the one
+    extra, handshake-only operation.
+
+    ## Versioning
+
+    `info.version` is the protocol version, `MAJOR.MINOR`. At startup
+    graph-engine calls `GET /protocol`; if the plugin's `protocol` is not
+    `graph-ops-datasource`, or its MAJOR differs from graph-engine's, startup
+    stops with an error (for example "incompatible data source protocol:
+    server speaks 2.0, graph-engine requires 1.x"). A different MINOR is
+    accepted: minor versions only add optional things. graph-engine sends its
+    own version on every request in the `GraphOps-Protocol-Version` header.
+
+    ## Transport and authentication
+
+    - graph-engine refuses plaintext `http://` unless the host is loopback
+      (`localhost`, 127.0.0.0/8, `::1`); anything else must be `https://`.
+    - A non-loopback data source must be configured with a bearer token;
+      graph-engine sends it as `Authorization: Bearer <token>` on every
+      request, including `GET /protocol`. A plugin reachable from the network
+      must verify it (use a constant-time comparison) and answer 401 when it
+      is missing or wrong.
+    - TLS certificates are always verified (TLS 1.2 or newer). There is no
+      fallback to plaintext, and graph-engine never follows redirects (a 3xx
+      answer is an error), so the token cannot be forwarded to another host.
+
+    ## Timeouts and retries
+
+    - graph-engine gives up on each request after 30 seconds (the whole
+      exchange: connecting, sending the request and reading the answer). The
+      value is fixed; it is not configurable.
+    - graph-engine never retries a request automatically, whatever the
+      failure (timeout, connection error, 5xx). The error is reported to the
+      user or agent that ran the command.
+    - A plugin must therefore answer every request within 30 seconds, and
+      should leave itself a margin (the sample Jira plugin uses a 25-second
+      deadline per request). If the plugin calls slow or rate-limited
+      services, it must bound its own retries and waits by that budget
+      rather than keep working past it.
+    - When graph-engine times out or disconnects, the outcome of a write
+      request is uncertain: the plugin may still have applied it, fully
+      (each request is atomic, see below). Callers must not blindly repeat a
+      create request (`createTicket`, `createNode`, `createEdge`,
+      `createArtifact`, `createProject`, `createLabel`) after a timeout;
+      they should first read back whether it took effect. Plugins should stop
+      work on a request as soon as the client disconnects (for example by
+      tying downstream calls to the request's context), so that writes which
+      have not started yet never happen.
+
+    ## Atomicity
+
+    There are no cross-request transactions. Each request must be processed atomically
+    by the plugin: either every effect of the request happens, or none does.
+    In particular: minting a ticket/node ID and inserting the row;
+    `PATCH /tickets/{ticketId}` with `label_ids` (if a label is invalid, no
+    other field of the same patch may be written either);
+    `DELETE /projects/{projectId}` (cascades to the project's tickets, their
+    nodes/edges/artifacts, and its labels, and clears the current project if
+    it pointed there); `DELETE /labels/{labelId}` (detaches the label from
+    every ticket).
+
+    ## Identifiers
+
+    IDs are strings chosen by the plugin; graph-engine never parses them.
+    Recommended formats (what the built-in backends use): tickets
+    `<project prefix>-<seq:05d>` (e.g. `DEMO-00042`); nodes
+    `<ticket id>-<seq:02d>` (a ticket holds at most 99 nodes). For edges and
+    artifacts graph-engine proposes an `id` in the request body; a plugin may
+    keep it or replace it with its own, and graph-engine uses whatever the
+    response returns. Path parameters are percent-encoded by graph-engine
+    (an ID may contain `/` or spaces).
+
+    ## Partial updates (PATCH)
+
+    For every PATCH body, an absent key means "leave this field unchanged".
+    Additionally:
+    - `assignee` (tickets and nodes) has three states: absent key = unchanged,
+      `null` = clear it, a string = set it.
+    - `label_ids` (tickets): absent key = unchanged; an array (including an
+      empty one) replaces the ticket's labels with exactly that set. Every ID
+      must be a label of the ticket's own project, otherwise the whole patch
+      fails with `LABEL_NOT_FOUND`.
+
+    ## Errors
+
+    Any non-2xx answer should carry an `ErrorResponse` body:
+    `{"error":{"code":"TICKET_NOT_FOUND","message":"..."}}`. How graph-engine
+    reads an error answer:
+
+    1. 401 or 403: the token was rejected, whatever the body says.
+    2. Otherwise, if `error.code` is one of the codes listed in `ErrorCode`,
+       graph-engine raises its own domain error with that code and message,
+       regardless of the HTTP status (so `500` with `INTERNAL_ERROR` is still
+       read as `INTERNAL_ERROR`). Use the status the code suggests anyway
+       (404 for `*_NOT_FOUND`, 409 for `*_TAKEN`, 400 for validation codes,
+       500 for `INTERNAL_ERROR`).
+    3. Anything else (an unknown code, a body that is not this JSON, an empty
+       body) becomes a generic error naming the method, path and status.
+
+    The Get operations (`getTicket`, `getTicketDetail`, `getNode`,
+    `getArtifact`, `getProject`, `getLabel`) answer a missing entity with 404
+    and the matching `*_NOT_FOUND` code; graph-engine treats that as "does not
+    exist", not as a failure. Delete operations on a missing ticket, node or
+    project succeed (they are no-ops); `deleteLabel` on a missing label is
+    `LABEL_NOT_FOUND`.
+
+    Error messages must never contain secrets. graph-engine reads at most
+    64 MiB of any response body.
+servers:
+  - url: "{baseUrl}"
+    description: The configured httpDataSourceUrl; every path below is appended to it.
+    variables:
+      baseUrl:
+        default: http://127.0.0.1:8787
+security:
+  - bearerAuth: []
+tags:
+  - name: protocol
+  - name: tickets
+  - name: nodes
+  - name: edges
+  - name: artifacts
+  - name: projects
+  - name: labels
+  - name: current-project
+
+paths:
+  /protocol:
+    get:
+      operationId: protocol
+      tags: [protocol]
+      summary: Identify the data source and its protocol version (startup handshake).
+      responses:
+        "200":
+          description: Protocol identification.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProtocolInfo" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /init:
+    post:
+      operationId: init
+      tags: [protocol]
+      summary: Prepare storage (create schema, migrate). Called once after the handshake; must be idempotent.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "204": { description: Ready. }
+        "200": { description: Ready (any body is ignored). }
+        default: { $ref: "#/components/responses/Error" }
+
+  /projects/{projectId}/tickets:
+    parameters: [{ $ref: "#/components/parameters/projectId" }]
+    post:
+      operationId: createTicket
+      tags: [tickets]
+      summary: Create a ticket in a project.
+      description: |
+        The plugin mints the ticket's ID (recommended `<prefix>-<seq:05d>` from
+        a per-project counter) and ignores `id`/`project_id` in the body. Only
+        each label's `id` in `labels` is read; a label that does not exist or
+        belongs to another project fails the whole call with `LABEL_NOT_FOUND`
+        and creates nothing. An empty `priority` means `MEDIUM`. A missing
+        project is `PROJECT_NOT_FOUND`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Ticket" }
+      responses:
+        "201":
+          description: The created ticket, with its labels.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ticket" }
+        "200":
+          description: Same as 201.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ticket" }
+        default: { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listTicketsByProject
+      tags: [tickets]
+      summary: List a project's tickets, newest first, each with its labels.
+      responses:
+        "200":
+          description: Tickets (an empty array when there are none).
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Ticket" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /tickets:
+    get:
+      operationId: listTickets
+      tags: [tickets]
+      summary: List every ticket across all projects, newest first, each with its labels.
+      responses:
+        "200":
+          description: Tickets.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Ticket" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /tickets/{ticketId}:
+    parameters: [{ $ref: "#/components/parameters/ticketId" }]
+    get:
+      operationId: getTicket
+      tags: [tickets]
+      summary: Get one ticket with its labels.
+      responses:
+        "200":
+          description: The ticket.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ticket" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateTicket
+      tags: [tickets]
+      summary: Partially update a ticket (see "Partial updates").
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TicketPatch" }
+      responses:
+        "200":
+          description: The updated ticket, with its labels.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ticket" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteTicket
+      tags: [tickets]
+      summary: Delete a ticket and its nodes, edges and artifacts. A missing ticket is a no-op.
+      responses:
+        "204": { description: Deleted. }
+        "200": { description: Deleted (any body is ignored). }
+        default: { $ref: "#/components/responses/Error" }
+
+  /tickets/{ticketId}/detail:
+    parameters: [{ $ref: "#/components/parameters/ticketId" }]
+    get:
+      operationId: getTicketDetail
+      tags: [tickets]
+      summary: Get a ticket with its nodes, edges and artifacts (artifacts as in listArtifactsByTicket).
+      responses:
+        "200":
+          description: The ticket detail.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TicketDetail" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /tickets/{ticketId}/nodes:
+    parameters: [{ $ref: "#/components/parameters/ticketId" }]
+    post:
+      operationId: createNode
+      tags: [nodes]
+      summary: Create an execution-graph node on a ticket.
+      description: |
+        The plugin mints the node ID (recommended `<ticket id>-<seq:02d>`,
+        at most 99 nodes per ticket) and ignores `id` in the body. A
+        `max_iterations` of 0 means 3. A missing ticket is `TICKET_NOT_FOUND`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GraphNode" }
+      responses:
+        "201":
+          description: The created node.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraphNode" }
+        "200":
+          description: Same as 201.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraphNode" }
+        default: { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listNodesByTicket
+      tags: [nodes]
+      summary: List a ticket's nodes, oldest first.
+      responses:
+        "200":
+          description: Nodes.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/GraphNode" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /nodes/{nodeId}:
+    parameters: [{ $ref: "#/components/parameters/nodeId" }]
+    get:
+      operationId: getNode
+      tags: [nodes]
+      summary: Get one node.
+      responses:
+        "200":
+          description: The node.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraphNode" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateNode
+      tags: [nodes]
+      summary: Partially update a node (see "Partial updates").
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NodePatch" }
+      responses:
+        "200":
+          description: The updated node.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraphNode" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteNode
+      tags: [nodes]
+      summary: Delete a node with its edges and artifacts. A missing node is a no-op.
+      responses:
+        "204": { description: Deleted. }
+        "200": { description: Deleted (any body is ignored). }
+        default: { $ref: "#/components/responses/Error" }
+
+  /tickets/{ticketId}/edges:
+    parameters: [{ $ref: "#/components/parameters/ticketId" }]
+    post:
+      operationId: createEdge
+      tags: [edges]
+      summary: Create an edge between two nodes of a ticket.
+      description: An empty `condition` means `always`. The plugin sets `created_at`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GraphEdge" }
+      responses:
+        "201":
+          description: The created edge.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraphEdge" }
+        "200":
+          description: Same as 201.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraphEdge" }
+        default: { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listEdgesByTicket
+      tags: [edges]
+      summary: List a ticket's edges, oldest first.
+      responses:
+        "200":
+          description: Edges.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/GraphEdge" } }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: clearEdgesByTicket
+      tags: [edges]
+      summary: Delete every edge of a ticket.
+      responses:
+        "204": { description: Cleared. }
+        "200": { description: Cleared (any body is ignored). }
+        default: { $ref: "#/components/responses/Error" }
+
+  /tickets/{ticketId}/artifacts:
+    parameters: [{ $ref: "#/components/parameters/ticketId" }]
+    post:
+      operationId: createArtifact
+      tags: [artifacts]
+      summary: Store an artifact produced by a node.
+      description: |
+        The plugin sets `created_at` and `has_content` (true when `content` is
+        a non-empty string). `content` is stored verbatim: text for
+        text/gherkin/json/html, a base64 string for image.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Artifact" }
+      responses:
+        "201":
+          description: The stored artifact.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Artifact" }
+        "200":
+          description: Same as 201.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Artifact" }
+        default: { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listArtifactsByTicket
+      tags: [artifacts]
+      summary: List a ticket's artifacts, oldest first.
+      description: |
+        This listing is polled often by the Web UI, so the plugin may (and
+        should) omit `content` for `html` and `image` artifacts. `has_content`
+        must still be correct for every artifact. `content` of
+        text/gherkin/json artifacts must be included.
+      responses:
+        "200":
+          description: Artifacts.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Artifact" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /artifacts/{artifactId}:
+    parameters: [{ $ref: "#/components/parameters/artifactId" }]
+    get:
+      operationId: getArtifact
+      tags: [artifacts]
+      summary: Get one artifact, always including its content.
+      responses:
+        "200":
+          description: The artifact.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Artifact" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /nodes/{nodeId}/artifacts:
+    parameters: [{ $ref: "#/components/parameters/nodeId" }]
+    get:
+      operationId: listArtifactsByNode
+      tags: [artifacts]
+      summary: List one node's artifacts, oldest first, including their content.
+      responses:
+        "200":
+          description: Artifacts.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Artifact" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /projects:
+    post:
+      operationId: createProject
+      tags: [projects]
+      summary: Create (register) a project.
+      description: |
+        `name` is required (`VALIDATION_ERROR` otherwise). A prefix is 1-5
+        ASCII letters/digits, unique case-insensitively (`INVALID_PREFIX`,
+        `PREFIX_TAKEN`). It is recommended that an empty `prefix` is derived
+        from the name the way the built-in backends do (its ASCII
+        letters/digits upper-cased and cut to 5 characters, `PRJ` when there
+        are none, de-duplicated with a numeric suffix). A plugin may impose
+        its own constraints instead -- for example require the prefix to name
+        an existing project in the backing system -- and answer
+        `VALIDATION_ERROR` or `INVALID_PREFIX` when they are not met.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                prefix: { type: string, description: "May be empty." }
+      responses:
+        "201":
+          description: The created project.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "200":
+          description: Same as 201.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        default: { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listProjects
+      tags: [projects]
+      summary: List every project, oldest first.
+      responses:
+        "200":
+          description: Projects.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Project" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /projects/{projectId}:
+    parameters: [{ $ref: "#/components/parameters/projectId" }]
+    get:
+      operationId: getProject
+      tags: [projects]
+      summary: Get one project.
+      responses:
+        "200":
+          description: The project.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateProject
+      tags: [projects]
+      summary: Rename a project. The prefix is immutable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+      responses:
+        "200":
+          description: The updated project.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteProject
+      tags: [projects]
+      summary: Delete a project with everything in it (see "Atomicity"). A missing project is a no-op.
+      responses:
+        "204": { description: Deleted. }
+        "200": { description: Deleted (any body is ignored). }
+        default: { $ref: "#/components/responses/Error" }
+
+  /projects/{projectId}/labels:
+    parameters: [{ $ref: "#/components/parameters/projectId" }]
+    post:
+      operationId: createLabel
+      tags: [labels]
+      summary: Create a label in a project.
+      description: |
+        `name` is trimmed and must be 1-50 characters (`INVALID_LABEL_NAME`);
+        `color` must be one of the palette keys (`INVALID_LABEL_COLOR`); the
+        name must be unique within the project, case-insensitively
+        (`LABEL_NAME_TAKEN`). A missing project is `PROJECT_NOT_FOUND`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, color]
+              properties:
+                name: { type: string }
+                color: { $ref: "#/components/schemas/LabelColor" }
+      responses:
+        "201":
+          description: The created label.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Label" }
+        "200":
+          description: Same as 201.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Label" }
+        default: { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listLabelsByProject
+      tags: [labels]
+      summary: List a project's labels sorted by name (case-insensitively), each with its ticket count.
+      responses:
+        "200":
+          description: Labels.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/LabelUsage" } }
+        default: { $ref: "#/components/responses/Error" }
+
+  /labels/{labelId}:
+    parameters: [{ $ref: "#/components/parameters/labelId" }]
+    get:
+      operationId: getLabel
+      tags: [labels]
+      summary: Get one label.
+      responses:
+        "200":
+          description: The label.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Label" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateLabel
+      tags: [labels]
+      summary: Rename and/or recolor a label (same validation as createLabel).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                color: { $ref: "#/components/schemas/LabelColor" }
+      responses:
+        "200":
+          description: The updated label.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Label" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteLabel
+      tags: [labels]
+      summary: Detach a label from every ticket and delete it.
+      responses:
+        "200":
+          description: How many tickets the label was removed from.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [removed_from_tickets]
+                properties:
+                  removed_from_tickets: { type: integer, minimum: 0 }
+        default: { $ref: "#/components/responses/Error" }
+
+  /current-project:
+    get:
+      operationId: getCurrentProjectID
+      tags: [current-project]
+      summary: Get the currently selected project (one value for the whole data source).
+      responses:
+        "200":
+          description: The current project ID, or "" when none has ever been selected.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CurrentProject" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setCurrentProjectID
+      tags: [current-project]
+      summary: Select the current project.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CurrentProject" }
+      responses:
+        "204": { description: Saved. }
+        "200": { description: Saved (any body is ignored). }
+        default: { $ref: "#/components/responses/Error" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        The token configured as httpDataSourceToken. Required for any
+        non-loopback data source; optional (but recommended) on loopback.
+
+  parameters:
+    projectId: { name: projectId, in: path, required: true, schema: { type: string } }
+    ticketId: { name: ticketId, in: path, required: true, schema: { type: string } }
+    nodeId: { name: nodeId, in: path, required: true, schema: { type: string } }
+    artifactId: { name: artifactId, in: path, required: true, schema: { type: string } }
+    labelId: { name: labelId, in: path, required: true, schema: { type: string } }
+
+  responses:
+    Error:
+      description: An error (see the "Errors" section of the description).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    NotFound:
+      description: The entity does not exist (answer with the matching *_NOT_FOUND code).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Unauthorized:
+      description: Missing or wrong bearer token.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  schemas:
+    ProtocolInfo:
+      type: object
+      required: [protocol, version]
+      properties:
+        protocol: { type: string, const: graph-ops-datasource }
+        version: { type: string, pattern: "^[0-9]+\\.[0-9]+$", examples: ["1.0"] }
+
+    ErrorCode:
+      type: string
+      description: |
+        The codes graph-engine maps onto its own errors. Any other code is
+        read as a generic error (and 401/403 are always read as "token
+        rejected", whatever their code).
+      enum:
+        - TICKET_NOT_FOUND
+        - NODE_NOT_FOUND
+        - ARTIFACT_NOT_FOUND
+        - PROJECT_NOT_FOUND
+        - LABEL_NOT_FOUND
+        - LABEL_NAME_TAKEN
+        - INVALID_LABEL_NAME
+        - INVALID_LABEL_COLOR
+        - INVALID_PREFIX
+        - PREFIX_TAKEN
+        - VALIDATION_ERROR
+        - INTERNAL_ERROR
+
+    ErrorResponse:
+      type: object
+      description: |
+        A known `code` is honoured regardless of the HTTP status; an unknown
+        code, a non-JSON body or an empty body is a generic error. See the
+        "Errors" section of the description.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              description: One of ErrorCode (any other string is treated as unknown).
+              anyOf:
+                - { $ref: "#/components/schemas/ErrorCode" }
+                - { type: string }
+            message: { type: string, description: "Developer-facing English text. Never include secrets." }
+
+    Timestamp:
+      type: string
+      description: RFC 3339 timestamp in UTC, e.g. 2026-09-18T13:32:00.992693Z.
+
+    TicketStatus:
+      type: string
+      enum: [TODO, REFINED, IN PROGRESS, IN REVIEW, IN RELEASE, DONE, CLOSED]
+    TicketPriority:
+      type: string
+      enum: [HIGH, MEDIUM, LOW]
+    NodeStatus:
+      type: string
+      enum: [TODO, IN PROGRESS, IN REVIEW, DONE, REJECTED, AWAITING FIX]
+    NodeType:
+      type: string
+      description: Open set (plan, review, gherkin_spec, implementation, review_gate, approval_gate, gherkin_test, report, release, investigation, or a custom type).
+    ArtifactType:
+      type: string
+      enum: [text, gherkin, html, image, json]
+    EdgeCondition:
+      type: string
+      enum: [success, failure, iteration_loop, always]
+    LabelColor:
+      type: string
+      enum: [gray, red, orange, amber, green, teal, blue, indigo, purple, pink]
+
+    Label:
+      type: object
+      required: [id, project_id, name, color, created_at, updated_at]
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        name: { type: string }
+        color: { $ref: "#/components/schemas/LabelColor" }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+        updated_at: { $ref: "#/components/schemas/Timestamp" }
+
+    LabelUsage:
+      allOf:
+        - { $ref: "#/components/schemas/Label" }
+        - type: object
+          required: [ticket_count]
+          properties:
+            ticket_count: { type: integer, minimum: 0 }
+
+    Project:
+      type: object
+      required: [id, name, prefix, created_at, updated_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        prefix: { type: string, pattern: "^[A-Za-z0-9]{1,5}$" }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+        updated_at: { $ref: "#/components/schemas/Timestamp" }
+
+    Ticket:
+      type: object
+      required: [id, project_id, title, description, status, auto_executable, blocked, created_at, updated_at, priority, labels]
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        title: { type: string }
+        description: { type: string, description: Markdown. }
+        status: { $ref: "#/components/schemas/TicketStatus" }
+        auto_executable: { type: boolean }
+        blocked: { type: boolean }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+        updated_at: { $ref: "#/components/schemas/Timestamp" }
+        refined_at: { $ref: "#/components/schemas/Timestamp" }
+        closed_reason: { type: string }
+        assignee: { type: string }
+        graph_expanded_at: { $ref: "#/components/schemas/Timestamp" }
+        priority: { $ref: "#/components/schemas/TicketPriority" }
+        labels:
+          type: array
+          description: Sorted by name case-insensitively. Always an array (never null). On createTicket only each element's id is read.
+          items: { $ref: "#/components/schemas/Label" }
+
+    TicketPatch:
+      type: object
+      description: |
+        Absent key = unchanged. `assignee`: `null` clears, a string sets.
+        `label_ids`: an array (possibly empty) replaces the ticket's labels.
+      properties:
+        title: { type: string }
+        description: { type: string }
+        status: { $ref: "#/components/schemas/TicketStatus" }
+        auto_executable: { type: boolean }
+        blocked: { type: boolean }
+        refined_at: { $ref: "#/components/schemas/Timestamp" }
+        closed_reason: { type: string }
+        assignee: { type: [string, "null"] }
+        graph_expanded_at: { $ref: "#/components/schemas/Timestamp" }
+        priority: { $ref: "#/components/schemas/TicketPriority" }
+        label_ids: { type: array, items: { type: string } }
+
+    GraphNode:
+      type: object
+      required: [id, ticket_id, name, type, status, iteration_count, max_iterations, is_manual, created_at, updated_at]
+      properties:
+        id: { type: string }
+        ticket_id: { type: string }
+        name: { type: string }
+        type: { $ref: "#/components/schemas/NodeType" }
+        status: { $ref: "#/components/schemas/NodeStatus" }
+        iteration_count: { type: integer }
+        max_iterations: { type: integer }
+        assignee: { type: string }
+        is_manual: { type: boolean }
+        gate_id: { type: string }
+        criteria: { type: string, description: Review criteria frozen at refine time; may be long. }
+        config_id: { type: string }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+        updated_at: { $ref: "#/components/schemas/Timestamp" }
+
+    NodePatch:
+      type: object
+      description: "Absent key = unchanged. `assignee`: `null` clears, a string sets."
+      properties:
+        name: { type: string }
+        type: { $ref: "#/components/schemas/NodeType" }
+        status: { $ref: "#/components/schemas/NodeStatus" }
+        iteration_count: { type: integer }
+        max_iterations: { type: integer }
+        assignee: { type: [string, "null"] }
+        is_manual: { type: boolean }
+        gate_id: { type: string }
+        criteria: { type: string }
+
+    GraphEdge:
+      type: object
+      required: [id, ticket_id, from_node_id, to_node_id, condition, created_at]
+      properties:
+        id: { type: string }
+        ticket_id: { type: string }
+        from_node_id: { type: string }
+        to_node_id: { type: string }
+        condition: { $ref: "#/components/schemas/EdgeCondition" }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+
+    Artifact:
+      type: object
+      required: [id, ticket_id, node_id, name, type, has_content, created_at]
+      properties:
+        id: { type: string }
+        ticket_id: { type: string }
+        node_id: { type: string }
+        name: { type: string }
+        type: { $ref: "#/components/schemas/ArtifactType" }
+        content: { type: string, description: "Text, or base64 for image. May be omitted in listArtifactsByTicket for html/image." }
+        file_path: { type: string }
+        metadata: { type: string, description: 'A JSON document encoded as a string (e.g. {"mime_type":"image/png"}).' }
+        has_content: { type: boolean }
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+
+    TicketDetail:
+      allOf:
+        - { $ref: "#/components/schemas/Ticket" }
+        - type: object
+          required: [nodes, edges, artifacts]
+          properties:
+            nodes: { type: array, items: { $ref: "#/components/schemas/GraphNode" } }
+            edges: { type: array, items: { $ref: "#/components/schemas/GraphEdge" } }
+            artifacts: { type: array, items: { $ref: "#/components/schemas/Artifact" } }
+
+    CurrentProject:
+      type: object
+      required: [project_id]
+      properties:
+        project_id: { type: string }
