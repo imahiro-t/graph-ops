@@ -68,7 +68,7 @@ The target project is resolved from the current directory: the project whose loc
 - `resolved project: <name> (<id>) from current directory` -- matched by the current directory.
 - `resolved project: <name> (<id>) from current project (use-project)` -- no match, so the fallback was used. Check that this is the project the user meant before reporting.
 
-Paths are compared as written, so a current directory reached through a symlink or spelled with different letter case does not match and falls back. If the fallback picked the wrong project, tell the user -- the ticket has already been created there, so don't just run the command again. To target a project explicitly, pass `--project <projectId>` (nothing is printed to stderr in that case).
+Paths are compared as written, so a current directory reached through a symlink or spelled with different letter case does not match and falls back. If the fallback picked the wrong project, tell the user -- the ticket has already been created there, so don't just run the command again. If the user agrees, remove the misplaced (or an accidentally duplicated) ticket with `graph-engine delete-ticket "<ticketId>" --yes`; this cannot be undone, so only run it after the user has confirmed that exact ticket ID. To target a project explicitly, pass `--project <projectId>` (nothing is printed to stderr in that case).
 
 The ticket is always created unassigned. Assignment is set afterward with the Web UI's per-ticket 「担当する」 ("Assign to me") button, which uses the name configured under the Web UI's Global Settings (全体設定) → App Settings (アプリ設定) → My Profile (自分の情報) (`myName`) and is hidden while that name is blank; there is no CLI command for it, and `create-ticket` takes no assignee argument.
 

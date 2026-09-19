@@ -258,7 +258,7 @@ Commands:
                                            be undone. --yes is required (before or after the id); without it
                                            nothing is deleted and the command fails. Works from ANY status,
                                            even with nodes IN PROGRESS. An unknown id is an error
-                                           (TICKET_NOT_FOUND). Prints {"id","deleted":true})
+                                           (TICKET_NOT_FOUND). Prints {"id":"<ticketId>","deleted":true})
   update-ticket <ticketId> [--title <text>] [--description <text|->] [--priority <HIGH|MEDIUM|LOW>]
                                           (changes only the given fields; the status and refined_at are
                                            NOT changed (unlike refine-ticket), nor are labels, assignee,
@@ -266,10 +266,11 @@ Commands:
                                            the Web UI. --description "-" reads stdin byte for byte (empty or
                                            whitespace-only stdin is an error); --description "" clears it.
                                            A flag's value is always the next argument, even if it starts
-                                           with "-". No field given, a priority other than HIGH/MEDIUM/LOW,
-                                           an empty title, an unknown flag (e.g. --assignee) or an unknown
-                                           id (TICKET_NOT_FOUND) is an error and changes nothing. Prints the
-                                           updated ticket JSON)
+                                           with "-" -- except -h/--help, which print this help instead
+                                           (see Help below). No field given, a priority other than
+                                           HIGH/MEDIUM/LOW, an empty title, an unknown flag (e.g. --assignee)
+                                           or an unknown id (TICKET_NOT_FOUND) is an error and changes
+                                           nothing. Prints the updated ticket JSON)
   get-ticket <ticketId>
   list-tickets
   get-executable <ticketId> [--language <code>]
