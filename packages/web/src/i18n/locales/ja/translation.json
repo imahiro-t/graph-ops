@@ -156,7 +156,7 @@
     "download": "ダウンロード",
     "downloadAllArtifacts": "成果物を一括ダウンロード",
     "noGherkinYet": "Gherkin テスト仕様はまだ登録されていません",
-    "noHtmlYet": "HTML 成果物はまだ登録されていません",
+    "noHtmlYet": "HTML成果物はまだ登録されていません",
     "noArtifactsYet": "成果物はまだ登録されていません",
     "delete": {
       "button": "チケットを削除",
