@@ -51,6 +51,19 @@ export const SettingsModal: React.FC<Props> = ({
   const { t } = useTranslation();
   const [scope, setScope] = useState<SettingsScope>('global');
   const [selectedProjectId, setSelectedProjectId] = useState<string>(currentProject?.id || '');
+  // App.tsx keeps this modal mounted and only toggles isOpen, so the
+  // useState initializer above runs once -- usually while App's
+  // currentProject is still null. Re-sync the project selection to the
+  // header's current project every time the modal opens (DFLT-00077),
+  // adjusting state during render rather than in an effect so the very
+  // first open render already has the right project (no flash of the
+  // "no project selected" warning, no fetch with an empty project id).
+  // scope and tab intentionally keep their previous values across opens.
+  const [wasOpen, setWasOpen] = useState(false);
+  if (isOpen !== wasOpen) {
+    setWasOpen(isOpen);
+    if (isOpen) setSelectedProjectId(currentProject?.id ?? '');
+  }
   const [tab, setTab] = useState<Tab>('nodeTypes');
   // Each tab's editor reports its own dirty state up here so switching tabs
   // or closing the modal while an unsaved edit exists can warn first (see

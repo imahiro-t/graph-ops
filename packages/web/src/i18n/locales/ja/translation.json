@@ -177,7 +177,7 @@
       "refine": "リファイン",
       "run": "実行する"
     },
-    "promptPlaceholder": "例: リリースしたので残りの工程を進めてステータスをレビュー中にしてください (改行できます。送信は「実行」ボタン、または Cmd/Ctrl+Enter)",
+    "promptPlaceholder": "例: リリースしたので残りの工程を進めてステータスをレビュー中にしてください (改行できます。送信は「送信」ボタン、または Cmd/Ctrl+Enter)",
     "send": "送信"
   },
   "artifactModal": {
