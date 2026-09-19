@@ -204,7 +204,10 @@ Commands:
                                            prefer it for long Markdown or text with quotes, $ or
                                            backquotes, e.g. a quoted heredoc (<<'EOF'). Use "-" only
                                            with a pipe or heredoc: empty or whitespace-only stdin, or a
-                                           failed read, is an error and no ticket is created.
+                                           failed read, is an error and no ticket is created. A
+                                           description argument that is only whitespace (e.g. "   ")
+                                           is an error too; "" or no description creates the ticket
+                                           without one.
                                            --project omitted -> the project whose local path (projectPaths in
                                            graph-config.json) is the cwd or contains it (deepest nested
                                            local path wins), else the current
@@ -223,7 +226,14 @@ Commands:
                                            Tickets start unassigned; use the Web UI's assign button)
   refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...
                                           (replaces the ticket's description with the refined text; builds
-                                           no graph. --priority is independent of the description: omitted
+                                           no graph. Description "-" -> read from stdin and saved byte
+                                           for byte (trailing newline included), same as create-ticket;
+                                           use it only with a pipe or heredoc. Empty or
+                                           whitespace-only stdin, a failed read, or a whitespace-only
+                                           description argument (e.g. "   ") is an error and changes
+                                           nothing -- the status does not become REFINED either.
+                                           "" or no description leaves the description unchanged.
+                                           --priority is independent of the description: omitted
                                            leaves the stored priority untouched, HIGH/MEDIUM/LOW sets it --
                                            so "refine-ticket <id> --priority LOW" with no description
                                            positional changes only the priority. A priority can't be
@@ -363,6 +373,62 @@ func printJSON(v any) error {
 	return enc.Encode(v)
 }
 
+// Usage lines for create-ticket and refine-ticket. Package-level (rather than
+// a const inside each command) so tests can strip the exact usage from an
+// error and check that both commands report the same description error.
+const (
+	createTicketUsageLine = `usage: graph-engine create-ticket <title> [description|-] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...`
+	refineTicketUsageLine = `usage: graph-engine refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...`
+)
+
+// readDescriptionArg resolves the [description|-] positional shared by
+// create-ticket and refine-ticket, so both commands accept and reject the
+// same inputs with the same wording (only the usage prefix differs). The
+// cases, checked in this order:
+//
+//   - "" is returned as-is, without error. An empty argument has always
+//     meant "no description" (create-ticket creates the ticket without one,
+//     refine-ticket leaves the stored description unchanged), and existing
+//     callers such as `refine-ticket <id> "" --priority LOW` rely on that.
+//   - "-" reads the description from stdin. A read failure is wrapped with
+//     %w (so errors.Is still sees the cause); stdin that is empty or only
+//     whitespace is an error. Otherwise the content is returned exactly as
+//     read -- no trimming -- so Markdown and a heredoc's trailing newline
+//     survive byte for byte.
+//   - A non-empty argument that is only whitespace (e.g. "   " or "\n") is an
+//     error.
+//   - Anything else (including "- item") is returned literally.
+//
+// The empty-stdin error came first for create-ticket (DFLT-00092); DFLT-00093
+// extended it to refine-ticket -- where empty stdin used to leave the
+// description unchanged yet still mark the ticket REFINED, and whitespace-only
+// stdin overwrote a refined description with blanks -- and to
+// whitespace-only arguments for both commands. Callers must resolve the
+// description before writing anything, so a rejected description changes
+// nothing.
+//
+// readPatch and add-artifact's "-" content deliberately do not use this:
+// they have their own formats and their own rules for empty input.
+func readDescriptionArg(arg, usage string) (string, error) {
+	switch {
+	case arg == "":
+		return "", nil
+	case arg == "-":
+		raw, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("reading description from stdin: %w", err)
+		}
+		if strings.TrimSpace(string(raw)) == "" {
+			return "", fmt.Errorf("%s: description from stdin is empty or whitespace-only (pipe or heredoc the description when passing -)", usage)
+		}
+		return string(raw), nil
+	case strings.TrimSpace(arg) == "":
+		return "", fmt.Errorf("%s: description is empty or whitespace-only (omit the description argument to leave it unset/unchanged)", usage)
+	default:
+		return arg, nil
+	}
+}
+
 // cmdCreateTicket parses positional args (title, [description]) and optional
 // --project <id> / --priority <HIGH|MEDIUM|LOW> flags interspersed anywhere
 // among them.
@@ -402,6 +468,10 @@ func printJSON(v any) error {
 // the same kind of silent mistake "-" used to be. A read error is an error
 // too. Anything other than exactly "-" (e.g. "- item") is still taken
 // literally, and omitting the description still creates an empty one.
+// Since DFLT-00093 a non-empty description argument that is only whitespace
+// is an error too and no ticket is created, while an explicit "" still
+// creates the ticket without a description. All of this lives in
+// readDescriptionArg, shared with refine-ticket.
 //
 // More than two positionals is a usage error rather than silently dropping
 // the extras: the third positional used to be the (since removed) assignee,
@@ -410,7 +480,7 @@ func printJSON(v any) error {
 // API, which ignores an unknown "assignee" key -- for the CLI the positional
 // count itself is the contract.
 func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc runtimeConfig, args []string) error {
-	const usage = `usage: graph-engine create-ticket <title> [description|-] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...`
+	const usage = createTicketUsageLine
 
 	var projectFlag, priorityFlag string
 	var labelNames []string
@@ -451,20 +521,9 @@ func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc run
 	// waiting on stdin) and before anything touches the DB.
 	description := ""
 	if len(positional) > 1 {
-		if positional[1] == "-" {
-			raw, err := io.ReadAll(os.Stdin)
-			if err != nil {
-				return fmt.Errorf("reading description from stdin: %w", err)
-			}
-			if strings.TrimSpace(string(raw)) == "" {
-				return fmt.Errorf("%s: description from stdin is empty (pipe or heredoc the description when passing -)", usage)
-			}
-			// Stored exactly as read -- no trimming -- so the caller's
-			// Markdown (including a heredoc's trailing newline) survives
-			// byte for byte.
-			description = string(raw)
-		} else {
-			description = positional[1]
+		var err error
+		if description, err = readDescriptionArg(positional[1], usage); err != nil {
+			return err
 		}
 	}
 
@@ -612,8 +671,17 @@ func cmdUseProject(repo store.GraphRepository, args []string) error {
 // them too); omitted, they are left untouched. Names are resolved in the
 // engine against the ticket's project, and an unregistered name fails the
 // whole command without writing any field.
+//
+// The [description|-] positional goes through readDescriptionArg, shared with
+// create-ticket (DFLT-00093): "-" reads stdin byte for byte; empty or
+// whitespace-only stdin, a failed read, or a non-empty whitespace-only
+// argument is an error that changes nothing -- description, priority,
+// labels, status and refined_at all stay as they were. Before this, empty
+// stdin still marked the ticket REFINED and whitespace-only stdin replaced
+// the description with blanks. An explicit "" still leaves the description
+// unchanged, same as omitting it.
 func cmdRefineTicket(eng *engine.GraphEngine, args []string) error {
-	const usage = `usage: graph-engine refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...`
+	const usage = refineTicketUsageLine
 	if len(args) < 1 {
 		return fmt.Errorf(usage)
 	}
@@ -657,16 +725,14 @@ func cmdRefineTicket(eng *engine.GraphEngine, args []string) error {
 		priority = engine.SetPriority(parsed)
 	}
 
+	// Resolved after --priority is validated (so a bad flag fails without
+	// waiting on stdin) and before the engine is called, so a rejected
+	// description writes nothing -- not even the REFINED status.
 	description := ""
 	if len(positional) > 0 {
-		if positional[0] == "-" {
-			raw, err := io.ReadAll(os.Stdin)
-			if err != nil {
-				return fmt.Errorf("reading description from stdin: %w", err)
-			}
-			description = string(raw)
-		} else {
-			description = positional[0]
+		var err error
+		if description, err = readDescriptionArg(positional[0], usage); err != nil {
+			return err
 		}
 	}
 

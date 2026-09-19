@@ -64,6 +64,8 @@ graph-engine refine-ticket "<ticketId>" - <<'EOF'
 EOF
 ```
 
+`-` means "read stdin" only when it is the whole description argument, so use it only together with a pipe or heredoc (on its own in a terminal the command just waits for input). The text is saved byte for byte. If stdin is empty or only whitespace -- or cannot be read -- the command fails and **nothing on the ticket changes** (not the description, priority, labels or status; it does not become `REFINED`); fix the input and run it again. A description argument that is only whitespace (e.g. `"   "`) fails the same way.
+
 If only the priority needs to change and the description doesn't, omit the description positional entirely -- `graph-engine refine-ticket "<ticketId>" --priority <HIGH|MEDIUM|LOW>` leaves the description untouched.
 
 A priority can be changed to another level but can never be emptied or cleared: any value other than `HIGH`/`MEDIUM`/`LOW` is an error that leaves the ticket unchanged.

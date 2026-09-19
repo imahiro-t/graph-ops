@@ -264,3 +264,78 @@ func TestCmdCreateTicket_InvalidPriorityCheckedBeforeStdin(t *testing.T) {
 		t.Errorf("no ticket may be created: %d -> %d", before, after)
 	}
 }
+
+// DFLT-00093: a non-empty description argument that is only whitespace is
+// rejected the same way as empty stdin, and stdin is never read for it.
+func TestCmdCreateTicket_WhitespaceOnlyArgumentIsAnError(t *testing.T) {
+	cases := []struct {
+		arg   string
+		flags []string
+	}{
+		{"   ", nil},
+		{"\n", nil},
+		{"\t", nil},
+		{" \n ", nil},
+		{"   ", []string{"--priority", "HIGH"}},
+		{"\n", []string{"--label", "バグ"}},
+		{"\t", []string{"--priority", "HIGH", "--label", "バグ"}},
+		{" \n ", []string{"--label", "バグ"}},
+	}
+	escape := strings.NewReplacer("\n", `\n`, "\t", `\t`)
+	for _, c := range cases {
+		name := strings.Join(append([]string{"arg=[" + escape.Replace(c.arg) + "]"}, c.flags...), " ")
+		t.Run(name, func(t *testing.T) {
+			repo, projectID := cliLabelSetup(t)
+			eng := engine.New(repo)
+			// Content that would be accepted if stdin were (wrongly) read.
+			withStdin(t, "stdin の内容")
+			before := countProjectTickets(t, repo, projectID)
+
+			args := append([]string{"T", c.arg, "--project", projectID}, c.flags...)
+			var runErr error
+			out := captureStdout(t, func() {
+				runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, args)
+			})
+			if runErr == nil {
+				t.Fatal("expected an error for a whitespace-only description")
+			}
+			for _, want := range []string{"empty", createTicketUsageLine} {
+				if !strings.Contains(runErr.Error(), want) {
+					t.Errorf("error %q should mention %q", runErr, want)
+				}
+			}
+			if strings.Contains(runErr.Error(), "stdin") {
+				t.Errorf("a whitespace-only argument must not be reported as a stdin error: %v", runErr)
+			}
+			if out != "" {
+				t.Errorf("nothing must be printed on stdout, got %q", out)
+			}
+			if after := countProjectTickets(t, repo, projectID); after != before {
+				t.Errorf("no ticket may be created: %d -> %d", before, after)
+			}
+		})
+	}
+}
+
+// An explicit "" still creates the ticket without a description (the
+// pre-DFLT-00093 behavior), without reading stdin.
+func TestCmdCreateTicket_EmptyStringArgumentCreatesWithoutDescription(t *testing.T) {
+	repo, projectID := cliLabelSetup(t)
+	eng := engine.New(repo)
+	withStdin(t, "stdin の内容")
+	before := countProjectTickets(t, repo, projectID)
+
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"T", "", "--project", projectID})
+	})
+	if runErr != nil {
+		t.Fatalf("cmdCreateTicket: %v", runErr)
+	}
+	if tk := decodeCLITicket(t, out); tk.Description != "" {
+		t.Errorf("description = %q, want empty", tk.Description)
+	}
+	if after := countProjectTickets(t, repo, projectID); after != before+1 {
+		t.Errorf("exactly one ticket should be created: %d -> %d", before, after)
+	}
+}
