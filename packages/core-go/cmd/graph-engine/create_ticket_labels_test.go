@@ -300,7 +300,7 @@ func TestCmdGetTicketAndListTickets_IncludeLabels(t *testing.T) {
 func TestPrintUsage_DocumentsLabelFlagAndNoLabelCommands(t *testing.T) {
 	out := captureStdout(t, printUsage)
 	for _, want := range []string{
-		"create-ticket <title> [description] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...",
+		"create-ticket <title> [description|-] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...",
 		"refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...",
 	} {
 		if !strings.Contains(out, want) {

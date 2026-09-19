@@ -109,7 +109,7 @@ func TestCmdCreateTicket_InvalidPriorityIsUsageErrorAndCreatesNothing(t *testing
 
 func TestPrintUsage_MentionsPriorityFlags(t *testing.T) {
 	out := captureStdout(t, printUsage)
-	if !strings.Contains(out, "create-ticket <title> [description] [--project <id>] [--priority <HIGH|MEDIUM|LOW>]") {
+	if !strings.Contains(out, "create-ticket <title> [description|-] [--project <id>] [--priority <HIGH|MEDIUM|LOW>]") {
 		t.Errorf("usage should list create-ticket's --priority flag:\n%s", out)
 	}
 	if !strings.Contains(out, "refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>]") {

@@ -51,6 +51,16 @@ graph-engine create-ticket "<title>" "<description>" --priority <HIGH|MEDIUM|LOW
 graph-engine create-ticket "<title>" "<description>" --label "<name>" --label "<name>"
 ```
 
+For a long description, or one containing newlines, `"`, `$` or backquotes (i.e. almost any Markdown description), pass `-` as the description and feed the text on stdin instead of quoting it as an argument. Use a **quoted** heredoc delimiter (`<<'EOF'`) so the shell expands nothing inside it; the text is saved byte for byte:
+
+```bash
+graph-engine create-ticket "<title>" - --priority HIGH --label "<name>" <<'EOF'
+<description markdown>
+EOF
+```
+
+`-` means "read stdin" only when it is the whole description argument, so use it only together with a pipe or heredoc (on its own in a terminal the command just waits for input). If stdin is empty or only whitespace -- or cannot be read -- the command fails and **no ticket is created**; fix the input and run it again.
+
 Omitting `--priority` creates the ticket with priority `MEDIUM` (the default). Every ticket always has one of `HIGH`/`MEDIUM`/`LOW` -- a priority can never be left empty.
 
 The target project is resolved from the current directory: the project whose local path -- this environment's `projectPaths` entry in `graph-config.json`, not a DB value -- is the current directory or contains it (the deepest nested local path wins). Only if none matches does it fall back to the current project selected via `use-project` / the Web UI, and it errors if neither exists. Stdout is the ticket JSON only; the resolution is reported as one stderr line:

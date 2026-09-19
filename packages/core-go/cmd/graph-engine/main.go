@@ -199,8 +199,13 @@ Commands:
   use-project <projectId>                (sets the current project; POST /api/tickets and GET /api/tickets
                                            default to whichever project is current. create-ticket uses it
                                            only as a fallback when the cwd matches no project's local path)
-  create-ticket <title> [description] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...
-                                          (--project omitted -> the project whose local path (projectPaths in
+  create-ticket <title> [description|-] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...
+                                          (description "-" -> read from stdin and saved byte for byte;
+                                           prefer it for long Markdown or text with quotes, $ or
+                                           backquotes, e.g. a quoted heredoc (<<'EOF'). Use "-" only
+                                           with a pipe or heredoc: empty or whitespace-only stdin, or a
+                                           failed read, is an error and no ticket is created.
+                                           --project omitted -> the project whose local path (projectPaths in
                                            graph-config.json) is the cwd or contains it (deepest nested
                                            local path wins), else the current
                                            project, else an error. Paths are compared as written, so a
@@ -389,6 +394,15 @@ func printJSON(v any) error {
 // LABEL_NOT_FOUND and no ticket is created. A trailing --label with no value
 // is a usage error.
 //
+// A description of exactly "-" (DFLT-00092) reads the description from stdin,
+// the same convention as refine-ticket and add-artifact; before this, "-"
+// was saved verbatim as the description. Stdin that is empty or only
+// whitespace is an error and no ticket is created -- otherwise a forgotten
+// pipe would silently produce a ticket with a blank description, which is
+// the same kind of silent mistake "-" used to be. A read error is an error
+// too. Anything other than exactly "-" (e.g. "- item") is still taken
+// literally, and omitting the description still creates an empty one.
+//
 // More than two positionals is a usage error rather than silently dropping
 // the extras: the third positional used to be the (since removed) assignee,
 // so ignoring it would let an old invocation "succeed" while leaving the user
@@ -396,7 +410,7 @@ func printJSON(v any) error {
 // API, which ignores an unknown "assignee" key -- for the CLI the positional
 // count itself is the contract.
 func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc runtimeConfig, args []string) error {
-	const usage = `usage: graph-engine create-ticket <title> [description] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...`
+	const usage = `usage: graph-engine create-ticket <title> [description|-] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...`
 
 	var projectFlag, priorityFlag string
 	var labelNames []string
@@ -423,10 +437,6 @@ func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc run
 		return fmt.Errorf(usage)
 	}
 	title := positional[0]
-	description := ""
-	if len(positional) > 1 {
-		description = positional[1]
-	}
 
 	var priority *domain.TicketPriority
 	if priorityFlag != "" {
@@ -435,6 +445,27 @@ func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc run
 			return fmt.Errorf("%s: %w", usage, err)
 		}
 		priority = &parsed
+	}
+
+	// Resolved after --priority is validated (so a bad flag fails without
+	// waiting on stdin) and before anything touches the DB.
+	description := ""
+	if len(positional) > 1 {
+		if positional[1] == "-" {
+			raw, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return fmt.Errorf("reading description from stdin: %w", err)
+			}
+			if strings.TrimSpace(string(raw)) == "" {
+				return fmt.Errorf("%s: description from stdin is empty (pipe or heredoc the description when passing -)", usage)
+			}
+			// Stored exactly as read -- no trimming -- so the caller's
+			// Markdown (including a heredoc's trailing newline) survives
+			// byte for byte.
+			description = string(raw)
+		} else {
+			description = positional[1]
+		}
 	}
 
 	opts := engine.CreateTicketOptions{Priority: priority, LabelNames: labelNames}

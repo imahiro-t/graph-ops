@@ -19,7 +19,7 @@ import (
 // assignee) and update-ticket, which existed only to edit that assignee, was
 // removed.
 
-const createTicketUsage = "usage: graph-engine create-ticket <title> [description] [--project <id>]"
+const createTicketUsage = "usage: graph-engine create-ticket <title> [description|-] [--project <id>]"
 
 func TestCmdCreateTicket_TitleAndDescriptionOnly(t *testing.T) {
 	cases := []struct {
@@ -99,7 +99,7 @@ func TestPrintUsage_NoUpdateTicketOrAssigneeArg(t *testing.T) {
 	if strings.Contains(out, "[assignee]") {
 		t.Errorf("usage must not mention an [assignee] argument:\n%s", out)
 	}
-	if !strings.Contains(out, "create-ticket <title> [description] [--project <id>]") {
+	if !strings.Contains(out, "create-ticket <title> [description|-] [--project <id>]") {
 		t.Errorf("usage should list the new create-ticket form:\n%s", out)
 	}
 }
