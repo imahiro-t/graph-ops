@@ -213,9 +213,32 @@ type jiraIssue struct {
 		Summary string   `json:"summary"`
 		Labels  []string `json:"labels"`
 		Created string   `json:"created"`
+		// Status, Parent, Subtasks and IssueType are only filled when the
+		// request asked for those fields.
+		Status    *jiraStatus    `json:"status,omitempty"`
+		Parent    *jiraIssueRef  `json:"parent,omitempty"`
+		Subtasks  []jiraIssueRef `json:"subtasks,omitempty"`
+		IssueType *struct {
+			Name    string `json:"name"`
+			Subtask bool   `json:"subtask"`
+		} `json:"issuetype,omitempty"`
 	} `json:"fields"`
 	Properties map[string]json.RawMessage `json:"properties"`
 }
+
+type jiraStatus struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// jiraIssueRef is the short form Jira uses for a parent or a sub-task.
+type jiraIssueRef struct {
+	ID  string `json:"id"`
+	Key string `json:"key"`
+}
+
+// defaultIssueFields is what getIssue and search ask for.
+var defaultIssueFields = []string{"summary", "labels", "created"}
 
 type jiraProperty struct {
 	Key   string `json:"key"`
@@ -239,8 +262,13 @@ func (c *jiraClient) createIssue(ctx context.Context, fields map[string]any, pro
 }
 
 func (c *jiraClient) getIssue(ctx context.Context, key string, properties []string) (*jiraIssue, error) {
+	return c.getIssueFields(ctx, key, defaultIssueFields, properties)
+}
+
+// getIssueFields reads one issue with the given fields and properties.
+func (c *jiraClient) getIssueFields(ctx context.Context, key string, fields, properties []string) (*jiraIssue, error) {
 	q := url.Values{}
-	q.Set("fields", "summary,labels,created")
+	q.Set("fields", strings.Join(fields, ","))
 	if len(properties) > 0 {
 		q.Set("properties", strings.Join(properties, ","))
 	}
@@ -254,6 +282,56 @@ func (c *jiraClient) getIssue(ctx context.Context, key string, properties []stri
 // editIssue sends PUT /issue/{key} with fields and/or update operations.
 func (c *jiraClient) editIssue(ctx context.Context, key string, body map[string]any) error {
 	return c.doJSON(ctx, http.MethodPut, "/rest/api/3/issue/"+url.PathEscape(key), body, nil)
+}
+
+// bulkFetchChunk is the most issues POST /issue/bulkfetch accepts at once.
+const bulkFetchChunk = 100
+
+// bulkFetchIssues reads many issues by key with POST /rest/api/3/issue/bulkfetch
+// (bulkFetchChunk per request), with the given fields and properties. Keys
+// Jira cannot return (deleted, or not visible) are simply missing from the
+// result. Unlike a JQL search it reads the issues themselves, so an issue
+// created a moment ago is never missing because the search index lags.
+func (c *jiraClient) bulkFetchIssues(ctx context.Context, keys, fields, properties []string) ([]jiraIssue, error) {
+	var all []jiraIssue
+	for start := 0; start < len(keys); start += bulkFetchChunk {
+		end := min(start+bulkFetchChunk, len(keys))
+		body := map[string]any{"issueIdsOrKeys": keys[start:end], "fields": fields}
+		if len(properties) > 0 {
+			body["properties"] = properties
+		}
+		var out struct {
+			Issues []jiraIssue `json:"issues"`
+		}
+		if err := c.doJSON(ctx, http.MethodPost, "/rest/api/3/issue/bulkfetch", body, &out); err != nil {
+			return nil, err
+		}
+		all = append(all, out.Issues...)
+	}
+	return all, nil
+}
+
+type jiraTransition struct {
+	ID   string     `json:"id"`
+	Name string     `json:"name"`
+	To   jiraStatus `json:"to"`
+}
+
+// getTransitions lists the workflow transitions available on an issue now.
+func (c *jiraClient) getTransitions(ctx context.Context, key string) ([]jiraTransition, error) {
+	var out struct {
+		Transitions []jiraTransition `json:"transitions"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/rest/api/3/issue/"+url.PathEscape(key)+"/transitions", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Transitions, nil
+}
+
+// doTransition moves an issue through one workflow transition.
+func (c *jiraClient) doTransition(ctx context.Context, key, transitionID string) error {
+	return c.doJSON(ctx, http.MethodPost, "/rest/api/3/issue/"+url.PathEscape(key)+"/transitions",
+		map[string]any{"transition": map[string]string{"id": transitionID}}, nil)
 }
 
 func (c *jiraClient) deleteIssue(ctx context.Context, key string) error {
@@ -291,7 +369,7 @@ func (c *jiraClient) search(ctx context.Context, jql string, properties []string
 	for page := 0; page < 1000; page++ {
 		body := map[string]any{
 			"jql":        jql,
-			"fields":     []string{"summary", "labels", "created"},
+			"fields":     defaultIssueFields,
 			"properties": properties,
 			"maxResults": 100,
 		}
@@ -312,9 +390,28 @@ func (c *jiraClient) search(ctx context.Context, jql string, properties []string
 }
 
 type jiraComment struct {
-	ID         string         `json:"id"`
-	Created    string         `json:"created"`
+	ID      string `json:"id"`
+	Created string `json:"created"`
+	// Self is the comment's REST URL, ".../issue/<issue id>/comment/<id>":
+	// the only place a comment read by ID says which issue it is on.
+	Self       string         `json:"self"`
 	Properties []jiraProperty `json:"properties"`
+}
+
+// issueIDOfCommentSelf extracts the issue ID (or key) from a comment's self
+// URL, or "" when self does not have the expected shape.
+func issueIDOfCommentSelf(self string) string {
+	const marker = "/issue/"
+	i := strings.LastIndex(self, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := self[i+len(marker):]
+	j := strings.Index(rest, "/comment/")
+	if j <= 0 {
+		return ""
+	}
+	return rest[:j]
 }
 
 // commentProperty returns the raw value of a comment property, if present.
@@ -374,6 +471,44 @@ func (c *jiraClient) listComments(ctx context.Context, issueKey string) ([]jiraC
 			return all, nil
 		}
 	}
+}
+
+// commentListChunk is the most comment IDs POST /comment/list accepts at once.
+const commentListChunk = 1000
+
+// listCommentsByIDs reads comments by ID, wherever they are, with
+// POST /rest/api/3/comment/list?expand=properties (commentListChunk IDs per
+// request, following its pages). IDs that are not numbers are skipped, and
+// comments Jira cannot return are missing from the result. Callers must
+// check each comment's Self before trusting which issue it belongs to.
+func (c *jiraClient) listCommentsByIDs(ctx context.Context, ids []string) ([]jiraComment, error) {
+	var nums []int64
+	for _, id := range ids {
+		if n, err := strconv.ParseInt(id, 10, 64); err == nil {
+			nums = append(nums, n)
+		}
+	}
+	var all []jiraComment
+	for start := 0; start < len(nums); start += commentListChunk {
+		chunk := nums[start:min(start+commentListChunk, len(nums))]
+		for startAt, page := 0, 0; page < 100; page++ {
+			var out struct {
+				Values []jiraComment `json:"values"`
+				Total  int           `json:"total"`
+				IsLast bool          `json:"isLast"`
+			}
+			path := fmt.Sprintf("/rest/api/3/comment/list?expand=properties&startAt=%d&maxResults=%d", startAt, commentListChunk)
+			if err := c.doJSON(ctx, http.MethodPost, path, map[string]any{"ids": chunk}, &out); err != nil {
+				return nil, err
+			}
+			all = append(all, out.Values...)
+			startAt += len(out.Values)
+			if out.IsLast || len(out.Values) == 0 || startAt >= out.Total {
+				break
+			}
+		}
+	}
+	return all, nil
 }
 
 func (c *jiraClient) deleteComment(ctx context.Context, issueKey, id string) error {

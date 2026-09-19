@@ -25,6 +25,9 @@ type harness struct {
 	store     *Store
 	srv       *httptest.Server
 	statePath string
+
+	logMu sync.Mutex
+	logs  []string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -43,7 +46,28 @@ func newHarness(t *testing.T) *harness {
 func (h *harness) newStore() *Store {
 	c := newJiraClient(h.jira.srv.URL, h.jira.email, h.jira.token)
 	c.sleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
-	return newStore(c, h.statePath, "Task")
+	s := newStore(c, h.statePath, storeOptions{
+		IssueType: "Task", SubtaskIssueType: "Subtask", InProgressStatus: "In Progress", DoneStatus: "Done",
+	})
+	s.logf = func(format string, args ...any) {
+		h.logMu.Lock()
+		defer h.logMu.Unlock()
+		h.logs = append(h.logs, fmt.Sprintf(format, args...))
+	}
+	return s
+}
+
+// logLines returns what the store has logged so far.
+func (h *harness) logLines() []string {
+	h.logMu.Lock()
+	defer h.logMu.Unlock()
+	return append([]string(nil), h.logs...)
+}
+
+func (h *harness) clearLogs() {
+	h.logMu.Lock()
+	defer h.logMu.Unlock()
+	h.logs = nil
 }
 
 // call sends one protocol request to the plugin and decodes a JSON answer
@@ -125,7 +149,7 @@ func TestLoadConfig_RequiresEachEnvVar(t *testing.T) {
 					env[k] = v
 				}
 			}
-			_, err := loadConfig(func(k string) string { return env[k] })
+			_, err := loadConfig(lookupIn(env))
 			if err == nil || !strings.Contains(err.Error(), missing) {
 				t.Fatalf("err = %v, want one naming %s", err, missing)
 			}
@@ -138,12 +162,58 @@ func TestLoadConfig_Defaults(t *testing.T) {
 		"JIRA_BASE_URL": "https://example.atlassian.net", "JIRA_EMAIL": "a@example.invalid",
 		"JIRA_API_TOKEN": "x", "GRAPHOPS_DATASOURCE_TOKEN": "y",
 	}
-	cfg, err := loadConfig(func(k string) string { return env[k] })
+	cfg, err := loadConfig(lookupIn(env))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.ListenAddr != "127.0.0.1:8787" || cfg.IssueType != "Task" || cfg.StateFile != "jira-datasource-state.json" {
 		t.Fatalf("defaults = %+v", cfg)
+	}
+	if cfg.SubtaskIssueType != "Subtask" || cfg.InProgressStatus != "In Progress" || cfg.DoneStatus != "Done" {
+		t.Fatalf("node sub-task defaults = %+v", cfg)
+	}
+}
+
+// lookupIn is an os.LookupEnv over a map.
+func lookupIn(env map[string]string) func(string) (string, bool) {
+	return func(k string) (string, bool) { v, ok := env[k]; return v, ok }
+}
+
+// Unset status names mean the defaults; names set to "" turn the workflow
+// move off; other names are used as given.
+func TestLoadConfig_NodeSubtaskSettings(t *testing.T) {
+	base := map[string]string{
+		"JIRA_BASE_URL": "https://example.atlassian.net", "JIRA_EMAIL": "a@example.invalid",
+		"JIRA_API_TOKEN": "x", "GRAPHOPS_DATASOURCE_TOKEN": "y",
+	}
+	with := func(extra map[string]string) config {
+		env := map[string]string{}
+		for k, v := range base {
+			env[k] = v
+		}
+		for k, v := range extra {
+			env[k] = v
+		}
+		cfg, err := loadConfig(lookupIn(env))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	cfg := with(map[string]string{"JIRA_SUBTASK_ISSUE_TYPE": "Sub-task", "JIRA_NODE_IN_PROGRESS_STATUS": "進行中", "JIRA_NODE_DONE_STATUS": " 完了 "})
+	if cfg.SubtaskIssueType != "Sub-task" || cfg.InProgressStatus != "進行中" || cfg.DoneStatus != "完了" {
+		t.Fatalf("configured = %+v", cfg)
+	}
+	cfg = with(map[string]string{"JIRA_NODE_IN_PROGRESS_STATUS": "", "JIRA_NODE_DONE_STATUS": ""})
+	if cfg.InProgressStatus != "" || cfg.DoneStatus != "" {
+		t.Fatalf("set-but-empty status names must turn the moves off: %+v", cfg)
+	}
+	cfg = with(map[string]string{"JIRA_SUBTASK_ISSUE_TYPE": ""})
+	if cfg.SubtaskIssueType != "Subtask" {
+		t.Fatalf("an empty sub-task type must fall back to the default: %+v", cfg)
+	}
+	if opts := cfg.storeOptions(); opts.SubtaskIssueType != "Subtask" || opts.DoneStatus != "Done" || opts.IssueType != "Task" {
+		t.Fatalf("storeOptions = %+v", opts)
 	}
 }
 
@@ -152,7 +222,7 @@ func TestLoadConfig_RejectsPlaintextRemoteJira(t *testing.T) {
 		"JIRA_BASE_URL": "http://example.atlassian.net", "JIRA_EMAIL": "a@example.invalid",
 		"JIRA_API_TOKEN": "x", "GRAPHOPS_DATASOURCE_TOKEN": "y",
 	}
-	if _, err := loadConfig(func(k string) string { return env[k] }); err == nil {
+	if _, err := loadConfig(lookupIn(env)); err == nil {
 		t.Fatal("expected an error for a plaintext non-loopback JIRA_BASE_URL")
 	}
 }
@@ -339,7 +409,7 @@ func TestConformance_All32Endpoints(t *testing.T) {
 	// Get operations on missing entities answer 404 + the matching code.
 	for path, code := range map[string]string{
 		"/tickets/GOPS-999": "TICKET_NOT_FOUND", "/tickets/GOPS-999/detail": "TICKET_NOT_FOUND",
-		"/nodes/GOPS-999-01": "NODE_NOT_FOUND", "/artifacts/GOPS-999-c1": "ARTIFACT_NOT_FOUND",
+		"/nodes/GOPS-999-n1000": "NODE_NOT_FOUND", "/artifacts/GOPS-999-n1000-c1": "ARTIFACT_NOT_FOUND",
 		"/projects/jira-NOPE": "PROJECT_NOT_FOUND", "/labels/GOPS-label-99": "LABEL_NOT_FOUND",
 	} {
 		var eb errBody
@@ -620,7 +690,7 @@ func TestDeleteTicket_DetachesTheIssue(t *testing.T) {
 	if issue == nil {
 		t.Fatal("the Jira issue itself was deleted")
 	}
-	if containsString(issue.Labels, "graphops") || issue.Properties["graphops.ticket"] != nil || issue.Properties["graphops.graph"] != nil {
+	if containsString(issue.Labels, "graphops") || issue.Properties["graphops.ticket"] != nil || issue.Properties["graphops.edges"] != nil {
 		t.Fatalf("issue still attached to GraphOps: %+v", issue)
 	}
 	var eb errBody
@@ -630,72 +700,27 @@ func TestDeleteTicket_DetachesTheIssue(t *testing.T) {
 	h.mustCall("DELETE", "/tickets/"+tk.ID, nil, nil, 204) // idempotent
 }
 
-// --- nodes and edges ---
-
-func TestNodesAndEdgesLiveInTheGraphProperty(t *testing.T) {
-	h := newHarness(t)
-	p := h.registerGOPS()
-	tk := h.createTicket(p.ID, "t")
-	var n1, n2 GraphNode
-	h.mustCall("POST", "/tickets/"+tk.ID+"/nodes", GraphNode{Name: "a", Type: "plan", Status: "TODO"}, &n1, 201)
-	h.mustCall("POST", "/tickets/"+tk.ID+"/nodes", GraphNode{Name: "b", Type: "review", Status: "TODO"}, &n2, 201)
-	h.mustCall("POST", "/tickets/"+tk.ID+"/edges", GraphEdge{ID: "e1", FromNodeID: n1.ID, ToNodeID: n2.ID}, nil, 201)
-
-	if n1.ID != tk.ID+"-01" || n2.ID != tk.ID+"-02" {
-		t.Fatalf("node IDs = %s, %s", n1.ID, n2.ID)
-	}
-	var g graphProp
-	if err := json.Unmarshal(h.jira.issue(tk.ID).Properties["graphops.graph"], &g); err != nil {
-		t.Fatal(err)
-	}
-	if len(g.Nodes) != 2 || len(g.Edges) != 1 || g.NodeSeq != 2 || g.Edges[0].Condition != "always" {
-		t.Fatalf("graphops.graph = %+v", g)
-	}
-
-	h.jira.resetRequests()
-	var got GraphNode
-	h.mustCall("GET", "/nodes/"+n2.ID, nil, &got, 200)
-	if got.Name != "b" {
-		t.Fatalf("GetNode = %+v", got)
-	}
-	for _, r := range h.jira.requestsMatching("GET", `^/rest/api/3/issue/[^/]+$`) {
-		if r.Path != "/rest/api/3/issue/"+tk.ID {
-			t.Fatalf("GetNode read another issue: %s", r.Path)
-		}
-	}
-}
-
-func TestGraphPropertyOverLimitFailsExplicitly(t *testing.T) {
-	h := newHarness(t)
-	p := h.registerGOPS()
-	tk := h.createTicket(p.ID, "t")
-	criteria := strings.Repeat("c", 20000)
-	h.mustCall("POST", "/tickets/"+tk.ID+"/nodes", GraphNode{Name: "a", Type: "review_gate", Criteria: &criteria}, nil, 201)
-	before := append([]byte(nil), h.jira.issue(tk.ID).Properties["graphops.graph"]...)
-
-	var eb errBody
-	status := h.call("POST", "/tickets/"+tk.ID+"/nodes", GraphNode{Name: "b", Type: "review_gate", Criteria: &criteria}, &eb)
-	if status != 400 || eb.Error.Code != "VALIDATION_ERROR" {
-		t.Fatalf("over-limit CreateNode = %d %+v", status, eb)
-	}
-	if !bytes.Equal(before, h.jira.issue(tk.ID).Properties["graphops.graph"]) {
-		t.Fatal("the existing graph property was changed")
-	}
-}
+// --- nodes ---
 
 func TestConcurrentCreateNodeIsSerialized(t *testing.T) {
 	h := newHarness(t)
 	p := h.registerGOPS()
 	tk := h.createTicket(p.ID, "t")
 	var wg sync.WaitGroup
+	statuses := make([]int, 10)
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			h.call("POST", "/tickets/"+tk.ID+"/nodes", GraphNode{Name: fmt.Sprint(i), Type: "custom"}, nil)
+			statuses[i] = h.call("POST", "/tickets/"+tk.ID+"/nodes", GraphNode{Name: fmt.Sprint(i), Type: "custom"}, nil)
 		}(i)
 	}
 	wg.Wait()
+	for i, status := range statuses {
+		if status != http.StatusCreated {
+			t.Errorf("creating node %d = %d, want 201", i, status)
+		}
+	}
 	var nodes []GraphNode
 	h.mustCall("GET", "/tickets/"+tk.ID+"/nodes", nil, &nodes, 200)
 	ids := map[string]bool{}
@@ -705,106 +730,17 @@ func TestConcurrentCreateNodeIsSerialized(t *testing.T) {
 	if len(nodes) != 10 || len(ids) != 10 {
 		t.Fatalf("got %d nodes with %d distinct IDs, want 10/10", len(nodes), len(ids))
 	}
-}
-
-// --- artifacts ---
-
-func TestArtifactIsACommentWithAParsableID(t *testing.T) {
-	h := newHarness(t)
-	p := h.registerGOPS()
-	tk := h.createTicket(p.ID, "t")
-	var n1, n2 GraphNode
-	h.mustCall("POST", "/tickets/"+tk.ID+"/nodes", GraphNode{Name: "a", Type: "plan"}, &n1, 201)
-	h.mustCall("POST", "/tickets/"+tk.ID+"/nodes", GraphNode{Name: "b", Type: "review"}, &n2, 201)
-	text := "the plan"
-	var art Artifact
-	h.mustCall("POST", "/tickets/"+tk.ID+"/artifacts", Artifact{NodeID: n1.ID, Name: "plan", Type: "text", Content: &text}, &art, 201)
-	other := "review notes"
-	h.mustCall("POST", "/tickets/"+tk.ID+"/artifacts", Artifact{NodeID: n2.ID, Name: "review", Type: "text", Content: &other}, nil, 201)
-
-	issueKey, commentID, ok := parseArtifactID(art.ID)
-	if !ok || issueKey != tk.ID || !strings.HasPrefix(art.ID, tk.ID+"-c") {
-		t.Fatalf("artifact ID %q", art.ID)
-	}
-	comments := h.jira.issue(tk.ID).Comments
-	if len(comments) != 2 || comments[0].ID != commentID {
-		t.Fatalf("comments = %+v", comments)
-	}
-	body, _ := json.Marshal(comments[0].Body)
-	for _, want := range []string{"plan", "text", n1.ID, "codeBlock", "the plan"} {
-		if !strings.Contains(string(body), want) {
-			t.Fatalf("comment body lacks %q: %s", want, body)
+	// Each ID names its own sub-task, and there is no other sub-task.
+	subtasks := map[string]bool{}
+	for id := range ids {
+		_, sub, ok := parseNodeID(id)
+		if !ok || h.jira.issue(sub) == nil || h.jira.issue(sub).Parent != tk.ID {
+			t.Fatalf("node %s does not name a sub-task of %s", id, tk.ID)
 		}
+		subtasks[sub] = true
 	}
-	if _, ok := comments[0].Properties["graphops.artifact"]; !ok {
-		t.Fatal("comment has no graphops.artifact property")
-	}
-
-	h.jira.resetRequests()
-	var got Artifact
-	h.mustCall("GET", "/artifacts/"+art.ID, nil, &got, 200)
-	if got.Content == nil || *got.Content != text {
-		t.Fatalf("GetArtifact = %+v", got)
-	}
-	for _, r := range h.jira.requestsMatching("GET", `^/rest/api/3/issue/`) {
-		// The ticket issue itself (the managed-ticket check) and its comment.
-		if r.Path != "/rest/api/3/issue/"+tk.ID && !strings.HasPrefix(r.Path, "/rest/api/3/issue/"+tk.ID+"/comment") {
-			t.Fatalf("GetArtifact read %s", r.Path)
-		}
-	}
-
-	var byNode []Artifact
-	h.mustCall("GET", "/nodes/"+n1.ID+"/artifacts", nil, &byNode, 200)
-	if len(byNode) != 1 || byNode[0].NodeID != n1.ID {
-		t.Fatalf("ListArtifactsByNode = %+v", byNode)
-	}
-}
-
-func TestLargeAndBinaryArtifactsUseAttachments(t *testing.T) {
-	cases := []struct {
-		name, typ, content string
-	}{
-		{"html", "html", "<html><body>report</body></html>"},
-		{"image", "image", base64.StdEncoding.EncodeToString([]byte{0x89, 'P', 'N', 'G', 0, 1, 2, 3})},
-		{"large text", "text", strings.Repeat("x", 40*1024)},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newHarness(t)
-			p := h.registerGOPS()
-			tk := h.createTicket(p.ID, "t")
-			var n GraphNode
-			h.mustCall("POST", "/tickets/"+tk.ID+"/nodes", GraphNode{Name: "a", Type: "report"}, &n, 201)
-			content := tc.content
-			var art Artifact
-			h.mustCall("POST", "/tickets/"+tk.ID+"/artifacts", Artifact{NodeID: n.ID, Name: tc.name, Type: tc.typ, Content: &content}, &art, 201)
-
-			issue := h.jira.issue(tk.ID)
-			if len(issue.Attachments) != 1 {
-				t.Fatalf("attachments = %v", issue.Attachments)
-			}
-			var ap artifactProp
-			_ = json.Unmarshal(issue.Comments[0].Properties["graphops.artifact"], &ap)
-			if ap.AttachmentID != issue.Attachments[0] || ap.Content != nil {
-				t.Fatalf("graphops.artifact = %+v", ap)
-			}
-			var got Artifact
-			h.mustCall("GET", "/artifacts/"+art.ID, nil, &got, 200)
-			if got.Content == nil || *got.Content != tc.content {
-				t.Fatalf("round trip lost the content")
-			}
-			var listed []Artifact
-			h.mustCall("GET", "/tickets/"+tk.ID+"/artifacts", nil, &listed, 200)
-			if !listed[0].HasContent {
-				t.Fatal("has_content false in the listing")
-			}
-			if tc.typ == "text" && (listed[0].Content == nil || *listed[0].Content != tc.content) {
-				t.Fatal("text content must be included in the ticket listing")
-			}
-			if tc.typ != "text" && listed[0].Content != nil {
-				t.Fatal("html/image content should be omitted from the ticket listing")
-			}
-		})
+	if len(subtasks) != 10 || len(h.jira.subtasksOf(tk.ID)) != 10 {
+		t.Fatalf("sub-tasks = %v", h.jira.subtasksOf(tk.ID))
 	}
 }
 
