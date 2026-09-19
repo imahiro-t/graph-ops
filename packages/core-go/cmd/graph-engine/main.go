@@ -378,7 +378,7 @@ Commands:
                                            loopback only unless you deliberately widen it, e.g.
                                            --host 0.0.0.0 on a network you trust.)
 
-User/team extension directories (see README.md "Configuration" section):
+User/team extension directories:
   GRAPH_USER_EXTENSIONS_DIR / userExtensionsDir   (default: $HOME/.graph-ops)
   GRAPH_TEAM_EXTENSIONS_DIR / teamExtensionsDir   (default: nearest ancestor .graph-ops/,
                                                    excluding $HOME/.graph-ops; a team root that is
