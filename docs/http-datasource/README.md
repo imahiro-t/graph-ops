@@ -429,14 +429,15 @@ only, no GraphOps imports) of about a dozen files:
 
 | File | Role |
 |---|---|
-| `main.go` | Reads the environment variables (`JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `GRAPHOPS_DATASOURCE_TOKEN`, ...), refuses to start if one is missing, sets server timeouts, shuts down gracefully |
+| `main.go` | Reads the environment variables (`JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `GRAPHOPS_DATASOURCE_TOKEN`, the issue types and the workflow status names, ...), refuses to start if a required one is missing, sets server timeouts, shuts down gracefully |
 | `server.go` | The protocol's HTTP layer: routes, bearer-token check (constant time, before any Jira call), a 25-second deadline per request, JSON errors |
-| `store.go` | The 32 operations mapped onto Jira, with a per-issue lock around read-modify-write updates |
+| `store.go` | Projects, tickets and labels mapped onto Jira, with a per-issue lock around read-modify-write updates |
+| `nodes.go` | Nodes as sub-tasks, edges, artifacts, node status labels and workflow moves, the managed-node checks, and the clean-up when a ticket is detached |
 | `jira.go` | A small Jira REST API v3 client: context-aware requests, bounded retries on 429/503 |
 | `state.go` | The local state file (registered projects, current project) |
 | `adf.go` | Mirrors Markdown into Jira's document format for people reading Jira |
 | `types.go` | The protocol's JSON types, declared locally |
-| `*_test.go` | A fake Jira, the conformance test, and hardening tests |
+| `*_test.go` | A fake Jira (with sub-tasks, workflows and transitions), the conformance test, and hardening tests |
 
 ### How the data is mapped
 
@@ -445,31 +446,57 @@ only, no GraphOps imports) of about a dozen files:
   definitions live in an issue property of a per-project metadata issue.
 - A **ticket** is a Jira issue labeled `graphops`, with every GraphOps field
   in the `graphops.ticket` issue property. Its ID is the issue key.
-- **Nodes and edges** live together in the ticket issue's `graphops.graph`
-  property. Node IDs are `<issue key>-NN`.
-- An **artifact** is a comment on the ticket issue with a `graphops.artifact`
-  comment property; large or binary content goes to an attachment. Artifact
-  IDs are `<issue key>-c<comment id>`.
+- A **node** is a **sub-task of the ticket's issue**, named
+  `<node name> [<node type>]`, with its data in the sub-task's
+  `graphops.node` property. Node IDs are `<ticket key>-n<sub-task number>`
+  (`GOPS-12-n15` is sub-task `GOPS-15`). The node's status is shown on the
+  sub-task as exactly one `graphops-status-<status>` label and, best effort,
+  as its workflow status (TODO: not moved; DONE: the configured "done"
+  status; anything else, REJECTED included: the configured "in progress"
+  status).
+- **Edges** live in the ticket issue's `graphops.edges` property.
+- An **artifact** is a comment on its node's sub-task with a
+  `graphops.artifact` comment property; large or binary content goes to an
+  attachment of the same sub-task. Artifact IDs are
+  `<node ID>-c<comment id>`.
 - The **list of projects and the current project** are single values for the
   whole data source, which Jira has no ordinary-permission place for, so they
   are in a local state file.
 
 Every ID encodes where its record is stored, so no operation has to search
-for it. The sample's README has the full mapping table and what each
-operation does in Jira.
+for it. Deleting a node deletes its sub-task; deleting a ticket detaches it
+and leaves its sub-tasks in Jira without their GraphOps data. The sample's
+README has the full mapping table, the status mapping and what each
+operation does in Jira. (Earlier versions of the sample kept the whole graph
+in one `graphops.graph` property of the ticket and the artifacts on the
+ticket's issue; that data is not read by the current version and not
+migrated.)
 
 ### Design choices worth copying
 
 - **IDs that lead to their storage location** avoid lookups and indexes.
-- **One search for listings**: ticket lists are one JQL query that also
-  returns the `graphops.ticket` property, not one request per issue.
-- **Authorization on every read**: an artifact ID pointing at an issue that is
-  not a managed ticket of a registered project is `ARTIFACT_NOT_FOUND`, and
-  nothing is read from Jira -- otherwise the token would give access to any
-  issue the Jira account can see.
+- **Map records onto what users see in the backing system**, not only onto
+  hidden storage: nodes as sub-tasks, with their artifacts on them and a
+  status label, make the execution graph readable in Jira itself.
+- **One search for listings, none for nodes**: ticket lists are one JQL
+  query that also returns the `graphops.ticket` property, not one request
+  per issue; a ticket's nodes are read through its `subtasks` field and a
+  bulk fetch, so Jira's search indexing delay never hides a new node.
+- **Authorization on every read and write**: an ID that does not name a
+  managed node of a managed ticket of a registered project is `NOT_FOUND`,
+  and nothing is read, written or deleted -- otherwise the token would give
+  access to any issue the Jira account can see.
+- **Mirrors are best effort; the record is authoritative**: a workflow move
+  that fails is logged and never fails the write, because the record is the
+  property.
+- **A fixed lock order** (ticket before node sub-task) and the workflow move
+  made inside the node's lock, so concurrent updates cannot deadlock or leave
+  the Jira status out of step with the label.
 - **A request deadline shorter than graph-engine's timeout**, with the
   request context passed to every Jira call, so a timed-out command does not
-  keep writing in the background.
+  keep writing in the background; best-effort work (workflow moves, clean-up
+  after a detach) gets its own shorter deadline and runs after the work the
+  request's success depends on.
 - **Explicit failures at limits**: a property that would exceed Jira's 32 KB
   limit fails with `VALIDATION_ERROR` and leaves the stored value intact.
 
@@ -477,18 +504,37 @@ operation does in Jira.
 
 Some constraints come from the backing system, and a plugin should document
 them the way the sample does: one plugin process per Jira site, keys of at
-most 5 characters, the 32 KB property limit (roughly 55-60 nodes per ticket,
-and a description of at most about 30 KB), no Jira workflow synchronization,
-search indexing delay, and a **trust boundary** -- anyone who can edit or
-comment on the Jira issues can change the GraphOps data that agents read. See
-the sample's README for details.
+most 5 characters, 99 nodes per ticket (counting the sub-tasks that carry
+`graphops.node`), about 300 edges per ticket (all edges share one 32 KB
+property, about 107-122 bytes each), 32 KB per node and a ticket
+description of at most about 30 KB, workflow status names that must be
+configured to the workflow's (possibly localized) names, commands that are
+slower than with SQLite, best-effort clean-up that can leave GraphOps data
+on the sub-tasks of a large detached ticket, search indexing delay, and a
+**trust boundary** -- anyone who can edit or comment on the Jira issues and
+sub-tasks can change the GraphOps data that agents read. See the sample's
+README for details.
 
 ### What the real-Jira verification showed
 
-The sample was verified end to end against a real Jira Cloud site (details in
-the sample's README). Everything worked, and it showed the cost of storing a
-graph in a remote service: each protocol request stayed under 5 seconds, but
-commands that update the graph many times are much slower than with SQLite --
-`get-executable` took 3-6 seconds and `expand-graph` about 11 seconds, because
-each step reads, modifies and writes the graph property again. If your backing
-system is remote, measure your commands the same way.
+The sample was verified end to end against a real Jira Cloud site (details,
+including the before/after table, in the sample's README). On 2026-09-19 the
+current format (commit `8b3901d`) showed every node as a sub-task with its
+artifacts, one status label and the mirrored workflow status, and it built
+and ran a 70-node, 104-edge graph; with the previous format (commit
+`d74e516`, the whole graph in one property) the same graph failed at 32,915
+bytes, over Jira's 32 KB property limit.
+
+It also showed the price of that visibility, which is worth measuring for any
+remote backend: **capacity improved, but every command that writes nodes got
+slower.** A node update became six Jira requests (about 2 seconds instead of
+0.44) and a node creation creates a Jira issue (about 1.4 seconds instead of
+0.49). On a 20-node graph `expand-graph` went from about 25 to about 41
+seconds and `complete-node` from 2.2-2.8 to 4.1-4.8 seconds, and
+`get-executable` costs about 2 seconds more for each node it starts. Each
+protocol request stayed under 2.5 seconds, far from the 30-second timeout,
+but a whole `expand-graph` of 68 nodes took 141 seconds -- longer than the
+2-minute default timeout of many agent tools. Reads did not slow down with
+the size of the graph (`get-ticket` 0.7 seconds for 70 nodes). If your
+backing system is remote, measure your commands the same way, per command
+and per protocol request, before and after a change of format.
