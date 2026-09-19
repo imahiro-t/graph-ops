@@ -1,0 +1,29 @@
+# Local MySQL for trying GraphOps' MySQL backend. See README.md in this
+# directory. Not for production: the passwords below are fixed dev values.
+name: graph-ops-mysql
+
+services:
+  mysql:
+    image: mysql:8.4
+    ports:
+      # 13306 rather than 3306 so this does not clash with a MySQL already
+      # running on the machine.
+      - "127.0.0.1:${GRAPH_DEV_MYSQL_PORT:-13306}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: graph_ops
+      MYSQL_USER: graphops
+      MYSQL_PASSWORD: graphops
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./conf/tls.cnf:/etc/mysql/conf.d/tls.cnf:ro
+      - ./certs:/etc/mysql/certs:ro
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  mysql-data:
