@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { getFocusableElements } from '../hooks/useModalDialog';
 import { SettingsModal } from './SettingsModal';
+import { Project } from '../types';
 
 vi.mock('../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../lib/settingsApi')>('../lib/settingsApi');
@@ -280,6 +281,85 @@ describe('SettingsModal', () => {
       await user.click(screen.getByRole('button', { name: i18n.t('settings.scope.project') }));
       const select = screen.getByLabelText(i18n.t('settings.scope.projectLabel'));
       expect(select.tagName).toBe('SELECT');
+    });
+  });
+
+  // DFLT-00077: App.tsx keeps the modal mounted and resolves its current
+  // project asynchronously, so the modal must pick up the header's project
+  // each time it opens rather than only on its first mount.
+  describe('project selection carried over from the header', () => {
+    const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALPHA', local_path: '/work/alpha', created_at: '', updated_at: '' };
+    const beta: Project = { id: 'p-beta', name: 'Beta', prefix: 'BETA', local_path: '/work/beta', created_at: '', updated_at: '' };
+
+    const modal = (isOpen: boolean, currentProject: Project | null) => (
+      <SettingsModal
+        isOpen={isOpen}
+        onClose={vi.fn()}
+        projects={[alpha, beta]}
+        currentProject={currentProject}
+        onProjectsChanged={vi.fn()}
+        onPaginationPageSizeChanged={vi.fn()}
+        onMyNameChanged={vi.fn()}
+      />
+    );
+    const projectSelect = () => screen.getByLabelText(i18n.t('settings.scope.projectLabel'));
+    const switchToProjectScope = (user: ReturnType<typeof userEvent.setup>) =>
+      user.click(screen.getByRole('button', { name: i18n.t('settings.scope.project') }));
+
+    it('selects the header project when opened after being mounted closed with no project', async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(modal(false, null));
+      rerender(modal(false, alpha));
+      rerender(modal(true, alpha));
+      await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
+      (fetchSettingsNodeTypes as unknown as Mock).mockClear();
+
+      await switchToProjectScope(user);
+
+      expect(projectSelect()).toHaveValue(alpha.id);
+      expect(screen.queryByText(i18n.t('settings.scope.noProjectSelected'))).not.toBeInTheDocument();
+      await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalledWith(expect.anything(), alpha.id));
+      expect(fetchSettingsNodeTypes).not.toHaveBeenCalledWith(expect.anything(), '');
+    });
+
+    it('goes back to the header project on reopen after another project was picked inside the modal', async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(modal(true, alpha));
+
+      await switchToProjectScope(user);
+      await user.selectOptions(projectSelect(), beta.id);
+      expect(projectSelect()).toHaveValue(beta.id);
+
+      rerender(modal(false, alpha));
+      rerender(modal(true, alpha));
+
+      expect(projectSelect()).toHaveValue(alpha.id);
+      await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenLastCalledWith(expect.anything(), alpha.id));
+    });
+
+    it('follows a header project change made while the modal was closed', async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(modal(true, alpha));
+      await switchToProjectScope(user);
+      expect(projectSelect()).toHaveValue(alpha.id);
+
+      rerender(modal(false, alpha));
+      rerender(modal(false, beta));
+      rerender(modal(true, beta));
+
+      expect(projectSelect()).toHaveValue(beta.id);
+      await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenLastCalledWith(expect.anything(), beta.id));
+    });
+
+    it('still warns when no project is selected in the header', async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(modal(false, null));
+      rerender(modal(true, null));
+
+      await switchToProjectScope(user);
+
+      expect(projectSelect()).toHaveValue('');
+      expect(screen.getByText(i18n.t('settings.scope.noProjectSelected'))).toBeInTheDocument();
     });
   });
 });
