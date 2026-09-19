@@ -121,6 +121,7 @@ func TestDisconnectedClientStopsJiraWrites(t *testing.T) {
 	tk := h.createTicket(p.ID, "t")
 	done := make(chan struct{}, 1)
 	h.useDeadline(requestDeadline, done)
+	createsBefore := len(h.jira.requestsMatching("POST", `^/rest/api/3/issue$`))
 
 	reading := make(chan struct{})
 	var once sync.Once
@@ -159,8 +160,8 @@ func TestDisconnectedClientStopsJiraWrites(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the plugin kept working on an abandoned request")
 	}
-	if puts := h.jira.requestsMatching("PUT", `/properties/graphops\.graph$`); len(puts) != 0 {
-		t.Fatalf("the plugin wrote the graph after the client disconnected: %+v", puts)
+	if creates := h.jira.requestsMatching("POST", `^/rest/api/3/issue$`); len(creates) != createsBefore {
+		t.Fatalf("the plugin created the node sub-task after the client disconnected: %d issue creations, want %d", len(creates), createsBefore)
 	}
 }
 
@@ -171,46 +172,86 @@ func TestArtifactReadsOnlyTouchManagedTickets(t *testing.T) {
 	p := h.registerGOPS()
 	ticketProp := `{"title":"t","status":"TODO","priority":"MEDIUM","label_ids":[]}`
 
-	type target struct{ issueKey, commentID, attachmentID string }
-	plant := func(issueKey string) target {
-		att := h.jira.seedAttachment(issueKey, []byte("secret attachment"))
-		cm := h.jira.seedComment(issueKey, map[string]string{
-			"graphops.artifact": `{"node_id":"` + issueKey + `-01","name":"x","type":"html","has_content":true,"attachment_id":"` + att + `","attachment_encoding":"raw"}`,
+	type target struct{ nodeID, commentID string }
+	// plant makes, next to parent, a sub-task that looks like a node and
+	// has an artifact-looking comment pointing at an attachment.
+	plant := func(parent string) target {
+		sub := h.jira.seedSubtask(parent, nil, map[string]string{"graphops.node": `{"name":"x","type":"report","status":"TODO"}`})
+		nodeID, _ := nodeIDOf(parent, sub)
+		att := h.jira.seedAttachment(sub, []byte("secret attachment"))
+		cm := h.jira.seedComment(sub, map[string]string{
+			"graphops.artifact": `{"node_id":"` + nodeID + `","name":"x","type":"html","has_content":true,"attachment_id":"` + att + `","attachment_encoding":"raw"}`,
 		})
-		return target{issueKey, cm, att}
+		return target{nodeID, cm}
 	}
 
 	// A detached ticket: created and given an artifact through GraphOps,
-	// then deleted (the Jira issue and its comments stay).
+	// then deleted (the Jira issues and the comments stay). Its sub-task
+	// cleanup is made to fail, so the sub-task keeps graphops.node.
 	tk := h.createTicket(p.ID, "detached")
 	var n GraphNode
 	h.mustCall("POST", "/tickets/"+tk.ID+"/nodes", GraphNode{Name: "a", Type: "report"}, &n, 201)
 	html := "<p>report</p>"
 	var art Artifact
 	h.mustCall("POST", "/tickets/"+tk.ID+"/artifacts", Artifact{NodeID: n.ID, Name: "r", Type: "html", Content: &html}, &art, 201)
+	h.jira.failWith = func(w http.ResponseWriter, r *http.Request) bool {
+		if r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/properties/graphops.node") {
+			w.WriteHeader(http.StatusInternalServerError)
+			return true
+		}
+		return false
+	}
 	h.mustCall("DELETE", "/tickets/"+tk.ID, nil, nil, 204)
-	_, detachedComment, _ := parseArtifactID(art.ID)
+	h.jira.failWith = nil
+	nodeID, detachedComment, _ := parseArtifactID(art.ID)
+
+	otherTicket := h.createTicket(p.ID, "other")
+	var otherNode GraphNode
+	h.mustCall("POST", "/tickets/"+otherTicket.ID+"/nodes", GraphNode{Name: "o", Type: "report"}, &otherNode, 201)
+	_, otherSub, _ := parseNodeID(otherNode.ID)
+	otherComment := h.jira.seedComment(otherSub, map[string]string{
+		"graphops.artifact": `{"node_id":"` + otherNode.ID + `","name":"x","type":"text","has_content":true,"content":"other"}`,
+	})
+	managed := h.createTicket(p.ID, "managed")
+	crossID, _ := nodeIDOf(managed.ID, otherSub) // another ticket's sub-task under this ticket's key
 
 	cases := map[string]target{
 		// DEMO exists in Jira but is not registered with the plugin.
 		"unregistered project": plant(h.jira.seedIssue("DEMO", []string{"graphops"}, map[string]string{"graphops.ticket": ticketProp})),
 		// In a registered project, but never created through GraphOps.
 		"unmanaged issue": plant(h.jira.seedIssue("GOPS", nil, nil)),
-		"detached ticket": {tk.ID, detachedComment, ""},
+		"detached ticket": {nodeID, detachedComment},
+		// A managed ticket's key with the number of another ticket's sub-task.
+		"another ticket's sub-task": {crossID, otherComment},
+		// A sub-task of a managed ticket, made by hand (no graphops.node).
+		"sub-task without graphops.node": func() target {
+			sub := h.jira.seedSubtask(managed.ID, nil, nil)
+			id, _ := nodeIDOf(managed.ID, sub)
+			cm := h.jira.seedComment(sub, map[string]string{
+				"graphops.artifact": `{"node_id":"` + id + `","name":"x","type":"text","has_content":true,"content":"x"}`,
+			})
+			return target{id, cm}
+		}(),
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			h.jira.resetRequests()
 			var eb errBody
-			if status := h.call("GET", "/artifacts/"+tc.issueKey+"-c"+tc.commentID, nil, &eb); status != 404 || eb.Error.Code != "ARTIFACT_NOT_FOUND" {
+			if status := h.call("GET", "/artifacts/"+tc.nodeID+"-c"+tc.commentID, nil, &eb); status != 404 || eb.Error.Code != "ARTIFACT_NOT_FOUND" {
 				t.Fatalf("GetArtifact = %d %+v, want 404 ARTIFACT_NOT_FOUND", status, eb)
 			}
+			if status := h.call("GET", "/nodes/"+tc.nodeID, nil, &eb); status != 404 || eb.Error.Code != "NODE_NOT_FOUND" {
+				t.Fatalf("GetNode = %d %+v, want 404 NODE_NOT_FOUND", status, eb)
+			}
 			var listed []Artifact
-			h.mustCall("GET", "/nodes/"+tc.issueKey+"-01/artifacts", nil, &listed, 200)
+			h.mustCall("GET", "/nodes/"+tc.nodeID+"/artifacts", nil, &listed, 200)
 			if len(listed) != 0 {
 				t.Fatalf("ListArtifactsByNode = %+v, want []", listed)
 			}
 			if rs := h.jira.requestsMatching("GET", `/comment`); len(rs) != 0 {
+				t.Fatalf("comments were read: %+v", rs)
+			}
+			if rs := h.jira.requestsMatching("POST", `^/rest/api/3/comment/list$`); len(rs) != 0 {
 				t.Fatalf("comments were read: %+v", rs)
 			}
 			if rs := h.jira.requestsMatching("GET", `^/rest/api/3/attachment/`); len(rs) != 0 {
@@ -255,6 +296,7 @@ func TestCreateArtifactRemovesTheAttachmentWhenTheCommentFails(t *testing.T) {
 	tk := h.createTicket(p.ID, "t")
 	var n GraphNode
 	h.mustCall("POST", "/tickets/"+tk.ID+"/nodes", GraphNode{Name: "a", Type: "report"}, &n, 201)
+	_, sub, _ := parseNodeID(n.ID)
 	h.jira.failWith = func(w http.ResponseWriter, r *http.Request) bool {
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comment") {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -267,9 +309,9 @@ func TestCreateArtifactRemovesTheAttachmentWhenTheCommentFails(t *testing.T) {
 	if status := h.call("POST", "/tickets/"+tk.ID+"/artifacts", Artifact{NodeID: n.ID, Name: "r", Type: "html", Content: &html}, &eb); status/100 != 5 {
 		t.Fatalf("CreateArtifact with a failing comment = %d %+v", status, eb)
 	}
-	issue := h.jira.issue(tk.ID)
+	issue := h.jira.issue(sub)
 	if len(issue.Attachments) != 1 {
-		t.Fatalf("expected one uploaded attachment, got %v", issue.Attachments)
+		t.Fatalf("expected one uploaded attachment on the sub-task, got %v", issue.Attachments)
 	}
 	if h.jira.hasAttachment(issue.Attachments[0]) {
 		t.Fatal("the attachment of the failed artifact was left behind")
@@ -277,4 +319,8 @@ func TestCreateArtifactRemovesTheAttachmentWhenTheCommentFails(t *testing.T) {
 	if dels := h.jira.requestsMatching("DELETE", `^/rest/api/3/attachment/`+issue.Attachments[0]+`$`); len(dels) != 1 {
 		t.Fatalf("attachment deletions = %+v", dels)
 	}
+	if parent := h.jira.issue(tk.ID); len(parent.Attachments) != 0 || len(parent.Comments) != 0 {
+		t.Fatalf("the ticket issue got attachments %v / comments %d", parent.Attachments, len(parent.Comments))
+	}
+
 }

@@ -29,7 +29,10 @@ be written to a file:
 | `JIRA_API_TOKEN` | yes | The Atlassian API token |
 | `GRAPHOPS_DATASOURCE_TOKEN` | yes | The bearer token graph-engine must send; pick a long random value |
 | `LISTEN_ADDR` | no | Default `127.0.0.1:8787` |
-| `JIRA_ISSUE_TYPE` | no | Issue type used for new issues, default `Task` |
+| `JIRA_ISSUE_TYPE` | no | Issue type used for ticket (and metadata) issues, default `Task` |
+| `JIRA_SUBTASK_ISSUE_TYPE` | no | Sub-task issue type used for node sub-tasks, default `Subtask` (some projects call it `Sub-task`) |
+| `JIRA_NODE_IN_PROGRESS_STATUS` | no | Workflow status a node sub-task is moved to while the node is under way (any status but TODO and DONE, REJECTED included), default `In Progress`. Set it to the empty string to turn this move off |
+| `JIRA_NODE_DONE_STATUS` | no | Workflow status a node sub-task is moved to when the node is DONE, default `Done`. Set it to the empty string to turn this move off |
 | `GRAPHOPS_STATE_FILE` | no | Local state file, default `./jira-datasource-state.json` |
 
 The plugin refuses to start if any required variable is missing.

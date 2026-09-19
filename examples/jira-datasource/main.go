@@ -11,8 +11,18 @@
 //	JIRA_API_TOKEN             an Atlassian API token for that account (required)
 //	GRAPHOPS_DATASOURCE_TOKEN  the bearer token graph-engine must send (required)
 //	LISTEN_ADDR                default 127.0.0.1:8787
-//	JIRA_ISSUE_TYPE            issue type for new issues, default Task
+//	JIRA_ISSUE_TYPE            issue type for ticket issues, default Task
+//	JIRA_SUBTASK_ISSUE_TYPE    sub-task issue type for node sub-tasks, default Subtask
+//	JIRA_NODE_IN_PROGRESS_STATUS
+//	                           workflow status a node sub-task is moved to while
+//	                           the node is under way, default "In Progress"
+//	JIRA_NODE_DONE_STATUS      workflow status a node sub-task is moved to when
+//	                           the node is DONE, default "Done"
 //	GRAPHOPS_STATE_FILE        local state file, default ./jira-datasource-state.json
+//
+// Setting either status variable to the empty string (set, but empty)
+// turns that workflow move off; the node's status label is kept up to date
+// either way.
 package main
 
 import (
@@ -25,6 +35,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -38,17 +49,35 @@ type config struct {
 	ListenAddr      string
 	IssueType       string
 	StateFile       string
+	// Node sub-tasks (see storeOptions).
+	SubtaskIssueType string
+	InProgressStatus string
+	DoneStatus       string
 }
 
 const (
 	defaultListenAddr = "127.0.0.1:8787"
 	defaultIssueType  = "Task"
 	defaultStateFile  = "jira-datasource-state.json"
+
+	defaultSubtaskIssueType = "Subtask"
+	defaultInProgressStatus = "In Progress"
+	defaultDoneStatus       = "Done"
 )
 
-// loadConfig reads the configuration through getenv (os.Getenv outside
-// tests) and reports the first missing or invalid value by name.
-func loadConfig(getenv func(string) string) (config, error) {
+// loadConfig reads the configuration through lookupEnv (os.LookupEnv
+// outside tests) and reports the first missing or invalid value by name.
+// lookupEnv, unlike os.Getenv, tells an unset variable (default value) from
+// one set to "" (for the node status names: no workflow move).
+func loadConfig(lookupEnv func(string) (string, bool)) (config, error) {
+	getenv := func(k string) string { v, _ := lookupEnv(k); return v }
+	statusName := func(k, def string) string {
+		v, ok := lookupEnv(k)
+		if !ok {
+			return def
+		}
+		return strings.TrimSpace(v)
+	}
 	c := config{
 		JiraBaseURL:     strings.TrimSpace(getenv("JIRA_BASE_URL")),
 		JiraEmail:       strings.TrimSpace(getenv("JIRA_EMAIL")),
@@ -57,6 +86,10 @@ func loadConfig(getenv func(string) string) (config, error) {
 		ListenAddr:      strings.TrimSpace(getenv("LISTEN_ADDR")),
 		IssueType:       strings.TrimSpace(getenv("JIRA_ISSUE_TYPE")),
 		StateFile:       strings.TrimSpace(getenv("GRAPHOPS_STATE_FILE")),
+
+		SubtaskIssueType: strings.TrimSpace(getenv("JIRA_SUBTASK_ISSUE_TYPE")),
+		InProgressStatus: statusName("JIRA_NODE_IN_PROGRESS_STATUS", defaultInProgressStatus),
+		DoneStatus:       statusName("JIRA_NODE_DONE_STATUS", defaultDoneStatus),
 	}
 	for _, req := range []struct{ name, value string }{
 		{"JIRA_BASE_URL", c.JiraBaseURL},
@@ -81,7 +114,24 @@ func loadConfig(getenv func(string) string) (config, error) {
 	if c.StateFile == "" {
 		c.StateFile = defaultStateFile
 	}
+	if c.SubtaskIssueType == "" {
+		c.SubtaskIssueType = defaultSubtaskIssueType
+	}
 	return c, nil
+}
+
+func (c config) storeOptions() storeOptions {
+	return storeOptions{
+		IssueType: c.IssueType, SubtaskIssueType: c.SubtaskIssueType,
+		InProgressStatus: c.InProgressStatus, DoneStatus: c.DoneStatus,
+	}
+}
+
+func describeStatus(name string) string {
+	if name == "" {
+		return "no workflow status (off)"
+	}
+	return strconv.Quote(name)
 }
 
 func isLoopback(host string) bool {
@@ -94,7 +144,7 @@ func isLoopback(host string) bool {
 
 func main() {
 	logger := log.New(os.Stderr, "jira-datasource: ", log.LstdFlags)
-	cfg, err := loadConfig(os.Getenv)
+	cfg, err := loadConfig(os.LookupEnv)
 	if err != nil {
 		logger.Fatal(err)
 	}
@@ -114,8 +164,10 @@ func main() {
 
 	jira := newJiraClient(cfg.JiraBaseURL, cfg.JiraEmail, cfg.JiraAPIToken)
 	jira.logf = logger.Printf
-	store := newStore(jira, cfg.StateFile, cfg.IssueType)
+	store := newStore(jira, cfg.StateFile, cfg.storeOptions())
 	store.logf = logger.Printf
+	logger.Printf("tickets are %q issues, nodes are %q sub-tasks; node sub-tasks move to %s (in progress) and %s (done)",
+		cfg.IssueType, cfg.SubtaskIssueType, describeStatus(cfg.InProgressStatus), describeStatus(cfg.DoneStatus))
 	srv := newServer(cfg.ListenAddr, newHandler(store, cfg.DataSourceToken, logger))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

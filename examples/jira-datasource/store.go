@@ -2,14 +2,12 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,12 +25,18 @@ import (
 //   - A ticket is a Jira issue labelled graphops; its ID is the issue key.
 //     Every GraphOps field lives in the graphops.ticket issue property (the
 //     summary and description mirror title/description for humans).
-//   - Nodes and edges (no Jira counterpart) live in the graphops.graph
-//     property of the ticket's issue. Node IDs are "<issue key>-NN".
-//   - An artifact (no Jira counterpart) is a comment on the ticket's issue,
-//     with its metadata in the graphops.artifact comment property. Its ID is
-//     "<issue key>-c<comment id>". Large text content and html/image content
-//     are stored as issue attachments.
+//   - A node is a sub-task of the ticket's issue (issue type
+//     JIRA_SUBTASK_ISSUE_TYPE), summary "<name> [<type>]". Its data lives in
+//     the sub-task's graphops.node property. Its ID is
+//     "<ticket key>-n<sub-task number>" ("GOPS-12-n15" is sub-task GOPS-15
+//     of ticket GOPS-12). Its status is mirrored on the sub-task as exactly
+//     one graphops-status-<status> label and, best effort, as a workflow
+//     status (see nodes.go).
+//   - Edges live in the graphops.edges property of the ticket's issue.
+//   - An artifact is a comment on its node's sub-task, with its metadata in
+//     the graphops.artifact comment property. Its ID is
+//     "<node ID>-c<comment id>". Large text content and html/image content
+//     are stored as attachments of that sub-task.
 //   - Labels are stored in the project's metadata issue. Label IDs are
 //     "<KEY>-label-<n>".
 const (
@@ -40,7 +44,8 @@ const (
 	jiraLabelMeta    = "graphops-meta"
 
 	propTicket   = "graphops.ticket"
-	propGraph    = "graphops.graph"
+	propEdges    = "graphops.edges"
+	propNode     = "graphops.node"
 	propProject  = "graphops.project"
 	propArtifact = "graphops.artifact"
 
@@ -87,13 +92,6 @@ type ticketProp struct {
 	UpdatedAt       string   `json:"updated_at"`
 }
 
-type graphProp struct {
-	NodeSeq int         `json:"node_seq"`
-	EdgeSeq int         `json:"edge_seq"`
-	Nodes   []GraphNode `json:"nodes"`
-	Edges   []GraphEdge `json:"edges"`
-}
-
 type projectProp struct {
 	Name      string  `json:"name"`
 	CreatedAt string  `json:"created_at"`
@@ -120,32 +118,65 @@ type artifactProp struct {
 	AttachmentEncoding string `json:"attachment_encoding,omitempty"`
 }
 
+// storeOptions is the Jira-side configuration the store needs.
+type storeOptions struct {
+	// IssueType is the issue type of ticket and metadata issues.
+	IssueType string
+	// SubtaskIssueType is the (sub-task) issue type of node sub-tasks.
+	SubtaskIssueType string
+	// InProgressStatus and DoneStatus are the workflow status names a node
+	// sub-task is moved to; "" turns that direction off.
+	InProgressStatus string
+	DoneStatus       string
+}
+
 // Store implements the 32 protocol operations on top of Jira.
 type Store struct {
-	jira      *jiraClient
-	state     *stateFile
-	issueType string
-	now       func() string
+	jira *jiraClient
+	// state is the local state file (registered projects, current project).
+	state *stateFile
+	opts  storeOptions
+	now   func() string
 	// logf, when non-nil, receives problems that do not fail the request.
 	logf func(format string, args ...any)
+	// transitionTimeout bounds moving one node sub-task through the
+	// workflow (reading its transitions and making one).
+	transitionTimeout time.Duration
+	// detachParallelism is how many sub-tasks DeleteTicket cleans up at once.
+	detachParallelism int
 
 	locksMu sync.Mutex
 	locks   map[string]*sync.Mutex
 }
 
-func newStore(jira *jiraClient, statePath, issueType string) *Store {
+func newStore(jira *jiraClient, statePath string, opts storeOptions) *Store {
 	return &Store{
-		jira:      jira,
-		state:     &stateFile{path: statePath},
-		issueType: issueType,
-		now:       func() string { return time.Now().UTC().Format(time.RFC3339Nano) },
-		locks:     map[string]*sync.Mutex{},
+		jira:              jira,
+		state:             &stateFile{path: statePath},
+		opts:              opts,
+		now:               func() string { return time.Now().UTC().Format(time.RFC3339Nano) },
+		transitionTimeout: defaultTransitionTimeout,
+		detachParallelism: 4,
+		locks:             map[string]*sync.Mutex{},
+	}
+}
+
+// log reports a problem that does not fail the request.
+func (s *Store) log(format string, args ...any) {
+	if s.logf != nil {
+		s.logf(format, args...)
 	}
 }
 
 // lock serializes read-modify-write of one issue's properties within this
 // process. The sample assumes a single plugin process per Jira site (see
 // README.md, "Limitations").
+//
+// Lock order: an operation that needs both a ticket's lock and one of its
+// node sub-tasks' locks (CreateNode, DeleteNode, DeleteTicket) always takes
+// the ticket's first. Operations on one node (UpdateNode, CreateArtifact)
+// take only the sub-task's lock, so no two operations can wait on each other
+// in opposite orders.
 func (s *Store) lock(issueKey string) func() {
 	s.locksMu.Lock()
 	m, ok := s.locks[issueKey]
@@ -204,31 +235,6 @@ func projectKeyOfIssue(issueKey string) string {
 		return issueKey[:i]
 	}
 	return ""
-}
-
-// issueKeyOfNode returns the issue key a node ID belongs to
-// ("GOPS-12-03" -> "GOPS-12").
-func issueKeyOfNode(nodeID string) (string, bool) {
-	i := strings.LastIndex(nodeID, "-")
-	if i <= 0 || len(nodeID)-i-1 != 2 {
-		return "", false
-	}
-	if _, err := strconv.Atoi(nodeID[i+1:]); err != nil {
-		return "", false
-	}
-	return nodeID[:i], true
-}
-
-// parseArtifactID splits "<issue key>-c<comment id>".
-func parseArtifactID(id string) (issueKey, commentID string, ok bool) {
-	i := strings.LastIndex(id, "-c")
-	if i <= 0 || i+2 >= len(id) {
-		return "", "", false
-	}
-	if _, err := strconv.ParseUint(id[i+2:], 10, 64); err != nil {
-		return "", "", false
-	}
-	return id[:i], id[i+2:], true
 }
 
 func projectKeyOfLabel(labelID string) (string, bool) {
@@ -364,7 +370,7 @@ func (s *Store) CreateProject(ctx context.Context, name, prefix string) (Project
 		metaKey, err = s.jira.createIssue(ctx, map[string]any{
 			"project":     map[string]string{"key": key},
 			"summary":     "GraphOps metadata (do not delete)",
-			"issuetype":   map[string]string{"name": s.issueType},
+			"issuetype":   map[string]string{"name": s.opts.IssueType},
 			"labels":      []string{jiraLabelMeta},
 			"description": markdownToADF("This issue stores GraphOps project metadata (project name and labels) in its graphops.project property. It is managed by the GraphOps Jira data source plugin."),
 		}, []jiraProperty{{Key: propProject, Value: json.RawMessage(raw)}})
@@ -749,7 +755,16 @@ func ticketJQL(keys []string) string {
 
 // readTicket loads a managed ticket issue and its graphops.ticket property.
 func (s *Store) readTicket(ctx context.Context, issueKey string, extraProps ...string) (*jiraIssue, ticketProp, error) {
-	issue, err := s.jira.getIssue(ctx, issueKey, append([]string{propTicket}, extraProps...))
+	return s.readTicketFields(ctx, issueKey, defaultIssueFields, extraProps...)
+}
+
+// ticketFieldsWithSubtasks is what reading a ticket together with its node
+// sub-tasks asks for.
+var ticketFieldsWithSubtasks = []string{"summary", "labels", "created", "subtasks"}
+
+// readTicketFields is readTicket with the issue fields to read.
+func (s *Store) readTicketFields(ctx context.Context, issueKey string, fields []string, extraProps ...string) (*jiraIssue, ticketProp, error) {
+	issue, err := s.jira.getIssueFields(ctx, issueKey, fields, append([]string{propTicket}, extraProps...))
 	if err != nil {
 		if isJiraStatus(err, http.StatusNotFound) {
 			return nil, ticketProp{}, notFound("TICKET_NOT_FOUND", "ticket", issueKey)
@@ -874,16 +889,16 @@ func (s *Store) CreateTicket(ctx context.Context, projectID string, in Ticket) (
 	if err != nil {
 		return Ticket{}, err
 	}
-	rawGraph, _ := json.Marshal(graphProp{Nodes: []GraphNode{}, Edges: []GraphEdge{}})
+	rawEdges, _ := json.Marshal(edgesProp{Edges: []storedEdge{}})
 	key, err := s.jira.createIssue(ctx, map[string]any{
 		"project":     map[string]string{"key": reg.Key},
 		"summary":     summaryFor(in.Title),
-		"issuetype":   map[string]string{"name": s.issueType},
+		"issuetype":   map[string]string{"name": s.opts.IssueType},
 		"labels":      []string{jiraLabelManaged},
 		"description": markdownToADF(in.Description),
 	}, []jiraProperty{
 		{Key: propTicket, Value: json.RawMessage(rawTicket)},
-		{Key: propGraph, Value: json.RawMessage(rawGraph)},
+		{Key: propEdges, Value: json.RawMessage(rawEdges)},
 	})
 	if err != nil {
 		return Ticket{}, jiraFailure(err)
@@ -904,7 +919,7 @@ func (s *Store) GetTicket(ctx context.Context, id string) (Ticket, error) {
 }
 
 func (s *Store) GetTicketDetail(ctx context.Context, id string) (TicketDetail, error) {
-	issue, tp, err := s.readTicket(ctx, id, propGraph)
+	issue, tp, err := s.readTicketFields(ctx, id, ticketFieldsWithSubtasks, propEdges)
 	if err != nil {
 		return TicketDetail{}, err
 	}
@@ -912,20 +927,21 @@ func (s *Store) GetTicketDetail(ctx context.Context, id string) (TicketDetail, e
 	if err != nil {
 		return TicketDetail{}, err
 	}
-	var g graphProp
-	if _, err := decodeProp(issue.Properties, propGraph, &g); err != nil {
-		return TicketDetail{}, jiraFailure(err)
-	}
-	arts, err := s.listArtifacts(ctx, issue.Key, "", false)
+	ep, err := edgesOf(issue)
 	if err != nil {
 		return TicketDetail{}, err
 	}
-	d := TicketDetail{Ticket: ticketFrom(issue.Key, tp, labels), Nodes: g.Nodes, Edges: g.Edges, Artifacts: arts}
-	if d.Nodes == nil {
-		d.Nodes = []GraphNode{}
+	nodes, err := s.loadNodes(ctx, issue)
+	if err != nil {
+		return TicketDetail{}, err
 	}
-	if d.Edges == nil {
-		d.Edges = []GraphEdge{}
+	arts, err := s.ticketArtifacts(ctx, issue.Key, nodes)
+	if err != nil {
+		return TicketDetail{}, err
+	}
+	d := TicketDetail{Ticket: ticketFrom(issue.Key, tp, labels), Nodes: []GraphNode{}, Edges: ep.graphEdges(issue.Key), Artifacts: arts}
+	for _, n := range nodes {
+		d.Nodes = append(d.Nodes, n.graphNode())
 	}
 	return d, nil
 }
@@ -1069,13 +1085,17 @@ func (s *Store) UpdateTicket(ctx context.Context, id string, p TicketPatch) (Tic
 }
 
 // DeleteTicket detaches the issue from GraphOps instead of deleting it from
-// Jira: the graphops label and the graphops.ticket/graphops.graph
-// properties are removed, so the ticket (with its nodes and edges) is gone
-// from GraphOps, while the Jira issue -- and the artifact comments on it --
-// stay for the humans who use Jira. A missing ticket is a no-op.
+// Jira. First the graphops label and the graphops.ticket/graphops.edges
+// properties are removed from the ticket's issue: from then on the ticket,
+// its nodes, edges and artifacts are gone from GraphOps (every read checks
+// the ticket first), and that is what the request's success means. Then,
+// best effort, each node sub-task loses its graphops.node property and its
+// graphops-status-* label (see detachSubtasks); the sub-tasks themselves,
+// their artifact comments and attachments stay for the humans who use
+// Jira. A missing ticket is a no-op.
 func (s *Store) DeleteTicket(ctx context.Context, id string) error {
 	defer s.lock(id)()
-	issue, _, err := s.readTicket(ctx, id)
+	issue, _, err := s.readTicketFields(ctx, id, ticketFieldsWithSubtasks)
 	if err != nil {
 		var apiErr *apiError
 		if errors.As(err, &apiErr) && apiErr.Code == "TICKET_NOT_FOUND" {
@@ -1088,459 +1108,11 @@ func (s *Store) DeleteTicket(ctx context.Context, id string) error {
 	}); err != nil {
 		return jiraFailure(err)
 	}
-	for _, prop := range []string{propTicket, propGraph} {
+	for _, prop := range []string{propTicket, propEdges} {
 		if err := s.jira.deleteIssueProperty(ctx, issue.Key, prop); err != nil {
 			return jiraFailure(err)
 		}
 	}
+	s.detachSubtasks(ctx, issue)
 	return nil
-}
-
-// --- nodes and edges ---
-
-func (s *Store) readGraph(ctx context.Context, issueKey string) (graphProp, error) {
-	issue, _, err := s.readTicket(ctx, issueKey, propGraph)
-	if err != nil {
-		return graphProp{}, err
-	}
-	var g graphProp
-	if _, err := decodeProp(issue.Properties, propGraph, &g); err != nil {
-		return graphProp{}, jiraFailure(err)
-	}
-	if g.Nodes == nil {
-		g.Nodes = []GraphNode{}
-	}
-	if g.Edges == nil {
-		g.Edges = []GraphEdge{}
-	}
-	return g, nil
-}
-
-func (s *Store) writeGraph(ctx context.Context, issueKey string, g graphProp) error {
-	raw, err := marshalProperty("the execution graph (graphops.graph) of "+issueKey, g)
-	if err != nil {
-		return err
-	}
-	if err := s.jira.setIssueProperty(ctx, issueKey, propGraph, raw); err != nil {
-		return jiraFailure(err)
-	}
-	return nil
-}
-
-func (s *Store) CreateNode(ctx context.Context, ticketID string, in GraphNode) (GraphNode, error) {
-	defer s.lock(ticketID)()
-	g, err := s.readGraph(ctx, ticketID)
-	if err != nil {
-		return GraphNode{}, err
-	}
-	if g.NodeSeq >= maxNodesPerTicket {
-		return GraphNode{}, validationError("ticket %s already has the maximum of %d nodes", ticketID, maxNodesPerTicket)
-	}
-	g.NodeSeq++
-	n := in
-	n.ID = fmt.Sprintf("%s-%02d", ticketID, g.NodeSeq)
-	n.TicketID = ticketID
-	if n.MaxIterations == 0 {
-		n.MaxIterations = 3
-	}
-	now := s.now()
-	n.CreatedAt, n.UpdatedAt = now, now
-	g.Nodes = append(g.Nodes, n)
-	if err := s.writeGraph(ctx, ticketID, g); err != nil {
-		return GraphNode{}, err
-	}
-	return n, nil
-}
-
-func (s *Store) findNode(ctx context.Context, nodeID string) (string, graphProp, int, error) {
-	issueKey, ok := issueKeyOfNode(nodeID)
-	if !ok {
-		return "", graphProp{}, -1, notFound("NODE_NOT_FOUND", "node", nodeID)
-	}
-	g, err := s.readGraph(ctx, issueKey)
-	if err != nil {
-		var apiErr *apiError
-		if errors.As(err, &apiErr) && apiErr.Code == "TICKET_NOT_FOUND" {
-			return "", graphProp{}, -1, notFound("NODE_NOT_FOUND", "node", nodeID)
-		}
-		return "", graphProp{}, -1, err
-	}
-	for i, n := range g.Nodes {
-		if n.ID == nodeID {
-			return issueKey, g, i, nil
-		}
-	}
-	return "", graphProp{}, -1, notFound("NODE_NOT_FOUND", "node", nodeID)
-}
-
-func (s *Store) GetNode(ctx context.Context, id string) (GraphNode, error) {
-	_, g, i, err := s.findNode(ctx, id)
-	if err != nil {
-		return GraphNode{}, err
-	}
-	return g.Nodes[i], nil
-}
-
-func (s *Store) ListNodesByTicket(ctx context.Context, ticketID string) ([]GraphNode, error) {
-	g, err := s.readGraph(ctx, ticketID)
-	if err != nil {
-		var apiErr *apiError
-		if errors.As(err, &apiErr) && apiErr.Code == "TICKET_NOT_FOUND" {
-			return []GraphNode{}, nil
-		}
-		return nil, err
-	}
-	return g.Nodes, nil
-}
-
-func (s *Store) UpdateNode(ctx context.Context, id string, p NodePatch) (GraphNode, error) {
-	issueKey, ok := issueKeyOfNode(id)
-	if !ok {
-		return GraphNode{}, notFound("NODE_NOT_FOUND", "node", id)
-	}
-	defer s.lock(issueKey)()
-	_, g, i, err := s.findNode(ctx, id)
-	if err != nil {
-		return GraphNode{}, err
-	}
-	n := &g.Nodes[i]
-	if p.Name != nil {
-		n.Name = *p.Name
-	}
-	if p.Type != nil {
-		n.Type = *p.Type
-	}
-	if p.Status != nil {
-		n.Status = *p.Status
-	}
-	if p.IterationCount != nil {
-		n.IterationCount = *p.IterationCount
-	}
-	if p.MaxIterations != nil {
-		n.MaxIterations = *p.MaxIterations
-	}
-	if p.Assignee.Set {
-		n.Assignee = p.Assignee.Value
-	}
-	if p.IsManual != nil {
-		n.IsManual = *p.IsManual
-	}
-	if p.GateID != nil {
-		n.GateID = p.GateID
-	}
-	if p.Criteria != nil {
-		n.Criteria = p.Criteria
-	}
-	n.UpdatedAt = s.now()
-	if err := s.writeGraph(ctx, issueKey, g); err != nil {
-		return GraphNode{}, err
-	}
-	return *n, nil
-}
-
-// DeleteNode removes a node, the edges touching it and its artifact
-// comments (with their attachments). A missing node is a no-op.
-func (s *Store) DeleteNode(ctx context.Context, id string) error {
-	issueKey, ok := issueKeyOfNode(id)
-	if !ok {
-		return nil
-	}
-	defer s.lock(issueKey)()
-	_, g, i, err := s.findNode(ctx, id)
-	if err != nil {
-		var apiErr *apiError
-		if errors.As(err, &apiErr) && apiErr.Code == "NODE_NOT_FOUND" {
-			return nil
-		}
-		return err
-	}
-	g.Nodes = append(g.Nodes[:i], g.Nodes[i+1:]...)
-	var edges []GraphEdge
-	for _, e := range g.Edges {
-		if e.FromNodeID != id && e.ToNodeID != id {
-			edges = append(edges, e)
-		}
-	}
-	g.Edges = edges
-	if g.Edges == nil {
-		g.Edges = []GraphEdge{}
-	}
-	if err := s.writeGraph(ctx, issueKey, g); err != nil {
-		return err
-	}
-	comments, err := s.jira.listComments(ctx, issueKey)
-	if err != nil {
-		return jiraFailure(err)
-	}
-	for _, cm := range comments {
-		ap, ok := artifactPropOf(cm)
-		if !ok || ap.NodeID != id {
-			continue
-		}
-		if ap.AttachmentID != "" {
-			if err := s.jira.deleteAttachment(ctx, ap.AttachmentID); err != nil {
-				return jiraFailure(err)
-			}
-		}
-		if err := s.jira.deleteComment(ctx, issueKey, cm.ID); err != nil {
-			return jiraFailure(err)
-		}
-	}
-	return nil
-}
-
-func (s *Store) CreateEdge(ctx context.Context, ticketID string, in GraphEdge) (GraphEdge, error) {
-	defer s.lock(ticketID)()
-	g, err := s.readGraph(ctx, ticketID)
-	if err != nil {
-		return GraphEdge{}, err
-	}
-	e := in
-	e.TicketID = ticketID
-	if e.ID == "" {
-		g.EdgeSeq++
-		e.ID = fmt.Sprintf("%s-e%d", ticketID, g.EdgeSeq)
-	}
-	if e.Condition == "" {
-		e.Condition = "always"
-	}
-	e.CreatedAt = s.now()
-	g.Edges = append(g.Edges, e)
-	if err := s.writeGraph(ctx, ticketID, g); err != nil {
-		return GraphEdge{}, err
-	}
-	return e, nil
-}
-
-func (s *Store) ListEdgesByTicket(ctx context.Context, ticketID string) ([]GraphEdge, error) {
-	g, err := s.readGraph(ctx, ticketID)
-	if err != nil {
-		var apiErr *apiError
-		if errors.As(err, &apiErr) && apiErr.Code == "TICKET_NOT_FOUND" {
-			return []GraphEdge{}, nil
-		}
-		return nil, err
-	}
-	return g.Edges, nil
-}
-
-func (s *Store) ClearEdgesByTicket(ctx context.Context, ticketID string) error {
-	defer s.lock(ticketID)()
-	g, err := s.readGraph(ctx, ticketID)
-	if err != nil {
-		var apiErr *apiError
-		if errors.As(err, &apiErr) && apiErr.Code == "TICKET_NOT_FOUND" {
-			return nil
-		}
-		return err
-	}
-	g.Edges = []GraphEdge{}
-	return s.writeGraph(ctx, ticketID, g)
-}
-
-// --- artifacts ---
-
-func artifactPropOf(cm jiraComment) (artifactProp, bool) {
-	raw, ok := cm.property(propArtifact)
-	if !ok {
-		return artifactProp{}, false
-	}
-	var ap artifactProp
-	if err := json.Unmarshal(raw, &ap); err != nil || ap.Type == "" {
-		return artifactProp{}, false
-	}
-	return ap, true
-}
-
-func isFileBacked(artType string) bool { return artType == "html" || artType == "image" }
-
-var attachmentExt = map[string]string{"html": ".html", "image": ".bin", "json": ".json", "gherkin": ".feature", "text": ".md"}
-
-// CreateArtifact stores an artifact as a comment on the ticket's issue.
-// text/gherkin/json content up to inlineContentLimit is kept inline (in the
-// comment's code block and its graphops.artifact property); larger content
-// and every html/image artifact is uploaded as an issue attachment that the
-// property points to. The returned ID is "<issue key>-c<comment id>".
-func (s *Store) CreateArtifact(ctx context.Context, ticketID string, in Artifact) (Artifact, error) {
-	defer s.lock(ticketID)()
-	if _, _, err := s.readTicket(ctx, ticketID); err != nil {
-		return Artifact{}, err
-	}
-	ap := artifactProp{
-		NodeID: in.NodeID, Name: in.Name, Type: in.Type, FilePath: in.FilePath, Metadata: in.Metadata,
-		CreatedAt: s.now(), HasContent: in.Content != nil && *in.Content != "",
-	}
-	var inline *string
-	attachmentName := ""
-	if ap.HasContent {
-		content := *in.Content
-		if !isFileBacked(in.Type) && len(content) <= inlineContentLimit {
-			inline = &content
-			ap.Content = &content
-			if _, err := marshalProperty("artifact", ap); err != nil {
-				inline, ap.Content = nil, nil
-			}
-		}
-		if inline == nil {
-			data := []byte(content)
-			ap.AttachmentEncoding = "raw"
-			if in.Type == "image" {
-				if decoded, err := base64.StdEncoding.DecodeString(content); err == nil {
-					data = decoded
-					ap.AttachmentEncoding = "base64"
-				}
-			}
-			ext := attachmentExt[in.Type]
-			if ext == "" {
-				ext = ".txt"
-			}
-			attachmentName = "graphops-artifact-" + strconv.FormatInt(time.Now().UnixNano(), 36) + ext
-			id, err := s.jira.addAttachment(ctx, ticketID, attachmentName, data)
-			if err != nil {
-				return Artifact{}, jiraFailure(err)
-			}
-			ap.AttachmentID = id
-		}
-	}
-	raw, err := marshalProperty("the artifact metadata (graphops.artifact)", ap)
-	if err != nil {
-		return Artifact{}, err
-	}
-	cm, err := s.jira.addComment(ctx, ticketID, artifactCommentBody(in, inline, attachmentName),
-		[]jiraProperty{{Key: propArtifact, Value: json.RawMessage(raw)}})
-	if err != nil {
-		if ap.AttachmentID != "" {
-			// Nothing refers to the uploaded attachment without the comment:
-			// remove it (best effort, and even when ctx is already done, with
-			// a short deadline of its own).
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), attachmentCleanupTimeout)
-			if delErr := s.jira.deleteAttachment(cleanupCtx, ap.AttachmentID); delErr != nil && s.logf != nil {
-				s.logf("could not remove the orphaned attachment %s of %s: %v", ap.AttachmentID, ticketID, delErr)
-			}
-			cancel()
-		}
-		return Artifact{}, jiraFailure(err)
-	}
-	out := Artifact{
-		ID: ticketID + "-c" + cm.ID, TicketID: ticketID, NodeID: ap.NodeID, Name: ap.Name, Type: ap.Type,
-		Content: in.Content, FilePath: ap.FilePath, Metadata: ap.Metadata, HasContent: ap.HasContent, CreatedAt: ap.CreatedAt,
-	}
-	return out, nil
-}
-
-// artifactFrom rebuilds an Artifact from a comment. withContent controls
-// whether attachment-backed content is downloaded.
-func (s *Store) artifactFrom(ctx context.Context, issueKey string, cm jiraComment, ap artifactProp, withContent bool) (Artifact, error) {
-	a := Artifact{
-		ID: issueKey + "-c" + cm.ID, TicketID: issueKey, NodeID: ap.NodeID, Name: ap.Name, Type: ap.Type,
-		FilePath: ap.FilePath, Metadata: ap.Metadata, HasContent: ap.HasContent, CreatedAt: ap.CreatedAt,
-		Content: ap.Content,
-	}
-	if withContent && ap.AttachmentID != "" {
-		data, err := s.jira.attachmentContent(ctx, ap.AttachmentID)
-		if err != nil {
-			return Artifact{}, jiraFailure(err)
-		}
-		content := string(data)
-		if ap.AttachmentEncoding == "base64" {
-			content = base64.StdEncoding.EncodeToString(data)
-		}
-		a.Content = &content
-	}
-	return a, nil
-}
-
-// listArtifacts lists an issue's artifacts, oldest first. With nodeID set,
-// only that node's. For a ticket listing (fullContent false), html/image
-// content is omitted (has_content still set), as the protocol allows;
-// text/gherkin/json content is always included.
-func (s *Store) listArtifacts(ctx context.Context, issueKey, nodeID string, fullContent bool) ([]Artifact, error) {
-	comments, err := s.jira.listComments(ctx, issueKey)
-	if err != nil {
-		if isJiraStatus(err, http.StatusNotFound) {
-			return []Artifact{}, nil
-		}
-		return nil, jiraFailure(err)
-	}
-	out := []Artifact{}
-	for _, cm := range comments {
-		ap, ok := artifactPropOf(cm)
-		if !ok || (nodeID != "" && ap.NodeID != nodeID) {
-			continue
-		}
-		withContent := fullContent || !isFileBacked(ap.Type)
-		a, err := s.artifactFrom(ctx, issueKey, cm, ap, withContent)
-		if err != nil {
-			return nil, err
-		}
-		if !withContent {
-			a.Content = nil
-		}
-		out = append(out, a)
-	}
-	return out, nil
-}
-
-// isTicketNotFound reports whether err is a TICKET_NOT_FOUND API error.
-func isTicketNotFound(err error) bool {
-	var apiErr *apiError
-	return errors.As(err, &apiErr) && apiErr.Code == "TICKET_NOT_FOUND"
-}
-
-// GetArtifact reads one artifact comment. Like every other read, it first
-// checks through readTicket that the issue is a managed ticket of a
-// registered project: an artifact ID naming any other issue the account can
-// see -- an unregistered project's, one never created through GraphOps, or a
-// detached (deleted) ticket's -- is ARTIFACT_NOT_FOUND, and neither its
-// comments nor any attachment a comment property points to are fetched.
-func (s *Store) GetArtifact(ctx context.Context, id string) (Artifact, error) {
-	issueKey, commentID, ok := parseArtifactID(id)
-	if !ok {
-		return Artifact{}, notFound("ARTIFACT_NOT_FOUND", "artifact", id)
-	}
-	if _, _, err := s.readTicket(ctx, issueKey); err != nil {
-		if isTicketNotFound(err) {
-			return Artifact{}, notFound("ARTIFACT_NOT_FOUND", "artifact", id)
-		}
-		return Artifact{}, err
-	}
-	cm, err := s.jira.getComment(ctx, issueKey, commentID)
-	if err != nil {
-		if isJiraStatus(err, http.StatusNotFound) {
-			return Artifact{}, notFound("ARTIFACT_NOT_FOUND", "artifact", id)
-		}
-		return Artifact{}, jiraFailure(err)
-	}
-	ap, ok := artifactPropOf(*cm)
-	if !ok {
-		return Artifact{}, notFound("ARTIFACT_NOT_FOUND", "artifact", id)
-	}
-	return s.artifactFrom(ctx, issueKey, *cm, ap, true)
-}
-
-func (s *Store) ListArtifactsByTicket(ctx context.Context, ticketID string) ([]Artifact, error) {
-	if _, _, err := s.readTicket(ctx, ticketID); err != nil {
-		var apiErr *apiError
-		if errors.As(err, &apiErr) && apiErr.Code == "TICKET_NOT_FOUND" {
-			return []Artifact{}, nil
-		}
-		return nil, err
-	}
-	return s.listArtifacts(ctx, ticketID, "", false)
-}
-
-func (s *Store) ListArtifactsByNode(ctx context.Context, nodeID string) ([]Artifact, error) {
-	issueKey, ok := issueKeyOfNode(nodeID)
-	if !ok {
-		return []Artifact{}, nil
-	}
-	// Same check as GetArtifact: only a managed ticket of a registered
-	// project has artifacts.
-	if _, _, err := s.readTicket(ctx, issueKey); err != nil {
-		if isTicketNotFound(err) {
-			return []Artifact{}, nil
-		}
-		return nil, err
-	}
-	return s.listArtifacts(ctx, issueKey, nodeID, true)
 }
