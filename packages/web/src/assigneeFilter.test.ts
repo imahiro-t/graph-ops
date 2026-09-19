@@ -81,3 +81,37 @@ describe('matchesAssigneeFilter', () => {
     expect(matching(['ユーザ不在'])).toEqual([]);
   });
 });
+
+// DFLT-00087: the sentinel's source spelling changed from a raw U+0000 byte to
+// the \u0000 escape. The runtime value must not change. The expected string
+// below is itself written with the escape, never the raw byte.
+describe('UNASSIGNED_ASSIGNEE', () => {
+  it('is still U+0000 followed by "unassigned"', () => {
+    expect(UNASSIGNED_ASSIGNEE.charCodeAt(0)).toBe(0);
+    expect(UNASSIGNED_ASSIGNEE).toBe('\u0000unassigned');
+    expect(UNASSIGNED_ASSIGNEE).toHaveLength(11);
+  });
+});
+
+// DFLT-00087 (optional item): a whitespace-only name is "nobody", not a
+// blank option row.
+describe('whitespace-only assignee names', () => {
+  it('are not offered as options', () => {
+    expect(assigneeFilterOptions(['  ', '\t', '佐藤'])).toEqual([UNASSIGNED_ASSIGNEE, '佐藤']);
+  });
+
+  it('match the unassigned bucket and no name', () => {
+    expect(matchesAssigneeFilter('  ', [UNASSIGNED_ASSIGNEE])).toBe(true);
+    expect(matchesAssigneeFilter('  ', ['佐藤'])).toBe(false);
+    for (const value of [null, undefined, '']) {
+      expect(matchesAssigneeFilter(value, [UNASSIGNED_ASSIGNEE])).toBe(true);
+    }
+    expect(matchesAssigneeFilter('佐藤', [UNASSIGNED_ASSIGNEE])).toBe(false);
+  });
+
+  it('keeps names with surrounding spaces as they are', () => {
+    // trim only decides "is there a name"; the name itself is not rewritten.
+    expect(assigneeFilterOptions([' 佐藤 '])).toEqual([UNASSIGNED_ASSIGNEE, ' 佐藤 ']);
+    expect(matchesAssigneeFilter(' 佐藤 ', [' 佐藤 '])).toBe(true);
+  });
+});
