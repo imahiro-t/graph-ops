@@ -23,6 +23,7 @@ import { apiFetch } from '../../lib/apiFetch';
 import { localizedApiErrorMessage, errorMessage } from '../../lib/apiError';
 import { StatusLiveRegion } from '../StatusLiveRegion';
 import { useLatest } from '../../hooks/useLatest';
+import { useSavedFlash } from '../../hooks/useSavedFlash';
 
 interface Props {
   scope: SettingsScope;
@@ -136,7 +137,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [savedFlash, setSavedFlash] = useState(false);
+  const { savedFlash, showSavedFlash } = useSavedFlash();
 
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -213,8 +214,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
       // disk, rather than from the submitted form.
       onPaginationPageSizeChanged(nextForm.paginationPageSize);
       onMyNameChanged(nextForm.myName);
-      setSavedFlash(true);
-      setTimeout(() => setSavedFlash(false), 2000);
+      showSavedFlash();
     } catch (e) {
       setError(errorMessage(e, t('errors.UNKNOWN')));
     } finally {

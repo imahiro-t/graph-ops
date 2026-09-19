@@ -15,6 +15,7 @@ import { Loader2, Save, CheckCircle2 } from 'lucide-react';
 import { SettingsScope, SettingsTemplateTextResponse } from '../../types';
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
+import { useSavedFlash } from '../../hooks/useSavedFlash';
 
 export type TemplateFetcher = (
   t: TFunction,
@@ -64,7 +65,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [savedFlash, setSavedFlash] = useState(false);
+  const { savedFlash, showSavedFlash } = useSavedFlash();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -102,8 +103,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
       setTierText(res.tier_text);
       setSavedTierText(res.tier_text);
       setMergedText(res.merged_text);
-      setSavedFlash(true);
-      setTimeout(() => setSavedFlash(false), 2000);
+      showSavedFlash();
     } catch (e) {
       setError(errorMessage(e, t('errors.UNKNOWN')));
     } finally {
