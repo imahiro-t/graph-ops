@@ -26,13 +26,15 @@ const OPTIONS: MultiSelectFilterOption<string>[] = [
 function Harness({
   options = OPTIONS,
   emptyKey,
+  initialSelected = [],
   onChange
 }: {
   options?: MultiSelectFilterOption<string>[];
   emptyKey?: string;
+  initialSelected?: string[];
   onChange?: (next: string[]) => void;
 }) {
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>(initialSelected);
   return (
     <MultiSelectFilter
       {...KEYS}
@@ -72,14 +74,22 @@ describe('MultiSelectFilter', () => {
     const user = userEvent.setup();
     render(<Harness />);
 
+    // Closed: the panel is not rendered, so there must be no aria-controls
+    // pointing at it (DFLT-00087).
     expect(trigger()).toHaveAttribute('aria-expanded', 'false');
-    expect(trigger()).toHaveAttribute('aria-controls', KEYS.panelId);
+    expect(trigger()).not.toHaveAttribute('aria-controls');
+    expect(document.getElementById(KEYS.panelId)).toBeNull();
     expect(screen.queryByRole('group')).not.toBeInTheDocument();
+    expect(screen.getByTestId(`${KEYS.panelId}-trigger`)).toBe(trigger());
 
     await user.click(trigger());
     expect(trigger()).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger()).toHaveAttribute('aria-controls', KEYS.panelId);
     const panel = screen.getByRole('group', { name: i18n.t('toolbar.statusGroupLabel') });
     expect(panel).toHaveAttribute('id', KEYS.panelId);
+
+    await user.keyboard('{Escape}');
+    expect(trigger()).not.toHaveAttribute('aria-controls');
   });
 
   it('keeps the panel open while toggling, and the selection in option order', async () => {
@@ -116,6 +126,49 @@ describe('MultiSelectFilter', () => {
     expect(trigger()).toHaveTextContent(i18n.t('toolbar.statusAll'));
     for (const box of screen.getAllByRole('checkbox')) expect(box).not.toBeChecked();
     expect(clearButton()).toBeDisabled();
+  });
+
+  it('moves focus to the trigger on clear, so Escape still closes the panel', async () => {
+    // DFLT-00087: the clear button disables itself when pressed; before the
+    // fix focus fell to <body>, outside the Escape handler.
+    const user = userEvent.setup();
+    render(<Harness />);
+
+    await user.click(trigger());
+    await user.click(screen.getByRole('checkbox', { name: 'あ' }));
+    await user.click(clearButton());
+    expect(document.activeElement).toBe(trigger());
+    expect(clearButton()).toBeDisabled();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('group')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  it('keeps selected values that are not among the options', async () => {
+    // DFLT-00087: 'z' has no checkbox (think of an assignee who dropped out
+    // of the polled options). Checking or unchecking others must keep it.
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<Harness initialSelected={['z']} onChange={onChange} />);
+    expect(trigger()).toHaveTextContent(i18n.t('toolbar.statusSelected', { count: 1 }));
+
+    await user.click(trigger());
+    await user.click(screen.getByRole('checkbox', { name: 'あ' }));
+    expect(onChange).toHaveBeenLastCalledWith(['a', 'z']);
+    expect(trigger()).toHaveTextContent(i18n.t('toolbar.statusSelected', { count: 2 }));
+
+    await user.click(screen.getByRole('checkbox', { name: 'う' }));
+    expect(onChange).toHaveBeenLastCalledWith(['a', 'c', 'z']);
+
+    await user.click(screen.getByRole('checkbox', { name: 'あ' }));
+    expect(onChange).toHaveBeenLastCalledWith(['c', 'z']);
+    expect(trigger()).toHaveTextContent(i18n.t('toolbar.statusSelected', { count: 2 }));
+
+    // Only the clear button can drop a value that has no checkbox.
+    await user.click(clearButton());
+    expect(onChange).toHaveBeenLastCalledWith([]);
+    expect(trigger()).toHaveTextContent(i18n.t('toolbar.statusAll'));
   });
 
   it('still shows the clear button, disabled, when there are no options at all', async () => {

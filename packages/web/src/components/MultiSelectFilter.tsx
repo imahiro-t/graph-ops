@@ -47,10 +47,11 @@ export interface MultiSelectFilterOption<T extends string> {
 }
 
 interface Props<T extends string> {
-  // Both the panel's id and the trigger's aria-controls. Must be unique on
-  // the page -- four of these render side by side in the toolbar -- and is
-  // also the stem of the overlay's data-testid, which is how tests click
-  // "outside" the panel.
+  // Both the panel's id and the trigger's aria-controls (while open). Must be
+  // unique on the page -- four of these render side by side in the toolbar --
+  // and is also the stem of the overlay's and the trigger's data-testid:
+  // tests click "outside" the panel through the former and find the trigger
+  // through the latter.
   panelId: string;
   // i18n keys rather than resolved strings: the "All" / "N selected" choice
   // is made here (see above), so callers cannot get the two out of step.
@@ -81,13 +82,24 @@ export function MultiSelectFilter<T extends string>({
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   const toggle = (value: T) => {
+    if (selected.includes(value)) {
+      // Removing already leaves every other value alone, including ones that
+      // are no longer among the options.
+      onChange(selected.filter(x => x !== value));
+      return;
+    }
     // Re-derive from `options` when adding so the selection always stays in
-    // the panel's display order, whatever order the user clicked in.
-    onChange(
-      selected.includes(value)
-        ? selected.filter(x => x !== value)
-        : options.map(o => o.value).filter(v => v === value || selected.includes(v))
-    );
+    // the panel's display order, whatever order the user clicked in -- then
+    // append, in their existing relative order, any selected values that are
+    // NOT among the current options (DFLT-00087). The assignee options are
+    // derived from the loaded tickets and change with the 15-second poll, so
+    // a selected name can drop out of the panel; assigneeFilter.ts promises
+    // such a selection stays until cleared. Rebuilding from `options` alone
+    // silently dropped it the moment any other box was checked. Values
+    // without a checkbox can only be removed by the clear button.
+    const inOptions = options.map(o => o.value);
+    const kept = selected.filter(v => !inOptions.includes(v));
+    onChange([...inOptions.filter(v => v === value || selected.includes(v)), ...kept]);
   };
 
   return (
@@ -108,7 +120,12 @@ export function MultiSelectFilter<T extends string>({
         type="button"
         onClick={() => setIsOpen(v => !v)}
         aria-expanded={isOpen}
-        aria-controls={panelId}
+        // Only while the panel is mounted: it is rendered conditionally, so
+        // a closed trigger pointing at panelId would reference an element
+        // that does not exist (DFLT-00087). Tests find the trigger by the
+        // testid below instead, named like the overlay's.
+        aria-controls={isOpen ? panelId : undefined}
+        data-testid={`${panelId}-trigger`}
         className="px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5 whitespace-nowrap"
       >
         {selected.length === 0 ? t(allKey) : t(selectedKey, { count: selected.length })}
@@ -157,11 +174,27 @@ export function MultiSelectFilter<T extends string>({
                 clear button at the bottom" true by construction instead of
                 per-filter, and a disabled control under "this project has no
                 labels" states the same thing the hidden one left implicit.
-                Covered by MultiSelectFilter.test.tsx. */}
+                Covered by MultiSelectFilter.test.tsx.
+
+                Pressing it disables it (the selection is now empty), and a
+                disabled button drops focus to <body> -- outside this
+                component's onKeyDown, so Escape stopped closing the panel
+                (WCAG 2.4.3 / 3.2.2, DFLT-00087). Focus therefore moves to
+                the trigger, which also announces the new "<filter>: All".
+                This happens inside the click handler, before React 18
+                re-renders the batched state update that sets `disabled`,
+                so focus never passes through <body>. aria-disabled with an
+                early return was the alternative; it was not taken because it
+                would keep an inert button in the tab order and break the
+                existing "the clear button is disabled while empty" contract
+                (Gherkin + toBeDisabled() tests). */}
             <div className="border-t border-slate-100 dark:border-slate-800 mt-1 pt-1 px-1">
               <button
                 type="button"
-                onClick={() => onChange([])}
+                onClick={() => {
+                  onChange([]);
+                  buttonRef.current?.focus();
+                }}
                 disabled={selected.length === 0}
                 className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-50 dark:hover:bg-slate-800 text-blue-700 dark:text-blue-400 font-medium disabled:opacity-50 disabled:hover:bg-transparent"
               >

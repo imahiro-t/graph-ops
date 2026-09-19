@@ -66,12 +66,12 @@ const selectedText = (f: FilterName, count: number) =>
   i18n.t(`toolbar.${FILTERS[f].prefix}Selected`, { count });
 const groupLabel = (f: FilterName) => i18n.t(`toolbar.${FILTERS[f].prefix}GroupLabel`);
 
-// Found by aria-controls rather than by its text, so a test can look the
-// trigger up without already knowing what it currently says.
+// Found by its `<panelId>-trigger` testid rather than by its text, so a test
+// can look the trigger up without already knowing what it currently says.
+// (Not by aria-controls: since DFLT-00087 a closed trigger has none, because
+// the panel it would point at is not in the DOM.)
 function trigger(f: FilterName): HTMLButtonElement {
-  const el = document.querySelector<HTMLButtonElement>(`button[aria-controls="${FILTERS[f].panelId}"]`);
-  if (!el) throw new Error(`no trigger for the ${f} filter`);
-  return el;
+  return screen.getByTestId(`${FILTERS[f].panelId}-trigger`) as HTMLButtonElement;
 }
 
 const panel = (f: FilterName) => screen.getByRole('group', { name: groupLabel(f) });
@@ -193,12 +193,49 @@ describe('App toolbar filters', () => {
   describe('the same control four times', () => {
     it.each(FILTER_NAMES)('gives the %s filter the shared ARIA wiring', async f => {
       const user = await renderApp();
+      // Closed: no aria-controls at all, and indeed nothing to point at.
       expect(trigger(f)).toHaveAttribute('aria-expanded', 'false');
-      expect(trigger(f)).toHaveAttribute('aria-controls', FILTERS[f].panelId);
+      expect(trigger(f)).not.toHaveAttribute('aria-controls');
+      expect(document.getElementById(FILTERS[f].panelId)).toBeNull();
 
       const p = await open(user, f);
       expect(trigger(f)).toHaveAttribute('aria-expanded', 'true');
-      expect(p).toHaveAttribute('id', FILTERS[f].panelId);
+      expect(trigger(f)).toHaveAttribute('aria-controls', FILTERS[f].panelId);
+      expect(document.getElementById(FILTERS[f].panelId)).toBe(p);
+      expect(p).toBeVisible();
+    });
+
+    // DFLT-00087: every way of closing leaves no dangling aria-controls, and
+    // reopening points it at a panel that exists again. aria-controls depends
+    // only on isOpen, but all three closings are run for all four filters so
+    // no combination is left to inference.
+    const CLOSINGS = {
+      Escape: async (user: User) => {
+        await user.keyboard('{Escape}');
+      },
+      'an outside click': async (user: User, f: FilterName) => {
+        await close(user, f);
+      },
+      'pressing the trigger again': async (user: User, f: FilterName) => {
+        await user.click(trigger(f));
+      }
+    } as const;
+    it.each(
+      FILTER_NAMES.flatMap(f =>
+        (Object.keys(CLOSINGS) as (keyof typeof CLOSINGS)[]).map(how => [f, how] as const)
+      )
+    )('leaves no dangling aria-controls on the %s filter after closing by %s', async (f, how) => {
+      const user = await renderApp();
+      await open(user, f);
+      await CLOSINGS[how](user, f);
+      expect(screen.queryByRole('group', { name: groupLabel(f) })).not.toBeInTheDocument();
+      expect(trigger(f)).toHaveAttribute('aria-expanded', 'false');
+      expect(trigger(f)).not.toHaveAttribute('aria-controls');
+
+      await user.click(trigger(f));
+      const id = trigger(f).getAttribute('aria-controls');
+      expect(id).toBe(FILTERS[f].panelId);
+      expect(document.getElementById(id!)).toBeInTheDocument();
     });
 
     it('gives each filter its own panel id', async () => {
@@ -267,6 +304,31 @@ describe('App toolbar filters', () => {
       expect(trigger(f)).toHaveTextContent(allText(f));
       for (const box of within(panel(f)).getAllByRole('checkbox')) expect(box).not.toBeChecked();
       await close(user, f);
+      expectVisible(ALL_IDS);
+    });
+
+    // DFLT-00087: the clear button disables itself when pressed; focus used to
+    // fall to <body>, out of reach of the panel's Escape handler.
+    it.each([
+      ['status' as const, () => [status('todo')]],
+      ['assignee' as const, () => ['佐藤']],
+      ['priority' as const, () => [priority('high')]],
+      ['label' as const, () => ['UI改善']]
+    ])('moves focus to the %s trigger, so Escape still closes the panel', async (f, pick) => {
+      const user = await renderApp();
+      await toggle(user, f, pick());
+      await user.click(clearButton(f));
+
+      expect(trigger(f)).toHaveFocus();
+      expect(document.activeElement).not.toBe(document.body);
+      expect(trigger(f)).toHaveTextContent(allText(f));
+      expect(panel(f)).toBeInTheDocument();
+      expect(clearButton(f)).toBeDisabled();
+
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('group', { name: groupLabel(f) })).not.toBeInTheDocument();
+      expect(trigger(f)).toHaveAttribute('aria-expanded', 'false');
+      expect(trigger(f)).toHaveFocus();
       expectVisible(ALL_IDS);
     });
 
@@ -385,6 +447,33 @@ describe('App toolbar filters', () => {
       expect(trigger('assignee')).toHaveTextContent(selectedText('assignee', 1));
       const p = await open(user, 'assignee');
       expect(within(p).queryByRole('checkbox', { name: '田中' })).not.toBeInTheDocument();
+    });
+
+    // DFLT-00087: checking another box used to rebuild the selection from the
+    // current options only, silently dropping the vanished name.
+    it('keeps a vanished assignee selected when another one is checked', async () => {
+      const user = await renderApp();
+      await filterBy(user, 'assignee', ['田中']);
+
+      backend.tickets.find(tk => tk.id === 'DFLT-00005')!.assignee = null;
+      await user.click(screen.getByTitle(i18n.t('toolbar.refreshTitle')));
+      await waitFor(() => expectVisible([]));
+      expect(within(await open(user, 'assignee')).queryByRole('checkbox', { name: '田中' })).not.toBeInTheDocument();
+
+      await toggle(user, 'assignee', ['佐藤']);
+      expect(trigger('assignee')).toHaveTextContent(selectedText('assignee', 2));
+      await close(user, 'assignee');
+      expectVisible(['DFLT-00001', 'DFLT-00002']);
+
+      // Bring 田中 back: the name must still be selected, which the UI shows
+      // as a ticked box and DFLT-00005 reappearing.
+      backend.tickets.find(tk => tk.id === 'DFLT-00005')!.assignee = '田中';
+      await user.click(screen.getByTitle(i18n.t('toolbar.refreshTitle')));
+      await waitFor(() => expectVisible(['DFLT-00001', 'DFLT-00002', 'DFLT-00005']));
+      const p = await open(user, 'assignee');
+      expect(within(p).getByRole('checkbox', { name: '田中' })).toBeChecked();
+      expect(within(p).getByRole('checkbox', { name: '佐藤' })).toBeChecked();
+      expect(trigger('assignee')).toHaveTextContent(selectedText('assignee', 2));
     });
   });
 
