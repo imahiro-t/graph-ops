@@ -13,10 +13,11 @@ GraphOps is a ticket management and execution platform for AI-driven development
 
 ### What GraphOps Does
 
-- **One execution graph per ticket**: each ticket gets a DAG of nodes such as `plan`, `review`, `gherkin_spec`, `implementation`, `review_gate`, `approval_gate`, `report`, and `release`. Nodes run in order or in parallel according to their dependencies. When a review fails, the graph loops back to the node that needs rework.
+- **One execution graph per ticket**: each ticket gets a DAG of nodes such as `plan`, `investigation`, `review`, `gherkin_spec`, `implementation`, `review_gate`, `gherkin_test`, `documentation`, `approval_gate`, `report`, and `release`. `/graph-ops:process-ticket` picks the graph's shape from the ticket (for example investigation only, or implementation with Gherkin tests). Nodes run in order or in parallel according to their dependencies. When a review fails, the graph loops back to the node that needs rework.
 - **Review gates and approval gates**: a `review_gate` node judges pass/fail automatically against configurable criteria (code, QA, security, non-functional, ...). An `approval_gate` node always waits for a human decision, made either in the terminal running `/graph-ops:process-ticket` or in the Web UI.
-- **Web UI**: a ticket list with search, filters, and paging; an interactive view of each ticket's execution graph; formatted previews of every artifact (Markdown, Gherkin, HTML); approve/reject buttons; and buttons that launch Claude Code for you.
+- **Web UI**: a ticket list with search, filters (status, assignee, priority, label), and paging; an interactive view of each ticket's execution graph; formatted previews of every artifact (Markdown, Gherkin, HTML); approve/reject buttons; and buttons that launch Claude Code for you.
 - **Customizable without editing the plugin**: node-type instructions, review-gate criteria, skill instructions, and the plan / review / report templates can be extended globally (per user) or per project (shared with your team), from the Web UI's Settings screen.
+- **Choice of storage**: a local SQLite file by default, a MySQL database to share projects and tickets with a team, or an HTTP custom data source that keeps the data in a system of your own, such as Jira.
 
 ### Requirements
 
@@ -33,12 +34,12 @@ Run the following inside Claude Code:
 /plugin marketplace add imahiro-t/graph-ops
 /plugin install graph-ops@graph-ops
 ```
-Installing fetches the plugin at the current release tag. The first time the plugin runs `graph-engine`, it downloads the binary for your OS/architecture from that release's GitHub Release, checks it against the release's `checksums.txt`, and stores it in a per-user cache (`~/.cache/graph-ops/engine/`). Later runs reuse the cache.
+Installing fetches the plugin at the current release tag. The first time the plugin runs `graph-engine`, it downloads the binary for your OS/architecture from that release's GitHub Release, checks it against the release's `checksums.txt`, and stores it in a per-user cache (`~/.cache/graph-ops/engine/`, or `%LOCALAPPDATA%\graph-ops\engine` on Windows). Later runs reuse the cache.
 
 #### Quick start
 
 1. **Choose the plugin's language**: run `/graph-ops:onboarding` once. It asks which language the plugin should use for node names and generated content (plans, Gherkin specs, implementation notes, review results, reports). You can re-run it any time.
-2. **Register your project**: `cd` into your project's working directory, start Claude Code, and run `/graph-ops:ui`. The Web UI opens in your browser. If no project is mapped to that directory in your environment yet, a dialog opens where you either **create a new project** or **choose an existing project** from the database (for example, one a teammate sharing the same MySQL database already created). Either way, the mapping from that directory to the project is saved to your local `graph-config.json`.
+2. **Register your project**: `cd` into your project's working directory, start Claude Code, and run `/graph-ops:ui`. The Web UI opens in your browser. If no project is mapped to that directory in your environment yet, a dialog opens where you either choose **"Create new"** or **"Choose an existing project"** from the database (for example, one a teammate sharing the same MySQL database already created). Either way, the mapping from that directory to the project is saved to your local `graph-config.json`.
 3. **Create a ticket**: run `/graph-ops:create-ticket` and describe what you want. Claude talks the request through with you (scope, affected areas, edge cases) before it registers the ticket. You can also start from the Web UI's "New Ticket" button.
 4. **Refine the ticket (optional)**: run `/graph-ops:refine-ticket` to pin down the completion criteria and the "why". The ticket's description is rewritten around them.
 5. **Run the ticket**: run `/graph-ops:process-ticket` (or press "Run" on the ticket in the Web UI). It builds the execution graph, runs each node with a subagent (in parallel where possible), saves artifacts, and repeats reviews until they pass.
@@ -50,7 +51,7 @@ Update from the `/plugin` menu, or run the following in a terminal:
 ```sh
 claude plugin update graph-ops@graph-ops
 ```
-Each release points the marketplace entry at the new release tag, so updating fetches that release. The first run after the update downloads the matching `graph-engine` binary. You don't need to uninstall or reinstall.
+Each release points the marketplace entry at the new release tag, so updating fetches that release. The first run after the update downloads the matching `graph-engine` binary and removes the other versions' binaries from the cache. You don't need to uninstall or reinstall.
 - **If you installed version 0.4.0 or earlier**: those versions were fetched by a `node` one-liner that kept a clone of the repository per release under `~/.cache/graph-ops/` (for example `~/.cache/graph-ops/v0.4.0`). The plugin no longer uses those clones, so you can delete the `v*` directories there. Leave `~/.cache/graph-ops/engine/`, which holds the downloaded binaries.
 
 ### Commands
@@ -76,7 +77,7 @@ A project itself (name, prefix, tickets) lives in the database and can be shared
 ![Ticket list with the overview and filters](docs/images/ticket-list.png)
 
 - "All Tickets Overview" shows the total number of tickets, how many are in progress, in review, and done, and the node progress.
-- Search by ticket ID or title, filter by status, assignee, priority, and label, and page through the list.
+- Search by ticket ID or title, filter by status, assignee, priority, and label, and page through the list. The list refreshes itself every 15 seconds; the refresh button next to the "Updated ..." time reloads it right away.
 - The four filters all work the same way: nothing selected means "All" (no filtering), and selecting several options within one filter shows the tickets that match any of them, while different filters narrow the list together. "Clear selection" at the bottom of a panel empties that filter back to All. The assignee filter takes several assignees too, and its "Unassigned" option narrows the list to tickets with nobody assigned.
 - A ticket's status (`TODO` / `REFINED` / `IN PROGRESS` / `IN REVIEW` / `IN RELEASE` / `DONE` / `CLOSED`) is derived automatically from its execution graph.
 - You can change a ticket's priority, assign it to yourself with "Assign to me", close it without completing it (with an optional reason), reopen it, or delete it (after a confirmation).
@@ -91,7 +92,7 @@ Click a ticket to expand it. The left side shows the execution graph: nodes on t
 
 - Click a node to preview its artifacts: Markdown, Gherkin, and HTML are shown formatted.
 - Each artifact can be opened in a new tab or downloaded. "Download all artifacts" downloads every artifact of the ticket at once.
-- The "Gherkin Spec", "HTML Artifacts", and "All Artifacts" tabs collect artifacts of each kind across the ticket.
+- Besides "Nodes & Artifacts" (the node list above), the "Gherkin Spec", "HTML Artifacts", and "All Artifacts" tabs collect artifacts of each kind across the ticket.
 
 #### Approving and rejecting
 
@@ -118,8 +119,8 @@ The prompt fields accept multiple lines: press Enter for a new line, and press "
 
 Open Settings with the gear button in the header.
 
-- **Scope**: "Global Settings" apply to you on every project (stored in `$HOME/.graph-ops` by default). "Project Settings" apply to one project and are stored in the `.graph-ops/` directory of its local path, so you can commit and share them with your team. Project settings take precedence over global settings. Editing "Project Settings" requires the project's local path to be set in your environment. `$HOME/.graph-ops` is always the global settings directory and is never used as a project's settings directory, so a project whose local path is your home directory itself has no project settings.
-- **Node Types / Review Gates / Skills / Templates**: add instructions for each node type, change or add review-gate criteria, add instructions to each skill, and replace the execution-plan, review, and HTML report templates (the Templates tab's left-hand list switches between the three). Each screen also shows a merged preview of what an agent actually sees.
+- **Scope**: "Global Settings" apply to you on every project (stored in `$HOME/.graph-ops` by default). "Project Settings" apply to one project and are stored in the `.graph-ops/` directory of its local path, so you can commit and share them with your team. Project settings take precedence over global settings. Editing "Project Settings" requires the project's local path to be set in your environment. `$HOME/.graph-ops` is always the global settings directory and is never used as a project's settings directory, so a project whose local path is your home directory itself has no project settings. Both are plain files -- review gates and the language in `config.yaml` (global) or `workflow.yaml` (project), instructions and templates under `extensions/` -- so they can also be edited by hand.
+- **Node Types / Review Gates / Skills / Templates**: add instructions for each node type (or add a custom node type), change or add review-gate criteria (including each gate's maximum iterations and whether it is enabled), add instructions to each skill, and replace the execution-plan, review, and HTML report templates (the Templates tab's left-hand list switches between the three). Each screen also shows a merged preview of what an agent actually sees.
 - **Labels** (Project Settings only): create labels for the selected project, rename them, pick each one's color from a fixed palette, and delete them. Label names must be unique within a project (ignoring letter case). Labels are stored in the database, not in `.graph-ops/`, so changes are saved immediately, shared with everyone using the same database, and reflected on every ticket that carries the label; this tab does not need the project's local path. Deleting a label that is in use asks for confirmation with the number of tickets using it, then removes it from all of them. The CLI (`graph-engine create-ticket` / `refine-ticket --label <name>`) can only attach labels that are already registered here.
 - **App Settings** (Global Settings only): data storage (SQLite database file, MySQL connection including TLS, or an HTTP custom data source), "My Profile" (your name for "Assign to me"), the number of tickets per page, the node/workflow config directory, and project management (rename a project, check / set / change / clear its local path for this environment -- shown as "Not set" when there is none -- or delete it). Storage changes take effect the next time the server starts. The defaults work as they are, so most users don't need to change anything here.
 
@@ -132,10 +133,9 @@ Use the header buttons to switch the theme (light / dark / match system) and the
 - **Local, single-user tool**: the Web UI has no login. By default, the server listens only on `127.0.0.1` (port `49173`). To change this, set `host` / `port` in `graph-config.json`, or the `GRAPH_HOST` / `PORT` environment variables. Only open it to other machines on a network you trust.
 - **Where data is stored**: tickets, execution graphs, and artifacts are stored in a database, by default the SQLite file `$HOME/.graph-ops/graph.db`. `$HOME/.graph-ops/artifacts` is a working-files directory for investigation material and temporary files. When an HTML or image artifact is registered from a file path, only files under this directory can be read. If an `artifacts/` directory appears at the root of your repository, it is stray output and safe to delete.
 - **Configuration file**: runtime settings are read from `graph-config.json` in the directory the server or CLI starts from, or else from `$HOME/.graph-ops/config.json`. App Settings writes to that same file. Environment variables take precedence over the file. The file also holds `projectPaths`, each project's local path in this environment; it is saved to whichever `graph-config.json` the server (or CLI) in use reads, so start them from places that resolve to the same file.
-- **Upgrading from a version that stored `work_dir` in the database**: the `projects.work_dir` column is dropped automatically (SQLite and MySQL) the first time the new version opens the database (the UI server or any `graph-engine` command that uses it), and its values are **not** migrated. First stop or restart any UI server started before the update (one you ran with `graph-engine serve`, or one `/graph-ops:ui` started in the background): `/graph-ops:ui` reuses a server that is already running, so an old server keeps serving until you stop it. On macOS / Linux, `kill $(lsof -ti tcp:49173 -sTCP:LISTEN)` stops it (replace `49173`, the default port, if you changed it), and the next `/graph-ops:ui` starts the new one. If you leave the old server running, it does not report projects' local paths, so `/graph-ops:ui` never finds the project for your directory and opens the old project creation form every time; and once the column is gone, the old server fails with SQL errors when it lists or creates projects. Set each project's local path again, from App Settings > project management or by running `/graph-ops:ui` in the project directory and choosing the existing project. If your team shares a MySQL database, upgrade everyone together: an older binary cannot create or read projects once the column is gone. API change: project responses no longer contain `work_dir`; they contain `local_path` (this environment's path, `""` when not set) instead, and `POST` / `PATCH /api/projects` accept `local_path`.
+- **Upgrading from 0.3.x or earlier (projects' `work_dir`)**: the first time 0.4.0 or later opens the database, it drops the `projects.work_dir` column without migrating its values. Stop any UI server started before the update (`/graph-ops:ui` reuses a running server; on macOS / Linux, `kill $(lsof -ti tcp:49173 -sTCP:LISTEN)` stops one on the default port), then set each project's local path again from App Settings > project management or by running `/graph-ops:ui` in the project directory and choosing the existing project. Teams sharing a MySQL database should upgrade together. See the [0.4.0 release notes](docs/release-notes/v0.4.0.md) for details, including the API change.
 - **Custom data source (HTTP)**: instead of SQLite or MySQL, GraphOps can keep its data in a system of your own, such as Jira, through a plugin (an HTTP server you run) that implements a published protocol. Set `dbBackend` to `"http"` with `httpDataSourceUrl` and `httpDataSourceToken`, or choose it in App Settings. Plaintext `http://` is allowed only for loopback addresses; a remote plugin needs `https://` and a bearer token. See the [developer manual for custom data sources](docs/http-datasource/README.md) and the [Jira sample plugin](examples/jira-datasource/README.md).
-- **Fixing or deleting a ticket from the CLI**: `graph-engine update-ticket <ticketId> [--title <text>] [--description <text|->] [--priority <HIGH|MEDIUM|LOW>]` changes only the fields you give and never the status, so an `IN PROGRESS` ticket can be corrected without going back to `REFINED` (which `/graph-ops:refine-ticket` always does). `--description -` reads the description from stdin. Labels, the assignee and other fields are not changed by it. `graph-engine delete-ticket <ticketId> --yes` deletes a ticket together with its nodes, edges, artifacts and label attachments, like the Web UI's delete; it works from any status, cannot be undone, and does nothing without `--yes`. Both commands fail on an unknown ticket ID, and `graph-engine help` describes them in full.
-- **Labels on an existing database**: the label tables are created automatically (SQLite and MySQL) the first time the new version opens the database. Existing tickets are left unchanged and start with no labels.
+- **Fixing or deleting a ticket from the CLI**: `graph-engine update-ticket <ticketId> [--title <text>] [--description <text|->] [--priority <HIGH|MEDIUM|LOW>]` changes only the given fields (`--description -` reads stdin) and never the status, labels, or assignee, so an `IN PROGRESS` ticket can be corrected without going back to `REFINED` as `/graph-ops:refine-ticket` does. `graph-engine delete-ticket <ticketId> --yes` deletes a ticket with its nodes, edges, artifacts, and label attachments from any status, like the Web UI's delete; it cannot be undone and does nothing without `--yes`. `graph-engine help` describes both in full.
 - **Two separate language settings**: `/graph-ops:onboarding` sets the language of the content the plugin generates (saved as `language:` in `$HOME/.graph-ops/config.yaml`). The header's language button only changes the Web UI's display language.
 
 ### Troubleshooting
@@ -156,14 +156,15 @@ GraphOps は、実行グラフ（DAG／並列／ループ）を軸にした、AI
 
 ![チケットの実行グラフとノード一覧](docs/images/execution-graph.png)
 
-> この README のスクリーンショットは、サンプルデータを使った英語表示の Web UI です。UI の表示言語（English／日本語）はヘッダーから切り替えられます。
+> この README のスクリーンショットは、サンプルデータを使った英語表示の Web UI です。本文の画面名やボタン名は、日本語表示のときの文言で書いています。UI の表示言語（English／日本語）はヘッダーから切り替えられます。
 
 ### GraphOps でできること
 
-- **チケットごとの実行グラフ**: チケットごとに、`plan`／`review`／`gherkin_spec`／`implementation`／`review_gate`／`approval_gate`／`report`／`release` などのノードから成る DAG を持ちます。ノードは依存関係に従って直列・並列に実行されます。レビューに落ちると、手直しが必要なノードへ差し戻し（ループ）ます。
+- **チケットごとの実行グラフ**: チケットごとに、`plan`／`investigation`／`review`／`gherkin_spec`／`implementation`／`review_gate`／`gherkin_test`／`documentation`／`approval_gate`／`report`／`release` などのノードから成る DAG を持ちます。グラフの形は、`/graph-ops:process-ticket` がチケットの内容から決めます（調査だけ、Gherkin テスト付きの実装など）。ノードは依存関係に従って直列・並列に実行されます。レビューに落ちると、手直しが必要なノードへ差し戻し（ループ）ます。
 - **レビューゲートと承認ゲート**: `review_gate` ノードは、設定した観点（コード、QA、セキュリティ、非機能など）で自動的に合否を判定します。`approval_gate` ノードは、必ず人間の判断を待ちます。判断は、`/graph-ops:process-ticket` を実行中のターミナルでも Web UI でもできます。
-- **Web UI**: 検索・フィルタ・ページングに対応したチケット一覧、チケットごとの実行グラフのインタラクティブな表示、すべての成果物（Markdown／Gherkin／HTML）の整形プレビュー、承認・却下ボタン、Claude Code を起動するボタンを備えています。
-- **プラグインを編集せずにカスタマイズ**: ノード種別ごとの指示、レビューゲートの観点、スキルへの指示、レポートテンプレートを、全体（ユーザーごと）またはプロジェクト単位（チームで共有）で拡張できます。Web UI の設定画面から編集します。
+- **Web UI**: 検索・フィルタ（ステータス・担当者・優先度・ラベル）・ページングに対応したチケット一覧、チケットごとの実行グラフのインタラクティブな表示、すべての成果物（Markdown／Gherkin／HTML）の整形プレビュー、承認・却下ボタン、Claude Code を起動するボタンを備えています。
+- **プラグインを編集せずにカスタマイズ**: ノード種別ごとの指示、レビューゲートの観点、スキルへの指示、計画・レビュー・レポートのテンプレートを、全体（ユーザーごと）またはプロジェクト単位（チームで共有）で拡張できます。Web UI の設定画面から編集します。
+- **データ保存先を選べる**: 既定はローカルの SQLite ファイルです。チームでプロジェクトやチケットを共有するなら MySQL、Jira などの自前のシステムにデータを置くなら HTTP カスタムデータソースを使えます。
 
 ### 必要なもの
 
@@ -180,7 +181,7 @@ Claude Code 内で次を実行します。
 /plugin marketplace add imahiro-t/graph-ops
 /plugin install graph-ops@graph-ops
 ```
-インストールすると、現在のリリースタグのプラグインが取得されます。プラグインが初めて `graph-engine` を実行するときに、お使いの OS／アーキテクチャ向けのバイナリをそのリリースの GitHub Release からダウンロードし、リリースの `checksums.txt` と照合してから、ユーザーごとのキャッシュ（`~/.cache/graph-ops/engine/`）に保存します。2 回目以降はこのキャッシュを使います。
+インストールすると、現在のリリースタグのプラグインが取得されます。プラグインが初めて `graph-engine` を実行するときに、お使いの OS／アーキテクチャ向けのバイナリをそのリリースの GitHub Release からダウンロードし、リリースの `checksums.txt` と照合してから、ユーザーごとのキャッシュ（`~/.cache/graph-ops/engine/`。Windows では `%LOCALAPPDATA%\graph-ops\engine`）に保存します。2 回目以降はこのキャッシュを使います。
 
 #### クイックスタート
 
@@ -197,7 +198,7 @@ Claude Code 内で次を実行します。
 ```sh
 claude plugin update graph-ops@graph-ops
 ```
-リリースのたびにマーケットプレイスの登録内容が新しいリリースタグを指すので、更新するとそのリリースが取得されます。更新後の初回実行時に、対応する `graph-engine` バイナリがダウンロードされます。アンインストールや再インストールは不要です。
+リリースのたびにマーケットプレイスの登録内容が新しいリリースタグを指すので、更新するとそのリリースが取得されます。更新後の初回実行時に、対応する `graph-engine` バイナリがダウンロードされ、ほかのバージョンのバイナリはキャッシュから削除されます。アンインストールや再インストールは不要です。
 - **バージョン 0.4.0 以前をインストールしていた場合**: これらのバージョンは `node` のワンライナーで取得され、リリースごとにリポジトリのクローンを `~/.cache/graph-ops/` の下（例: `~/.cache/graph-ops/v0.4.0`）に残していました。現在のプラグインはこれらを使わないので、そこにある `v*` ディレクトリは削除してかまいません。ダウンロード済みのバイナリが入っている `~/.cache/graph-ops/engine/` は残してください。
 
 ### コマンド一覧
@@ -223,9 +224,9 @@ claude plugin update graph-ops@graph-ops
 ![全チケット概要とフィルタを含むチケット一覧](docs/images/ticket-list.png)
 
 - 「全チケット概要」に、総チケット数、進行中・レビュー中・完了の件数、ノード進捗が表示されます。
-- チケット ID やタイトルで検索し、ステータス・担当者・優先度・ラベルで絞り込み、ページを切り替えられます。
+- チケット ID やタイトルで検索し、ステータス・担当者・優先度・ラベルで絞り込み、ページを切り替えられます。一覧は 15 秒ごとに自動で更新されます。「○○ 更新」の時刻の横にある更新ボタンで、すぐに最新の状態にできます。
 - 4つの絞り込みはどれも同じ操作です。何も選んでいない状態が「すべて」（絞り込みなし）で、同じ絞り込みの中で複数選ぶと、そのいずれかに一致するチケットが表示されます。異なる絞り込みどうしは、すべてに一致するチケットに絞られます。パネル下部の「選択を解除」を押すと、その絞り込みの選択が空（＝すべて）に戻ります。担当者も複数選べ、「未割り当て」を選ぶと担当者が未設定のチケットだけに絞り込めます。
-- チケットのステータス（`TODO`／`REFINED`／`IN PROGRESS`／`IN REVIEW`／`IN RELEASE`／`DONE`／`CLOSED`）は、実行グラフから自動的に決まります。
+- チケットのステータス（`TODO`／`REFINED`／`IN PROGRESS`／`IN REVIEW`／`IN RELEASE`／`DONE`／`CLOSED`。日本語表示ではそれぞれ「未着手」「リファイン済み」「進行中」「レビュー中」「リリース中」「完了」「クローズ」）は、実行グラフから自動的に決まります。
 - チケットの優先度の変更、「担当する」での自分への割り当て、完了せずにクローズ（理由は任意）、再オープン、削除（確認あり）ができます。
 - 「担当する」ボタンは、設定 > アプリ設定 > 「自分の情報」で名前を設定すると表示されます。
 - チケットには複数のラベル（「バグ」「機能追加」など）を付けられ、チケットの行と展開したチケットに色付きで表示されます。付け外しは、展開したチケットの「ラベルを編集」で行います。選べるのは、そのプロジェクトに登録済みのラベル（設定の「ラベル」を参照）だけです。
@@ -238,7 +239,7 @@ claude plugin update graph-ops@graph-ops
 
 - ノードをクリックすると成果物をプレビューできます。Markdown・Gherkin・HTML は整形して表示されます。
 - 成果物ごとに「別タブで開く」「ダウンロード」ができます。「成果物を一括ダウンロード」で、チケットのすべての成果物をまとめてダウンロードできます。
-- 「Gherkin 仕様」「HTML成果物」「全成果物」タブには、チケット全体の成果物が種類ごとにまとまっています。
+- 「ノード一覧・成果物展開」（上記のノード一覧）のほか、「Gherkin 仕様」「HTML成果物」「全成果物」タブには、チケット全体の成果物が種類ごとにまとまっています。
 
 #### 承認と却下
 
@@ -265,8 +266,8 @@ claude plugin update graph-ops@graph-ops
 
 ヘッダーの歯車ボタンで設定画面を開きます。
 
-- **スコープ**: 「全体設定」は、すべてのプロジェクトで自分に適用されます（既定の保存先は `$HOME/.graph-ops`）。「プロジェクト単位設定」は 1 つのプロジェクトに適用され、そのローカルパスの `.graph-ops/` ディレクトリに保存されるので、コミットしてチームで共有できます。プロジェクト単位設定は全体設定より優先されます。「プロジェクト単位設定」を編集するには、自分の環境でそのプロジェクトのローカルパスが設定されている必要があります。`$HOME/.graph-ops` は常に全体設定の保存先で、プロジェクト単位設定の保存先としては使われません。そのため、ローカルパスがホームディレクトリそのものであるプロジェクトには、プロジェクト単位設定がありません。
-- **ノード種別／レビューゲート／スキル／レポートテンプレート**: ノード種別ごとの指示の追加、レビューゲートの観点の変更・追加、スキルごとの指示の追加、HTML レポートテンプレートの差し替えができます。どの画面にも、エージェントが実際に受け取る内容のマージ済みプレビューがあります。
+- **スコープ**: 「全体設定」は、すべてのプロジェクトで自分に適用されます（既定の保存先は `$HOME/.graph-ops`）。「プロジェクト単位設定」は 1 つのプロジェクトに適用され、そのローカルパスの `.graph-ops/` ディレクトリに保存されるので、コミットしてチームで共有できます。プロジェクト単位設定は全体設定より優先されます。「プロジェクト単位設定」を編集するには、自分の環境でそのプロジェクトのローカルパスが設定されている必要があります。`$HOME/.graph-ops` は常に全体設定の保存先で、プロジェクト単位設定の保存先としては使われません。そのため、ローカルパスがホームディレクトリそのものであるプロジェクトには、プロジェクト単位設定がありません。どちらも普通のファイル（レビューゲートと言語は `config.yaml`（全体）または `workflow.yaml`（プロジェクト）、指示とテンプレートは `extensions/` の下）なので、手で編集することもできます。
+- **ノード種別／レビューゲート／スキル／テンプレート**: ノード種別ごとの指示の追加（独自のノード種別の追加も可）、レビューゲートの観点の変更・追加（ゲートごとの最大イテレーション数や有効・無効も含む）、スキルごとの指示の追加、実行計画・レビュー・HTML レポートのテンプレートの差し替え（「テンプレート」タブの左の一覧で 3 つを切り替えます）ができます。どの画面にも、エージェントが実際に受け取る内容のマージ済みプレビューがあります。
 - **ラベル**（プロジェクト単位設定のみ）: 選択中のプロジェクトのラベルを作成し、名前の変更、固定パレットからの色の選択、削除ができます。ラベル名はプロジェクト内で重複できません（大文字小文字は区別しません）。ラベルは `.graph-ops/` ではなく DB に保存されるので、変更はすぐに保存されて同じ DB を使う全員で共有され、そのラベルが付いたすべてのチケットの表示に反映されます。このタブはプロジェクトのローカルパスが未設定でも使えます。使用中のラベルを削除するときは、使用しているチケットの件数付きで確認が表示され、確定するとすべてのチケットから外れます。CLI（`graph-engine create-ticket`／`refine-ticket` の `--label <name>`）で付けられるのは、ここで登録済みのラベルだけです。
 - **アプリ設定**（全体設定のみ）: データ保存先（SQLite のデータベースファイル、TLS 設定を含む MySQL 接続、または HTTP カスタムデータソース）、「自分の情報」（「担当する」に使う名前）、1 ページあたりのチケット数、ノード／ワークフロー設定ディレクトリ、プロジェクト管理（名前の変更、この環境でのローカルパスの確認・設定・変更・クリア（未設定なら「未設定」と表示）、削除）。保存先の変更は、次にサーバーを起動したときに反映されます。既定値のままで動くので、ほとんどの場合は変更不要です。
 
@@ -279,10 +280,9 @@ claude plugin update graph-ops@graph-ops
 - **ローカル・単一ユーザー向けのツール**: Web UI にログインはありません。既定では、サーバーは `127.0.0.1`（ポート `49173`）でのみ待ち受けます。変更するには、`graph-config.json` の `host`／`port`、または環境変数 `GRAPH_HOST`／`PORT` を設定します。他のマシンに公開するのは、信頼できるネットワークの中だけにしてください。
 - **データの保存先**: チケット・実行グラフ・成果物はデータベースに保存されます。既定は SQLite ファイル `$HOME/.graph-ops/graph.db` です。`$HOME/.graph-ops/artifacts` は、調査資料や一時ファイルを置く作業ファイル置き場です。HTML や画像の成果物をファイルパスで登録するときは、このディレクトリ配下のファイルだけを読み込めます。リポジトリ直下に `artifacts/` ディレクトリができていたら、紛れ込んだ不要な出力なので削除してかまいません。
 - **設定ファイル**: 実行時の設定は、サーバーや CLI を起動したディレクトリの `graph-config.json`、なければ `$HOME/.graph-ops/config.json` から読み込まれます。アプリ設定もこのファイルに書き込みます。環境変数はファイルより優先されます。このファイルには、この環境での各プロジェクトのローカルパス `projectPaths` も入ります。使っているサーバー（または CLI）が読む `graph-config.json` に保存されるので、両者が同じファイルを読む場所から起動してください。
-- **DB に `work_dir` を保存していたバージョンからのアップグレード**: 新しいバージョンが初めて DB を開いたとき（UI サーバーでも、DB を使う `graph-engine` のコマンドでも）に `projects.work_dir` カラムが自動で削除されます（SQLite・MySQL とも）。既存の値は**移行されません**。まず、更新前に起動した UI サーバー（`graph-engine serve` で起動したもの、または `/graph-ops:ui` がバックグラウンドで起動したもの）が動いていれば、停止または再起動してください。`/graph-ops:ui` は起動済みのサーバーをそのまま使うため、止めない限り古いサーバーが動き続けます。macOS／Linux では `kill $(lsof -ti tcp:49173 -sTCP:LISTEN)` で停止できます（`49173` は既定のポートです。変更している場合は置き換えてください）。次に `/graph-ops:ui` を実行すると新しいサーバーが起動します。古いサーバーを動かしたままにすると、プロジェクトのローカルパスを返さないため、`/graph-ops:ui` はディレクトリに対応するプロジェクトを特定できず、毎回古いプロジェクト作成フォームを開きます。さらにカラムの削除後は、古いサーバーでのプロジェクトの取得・作成が SQL エラーになります。各プロジェクトのローカルパスは、アプリ設定のプロジェクト管理か、プロジェクトのディレクトリで `/graph-ops:ui` を実行して既存プロジェクトを選ぶことで、各自が設定し直してください。チームで MySQL を共有している場合は、全員そろってアップグレードしてください。カラム削除後は、古いバイナリではプロジェクトの作成や取得ができません。API の変更点: プロジェクトの応答から `work_dir` がなくなり、代わりに `local_path`（この環境でのパス。未設定なら `""`）が入ります。`POST`／`PATCH /api/projects` は `local_path` を受け付けます。
+- **0.3.x 以前からのアップグレード（プロジェクトの `work_dir`）**: 0.4.0 以降が初めて DB を開いたときに `projects.work_dir` カラムが削除され、既存の値は移行されません。更新前に起動した UI サーバーが動いていれば停止してから（`/graph-ops:ui` は起動済みのサーバーをそのまま使います。macOS／Linux では、既定のポートなら `kill $(lsof -ti tcp:49173 -sTCP:LISTEN)` で停止できます）、各プロジェクトのローカルパスを、アプリ設定のプロジェクト管理か、プロジェクトのディレクトリで `/graph-ops:ui` を実行して既存プロジェクトを選ぶことで設定し直してください。チームで MySQL を共有している場合は、全員そろってアップグレードしてください。API の変更点を含む詳細は [0.4.0 のリリースノート](docs/release-notes/v0.4.0.md)（英語）を参照してください。
 - **カスタムデータソース（HTTP）**: SQLite や MySQL の代わりに、公開されたプロトコルを実装したプラグイン（自分で動かす HTTP サーバー）を通して、Jira などの自前のシステムにデータを保存できます。`dbBackend` を `"http"` にして `httpDataSourceUrl` と `httpDataSourceToken` を設定するか、アプリ設定で選びます。平文の `http://` はループバックアドレスだけで使えます。リモートのプラグインには `https://` と Bearer トークンが必要です。詳しくは[カスタムデータソースの開発マニュアル](docs/http-datasource/README.md)（英語）と [Jira サンプルプラグイン](examples/jira-datasource/README.md)（英語）を参照してください。
-- **CLI でのチケットの修正・削除**: `graph-engine update-ticket <ticketId> [--title <text>] [--description <text|->] [--priority <HIGH|MEDIUM|LOW>]` は、指定した項目だけを変更し、ステータスは変えません。そのため `IN PROGRESS` のチケットも、`REFINED` に戻さずに直せます（`/graph-ops:refine-ticket` はステータスを必ず `REFINED` にします）。`--description -` で説明を標準入力から読み込みます。ラベルや担当者などはこのコマンドでは変わりません。`graph-engine delete-ticket <ticketId> --yes` は、Web UI の削除と同じく、チケットとそのノード・エッジ・成果物・ラベルの紐付けを削除します。ステータスにかかわらず削除でき、元に戻せません。`--yes` がなければ何も削除しません。どちらのコマンドも、存在しないチケット ID ではエラーになります。詳しくは `graph-engine help` を参照してください。
-- **既存 DB のラベル対応**: 新しいバージョンが初めて DB を開いたときに、ラベル用のテーブルが自動で作成されます（SQLite・MySQL とも）。既存のチケットは変更されず、ラベルなしの状態になります。
+- **CLI でのチケットの修正・削除**: `graph-engine update-ticket <ticketId> [--title <text>] [--description <text|->] [--priority <HIGH|MEDIUM|LOW>]` は指定した項目だけを変更し（`--description -` で標準入力から読み込み）、ステータス・ラベル・担当者は変えません。そのため `IN PROGRESS` のチケットも、`/graph-ops:refine-ticket` のように `REFINED` に戻さずに直せます。`graph-engine delete-ticket <ticketId> --yes` は、Web UI の削除と同じく、チケットをノード・エッジ・成果物・ラベルの紐付けとともに、ステータスにかかわらず削除します。元に戻せず、`--yes` がなければ何も削除しません。詳しくは `graph-engine help` を参照してください。
 - **2 種類の言語設定**: `/graph-ops:onboarding` は、プラグインが生成する内容の言語を設定します（`$HOME/.graph-ops/config.yaml` に `language:` として保存）。ヘッダーの言語ボタンは、Web UI の表示言語だけを切り替えます。
 
 ### トラブルシューティング
