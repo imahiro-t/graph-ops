@@ -89,9 +89,14 @@ func newImplNode(t *testing.T, repo store.GraphRepository, projectID string) dom
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
+	// IN PROGRESS, not TODO: that is where get-executable leaves a node it
+	// has handed out, and since DFLT-00102 it is the only state an
+	// automatic node can be completed from. Seeding these tests at TODO
+	// would have them exercise a call the engine now refuses outright,
+	// which is not what any of them is about.
 	node, err := repo.CreateNode(domain.GraphNode{
 		ID: "node-" + engine.NewArtifactID(), TicketID: ticket.ID, Name: "Impl",
-		Type: domain.NodeTypeImplementation, Status: domain.NodeTODO,
+		Type: domain.NodeTypeImplementation, Status: domain.NodeInProgress,
 	})
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)

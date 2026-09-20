@@ -565,53 +565,13 @@ func (r *SQLiteRepository) ListNodesByTicket(ticketID string) ([]domain.GraphNod
 }
 
 func (r *SQLiteRepository) UpdateNode(id string, patch NodePatch) (domain.GraphNode, error) {
-	cur, err := r.GetNode(id)
-	if err != nil {
-		return domain.GraphNode{}, err
-	}
-	if cur == nil {
-		return domain.GraphNode{}, fmt.Errorf("node %s not found", id)
-	}
-	if patch.Name != nil {
-		cur.Name = *patch.Name
-	}
-	if patch.Type != nil {
-		cur.Type = *patch.Type
-	}
-	if patch.Status != nil {
-		cur.Status = *patch.Status
-	}
-	if patch.IterationCount != nil {
-		cur.IterationCount = *patch.IterationCount
-	}
-	if patch.MaxIterations != nil {
-		cur.MaxIterations = *patch.MaxIterations
-	}
-	if patch.Assignee != nil {
-		cur.Assignee = *patch.Assignee
-	}
-	if patch.IsManual != nil {
-		cur.IsManual = *patch.IsManual
-	}
-	if patch.GateID != nil {
-		cur.GateID = patch.GateID
-	}
-	if patch.Criteria != nil {
-		cur.Criteria = patch.Criteria
-	}
-	cur.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	return updateNodeColumns(r.db, r.GetNode, id, patch)
+}
 
-	_, err = r.db.Exec(
-		`UPDATE nodes SET name=?, type=?, status=?, iteration_count=?, max_iterations=?, assignee=?, is_manual=?, gate_id=?, criteria=?, updated_at=?
-		 WHERE id=?`,
-		cur.Name, cur.Type, cur.Status, cur.IterationCount, cur.MaxIterations,
-		nullableString(cur.Assignee), boolToInt(cur.IsManual), nullableString(cur.GateID), nullableString(cur.Criteria),
-		cur.UpdatedAt, cur.ID,
-	)
-	if err != nil {
-		return domain.GraphNode{}, fmt.Errorf("updating node %s: %w", id, err)
-	}
-	return *cur, nil
+// ClaimNode implements GraphRepository.ClaimNode; see that interface's doc
+// comment for the contract.
+func (r *SQLiteRepository) ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus) (*domain.GraphNode, error) {
+	return claimNodeCAS(r.db, r.GetNode, id, newStatus, excluded)
 }
 
 func (r *SQLiteRepository) DeleteNode(id string) error {
@@ -904,23 +864,7 @@ func (r *SQLiteRepository) ListProjects() ([]domain.Project, error) {
 }
 
 func (r *SQLiteRepository) UpdateProject(id string, patch ProjectPatch) (domain.Project, error) {
-	cur, err := r.GetProject(id)
-	if err != nil {
-		return domain.Project{}, err
-	}
-	if cur == nil {
-		return domain.Project{}, domain.NewAPIError(domain.ErrCodeProjectNotFound, "project %s not found", id)
-	}
-	if patch.Name != nil {
-		cur.Name = *patch.Name
-	}
-	cur.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-
-	_, err = r.db.Exec(`UPDATE projects SET name=?, updated_at=? WHERE id=?`, cur.Name, cur.UpdatedAt, cur.ID)
-	if err != nil {
-		return domain.Project{}, fmt.Errorf("updating project %s: %w", id, err)
-	}
-	return *cur, nil
+	return updateProjectColumns(r.db, r.GetProject, id, patch)
 }
 
 // DeleteProject removes projectID and every ticket under it. Deleting

@@ -46,8 +46,15 @@ func mustCreateTicketAndNode(t *testing.T, repo store.GraphRepository, projectID
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
+	// approval_gate and release are manual node types, and ExpandGraph
+	// forces is_manual on them in a real graph; the fixture has to do the
+	// same or it produces a node that could not exist. It matters since
+	// DFLT-00102: a manual node may be completed straight from TODO (that
+	// is where a human judges it, since get-executable never claims one),
+	// while an automatic one at TODO is refused.
 	node, err := repo.CreateNode(domain.GraphNode{
 		TicketID: ticket.ID, Name: "n", Type: nodeType, Status: domain.NodeTODO,
+		IsManual: nodeType == domain.NodeTypeApprovalGate || nodeType == domain.NodeTypeRelease,
 	})
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)

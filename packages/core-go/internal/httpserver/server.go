@@ -605,6 +605,12 @@ func statusForError(err error, fallback int) int {
 		case domain.ErrCodeProjectNotFound, domain.ErrCodeTicketNotFound, domain.ErrCodeNodeNotFound, domain.ErrCodeArtifactNotFound,
 			domain.ErrCodeLabelNotFound:
 			return http.StatusNotFound
+		// Its own case, not folded into the 400 group: the request was
+		// valid and the row exists -- what stands in the way is the
+		// state the row is in right now, which is what 409 means
+		// (DFLT-00102).
+		case domain.ErrCodeInvalidNodeState:
+			return http.StatusConflict
 		}
 	}
 	return fallback

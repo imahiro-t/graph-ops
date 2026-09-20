@@ -475,6 +475,7 @@
     "TITLE_REQUIRED": "A title is required.",
     "TICKET_NOT_FOUND": "That ticket could not be found.",
     "NODE_NOT_FOUND": "That node could not be found.",
+    "INVALID_NODE_STATE": "This node cannot be completed while it is in its current state - it may already be finished, or may not have started yet. Reload the page to see where it stands now.",
     "VALIDATION_ERROR": "The request was invalid. Please check your input and try again.",
     "INTERNAL_ERROR": "Something went wrong on the server. Please try again.",
     "INVALID_PREFIX": "The prefix must be 1-5 alphanumeric characters.",

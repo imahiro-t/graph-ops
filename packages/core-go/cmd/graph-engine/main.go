@@ -295,7 +295,7 @@ Commands:
                                           (call once the seed passes; no patch = default full template;
                                            --language is this one call's explicit language choice, same
                                            precedence note as get-executable's)
-  complete-node <nodeId> [passed:true|false] [--reason "<text>"]
+  complete-node <nodeId> [true|false] [--reason "<text>"]
                                           (--reason saves the text as a "rejection_reason" text
                                            artifact on the node in the same call; valid ONLY when
                                            passed=false and the node is type approval_gate --
@@ -1122,7 +1122,7 @@ func readPatch(source string) (*engine.Patch, error) {
 // it -- see plan art-5f8847a4 section 2.3(a) and the corresponding
 // misuse-prevention scenarios in the Gherkin spec (art-eff6ffdb section 3.5).
 func cmdCompleteNode(eng *engine.GraphEngine, repo store.GraphRepository, args []string) error {
-	const usage = `usage: graph-engine complete-node <nodeId> [passed:true|false] [--reason "<text>"]`
+	const usage = `usage: graph-engine complete-node <nodeId> [true|false] [--reason "<text>"]`
 	if len(args) < 1 {
 		return fmt.Errorf(usage)
 	}
@@ -1134,7 +1134,23 @@ func cmdCompleteNode(eng *engine.GraphEngine, repo store.GraphRepository, args [
 	// The optional bare "passed" positional, if present, is always
 	// immediately after nodeId and never itself starts with "--".
 	if len(rest) > 0 && rest[0] != "--reason" {
-		passed = rest[0] != "false"
+		// Exactly "true" or "false", nothing else. This used to be
+		// `rest[0] != "false"`, which made every value but that one
+		// literal string mean PASS: "False", "0", "no", a typo -- and
+		// "passed:false", which is what this command's own help text
+		// told people to write (DOC-05). A reviewer recording a failure
+		// got a pass on the record and the graph carried on as if the
+		// work had been approved (BUG-03). A verdict is not something to
+		// guess at, so anything unrecognized is a usage error rather
+		// than a default.
+		switch rest[0] {
+		case "true":
+			passed = true
+		case "false":
+			passed = false
+		default:
+			return fmt.Errorf("%s: invalid pass/fail argument %q; expected exactly \"true\" or \"false\"", usage, rest[0])
+		}
 		rest = rest[1:]
 	}
 	for i := 0; i < len(rest); i++ {
@@ -1157,7 +1173,12 @@ func cmdCompleteNode(eng *engine.GraphEngine, repo store.GraphRepository, args [
 			return err
 		}
 		if node == nil {
-			return fmt.Errorf("node %s not found", nodeID)
+			// The same APIError engine.CompleteNode returns for a
+			// missing node (DFLT-00102): one command reporting a
+			// missing node two different ways, depending on whether
+			// --reason happened to be passed, is exactly the kind of
+			// record/behaviour mismatch this ticket is closing.
+			return domain.NewAPIError(domain.ErrCodeNodeNotFound, "node %s not found", nodeID)
 		}
 		if passed || node.Type != domain.NodeTypeApprovalGate {
 			return fmt.Errorf("--reason is only valid when rejecting (passed=false) an approval_gate node; node %s is type %s with passed=%v", nodeID, node.Type, passed)

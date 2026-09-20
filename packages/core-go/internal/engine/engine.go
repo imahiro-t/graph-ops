@@ -489,6 +489,24 @@ func allNonLoopPrereqsDone(nodeID string, byID map[string]domain.GraphNode, edge
 	return true
 }
 
+// claimableExclusions lists the statuses a node must NOT be in to be claimed:
+// DONE has already produced its result, and IN PROGRESS / IN REVIEW mean
+// somebody is working on it right now. Everything else (TODO, AWAITING FIX,
+// REJECTED) is fair game -- unchanged from before the claim became a CAS, and
+// deliberately so: GetExecutableNodes passes this same list as the CAS's
+// excluded set, so the pre-filter it drives and the condition the database
+// enforces are one definition rather than two that can drift apart.
+var claimableExclusions = []domain.NodeStatus{domain.NodeDone, domain.NodeInProgress, domain.NodeInReview}
+
+func isClaimed(status domain.NodeStatus) bool {
+	for _, s := range claimableExclusions {
+		if status == s {
+			return true
+		}
+	}
+	return false
+}
+
 // GetExecutableNodes returns the nodes whose non-loop prerequisites are all
 // DONE, excluding manual nodes (which require human action) and nodes that
 // are already in progress, in review, or done. Both TODO and AWAITING FIX
@@ -552,7 +570,7 @@ func (e *GraphEngine) GetExecutableNodes(ticketID string, catalog config.Catalog
 
 	executable := []domain.GraphNode{}
 	for _, n := range detail.Nodes {
-		if n.Status == domain.NodeDone || n.Status == domain.NodeInProgress || n.Status == domain.NodeInReview {
+		if isClaimed(n.Status) {
 			continue
 		}
 		if n.IsManual {
@@ -566,11 +584,26 @@ func (e *GraphEngine) GetExecutableNodes(ticketID string, catalog config.Catalog
 		if n.Type == domain.NodeTypeReview || n.Type == domain.NodeTypeReviewGate {
 			claimedStatus = domain.NodeInReview
 		}
-		claimed, err := e.repo.UpdateNode(n.ID, store.NodePatch{Status: &claimedStatus})
+		// ClaimNode, not UpdateNode: the status check above and the write
+		// that acts on it have to be one step. The statuses read into
+		// `detail` are a snapshot, and process-ticket runs several
+		// subagents that call this method at the same moment -- with a
+		// read here and a write there, two of them could both see the
+		// same node at TODO and both be handed it (CHK-01). The excluded
+		// set is exactly the skip condition above, so the range of
+		// claimable statuses is unchanged.
+		claimed, err := e.repo.ClaimNode(n.ID, claimedStatus, claimableExclusions)
 		if err != nil {
 			return nil, err
 		}
-		executable = append(executable, claimed)
+		// Somebody else got there first (or the node has since been
+		// deleted). Leave it out of this call's result and carry on --
+		// losing a race is how parallel execution is supposed to look,
+		// not an error to report to the caller.
+		if claimed == nil {
+			continue
+		}
+		executable = append(executable, *claimed)
 	}
 
 	// Always resync, not just when something was actually claimed: a manual
@@ -680,6 +713,66 @@ func loopBackRewindSet(targetID, failedNodeID string, byID map[string]domain.Gra
 	return ids
 }
 
+// checkCompletable decides whether a node may be completed at all, from its
+// own status and its ticket's. It returns an INVALID_NODE_STATE *domain.APIError
+// when it may not, and is called by CompleteNode before that method writes
+// anything (DFLT-00102 / BUG-04).
+//
+// Until this existed, CompleteNode never looked at the node it was closing.
+// A DONE node could be completed a second time with passed=false, blocking a
+// ticket whose work was finished; a TODO node nobody had run could be marked
+// DONE; and either way the artifacts of that bogus call were already on the
+// node by the time anyone noticed. The record then disagreed with what had
+// actually happened, with nothing left to show where it went wrong. The rule
+// was previously carried by a warning in process-ticket's SKILL.md ("don't
+// call complete-node if the Web UI already handled it"), which is not a rule
+// at all -- anyone completing a node by hand, or two agents racing, walked
+// straight past it.
+//
+// What may complete:
+//
+//   - an automatic node (is_manual=false) that is IN PROGRESS or IN REVIEW,
+//     i.e. one get-executable actually handed out;
+//   - a manual node (approval_gate, release, any is_manual custom type) in
+//     those two statuses *or* still at TODO. Manual nodes are never claimed --
+//     GetExecutableNodes skips them and a human judges them where they sit --
+//     so TODO is their normal state at the moment of approval, and the Web UI
+//     offers approve/reject on exactly the TODO approval_gates. Holding them
+//     to the automatic rule would break the approval flow outright.
+//
+// Everything else is refused: DONE, REJECTED and AWAITING FIX have all had
+// their turn, TODO on an automatic node was never claimed, and an unknown
+// status is refused rather than guessed at. A CLOSED ticket refuses
+// regardless of node status -- a closed ticket takes no more work (the same
+// line GetExecutableNodes and syncTicketStatus already hold).
+//
+// Two things it deliberately does not check: the ticket's `blocked` flag and
+// whether the node's prerequisites are DONE. Parallel branches make both
+// wrong -- one branch's gate rejection blocks the ticket while a sibling node
+// is still legitimately running, and refusing that sibling's completion would
+// throw away work that was correctly done and was already in flight when the
+// block landed.
+func checkCompletable(node *domain.GraphNode, detail *domain.TicketDetail) error {
+	const recovery = "use get-executable to hand out an automatic node still at TODO, unstick-node to release a node stuck at IN PROGRESS/IN REVIEW, or reopen-nodes to redo a completed one"
+
+	if detail.Status == domain.TicketClosed {
+		return domain.NewAPIError(domain.ErrCodeInvalidNodeState,
+			"node %s belongs to ticket %s, which is CLOSED; a closed ticket's nodes cannot be completed", node.ID, detail.ID)
+	}
+	if node.Status == domain.NodeInProgress || node.Status == domain.NodeInReview {
+		return nil
+	}
+	if node.IsManual && node.Status == domain.NodeTODO {
+		return nil
+	}
+	allowed := "IN PROGRESS or IN REVIEW"
+	if node.IsManual {
+		allowed = "TODO, IN PROGRESS or IN REVIEW"
+	}
+	return domain.NewAPIError(domain.ErrCodeInvalidNodeState,
+		"node %s is %s, not %s; only a node in one of those states can be completed (%s)", node.ID, node.Status, allowed, recovery)
+}
+
 // CompleteNodeResult mirrors the TS engine's { nextStatus, loopedBack } shape.
 type CompleteNodeResult struct {
 	NextStatus string `json:"nextStatus"`
@@ -698,6 +791,12 @@ type CompleteNodeResult struct {
 // take at all). The one exception is NodeTypeApprovalGate: a "reject" there
 // (passed=false) always blocks the ticket immediately, regardless of any
 // iteration_loop edge -- see the dedicated branch below.
+//
+// The node's current status is checked first, by checkCompletable, and a node
+// that may not be completed from where it stands is refused with an
+// INVALID_NODE_STATE *domain.APIError before this method writes anything at
+// all -- artifacts included (DFLT-00102 / BUG-04). See checkCompletable for
+// which statuses pass and why manual nodes are allowed to complete from TODO.
 //
 // artifacts is persisted as-is via e.repo.CreateArtifact, with no validation
 // of its own -- this package is deliberately DB-/HTTP-independent pure graph
@@ -720,7 +819,7 @@ func (e *GraphEngine) CompleteNode(nodeID string, passed bool, artifacts []domai
 		return CompleteNodeResult{}, err
 	}
 	if node == nil {
-		return CompleteNodeResult{}, fmt.Errorf("node %s not found", nodeID)
+		return CompleteNodeResult{}, domain.NewAPIError(domain.ErrCodeNodeNotFound, "node %s not found", nodeID)
 	}
 	detail, err := e.repo.GetTicketDetail(node.TicketID)
 	if err != nil {
@@ -728,6 +827,14 @@ func (e *GraphEngine) CompleteNode(nodeID string, passed bool, artifacts []domai
 	}
 	if detail == nil {
 		return CompleteNodeResult{}, fmt.Errorf("ticket %s not found", node.TicketID)
+	}
+	// Before the artifact loop below, not after it: a rejected completion
+	// has to leave the graph exactly as it found it, and this check used to
+	// not exist at all, so a call that should never have been accepted still
+	// wrote its artifacts onto the node (BUG-04). Everything above this point
+	// is a read.
+	if err := checkCompletable(node, detail); err != nil {
+		return CompleteNodeResult{}, err
 	}
 
 	for _, art := range artifacts {

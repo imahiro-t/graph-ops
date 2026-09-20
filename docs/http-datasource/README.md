@@ -292,6 +292,25 @@ labels, and clears the current project if it pointed there), and
 subagents in parallel -- so serialize read-modify-write updates of shared
 records.
 
+One thing graph-engine cannot make atomic over this protocol is **claiming a
+node** -- the step where `get-executable` takes ownership of a runnable node by
+moving it to `IN PROGRESS`/`IN REVIEW`. Against SQLite and MySQL that is a
+single conditional statement (`UPDATE nodes SET status=... WHERE id=... AND
+status NOT IN ('DONE','IN PROGRESS','IN REVIEW')`), so of two callers racing
+for the same node exactly one wins and the other is simply not offered it.
+The protocol has no conditional update, so against an HTTP data source
+graph-engine claims with `GET /nodes/{id}` followed by `PATCH /nodes/{id}`
+instead, and a claim that lands between those two requests is invisible to it:
+**the same node can be handed out twice**. A plugin cannot close this gap on
+its own -- the PATCH it receives carries no expected-current-status to check
+against -- so treat it as a property of this backend. In practice one
+`process-ticket` session issues its `get-executable` calls one at a time and
+waits for the subagents it launched, so the exposure is two sessions (or two
+people) driving the same ticket at once; avoid that, and the duplicate work is
+avoided with it. If it does happen, the second agent's `complete-node` is
+refused with `INVALID_NODE_STATE` and writes nothing, so the record stays
+correct even though the work was done twice.
+
 ### Artifact content in listings
 
 `GET /tickets/{ticketId}/artifacts` is polled by the Web UI, so a plugin may

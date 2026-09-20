@@ -39,8 +39,11 @@ func runWaitNode(t *testing.T, repo store.GraphRepository, args ...string) (wait
 
 func mustCreateNodeOnTicket(t *testing.T, repo store.GraphRepository, ticketID string, nodeType domain.NodeType, status domain.NodeStatus) string {
 	t.Helper()
+	// is_manual mirrors what ExpandGraph does for the manual node types --
+	// see mustCreateTicketAndNode for why the fixture has to set it.
 	node, err := repo.CreateNode(domain.GraphNode{
 		TicketID: ticketID, Name: "n", Type: nodeType, Status: status, MaxIterations: 3,
+		IsManual: nodeType == domain.NodeTypeApprovalGate || nodeType == domain.NodeTypeRelease,
 	})
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)

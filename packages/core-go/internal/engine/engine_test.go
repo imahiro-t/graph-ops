@@ -252,9 +252,27 @@ func TestCompleteNode_BlocksAfterExceedingMaxIterations(t *testing.T) {
 
 	// plan_review loops back to plan (max_iterations=3): 3 failures loop,
 	// the 4th (iteration_count 3->4 > 3) blocks the ticket.
+	//
+	// Each retry is driven back through get-executable the way a real run
+	// is. A loop-back leaves plan at TODO and plan_review at AWAITING FIX,
+	// and since DFLT-00102 neither can be completed again until it has been
+	// claimed -- CompleteNode refuses a node nobody handed out.
 	var res CompleteNodeResult
 	for i := 0; i < 4; i++ {
-		res, _ = e.CompleteNode(planReview.ID, false, nil)
+		var err error
+		res, err = e.CompleteNode(planReview.ID, false, nil)
+		if err != nil {
+			t.Fatalf("failing plan_review (attempt %d): %v", i+1, err)
+		}
+		if i == 3 {
+			break
+		}
+		exec, _ = e.GetExecutableNodes(ticket.ID, cat) // plan, back at TODO
+		if _, err := e.CompleteNode(exec[0].ID, true, nil); err != nil {
+			t.Fatalf("redoing plan (attempt %d): %v", i+1, err)
+		}
+		exec, _ = e.GetExecutableNodes(ticket.ID, cat) // plan_review, reclaimed
+		planReview = exec[0]
 	}
 	if res.NextStatus != "BLOCKED" {
 		t.Fatalf("expected BLOCKED after exceeding max_iterations, got %+v", res)
@@ -1317,6 +1335,16 @@ func TestCloseTicket_OverwritesPreviousReason(t *testing.T) {
 	}
 }
 
+// TestSyncTicketStatus_ClosedTicketUnaffectedByCompleteNode covers a ticket
+// closed out from under a node that was already claimed.
+//
+// It used to check only that the ticket stayed CLOSED -- CompleteNode
+// succeeded and syncTicketStatus declined to resurrect the ticket. Since
+// DFLT-00102 the completion itself is refused: a closed ticket takes no
+// further work, so the node keeps the status it had rather than quietly
+// reaching DONE under a ticket nobody is working on any more. The old
+// expectation (the ticket stays CLOSED) is checked too, and now holds because
+// nothing was written at all.
 func TestSyncTicketStatus_ClosedTicketUnaffectedByCompleteNode(t *testing.T) {
 	e, repo, projectID := newTestEngine(t)
 	cat := baseCatalog(t)
@@ -1329,9 +1357,8 @@ func TestSyncTicketStatus_ClosedTicketUnaffectedByCompleteNode(t *testing.T) {
 		t.Fatalf("CloseTicket: %v", err)
 	}
 
-	if _, err := e.CompleteNode(planNode.ID, true, nil); err != nil {
-		t.Fatalf("CompleteNode: %v", err)
-	}
+	_, err := e.CompleteNode(planNode.ID, true, nil)
+	assertInvalidNodeState(t, err)
 
 	got, err := repo.GetTicket(ticket.ID)
 	if err != nil {
@@ -1339,6 +1366,13 @@ func TestSyncTicketStatus_ClosedTicketUnaffectedByCompleteNode(t *testing.T) {
 	}
 	if got.Status != domain.TicketClosed {
 		t.Errorf("expected ticket to remain CLOSED after complete-node, got %s", got.Status)
+	}
+	node, err := repo.GetNode(planNode.ID)
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if node.Status != domain.NodeInProgress {
+		t.Errorf("expected the node to stay IN PROGRESS, got %s", node.Status)
 	}
 }
 
