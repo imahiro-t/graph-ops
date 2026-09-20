@@ -11,7 +11,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { AppSettingsEditor } from './AppSettingsEditor';
-import { AppSettingsResponse } from '../../types';
+import { APP_SETTINGS_WARNINGS, AppSettingsResponse } from '../../types';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -108,12 +108,41 @@ describe('AppSettingsEditor save-location note', () => {
     expect(screen.queryByText(i18n.t('settings.appSettings.homeConfigUnavailable'))).not.toBeInTheDocument();
 
     mockedSaveAppSettings.mockResolvedValueOnce(
-      makeResponse({ home_config_path: '', warnings: ['HOME_CONFIG_UNAVAILABLE'] })
+      makeResponse({ home_config_path: '', warnings: [APP_SETTINGS_WARNINGS.homeConfigUnavailable] })
     );
     await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
 
     await waitFor(() =>
       expect(screen.getByText(i18n.t('settings.appSettings.homeConfigUnavailable'))).toBeInTheDocument()
     );
+  });
+
+  // DFLT-00104, non-functional review NF-2. A home config that cannot be
+  // parsed is reported on stderr by the CLI, which someone who only opens the
+  // Web UI never sees -- and the page would otherwise show an empty artifacts
+  // directory with nothing to explain it. The GET raises the warning, so it
+  // is on screen before anything has been saved.
+  it('warns about an unreadable home config as soon as the page loads', async () => {
+    mockedFetchAppSettings.mockResolvedValueOnce(
+      makeResponse({ home_config_path: HOME_CONFIG, warnings: [APP_SETTINGS_WARNINGS.homeConfigUnreadable] })
+    );
+    renderEditor();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(i18n.t('settings.appSettings.homeConfigUnreadable', { path: HOME_CONFIG }))
+      ).toBeInTheDocument()
+    );
+  });
+
+  it('says nothing about the home config when the server reports no warnings', async () => {
+    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse({ home_config_path: HOME_CONFIG }));
+    renderEditor();
+
+    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    expect(
+      screen.queryByText(i18n.t('settings.appSettings.homeConfigUnreadable', { path: HOME_CONFIG }))
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('settings.appSettings.homeConfigUnavailable'))).not.toBeInTheDocument();
   });
 });

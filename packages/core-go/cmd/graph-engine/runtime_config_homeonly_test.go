@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -302,7 +303,7 @@ func TestLoadRuntimeConfig_MalformedHomeConfigWarnsButStarts(t *testing.T) {
 	want := []string{
 		"graph-ops: warning: ignoring host in " + filepath.Join(cwd, "graph-config.json") +
 			"; these settings are read only from " + homePath + " or the environment.",
-		"graph-ops: warning: cannot read " + homePath + " (unexpected end of JSON input); " +
+		"graph-ops: warning: cannot read " + homePath + ": unexpected end of JSON input; " +
 			"terminalCommand, claudeBinary, host, artifactsDir fall back to environment variables or built-in defaults.",
 	}
 	if len(warnings) != len(want) {
@@ -330,5 +331,51 @@ func TestLoadRuntimeConfig_MalformedHomeConfigAsResolvedPathStillFails(t *testin
 	_, err := loadRuntimeConfig()
 	if err == nil {
 		t.Fatal("loadRuntimeConfig = nil error, want a parse error")
+	}
+}
+
+// TestConfigWarnWriter_IsStderrByDefault pins the one property of these
+// warnings that every agent and script depends on: they go to stderr.
+//
+// loadRuntimeConfig runs on the startup path of every subcommand, including
+// the ones whose stdout is piped into a JSON parser (`get-ticket`, `list`),
+// so a warning printed to stdout would corrupt that output -- on exactly the
+// machines this change gives a warning to. Every other test in this file
+// replaces the writer in order to read what was written, which means none of
+// them would notice the default being changed to os.Stdout. This one does.
+func TestConfigWarnWriter_IsStderrByDefault(t *testing.T) {
+	if configWarnWriter != io.Writer(os.Stderr) {
+		t.Errorf("configWarnWriter = %v, want os.Stderr: config warnings must never be written to stdout", configWarnWriter)
+	}
+}
+
+// TestLoadRuntimeConfig_WarnsWithoutWritingToStdout is the other half: while
+// a warning is actually being produced, os.Stdout stays empty and the
+// subcommand still gets its config. What this adds to the check above is
+// that loadRuntimeConfig prints through that one writer and nowhere else.
+func TestLoadRuntimeConfig_WarnsWithoutWritingToStdout(t *testing.T) {
+	homeOnlyTestEnv(t)
+	stubHome(t)
+	cwd := tempCwd(t)
+	warnings := captureConfigWarnings(t)
+	writeGraphConfig(t, cwd, runtimeconfig.FileConfig{Host: "0.0.0.0", DBPath: filepath.Join(cwd, "repo.db")})
+
+	// captureStdout is report_validation_test.go's helper: it swaps
+	// os.Stdout for a pipe around the call and returns what was written.
+	var cfg runtimeConfig
+	var err error
+	got := captureStdout(t, func() { cfg, err = loadRuntimeConfig() })
+
+	if err != nil {
+		t.Fatalf("loadRuntimeConfig: %v", err)
+	}
+	if got != "" {
+		t.Errorf("stdout = %q, want nothing -- warnings belong on stderr", got)
+	}
+	if lines := warnings(); len(lines) != 1 {
+		t.Fatalf("warnings = %v, want exactly one", lines)
+	}
+	if cfg.Host != runtimeconfig.DefaultHost {
+		t.Errorf("Host = %q, want the default %q", cfg.Host, runtimeconfig.DefaultHost)
 	}
 }

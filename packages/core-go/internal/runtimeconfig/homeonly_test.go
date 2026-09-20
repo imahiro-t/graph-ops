@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -74,9 +75,9 @@ func TestLoadEffective_HomeOnlyKeysComeFromHomeNotCwd(t *testing.T) {
 	if eff.HomeConfigPath != HomeConfigPath(home) {
 		t.Errorf("HomeConfigPath = %q, want %q", eff.HomeConfigPath, HomeConfigPath(home))
 	}
-	want := []IgnoredSetting{{Path: workPath, Keys: []string{"terminalCommand", "claudeBinary", "host", "artifactsDir"}}}
-	if !reflect.DeepEqual(eff.Ignored, want) {
-		t.Errorf("Ignored = %+v, want %+v", eff.Ignored, want)
+	want := []string{"terminalCommand", "claudeBinary", "host", "artifactsDir"}
+	if !reflect.DeepEqual(eff.IgnoredKeys, want) {
+		t.Errorf("IgnoredKeys = %+v, want %+v", eff.IgnoredKeys, want)
 	}
 }
 
@@ -92,9 +93,13 @@ func TestLoadEffective_ReportsOnlyTheKeysActuallyPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEffective: %v", err)
 	}
-	want := []IgnoredSetting{{Path: workPath, Keys: []string{"terminalCommand", "host"}}}
-	if !reflect.DeepEqual(eff.Ignored, want) {
-		t.Errorf("Ignored = %+v, want %+v", eff.Ignored, want)
+	want := []string{"terminalCommand", "host"}
+	if !reflect.DeepEqual(eff.IgnoredKeys, want) {
+		t.Errorf("IgnoredKeys = %+v, want %+v", eff.IgnoredKeys, want)
+	}
+	// The file they were ignored in is Path itself; there is no second one.
+	if eff.Path != workPath {
+		t.Errorf("Path = %q, want %q", eff.Path, workPath)
 	}
 }
 
@@ -114,8 +119,8 @@ func TestLoadEffective_NoHomeOnlyKeysMeansNothingIgnored(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LoadEffective: %v", err)
 			}
-			if len(eff.Ignored) != 0 {
-				t.Errorf("Ignored = %+v, want none", eff.Ignored)
+			if len(eff.IgnoredKeys) != 0 {
+				t.Errorf("IgnoredKeys = %+v, want none", eff.IgnoredKeys)
 			}
 		})
 	}
@@ -157,9 +162,11 @@ func TestLoadEffective_UnresolvableHomeStillRefusesCwdValues(t *testing.T) {
 	if eff.HomeConfigPath != "" {
 		t.Errorf("HomeConfigPath = %q, want empty", eff.HomeConfigPath)
 	}
-	want := []IgnoredSetting{{Path: workPath, Keys: []string{"host"}}}
-	if !reflect.DeepEqual(eff.Ignored, want) {
-		t.Errorf("Ignored = %+v, want %+v", eff.Ignored, want)
+	if want := []string{"host"}; !reflect.DeepEqual(eff.IgnoredKeys, want) {
+		t.Errorf("IgnoredKeys = %+v, want %+v", eff.IgnoredKeys, want)
+	}
+	if eff.Path != workPath {
+		t.Errorf("Path = %q, want %q", eff.Path, workPath)
 	}
 }
 
@@ -180,8 +187,8 @@ func TestLoadEffective_HomeConfigAloneIsUnchanged(t *testing.T) {
 	if eff.Path != homePath {
 		t.Errorf("Path = %q, want %q", eff.Path, homePath)
 	}
-	if len(eff.Ignored) != 0 {
-		t.Errorf("Ignored = %+v, want none", eff.Ignored)
+	if len(eff.IgnoredKeys) != 0 {
+		t.Errorf("IgnoredKeys = %+v, want none", eff.IgnoredKeys)
 	}
 }
 
@@ -329,6 +336,23 @@ func TestClearHomeOnly_CoversEveryHomeOnlyKey(t *testing.T) {
 	if cfg.DBPath != "keep" || cfg.Port != 1 {
 		t.Errorf("no other field may be touched, got %+v", cfg)
 	}
+}
+
+// fileConfigJSONTags returns every json tag name declared on FileConfig. It
+// lives here, not beside the code it inspects, because
+// TestHomeOnlyKeys_MatchFileConfigJSONTags is its only caller: keeping it
+// (and the reflect import it needs) out of the package's non-test files
+// means the shipped binary carries neither.
+func fileConfigJSONTags() []string {
+	t := reflect.TypeOf(FileConfig{})
+	tags := make([]string, 0, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if name != "" {
+			tags = append(tags, name)
+		}
+	}
+	return tags
 }
 
 func readConfigFile(t *testing.T, path string) FileConfig {

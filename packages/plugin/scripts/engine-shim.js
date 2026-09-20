@@ -10,10 +10,13 @@
 // it was killed by a signal). Everything this script itself prints goes to
 // stderr; stdout is graph-engine's own.
 //
-// "This script's arguments" are process.argv's, except when the .cmd shim
-// relayed them through the environment instead of through cmd.exe's
+// "This script's arguments" are process.argv's, except on Windows when the
+// .cmd shim relayed them through the environment instead of through cmd.exe's
 // all-arguments token -- see scripts/cmd-args.js for why it does that and
-// what resolveArgv picks.
+// what resolveArgv picks. That shim can also report that it found an argument
+// it cannot relay at all, in which case nothing is run: exiting 2 with the
+// reason on stderr is the point, since the alternative is running a command
+// that is missing part of what the user typed.
 'use strict';
 
 const os = require('os');
@@ -49,6 +52,12 @@ async function main(argv) {
   return 1;
 }
 
-main(resolveArgv()).then((code) => {
-  process.exitCode = code;
-});
+const { argv, error } = resolveArgv();
+if (error !== null) {
+  process.stderr.write(`graph-ops: ${error}\n`);
+  process.exitCode = 2;
+} else {
+  main(argv).then((code) => {
+    process.exitCode = code;
+  });
+}

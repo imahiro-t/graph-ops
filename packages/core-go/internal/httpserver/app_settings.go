@@ -47,7 +47,10 @@ type appSettingsResponse struct {
 	// Warnings are fixed, machine-readable codes for things the server did
 	// not do, on a request it nonetheless completed (HTTP 200). Clients look
 	// each code up in their own message catalogue, the way they already do
-	// for error codes; a code is never a sentence.
+	// for error codes; a code is never a sentence. See
+	// warnHomeConfigUnavailable and warnHomeConfigUnreadable -- a GET can
+	// carry the latter, so the page shows the home config being broken
+	// before anything has been saved.
 	Warnings []string `json:"warnings,omitempty"`
 }
 
@@ -59,6 +62,34 @@ type appSettingsResponse struct {
 // is worse than not saving it -- so the request succeeds, minus that field,
 // and says so.
 const warnHomeConfigUnavailable = "HOME_CONFIG_UNAVAILABLE"
+
+// warnHomeConfigUnreadable is the other code: the home config file exists but
+// could not be read or parsed, so the home-only keys are coming from nowhere
+// -- neither this response's artifactsDir nor the next startup's. The CLI
+// prints the same fact on stderr, but a user who only ever opens the Web UI
+// never sees that, and without this the page would show an empty artifacts
+// directory with nothing to explain it (DFLT-00104, non-functional review
+// NF-2). A PUT cannot merely warn about it (it has nowhere safe to write, and
+// overwriting a file it failed to parse would discard whatever the user has
+// in there), so on that side the same condition is
+// domain.ErrCodeHomeConfigUnreadable -- and this is spelled as that constant
+// rather than as a second literal, so the warning and the error can never
+// drift into two different names for one state. warnHomeConfigUnavailable
+// above stays a local constant because it has no error form: an unresolvable
+// home directory only ever produces a successful response.
+const warnHomeConfigUnreadable = string(domain.ErrCodeHomeConfigUnreadable)
+
+// appSettingsWarnings returns the codes describing what an otherwise
+// successful request could not do, given the load it is answering from.
+// extra carries the codes only a PUT can raise (the home directory being
+// unresolvable, which a GET has nothing to report about).
+func appSettingsWarnings(eff runtimeconfig.Effective, extra ...string) []string {
+	warnings := append([]string(nil), extra...)
+	if eff.HomeConfigErr != nil {
+		warnings = append(warnings, warnHomeConfigUnreadable)
+	}
+	return warnings
+}
 
 type effectiveAppSettings struct {
 	DBBackend string `json:"dbBackend"`
@@ -99,6 +130,17 @@ type redactedFileConfig runtimeconfig.FileConfig
 func newRedactedFileConfig(cfg runtimeconfig.FileConfig) redactedFileConfig {
 	cfg.MySQLPassword = runtimeconfig.RedactSecret(cfg.MySQLPassword)
 	cfg.HTTPDataSourceToken = runtimeconfig.RedactSecret(cfg.HTTPDataSourceToken)
+	// The three home-only keys this page does not edit are dropped rather
+	// than sent (security review S-4). They are the settings that decide
+	// what this machine runs and who can reach it, and since LoadEffective
+	// now reaches into the home config for them, leaving them in would put
+	// them on the wire in environments where the old code never read them at
+	// all. Nothing in the UI reads them, so no client loses anything; all
+	// three are omitempty, so they simply do not appear. artifactsDir, the
+	// fourth, IS edited here and stays.
+	cfg.TerminalCommand = ""
+	cfg.ClaudeBinary = ""
+	cfg.Host = ""
 	return redactedFileConfig(cfg)
 }
 
@@ -412,7 +454,7 @@ func (s *Server) handleGetAppSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, newAppSettingsResponse(eff, effective, nil))
+	writeJSON(w, http.StatusOK, newAppSettingsResponse(eff, effective, appSettingsWarnings(eff)))
 }
 
 // handlePutAppSettings saves the fields this endpoint owns
@@ -436,9 +478,13 @@ func (s *Server) handleGetAppSettings(w http.ResponseWriter, r *http.Request) {
 // DFLT-00104's "changed it in the UI, nothing happened". The response's
 // home_config_path names the file it did go to. The two writes are not one
 // atomic operation; on a failure of the second the response says which
-// settings were saved and which one was not, and an unresolvable home
-// directory turns the second stage into a HOME_CONFIG_UNAVAILABLE warning on
-// an otherwise successful save.
+// settings were saved and which one was not, under a code of its own
+// (APP_SETTINGS_ARTIFACTS_DIR_NOT_SAVED, or HOME_CONFIG_UNREADABLE when the
+// home config is the reason) and with a log line, since "try again later" is
+// exactly the wrong thing to tell someone whose other settings did save. An
+// unresolvable home directory is different again: there is nothing to fail,
+// so the second stage turns into a HOME_CONFIG_UNAVAILABLE warning on an
+// otherwise successful save.
 //
 // Those owned fields are a full replacement, not a patch: each one is
 // written from the request body as submitted, so a field the body leaves out
@@ -617,10 +663,29 @@ func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 		homeCfg.ArtifactsDir = body.ArtifactsDir
 		return nil
 	}); err != nil {
-		// The two stages are not one atomic write, so say precisely which
-		// one landed -- "saving failed" alone would leave the user unable to
-		// tell whether the dbPath they just changed took or not.
-		writeError(w, http.StatusInternalServerError, domain.NewAPIError(domain.ErrCodeInternal,
+		// The two stages are not one atomic write, so this is a half-done
+		// state: every other setting is on disk under its new value while
+		// artifactsDir still holds the old one. writeError does not log 5xx
+		// responses (see handleCreateProject, which faces the same shape of
+		// problem), so record it here for whoever investigates later.
+		s.logger.Error("app settings were saved but artifactsDir could not be written to the home config",
+			slog.String("event", "app_settings_artifacts_dir_save_failed"),
+			slog.String("config_path", path),
+			slog.String("home_config_path", homePath),
+			slog.String("error", err.Error()))
+		// A dedicated code, not ErrCodeInternal: the client shows the user a
+		// message chosen by the code alone (the message below is
+		// developer-facing), and "something went wrong, try again later" is
+		// the one thing that must not be said about a save that did land --
+		// minus one field, which the user has to set again. When the cause
+		// is the home config being unparseable, say that instead: retrying
+		// cannot help until the file itself is repaired or removed.
+		code := domain.ErrCodeAppSettingsArtifactsDirNotSaved
+		var readErr *runtimeconfig.HomeConfigReadError
+		if errors.As(err, &readErr) {
+			code = domain.ErrCodeHomeConfigUnreadable
+		}
+		writeError(w, http.StatusInternalServerError, domain.NewAPIError(code,
 			"saved every other setting to %s, but could not save artifactsDir to %s: %s", path, homePath, err.Error()))
 		return
 	}
@@ -639,7 +704,7 @@ func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, newAppSettingsResponse(eff, effective, warnings))
+	writeJSON(w, http.StatusOK, newAppSettingsResponse(eff, effective, appSettingsWarnings(eff, warnings...)))
 }
 
 // testMySQLConnectionResponse is POST /api/settings/app/test-mysql-connection's

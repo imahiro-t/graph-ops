@@ -3,9 +3,9 @@ package runtimeconfig
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 )
 
@@ -117,28 +117,24 @@ func copyHomeOnly(dst *FileConfig, src FileConfig) {
 	dst.ArtifactsDir = src.ArtifactsDir
 }
 
-// fileConfigJSONTags returns every json tag name declared on FileConfig.
-// Used by the test that pins homeOnlyKeys against the struct, so renaming a
-// field's tag without updating homeOnlyKeys fails loudly instead of quietly
-// turning a protected key back into one a working-directory config can set.
-func fileConfigJSONTags() []string {
-	t := reflect.TypeOf(FileConfig{})
-	tags := make([]string, 0, t.NumField())
-	for i := 0; i < t.NumField(); i++ {
-		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
-		if name != "" {
-			tags = append(tags, name)
-		}
-	}
-	return tags
+// HomeConfigReadError reports that the home config file exists but could not
+// be read or parsed. Both places that open that file for its own sake --
+// LoadEffective, consulting it for the home-only keys, and UpdateHome, which
+// must read it before it may write it -- report the failure as this type, so
+// a caller can tell "your home config is broken, here is which file" apart
+// from any other I/O failure and say something the user can act on. The Web
+// UI does exactly that: the same condition is a warning on a GET and a named
+// error code on a PUT (DFLT-00104, non-functional review NF-2).
+type HomeConfigReadError struct {
+	Path string
+	Err  error
 }
 
-// IgnoredSetting records that Keys (a subset of homeOnlyKeys, in that order)
-// were present in the config file at Path but were not used.
-type IgnoredSetting struct {
-	Path string
-	Keys []string
+func (e *HomeConfigReadError) Error() string {
+	return fmt.Sprintf("cannot read %s: %v", e.Path, e.Err)
 }
+
+func (e *HomeConfigReadError) Unwrap() error { return e.Err }
 
 // Effective is LoadEffective's result: the settings that actually apply,
 // plus everything a caller needs in order to tell the user what was dropped
@@ -162,10 +158,15 @@ type Effective struct {
 	// HomeConfigPath is the file the home-only settings were taken from, or
 	// "" when home could not be resolved.
 	HomeConfigPath string
-	// Ignored lists the home-only keys that were found in Path and dropped.
-	// Empty (the common case) when Path is the home config itself, or when
-	// it simply carries none of them.
-	Ignored []IgnoredSetting
+	// IgnoredKeys lists the home-only keys that were found in Path and
+	// dropped, in homeOnlyKeys order. Empty in the common case: when Path is
+	// the home config itself, or when it simply carries none of them.
+	//
+	// There is deliberately no file name beside it, and no room for a second
+	// file: exactly one file is ever read and partly ignored here, and that
+	// file is Path. A slice of (path, keys) pairs would have invited readers
+	// to wonder which other files could turn up in it.
+	IgnoredKeys []string
 	// HomeConfigErr is non-nil when HomeConfigPath exists but could not be
 	// read or parsed while it was being consulted for the home-only keys.
 	// It is deliberately NOT an error return -- see LoadEffective.
@@ -213,9 +214,7 @@ func LoadEffective(cwd, home string) (Effective, error) {
 		return eff, nil
 	}
 
-	if keys := clearHomeOnly(&eff.Config); len(keys) > 0 {
-		eff.Ignored = []IgnoredSetting{{Path: path, Keys: keys}}
-	}
+	eff.IgnoredKeys = clearHomeOnly(&eff.Config)
 	if homePath == "" {
 		// No trusted file to fall back to. The home-only fields stay empty,
 		// which is the safe direction: the caller falls through to the env
@@ -225,7 +224,7 @@ func LoadEffective(cwd, home string) (Effective, error) {
 	}
 	homeCfg, err := loadFrom(homePath)
 	if err != nil {
-		eff.HomeConfigErr = err
+		eff.HomeConfigErr = &HomeConfigReadError{Path: homePath, Err: err}
 		return eff, nil
 	}
 	copyHomeOnly(&eff.Config, homeCfg)
@@ -255,7 +254,12 @@ func UpdateHome(home string, fn func(cfg *FileConfig) error) (FileConfig, string
 
 	cfg, err := loadFrom(path)
 	if err != nil {
-		return FileConfig{}, path, err
+		// A HomeConfigReadError, not a bare one: a home config that cannot
+		// be parsed makes every save of a home-only key fail, for as long as
+		// the file stays broken, and the user can only fix that if they are
+		// told it is that file. The caller turns this into its own
+		// user-facing message.
+		return FileConfig{}, path, &HomeConfigReadError{Path: path, Err: err}
 	}
 	if err := fn(&cfg); err != nil {
 		return cfg, path, err

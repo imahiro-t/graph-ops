@@ -342,6 +342,7 @@ func ResolvePath(cwd, home string) string {
 // already checks err first, so nothing observable changes, but the contract
 // is now "cfg is meaningful only when err == nil" rather than something a
 // future caller has to infer from the call sites.
+//
 // Load is deliberately the RAW read of a single file: it does not apply the
 // home-only rule (see homeOnlyKeys), so a terminalCommand or host it returns
 // may be one a working-directory graph-config.json supplied. Use it only

@@ -126,10 +126,10 @@ func defaultDataDir(cwd, home string) string {
 var configWarnWriter io.Writer = os.Stderr
 
 // formatConfigWarnings renders what LoadEffective dropped as the lines to
-// print, one per file, keys in runtimeconfig.HomeOnlyKeys order. It returns
-// nothing at all in the ordinary case -- a config with none of those keys in
-// it must stay silent, or every single subcommand invocation would grow a
-// line of noise (completion criterion 2 of DFLT-00104).
+// print, keys in runtimeconfig.HomeOnlyKeys order. It returns nothing at all
+// in the ordinary case -- a config with none of those keys in it must stay
+// silent, or every single subcommand invocation would grow a line of noise
+// (completion criterion 2 of DFLT-00104).
 //
 // The wording names the file the keys were ignored in AND the file they are
 // read from instead, because that pair is the whole actionable content: it
@@ -144,18 +144,19 @@ func formatConfigWarnings(eff runtimeconfig.Effective) []string {
 	if eff.HomeConfigPath != "" {
 		source = eff.HomeConfigPath
 	}
-	for _, ignored := range eff.Ignored {
+	if len(eff.IgnoredKeys) > 0 {
 		lines = append(lines, fmt.Sprintf(
 			"graph-ops: warning: ignoring %s in %s; these settings are read only from %s or the environment.",
-			strings.Join(ignored.Keys, ", "), ignored.Path, source))
+			strings.Join(eff.IgnoredKeys, ", "), eff.Path, source))
 	}
 	if eff.HomeConfigErr != nil {
-		// Not fatal -- see LoadEffective. Say which keys this costs, since
-		// the file being unreadable is otherwise indistinguishable from it
-		// simply not setting them.
+		// Not fatal -- see LoadEffective. The error names the file itself
+		// (runtimeconfig.HomeConfigReadError); what this adds is which keys
+		// the failure costs, since a file that cannot be read is otherwise
+		// indistinguishable from one that simply sets none of them.
 		lines = append(lines, fmt.Sprintf(
-			"graph-ops: warning: cannot read %s (%v); %s fall back to environment variables or built-in defaults.",
-			eff.HomeConfigPath, eff.HomeConfigErr, runtimeconfig.HomeOnlyKeyList()))
+			"graph-ops: warning: %v; %s fall back to environment variables or built-in defaults.",
+			eff.HomeConfigErr, runtimeconfig.HomeOnlyKeyList()))
 	}
 	return lines
 }
