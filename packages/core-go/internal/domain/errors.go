@@ -147,6 +147,13 @@ const (
 	// failure. Distinct from VALIDATION_ERROR so the Web UI can say "this
 	// artifact is too big to upload" rather than "check your input".
 	ErrCodeRequestBodyTooLarge ErrorCode = "REQUEST_BODY_TOO_LARGE"
+	// ErrCodeRouteNotFound: the request named a non-/api/ route this server
+	// deliberately no longer serves (DFLT-00103 removed /artifacts-static/).
+	// Separate from API_ROUTE_NOT_FOUND so "an endpoint you called is gone"
+	// stays distinguishable from "you misspelled an API path", and from
+	// TICKET_NOT_FOUND, which is about a missing row rather than a missing
+	// route.
+	ErrCodeRouteNotFound ErrorCode = "ROUTE_NOT_FOUND"
 )
 
 // APIError pairs a machine-readable Code with a developer-facing English

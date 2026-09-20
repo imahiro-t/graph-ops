@@ -215,7 +215,11 @@
     "loopBackLabel": "Loop-back"
   },
   "markdownViewer": {
-    "loadRemoteImage": "Load image from {{host}}: {{description}}",
+    "loadRemoteImage": "Load image from {{host}}:",
+    "openRemoteImage": "Open image from {{host}} in a new tab:",
+    "remoteImageFailedLink": "Could not load from {{host}} -- open in a new tab:",
+    "remoteImageLoaded": "Image loaded: {{description}}",
+    "remoteImageFailed": "Could not load the image from {{host}}: {{description}}",
     "untitledImage": "(no description)"
   },
   "artifactPreview": {

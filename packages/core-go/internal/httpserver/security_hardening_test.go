@@ -68,13 +68,14 @@ func TestUnknownAPIRoute_Is404JSON(t *testing.T) {
 // /artifacts-static/ served the artifacts directory off the filesystem, on
 // the app's own origin and with no sandbox: agent-authored HTML opened from
 // there ran as same-origin script and could call the API with the CSRF header
-// attached. The route is gone, so neither a file's bytes nor a listing of the
-// directory can be reached through it.
+// attached. The route is gone. Two things are pinned here: that nothing from
+// the artifacts directory can still be reached through it (the security
+// property), and that it answers an explicit 404 rather than falling through
+// to the SPA catch-all with a 200 (the tombstone in Routes()).
 //
-// The assertion is about content rather than status code on purpose: the SPA
-// catch-all answers unrouted non-/api/ paths with index.html, so the status
-// depends on what happens to be in the embedded build. What must hold either
-// way is that nothing from the artifacts directory comes back.
+// "/artifacts-static" with no trailing slash is a 301 to the subtree pattern,
+// which is ServeMux's own behaviour and still ends at the 404; it is listed
+// so that a redirect to something else would be noticed.
 func TestRemovedRoute_ArtifactsStaticServesNothing(t *testing.T) {
 	s, _, _ := newTestServer(t)
 
@@ -84,22 +85,38 @@ func TestRemovedRoute_ArtifactsStaticServesNothing(t *testing.T) {
 		t.Fatalf("seed artifacts dir: %v", err)
 	}
 
-	for _, path := range []string{"/artifacts-static/" + name, "/artifacts-static/", "/artifacts-static"} {
-		t.Run(path, func(t *testing.T) {
-			rec := doJSON(t, s, http.MethodGet, path, nil)
+	for _, tc := range []struct {
+		path       string
+		wantStatus int
+	}{
+		{"/artifacts-static/" + name, http.StatusNotFound},
+		{"/artifacts-static/", http.StatusNotFound},
+		{"/artifacts-static", http.StatusMovedPermanently},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			rec := doJSON(t, s, http.MethodGet, tc.path, nil)
 			if body := rec.Body.String(); strings.Contains(body, secret) {
-				t.Errorf("GET %s returned the artifact file's content", path)
+				t.Errorf("GET %s returned the artifact file's content", tc.path)
 			} else if strings.Contains(body, name) {
-				t.Errorf("GET %s returned a directory listing naming %q", path, name)
+				t.Errorf("GET %s returned a directory listing naming %q", tc.path, name)
+			}
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("GET %s = %d, want %d: %s", tc.path, rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if tc.wantStatus != http.StatusNotFound {
+				return
+			}
+			if got := decodeError(t, rec).Code; got != domain.ErrCodeRouteNotFound {
+				t.Errorf("error code = %q, want %q", got, domain.ErrCodeRouteNotFound)
 			}
 		})
 	}
 }
 
-// Every response carries the clickjacking headers -- successful API calls,
-// the SPA itself, and the 403s the Host/CSRF layers produce before any
-// handler runs. The last of those is why withSecurityHeaders is the
-// outermost middleware.
+// Every response carries the security headers -- successful API calls, the
+// SPA itself, and the 403s the Host/CSRF layers produce before any handler
+// runs. The last of those is why withSecurityHeaders is the outermost
+// middleware.
 func TestSecurityHeaders_OnEveryResponse(t *testing.T) {
 	s, _, _ := newTestServer(t)
 
@@ -176,6 +193,18 @@ func TestSecurityHeaders_OnEveryResponse(t *testing.T) {
 			}
 			if got := rec.Header().Get("Content-Security-Policy"); got != "frame-ancestors 'none'" {
 				t.Errorf("Content-Security-Policy = %q, want frame-ancestors 'none'", got)
+			}
+			// nosniff used to be set in one handler only. It belongs with
+			// the other two now that there is a place that cannot be
+			// forgotten -- especially since the /api/ 404 reflects the
+			// request path into a JSON body.
+			if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+			}
+			// SEC-09's other half: an artifact preview's URL names the
+			// artifact being read, and no external host gets to see it.
+			if got := rec.Header().Get("Referrer-Policy"); got != "no-referrer" {
+				t.Errorf("Referrer-Policy = %q, want no-referrer", got)
 			}
 		})
 	}

@@ -1688,15 +1688,22 @@ func cmdServe(rc runtimeConfig, args []string) error {
 	// a request header one byte at a time (Slowloris) would otherwise each
 	// hold a goroutine open indefinitely.
 	//
-	// ReadHeaderTimeout is the one that closes that, and it is safe to set
-	// because a request's headers are small no matter what the request is.
-	// ReadTimeout and WriteTimeout are deliberately left unset: they cap the
-	// whole exchange, body included, which here can legitimately be a
-	// multi-megabyte artifact upload or the zip GET
+	// ReadHeaderTimeout closes the header phase of that, and it is safe to
+	// set because a request's headers are small no matter what the request
+	// is. It is worth being precise about what is left: a client that sends
+	// its headers promptly and then dribbles out a *body* is still holding a
+	// goroutine, because ReadTimeout is deliberately unset. ReadTimeout and
+	// WriteTimeout cap the whole exchange, body included, which here can
+	// legitimately be a multi-megabyte artifact upload or the zip GET
 	// /api/tickets/{id}/artifacts/download streams out, and a client on a
-	// slow link would see those cut off mid-transfer. IdleTimeout bounds
-	// keep-alive connections that are between requests, where nothing is in
-	// flight to interrupt.
+	// slow link would see those cut off mid-transfer. maxRequestBodyBytes
+	// bounds how much such a client can make this process buffer, but not
+	// how long it can take doing so. Closing that too means a per-route read
+	// deadline (http.NewResponseController(w).SetReadDeadline) on the
+	// handlers that are not streaming, which is a larger change than this
+	// ticket's "at least ReadHeaderTimeout" and is left for one of its own.
+	// IdleTimeout bounds keep-alive connections that are between requests,
+	// where nothing is in flight to interrupt.
 	httpSrv := &http.Server{
 		Addr:              addr,
 		Handler:           srv.Routes(),

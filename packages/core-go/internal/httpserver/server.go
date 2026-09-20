@@ -55,8 +55,9 @@ type Config struct {
 	// os.UserHomeDir() directly in that handler, so a test can sandbox it.
 	HomeDir string
 	// Logger receives this package's "request rejected" security events (see
-	// securitylog.go) -- currently HOST_NOT_ALLOWED, CSRF_HEADER_REQUIRED and
-	// MYSQL_PASSWORD_RETYPE_REQUIRED. When nil, New falls back to a
+	// securitylog.go) -- currently HOST_NOT_ALLOWED, CSRF_HEADER_REQUIRED,
+	// MYSQL_PASSWORD_RETYPE_REQUIRED, REQUEST_BODY_TOO_LARGE and
+	// API_ROUTE_NOT_FOUND. When nil, New falls back to a
 	// slog.NewTextHandler on os.Stderr rather than discarding output: these
 	// are "we detected and blocked something" events, and a nil Logger
 	// silently turning into a no-op logger would reproduce this ticket's own
@@ -147,9 +148,30 @@ func (s *Server) Routes() http.Handler {
 	// indication anything was wrong. DFLT-00103 removed GET
 	// /api/tickets/{id}/executable-nodes; "removed" has to mean gone, not
 	// "quietly answers with the web UI".
+	//
+	// One side effect worth knowing about: this pattern also swallows the
+	// 405 ServeMux would otherwise produce for a known path called with the
+	// wrong method (POST /api/health was 405 with an Allow header, and is
+	// now this 404). A caller can no longer tell "no such endpoint" from
+	// "wrong method" -- accepted, and called out in the release notes,
+	// because nothing in this project depends on the distinction and the
+	// alternative is leaving unrouted /api/ paths answering 200 with HTML.
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		s.rejectLog.log(r, domain.ErrCodeAPIRouteNotFound, http.StatusNotFound,
+			slog.String("path_class", pathClass(r.URL.Path)))
 		writeError(w, http.StatusNotFound, domain.NewAPIError(domain.ErrCodeAPIRouteNotFound,
 			"no such API endpoint: %s %s", r.Method, r.URL.Path))
+	})
+
+	// A tombstone for the route DFLT-00103 removed (SEC-03). Without it,
+	// /artifacts-static/... falls through to the SPA catch-all below and is
+	// answered with index.html and a 200 -- nothing from the artifacts
+	// directory leaks either way, but "the route is gone" is worth saying
+	// plainly to anyone who still points something at it, and 404 is what
+	// the ticket asks for and what the test below pins.
+	mux.HandleFunc("/artifacts-static/", func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusNotFound, domain.NewAPIError(domain.ErrCodeRouteNotFound,
+			"the /artifacts-static/ route was removed; read artifacts through GET /api/artifacts/{id}/content"))
 	})
 
 	// Serve the embedded, built web UI for everything else. In `npm run dev`
@@ -170,7 +192,7 @@ func (s *Server) Routes() http.Handler {
 	//  4. withRequestBodyLimit -- innermost, wrapping only the mux: a
 	//     request rejected by 2 or 3 never has its body read at all, so
 	//     capping it any further out would buy nothing.
-	return withSecurityHeaders(withAllowedHost(s.cfg.Host, s.rejectLog, withCORS(s.rejectLog, withRequestBodyLimit(mux))))
+	return withSecurityHeaders(withAllowedHost(s.cfg.Host, s.rejectLog, withCORS(s.rejectLog, withRequestBodyLimit(s.rejectLog, mux))))
 }
 
 // csrfHeaderName is the header every state-changing request to this API must
@@ -390,6 +412,24 @@ func withCORS(rl *rejectLogger, h http.Handler) http.Handler {
 // external terminal (packages/web/src/components/TicketItem.tsx). Refusing
 // to be framed at all is what closes that.
 //
+// Two more headers ride along here rather than being repeated per handler,
+// for the same "impossible to forget" reason:
+//
+//   - X-Content-Type-Options: nosniff. It used to be set in exactly one
+//     place (writeArtifactContent). Every response this server writes
+//     declares its own Content-Type, so there is never a reason to let a
+//     browser guess one -- and the /api/ 404 added by this ticket reflects
+//     the request path back in a JSON body, which is safe as written
+//     (encoding/json escapes < > &, and the type is application/json) but
+//     is exactly the shape that stops being safe if a browser decides the
+//     body is HTML after all.
+//   - Referrer-Policy: no-referrer. An artifact preview's URL names the
+//     artifact being read; SEC-09 is about not handing that to a third
+//     party, and this is the half of it that applies to every link and
+//     subresource rather than just to MarkdownViewer's remote images.
+//     packages/web/index.html carries the same policy in a <meta>, which is
+//     what covers `npm run dev`, where Vite serves the page instead.
+//
 // Set (not Add) on purpose: a handler that needs a different policy for its
 // own response -- writeArtifactContent, the single documented exception --
 // overwrites these values rather than appending a second, conflicting
@@ -401,6 +441,8 @@ func withSecurityHeaders(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
 		h.ServeHTTP(w, r)
 	})
 }
@@ -430,17 +472,51 @@ const maxRequestBodyBytes = 64 << 20
 // A body that exceeds the cap surfaces as *http.MaxBytesError out of
 // whatever decoder read it, and writeError turns that into 413 regardless of
 // the status the handler asked for -- see writeError.
-func withRequestBodyLimit(h http.Handler) http.Handler {
+//
+// The rejection is also recorded through rl. It is watched for on the way
+// out (the status this middleware's own wrapper saw) rather than at the
+// point of classification, because the error is raised inside whichever
+// decoder happened to read the body, several frames below, and writeError --
+// where it is turned into a 413 -- has neither the request nor the logger.
+// Watching the status keeps one source of truth for "this was a 413" without
+// threading either of them through ~20 handlers. It is worth recording at
+// all because repeated over-cap bodies are the only trace an operator would
+// have of the memory-exhaustion attempt SEC-08 is about.
+func withRequestBodyLimit(rl *rejectLogger, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
-		default:
-			if r.Body != nil {
-				r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
-			}
+			h.ServeHTTP(w, r)
+			return
 		}
-		h.ServeHTTP(w, r)
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+		}
+		rec := &statusRecorder{ResponseWriter: w}
+		h.ServeHTTP(rec, r)
+		if rec.status == http.StatusRequestEntityTooLarge {
+			rl.log(r, domain.ErrCodeRequestBodyTooLarge, rec.status,
+				slog.String("path_class", pathClass(r.URL.Path)))
+		}
 	})
+}
+
+// statusRecorder remembers the status a handler wrote, so a middleware can
+// act on it afterwards (withRequestBodyLimit). It deliberately implements
+// nothing beyond http.ResponseWriter: this package's handlers never assert
+// http.Flusher or http.Hijacker, and it only ever wraps requests that carry
+// a body (never the SSE or zip-streaming GETs), so there is no optional
+// interface here to lose.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	if s.status == 0 {
+		s.status = code
+	}
+	s.ResponseWriter.WriteHeader(code)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

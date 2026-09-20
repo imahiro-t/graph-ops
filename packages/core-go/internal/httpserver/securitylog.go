@@ -13,13 +13,19 @@ import (
 	"github.com/graph-ops/core-go/internal/domain"
 )
 
-// This file records the "request rejected" security events for the three
+// This file records the "request rejected" security events for the
 // attack-detection rejections this package can make: HOST_NOT_ALLOWED
 // (server.go's withAllowedHost), CSRF_HEADER_REQUIRED (server.go's
-// withCORS) and MYSQL_PASSWORD_RETYPE_REQUIRED (app_settings.go's
-// handlePutAppSettings/handleTestMySQLConnection). Before DFLT-00035 none of
+// withCORS), MYSQL_PASSWORD_RETYPE_REQUIRED (app_settings.go's
+// handlePutAppSettings/handleTestMySQLConnection) and, since DFLT-00103,
+// REQUEST_BODY_TOO_LARGE (server.go's withRequestBodyLimit) and
+// API_ROUTE_NOT_FOUND (its /api/ catch-all). Before DFLT-00035 none of
 // these were logged anywhere, so a real attack against this server was both
-// undetectable and untraceable after the fact.
+// undetectable and untraceable after the fact -- which is why a rejection
+// added later has to be added here too: an over-cap body repeated in a loop
+// is the only trace the memory-exhaustion attempt behind SEC-08 would leave,
+// and a run of API_ROUTE_NOT_FOUND is how endpoint probing (or a client
+// stuck on a removed route) becomes visible at all.
 //
 // Masking policy (do not weaken this without updating README.md EN/JA):
 // every value in the request that the *caller* controls -- the Host header,
@@ -126,9 +132,10 @@ func remoteIP(remoteAddr string) string {
 //
 // There used to be a third bucket, "artifacts-static", for the filesystem
 // route that served the artifacts directory. DFLT-00103 removed that route,
-// and the bucket with it: everything outside /api/ is now the SPA (including
-// its catch-all fallback), so a separate class would only ever be an empty
-// one.
+// and the bucket with it. Everything outside /api/ is now either the SPA
+// (including its catch-all fallback) or the 404 tombstone left where that
+// route was, and neither reaches a file on disk -- so the bucket would no
+// longer separate anything that matters when reading these lines back.
 func pathClass(path string) string {
 	switch {
 	case strings.HasPrefix(path, "/api/"):

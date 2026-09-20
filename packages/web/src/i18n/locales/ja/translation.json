@@ -215,7 +215,11 @@
     "loopBackLabel": "差し戻しループ"
   },
   "markdownViewer": {
-    "loadRemoteImage": "{{host}} から画像を読み込む: {{description}}",
+    "loadRemoteImage": "{{host}} から画像を読み込む:",
+    "openRemoteImage": "{{host}} の画像を新しいタブで開く:",
+    "remoteImageFailedLink": "{{host}} から読み込めません。新しいタブで開く:",
+    "remoteImageLoaded": "画像を読み込みました: {{description}}",
+    "remoteImageFailed": "{{host}} から画像を読み込めませんでした: {{description}}",
     "untitledImage": "（説明なし）"
   },
   "artifactPreview": {

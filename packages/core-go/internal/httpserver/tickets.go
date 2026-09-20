@@ -232,7 +232,18 @@ func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 		// records a reason alongside it (engine.CloseTicket, DFLT-00043), and
 		// a bare status write would leave a ticket closed with no reason
 		// while bypassing the one code path that owns that transition.
-		// Reopening is the same story in reverse (engine.ReopenTicket).
+		//
+		// This closes the "into CLOSED" direction only. Moving a ticket back
+		// *out* of CLOSED with a PATCH is still possible, and still skips
+		// engine.ReopenTicket -- which refuses a ticket that is not CLOSED
+		// and re-derives the status from the graph rather than taking one
+		// from the caller. That is pre-existing behaviour, not something
+		// DFLT-00103 introduced; it is left alone here because the status
+		// the caller supplies has at least been through ParseTicketStatus,
+		// closed_reason is preserved exactly as ReopenTicket preserves it,
+		// and refusing the direction outright would be a compatibility
+		// change this ticket has no mandate for. Said plainly so the comment
+		// does not read as a claim that both directions are covered.
 		if status == domain.TicketClosed {
 			writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation,
 				"status cannot be set to %q here: use POST /api/tickets/{id}/close, which records a reason",
@@ -438,10 +449,16 @@ func (s *Server) handleCompleteNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-// nodePatchWithdrawnFields names, for the error message, the PATCH
-// /api/nodes/{id} fields DFLT-00103 withdrew. They are refused explicitly
-// rather than silently ignored as unknown JSON keys would be, so a caller
-// that was setting one gets told instead of watching its write vanish.
+// handleUpdateNode applies a partial update to a node.
+//
+// Validation comes first and the store call last, with the patch built in
+// between out of values already accepted -- the same shape, and for the same
+// reason, as handleUpdateTicket (DFLT-00103 / BUG-05).
+//
+// Three fields this endpoint used to accept are withdrawn: name, type and
+// iteration_count. They are refused explicitly rather than silently ignored
+// as unknown JSON keys would be, so a caller that was setting one gets told
+// instead of watching its write vanish.
 //
 // Why each went:
 //
@@ -458,8 +475,6 @@ func (s *Server) handleCompleteNode(w http.ResponseWriter, r *http.Request) {
 // No caller was found for any of the three: the Web UI never issues this
 // PATCH at all (it completes nodes through POST /api/nodes/{id}/complete),
 // and the CLI goes through the engine rather than HTTP.
-const nodePatchWithdrawnFields = "name, type, iteration_count"
-
 func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body struct {
@@ -473,10 +488,10 @@ func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 		Assignee nullableString `json:"assignee"`
 		IsManual *bool          `json:"is_manual"`
 
-		// Withdrawn fields, kept only to be refused -- see
-		// nodePatchWithdrawnFields. json.RawMessage records "the key was
-		// present" without committing to a type, so even a well-formed value
-		// is reported rather than applied.
+		// Withdrawn fields, kept only to be refused -- see this function's
+		// doc comment. json.RawMessage records "the key was present" without
+		// committing to a type, so even a well-formed value is reported
+		// rather than applied.
 		Name           json.RawMessage `json:"name"`
 		Type           json.RawMessage `json:"type"`
 		IterationCount json.RawMessage `json:"iteration_count"`
@@ -485,36 +500,53 @@ func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	// Ordered, not a map, so the field named in the message is the same one
-	// on every run for a body that carries several of them.
-	for _, sent := range []struct {
+
+	// Everything from here to the patch validates; the patch is built
+	// afterwards, out of values already accepted. Nothing before it reaches
+	// the store, so ordering it this way is not about correctness -- it is
+	// so that "a rejected PATCH writes nothing" can be read off the shape of
+	// the function instead of traced through it.
+	//
+	// One slice literal, ordered, is the single source for both the check
+	// and the list the message prints, so a field added back or withdrawn
+	// later cannot leave the two disagreeing. Ordered also means the field
+	// named in the message is the same one on every run for a body carrying
+	// several of them.
+	withdrawn := []struct {
 		field string
 		raw   json.RawMessage
 	}{
 		{"name", body.Name}, {"type", body.Type}, {"iteration_count", body.IterationCount},
-	} {
-		if sent.raw != nil {
-			writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation,
-				"%q can no longer be set through PATCH /api/nodes/{id} (withdrawn fields: %s)",
-				sent.field, nodePatchWithdrawnFields))
-			return
-		}
 	}
-
-	patch := store.NodePatch{MaxIterations: body.MaxIterations, IsManual: body.IsManual}
-	if body.Status != nil {
-		status, err := domain.ParseNodeStatus(*body.Status)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation, "%s", err))
-			return
+	for _, sent := range withdrawn {
+		if sent.raw == nil {
+			continue
 		}
-		patch.Status = &status
+		names := make([]string, len(withdrawn))
+		for i, f := range withdrawn {
+			names[i] = f.field
+		}
+		writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation,
+			"%q can no longer be set through PATCH /api/nodes/{id} (withdrawn fields: %s)",
+			sent.field, strings.Join(names, ", ")))
+		return
 	}
 	if body.MaxIterations != nil && *body.MaxIterations < 1 {
 		writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeInvalidMaxIterations,
 			"max_iterations must be 1 or greater, got %d", *body.MaxIterations))
 		return
 	}
+	var status *domain.NodeStatus
+	if body.Status != nil {
+		parsed, err := domain.ParseNodeStatus(*body.Status)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation, "%s", err))
+			return
+		}
+		status = &parsed
+	}
+
+	patch := store.NodePatch{Status: status, MaxIterations: body.MaxIterations, IsManual: body.IsManual}
 	if body.Assignee.Present {
 		patch.Assignee = &body.Assignee.Value
 	}

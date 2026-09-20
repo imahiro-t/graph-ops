@@ -18,12 +18,16 @@ var webdistFS embed.FS
 // staticWebHandler serves the embedded frontend build, with an SPA fallback:
 // a request path that isn't a real file in the build (e.g. /artifacts/{id}/
 // preview, the artifact-preview deep link opened by "open in new tab" for
-// gherkin, text and html artifacts -- see TicketItem.tsx's
-// openInNewTabLink) is served
-// index.html instead of a 404, so the app's own tiny path-based switch in
-// main.tsx can take over client-side. Vite's dev server already does this by
-// default (its default appType is "spa"); this makes the built single-binary
-// `serve` path behave the same way.
+// gherkin, text and html artifacts -- see TicketItem.tsx's openInNewTabLink)
+// is served index.html instead of a 404, so the app's own tiny path-based
+// switch in main.tsx can take over client-side. Vite's dev server already
+// does this by default (its default appType is "spa"); this makes the built
+// single-binary `serve` path behave the same way.
+//
+// Two prefixes deliberately never reach this fallback, because answering
+// them with the SPA and a 200 would hide a caller's mistake: /api/ and the
+// removed /artifacts-static/ route, both of which Routes() answers with an
+// explicit JSON 404.
 //
 // fs.Sub only fails if "webdist" isn't present in webdistFS, which can't
 // happen: go:embed guarantees the directory exists at compile time.

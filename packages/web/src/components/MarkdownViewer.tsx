@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Image as ImageIcon } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { StatusLiveRegion } from './StatusLiveRegion';
 
 interface Props {
   content: string;
@@ -39,46 +40,154 @@ export function isRemoteImageSrc(src: string): boolean {
   }
 }
 
-// RemoteImage renders a remote <img> only after the reader asks for it
-// (DFLT-00103 / SEC-09).
+// remoteImageInfo describes a remote src: the host to show the reader, and
+// whether an <img> for it can actually load under the SPA's CSP.
+//
+// index.html's img-src is `'self' data: blob: https:`. A cross-origin https
+// URL is allowed (the reader's click is what gates it -- see RemoteImage);
+// anything else remote -- plain http:, a protocol-relative "//host/x" that
+// resolves to http: on this loopback origin, an unparseable src -- is not,
+// and rendering an <img> for one would produce a control that silently does
+// nothing. Knowing that here is what lets RemoteImage offer a link instead.
+export function remoteImageInfo(src: string): { host: string; loadable: boolean } {
+  try {
+    const u = new URL(src, window.location.href);
+    return { host: u.host || src, loadable: u.protocol === 'https:' };
+  } catch {
+    // Keep the raw src: an unparseable URL has no host to show, and the
+    // reader is better served seeing exactly what is written than nothing.
+    return { host: src, loadable: false };
+  }
+}
+
+// RemoteImage never fetches a remote image on its own: it shows where the
+// image would come from and waits for the reader to ask (DFLT-00103 /
+// SEC-09).
 //
 // An artifact is written by an agent, and until DFLT-00103 merely opening
 // one was enough to make the browser fetch every image URL in it. That is a
 // request to someone else's server, carrying the reader's IP and the fact
 // that they are looking at this artifact right now, with nobody having
 // chosen to make it. Showing the host and waiting for a click puts that
-// choice back where it belongs.
+// choice back where it belongs. This component -- not the page's CSP -- is
+// where that rule lives; see index.html's img-src note for why the two have
+// to agree rather than each try to enforce it.
 //
-// It is a real <button>, not a clickable div: this has to be reachable and
-// activatable from the keyboard, and its accessible name has to say both
-// what the image is and where it would come from.
+// Three things the reviews of the first attempt asked for, all of which come
+// from this being a control the reader deliberately operates:
+//
+//   - it must actually do something. An https image loads inline; anything
+//     the CSP would refuse (remoteImageInfo's `loadable`) is offered as a
+//     new-tab link from the start, never as a button that does nothing.
+//   - focus must not be lost. Activating the button unmounts it, which would
+//     drop focus to <body> and send the next Tab back to the top of the
+//     document -- in the middle of what the reader was reading. The
+//     pendingFocus + useEffect shape here is the same one
+//     settings/LabelsEditor.tsx uses for the same reason.
+//   - the outcome must reach assistive technology (WCAG 2.2 SC 4.1.3).
+//     Loaded and failed are both announced through StatusLiveRegion, which
+//     is mounted from the first render (empty) so the announcement is a text
+//     change inside an existing live region rather than a new element.
+//
+// It is a real <button>, not a clickable div, so it is reachable and
+// activatable from the keyboard, and its accessible name says both what the
+// image is and where it would come from.
 const RemoteImage: React.FC<{ src: string; alt?: string; title?: string }> = ({ src, alt, title }) => {
   const { t } = useTranslation();
-  const [loaded, setLoaded] = useState(false);
+  const { host, loadable } = remoteImageInfo(src);
+  // 'asked' means the reader clicked and the <img> is mounted; it stays
+  // 'asked' once the image has loaded. 'failed' is the onError landing.
+  const [phase, setPhase] = useState<'idle' | 'asked' | 'failed'>('idle');
+  const [announcement, setAnnouncement] = useState('');
+  // What to focus once the next render has settled -- see the doc comment.
+  const [pendingFocus, setPendingFocus] = useState<'image' | 'link' | null>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const linkRef = useRef<HTMLAnchorElement>(null);
 
-  if (loaded) {
-    return <img src={src} alt={alt || ''} title={title} className="max-w-full h-auto rounded" />;
-  }
+  useEffect(() => {
+    if (pendingFocus === null) return;
+    (pendingFocus === 'image' ? imageRef.current : linkRef.current)?.focus();
+    setPendingFocus(null);
+    // phase is what mounts and unmounts the two targets, so the effect has
+    // to re-run on it.
+  }, [pendingFocus, phase]);
 
-  let host = src;
-  try {
-    host = new URL(src, window.location.href).host || src;
-  } catch {
-    // Keep the raw src: an unparseable URL has no host to show, and the
-    // reader is better served seeing exactly what is written than nothing.
-  }
   const description = alt?.trim() || t('markdownViewer.untitledImage');
 
-  return (
-    <button
-      type="button"
-      onClick={() => setLoaded(true)}
-      title={src}
-      className="inline-flex items-center gap-1.5 max-w-full text-left px-2 py-1 rounded border border-dashed border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+  // The link the reader is offered when an <img> is not an option: either
+  // the CSP would refuse this src, or it was tried and failed. A top-level
+  // navigation is not an img-src fetch, so this works in both cases -- and
+  // it is still the reader's explicit action that leaves this origin.
+  const openInNewTab = (
+    <a
+      ref={linkRef}
+      href={src}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center gap-1.5 max-w-full text-left px-2 py-1 rounded border border-dashed border-slate-500 dark:border-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
     >
       <ImageIcon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-      <span className="truncate">{t('markdownViewer.loadRemoteImage', { description, host })}</span>
-    </button>
+      {/* The host is never truncated: it is the part the reader needs in
+          order to decide, and a title tooltip would not reach a
+          keyboard-only or touch user. The description gives way instead. */}
+      <span className="shrink-0 text-indigo-600 dark:text-indigo-400">
+        {t(phase === 'failed' ? 'markdownViewer.remoteImageFailedLink' : 'markdownViewer.openRemoteImage', { host })}
+      </span>
+      <span className="truncate min-w-0 text-slate-600 dark:text-slate-400">{description}</span>
+    </a>
+  );
+
+  return (
+    // One wrapper for every phase, so the live region below is mounted
+    // before anything it has to announce happens.
+    <span className="inline-flex max-w-full align-middle">
+      <StatusLiveRegion message={announcement} />
+      {phase === 'asked' ? (
+        <img
+          ref={imageRef}
+          src={src}
+          alt={alt || ''}
+          title={title}
+          // referrerPolicy as well as the page-level policy in index.html:
+          // this one travels with the element, so it holds even if the
+          // document is ever served without that header.
+          referrerPolicy="no-referrer"
+          // Not in the tab order (-1), but focusable, so the focus the
+          // button held can land here instead of on <body>.
+          tabIndex={-1}
+          onLoad={() => setAnnouncement(t('markdownViewer.remoteImageLoaded', { description }))}
+          onError={() => {
+            setAnnouncement(t('markdownViewer.remoteImageFailed', { description, host }));
+            setPhase('failed');
+            setPendingFocus('link');
+          }}
+          className="max-w-full h-auto rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        />
+      ) : phase === 'failed' || !loadable ? (
+        openInNewTab
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setPhase('asked');
+            setPendingFocus('image');
+          }}
+          // border-slate-500/400 rather than 300/600: the dashed border is
+          // the only thing marking this as operable, and SC 1.4.11 wants 3:1
+          // against the box behind it (bg-white / dark:bg-slate-900). The old
+          // pair measured 1.5:1 and 2.4:1; these measure 4.8:1 and 7.0:1. The
+          // indigo label is the second signal, matching how a link reads in
+          // this same viewer.
+          className="inline-flex items-center gap-1.5 max-w-full text-left px-2 py-1 rounded border border-dashed border-slate-500 dark:border-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        >
+          <ImageIcon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+          <span className="shrink-0 text-indigo-600 dark:text-indigo-400">
+            {t('markdownViewer.loadRemoteImage', { host })}
+          </span>
+          <span className="truncate min-w-0 text-slate-600 dark:text-slate-400">{description}</span>
+        </button>
+      )}
+    </span>
   );
 };
 
