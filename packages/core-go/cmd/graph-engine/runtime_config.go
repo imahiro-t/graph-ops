@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
@@ -114,6 +116,50 @@ func defaultDataDir(cwd, home string) string {
 	return filepath.Join(home, ".graph-ops")
 }
 
+// configWarnWriter is where loadRuntimeConfig's config warnings go. It is a
+// variable only so a test can capture them; nothing but a test ever assigns
+// to it.
+//
+// stderr, never stdout: loadRuntimeConfig runs on the startup path of every
+// subcommand, including the ones agents pipe and parse (`get-ticket`,
+// `list`), and a warning that landed in stdout would corrupt their output.
+var configWarnWriter io.Writer = os.Stderr
+
+// formatConfigWarnings renders what LoadEffective dropped as the lines to
+// print, one per file, keys in runtimeconfig.HomeOnlyKeys order. It returns
+// nothing at all in the ordinary case -- a config with none of those keys in
+// it must stay silent, or every single subcommand invocation would grow a
+// line of noise (completion criterion 2 of DFLT-00104).
+//
+// The wording names the file the keys were ignored in AND the file they are
+// read from instead, because that pair is the whole actionable content: it
+// tells the user both where to delete the key to silence this and where to
+// move it if they meant it.
+func formatConfigWarnings(eff runtimeconfig.Effective) []string {
+	var lines []string
+	// "the home config file" rather than a path when home could not be
+	// resolved at all: naming a path we do not have would be a lie, and
+	// there is nothing there for the user to edit.
+	source := "the home config file"
+	if eff.HomeConfigPath != "" {
+		source = eff.HomeConfigPath
+	}
+	for _, ignored := range eff.Ignored {
+		lines = append(lines, fmt.Sprintf(
+			"graph-ops: warning: ignoring %s in %s; these settings are read only from %s or the environment.",
+			strings.Join(ignored.Keys, ", "), ignored.Path, source))
+	}
+	if eff.HomeConfigErr != nil {
+		// Not fatal -- see LoadEffective. Say which keys this costs, since
+		// the file being unreadable is otherwise indistinguishable from it
+		// simply not setting them.
+		lines = append(lines, fmt.Sprintf(
+			"graph-ops: warning: cannot read %s (%v); %s fall back to environment variables or built-in defaults.",
+			eff.HomeConfigPath, eff.HomeConfigErr, runtimeconfig.HomeOnlyKeyList()))
+	}
+	return lines
+}
+
 func loadRuntimeConfig() (runtimeConfig, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -121,9 +167,19 @@ func loadRuntimeConfig() (runtimeConfig, error) {
 	}
 	home, _ := os.UserHomeDir()
 
-	fileCfg, _, err := runtimeconfig.Load(cwd, home)
+	// LoadEffective, not Load: terminalCommand, claudeBinary, host and
+	// artifactsDir must not come from the graph-config.json of whatever
+	// directory this process happens to have been started in (see
+	// runtimeconfig's homeOnlyKeys). The firstNonEmpty chains below are
+	// untouched, so an environment variable still wins over everything --
+	// including the home config.
+	eff, err := runtimeconfig.LoadEffective(cwd, home)
 	if err != nil {
 		return runtimeConfig{}, err
+	}
+	fileCfg := eff.Config
+	for _, line := range formatConfigWarnings(eff) {
+		fmt.Fprintln(configWarnWriter, line)
 	}
 
 	dbBackend := firstNonEmpty(os.Getenv("GRAPH_DB_BACKEND"), fileCfg.DBBackend, "sqlite")

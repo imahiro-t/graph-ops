@@ -365,6 +365,8 @@
     "appSettings": {
       "globalOnly": "この設定は全体設定でのみ編集できます。上のスコープ切り替えで「全体設定」を選択してください。",
       "restartNote": "この項目の変更は、次回サーバー起動時に反映されます（保存先: {{path}}）。",
+      "homeOnlyNote": "ただし「成果物ディレクトリ」は作業ディレクトリの graph-config.json からは読まれないため、保存先は {{path}} です。",
+      "homeConfigUnavailable": "ホームディレクトリを特定できなかったため、「成果物ディレクトリ」だけは保存されていません。他の項目は保存されています。",
       "currentlyInEffect": "現在有効な値: {{value}}",
       "storage": {
         "title": "データ保存先",

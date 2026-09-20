@@ -154,6 +154,12 @@ export const AppSettingsEditor: React.FC<Props> = ({
   const [savedForm, setSavedForm] = useState<FormState>(emptyForm);
   const [effective, setEffective] = useState<EffectiveAppSettings | null>(null);
   const [configPath, setConfigPath] = useState('');
+  // Where artifactsDir actually lands. It differs from configPath exactly
+  // when a working-directory graph-config.json is in play, and that is the
+  // case where a single "saved to <configPath>" note would be telling the
+  // user the wrong file (DFLT-00104, completion criterion 3).
+  const [homeConfigPath, setHomeConfigPath] = useState('');
+  const [saveWarnings, setSaveWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -194,6 +200,8 @@ export const AppSettingsEditor: React.FC<Props> = ({
       setSavedForm(toForm(data.file));
       setEffective(data.effective);
       setConfigPath(data.config_path);
+      setHomeConfigPath(data.home_config_path ?? '');
+      setSaveWarnings([]);
     } catch (e) {
       setError(errorMessage(e, tRef.current('errors.UNKNOWN')));
     } finally {
@@ -228,6 +236,8 @@ export const AppSettingsEditor: React.FC<Props> = ({
       setSavedForm(nextForm);
       setEffective(data.effective);
       setConfigPath(data.config_path);
+      setHomeConfigPath(data.home_config_path ?? '');
+      setSaveWarnings(data.warnings ?? []);
       // Unlike every other field here, the page size and my-name are pure
       // frontend/display behavior with nothing to restart -- apply them
       // immediately. They come from nextForm, i.e. what actually landed on
@@ -471,7 +481,18 @@ export const AppSettingsEditor: React.FC<Props> = ({
 
       <div className="p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[11px] rounded-lg border border-slate-200 dark:border-slate-700">
         {t('settings.appSettings.restartNote', { path: configPath })}
+        {/* Only when the two really are different files: repeating the same
+            path in a second sentence would be noise everywhere else. */}
+        {homeConfigPath && homeConfigPath !== configPath && (
+          <> {t('settings.appSettings.homeOnlyNote', { path: homeConfigPath })}</>
+        )}
       </div>
+
+      {saveWarnings.includes('HOME_CONFIG_UNAVAILABLE') && (
+        <div className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[11px] rounded-lg border border-amber-200 dark:border-amber-900">
+          {t('settings.appSettings.homeConfigUnavailable')}
+        </div>
+      )}
 
       {/* Storage */}
       <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2">

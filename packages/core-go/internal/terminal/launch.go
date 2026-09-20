@@ -278,17 +278,54 @@ func writeWindowsCommandScript(workDir, claudeBin, prompt string) (string, error
 	return filepath.Clean(f.Name()), nil
 }
 
-// powershellQuote wraps s in single quotes, escaping any embedded single
-// quote by doubling it, producing a token that is safe to embed in a
-// generated PowerShell script regardless of s's contents. It plays the same
-// role shellQuote plays for the POSIX script, and for the same reason: a
-// PowerShell single-quoted string is fully literal -- no character (not '%',
-// '"', '&', '|', '<', '>', '^', '!', '$', a backtick, nor a literal newline)
-// has any special meaning inside one, and the only escape rule is that a
-// single quote is written as two. This is also why PowerShell was chosen
-// over a cmd.exe batch script for this file: cmd.exe has no quoting
-// construct that survives an embedded newline (see
-// writeWindowsCommandScript's doc comment), while this one does.
+// powerShellSingleQuotes are every rune PowerShell's tokenizer accepts as a
+// single quote: the ASCII apostrophe plus the four "smart quote" characters
+// its IsSingleQuote() classifies alongside it -- U+2018 LEFT SINGLE
+// QUOTATION MARK, U+2019 RIGHT SINGLE QUOTATION MARK, U+201A SINGLE LOW-9
+// QUOTATION MARK and U+201B SINGLE HIGH-REVERSED-9 QUOTATION MARK.
+//
+// They are one class throughout: any of them opens a literal string, any of
+// them closes it, and the doubling escape is "the next character is in this
+// same class" rather than "the next character is the same character". That
+// is why powershellQuote has to double all five and not just the ASCII one
+// (finding CHK-02 of DFLT-00104): text containing a smart quote -- which
+// prose routinely does, since editors and phones substitute one for an
+// apostrophe automatically -- would otherwise close the quoted string this
+// function opened, and everything after it in the prompt would be parsed as
+// PowerShell rather than as data.
+const powerShellSingleQuotes = "'‘’‚‛"
+
+// powershellQuote wraps s in single quotes, escaping every embedded single
+// quote (all five of them -- see powerShellSingleQuotes) by doubling it,
+// producing a token that is safe to embed in a generated PowerShell script
+// regardless of s's contents. It plays the same role shellQuote plays for
+// the POSIX script, and for the same reason: a PowerShell single-quoted
+// string is fully literal -- no character (not '%', '"', '&', '|', '<', '>',
+// '^', '!', '$', a backtick, nor a literal newline) has any special meaning
+// inside one, and the only escape rule is that a single quote is written as
+// two. This is also why PowerShell was chosen over a cmd.exe batch script
+// for this file: cmd.exe has no quoting construct that survives an embedded
+// newline (see writeWindowsCommandScript's doc comment), while this one
+// does.
+//
+// The opening and closing quotes are always the ASCII one. A doubled smart
+// quote inside the literal is folded back to a single character of the same
+// kind by PowerShell's own unescaping, so the text the prompt carries is
+// preserved as well as contained.
+//
+// shellQuote, its POSIX counterpart, deliberately stays ASCII-only: `sh`
+// gives the smart quotes no syntactic meaning at all, so doubling them there
+// would corrupt the prompt rather than protect it.
 func powershellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+	var b strings.Builder
+	b.Grow(len(s) + 2)
+	b.WriteByte('\'')
+	for _, r := range s {
+		b.WriteRune(r)
+		if strings.ContainsRune(powerShellSingleQuotes, r) {
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('\'')
+	return b.String()
 }

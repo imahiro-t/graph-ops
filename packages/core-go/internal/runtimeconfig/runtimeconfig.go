@@ -17,7 +17,6 @@
 package runtimeconfig
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -310,8 +309,8 @@ func ResolveSecret(raw string) (value string, fromEnv bool, envVarName string, e
 // what callers already do when os.UserHomeDir() itself fails).
 func CandidatePaths(cwd, home string) []string {
 	paths := []string{filepath.Join(cwd, "graph-config.json")}
-	if home != "" {
-		paths = append(paths, filepath.Join(home, ".graph-ops", "config.json"))
+	if homePath := HomeConfigPath(home); homePath != "" {
+		paths = append(paths, homePath)
 	}
 	return paths
 }
@@ -343,42 +342,33 @@ func ResolvePath(cwd, home string) string {
 // already checks err first, so nothing observable changes, but the contract
 // is now "cfg is meaningful only when err == nil" rather than something a
 // future caller has to infer from the call sites.
+// Load is deliberately the RAW read of a single file: it does not apply the
+// home-only rule (see homeOnlyKeys), so a terminalCommand or host it returns
+// may be one a working-directory graph-config.json supplied. Use it only
+// where that literal file content is the point -- a read-modify-write that
+// must write back exactly the file it read (Update, UpdateHome and the
+// settings API's save path), or a field the rule does not cover at all
+// (projectPaths). Anywhere a setting is about to be *used*, call
+// LoadEffective instead.
 func Load(cwd, home string) (FileConfig, string, error) {
 	path := ResolvePath(cwd, home)
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return FileConfig{}, path, nil
-		}
-		return FileConfig{}, path, err
-	}
-	var cfg FileConfig
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return FileConfig{}, path, err
-	}
-	return cfg, path, nil
+	cfg, err := loadFrom(path)
+	return cfg, path, err
 }
 
 // Save writes cfg to graph-config.json at its resolved path, creating the
 // parent directory first if needed (relevant the first time anything writes
 // to the canonical home-based default). Returns the path written to.
 func Save(cwd, home string, cfg FileConfig) (string, error) {
-	path := ResolvePath(cwd, home)
-	// 0o700: the only directory this call ever actually creates is
-	// $HOME/.graph-ops (the cwd candidate's parent is cwd itself, which
+	// 0o700 (in saveTo): the only directory this call ever actually creates
+	// is $HOME/.graph-ops (the cwd candidate's parent is cwd itself, which
 	// necessarily exists), the same directory cmd/graph-engine's
 	// loadRuntimeConfig and store.NewSQLiteRepository create user-only -- and
-	// the file written below is already 0o600 because it can hold a MySQL
+	// the file written is already 0o600 because it can hold a MySQL
 	// password. Whichever of the three runs first in a fresh environment sets
 	// the mode, so they are kept in step.
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return path, err
-	}
-	raw, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return path, err
-	}
-	return path, writeFileAtomic(path, raw)
+	path := ResolvePath(cwd, home)
+	return path, saveTo(path, cfg)
 }
 
 // writeFileAtomic replaces path's contents with raw via a temp file in the

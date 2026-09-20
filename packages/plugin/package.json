@@ -4,7 +4,7 @@
   "private": true,
   "description": "Claude Code Plugin for GraphOps",
   "scripts": {
-    "test": "node --test test/marketplace-source.test.js test/prune-engine-cache.test.js test/install-binary.test.js test/resolve-binary.test.js test/engine-shim.test.js test/bin-files.test.js"
+    "test": "node --test test/marketplace-source.test.js test/prune-engine-cache.test.js test/install-binary.test.js test/resolve-binary.test.js test/engine-shim.test.js test/cmd-args.test.js test/bin-files.test.js"
   },
   "keywords": ["claude-plugin", "graph-ops", "dag"],
   "author": { "name": "Takashi Imahiro", "email": "imahiro-t@users.noreply.github.com" },

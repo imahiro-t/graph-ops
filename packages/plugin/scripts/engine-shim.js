@@ -9,12 +9,18 @@
 // the inherited stdio, exiting with its exit code (128 + signal number when
 // it was killed by a signal). Everything this script itself prints goes to
 // stderr; stdout is graph-engine's own.
+//
+// "This script's arguments" are process.argv's, except when the .cmd shim
+// relayed them through the environment instead of through cmd.exe's
+// all-arguments token -- see scripts/cmd-args.js for why it does that and
+// what resolveArgv picks.
 'use strict';
 
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { ensureEngine } = require('./install-binary');
+const { resolveArgv } = require('./cmd-args');
 
 async function main(argv) {
   const pluginRoot = path.resolve(__dirname, '..');
@@ -26,7 +32,10 @@ async function main(argv) {
     return 1;
   }
 
-  const res = spawnSync(bin, argv, { stdio: 'inherit' });
+  // env is passed explicitly rather than left to default to process.env, to
+  // make it visible that what the child inherits is the environment
+  // resolveArgv has already stripped the relay variables out of.
+  const res = spawnSync(bin, argv, { stdio: 'inherit', env: process.env });
   if (res.error) {
     process.stderr.write(`graph-ops: failed to run ${bin}: ${res.error.message}\n`);
     return res.error.code === 'ENOENT' ? 127 : 126;
@@ -40,6 +49,6 @@ async function main(argv) {
   return 1;
 }
 
-main(process.argv.slice(2)).then((code) => {
+main(resolveArgv()).then((code) => {
   process.exitCode = code;
 });

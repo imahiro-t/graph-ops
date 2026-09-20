@@ -365,6 +365,8 @@
     "appSettings": {
       "globalOnly": "This setting can only be edited in Global Settings. Switch the scope above to \"Global Settings\".",
       "restartNote": "Changes here take effect the next time the server starts (saved to: {{path}}).",
+      "homeOnlyNote": "\"Artifacts directory\" is never read from the working directory's graph-config.json, so it is saved to {{path}} instead.",
+      "homeConfigUnavailable": "The home directory could not be resolved, so \"Artifacts directory\" alone was not saved. Every other setting was.",
       "currentlyInEffect": "Currently in effect: {{value}}",
       "storage": {
         "title": "Data Storage",

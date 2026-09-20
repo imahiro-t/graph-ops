@@ -412,6 +412,16 @@ export interface AppSettingsResponse {
   file: AppSettingsFile;
   effective: EffectiveAppSettings;
   config_path: string;
+  // Where the "home-only" settings are read from and written to instead of
+  // config_path -- of the fields this form edits, only artifactsDir is one
+  // (see packages/core-go/internal/runtimeconfig's HomeOnlyKeys). Equal to
+  // config_path in the common case; '' when the home directory could not be
+  // resolved. Optional so a response from an older server still type-checks.
+  home_config_path?: string;
+  // Fixed codes for things the server did not do on a request it still
+  // completed, e.g. 'HOME_CONFIG_UNAVAILABLE' when artifactsDir could not be
+  // saved because there is no home config file to save it to.
+  warnings?: string[];
 }
 
 // POST /api/settings/app/test-mysql-connection's response. See
