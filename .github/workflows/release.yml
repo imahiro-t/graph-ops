@@ -47,6 +47,9 @@ name: Release graph-engine binaries
 # not pass it having scanned nothing. It is a separate job rather than a step
 # in `build` so that the job producing the published binaries runs no extra
 # third-party code, and it installs a pinned govulncheck rather than @latest.
+# That job runs a newer Go than the pinned toolchain on purpose (govulncheck
+# needs it to build, and the version that scans a binary is independent of the
+# version that built it); only `build` follows packages/core-go/go.mod.
 #
 # Also publishes a checksums.txt (plain `sha256sum` output) covering every
 # binary asset. install-binary.js fetches this alongside the binary and
@@ -194,17 +197,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      # Checked out only for packages/core-go/go.mod: setup-go reads the Go
-      # version from it, and the scan below reads its `toolchain` line to know
-      # which Go version the binaries must have been built with.
+      # Checked out only for packages/core-go/go.mod: the scan below reads its
+      # `toolchain` line to know which Go version the binaries must have been
+      # built with.
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
+      # Deliberately NOT `go-version-file: packages/core-go/go.mod` here: this
+      # Go only runs the scanner, and the binaries under test carry their own
+      # build version, so the two need not match. govulncheck itself requires
+      # a newer Go than the pinned toolchain (x/vuln v1.8.0 needs go >= 1.26),
+      # and setup-go sets GOTOOLCHAIN=local, so building it with the pinned
+      # go1.25.14 fails at `go install`. Do not "fix" this back to
+      # go-version-file -- the `build` job above is the one that must follow
+      # the go.mod pin, because it produces what users run.
       # `cache: false` on purpose (see the header comment).
       - uses: actions/setup-go@v7
         with:
-          go-version-file: packages/core-go/go.mod
+          go-version: '1.26.x'
+          check-latest: true
           cache: false
 
       # Only the binaries -- the same pattern the `release` job uses, so this
