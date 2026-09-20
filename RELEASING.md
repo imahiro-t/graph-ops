@@ -15,6 +15,12 @@ The release version is hardcoded in 5 places:
 - `.claude-plugin/marketplace.json` (the graph-ops entry's `git-subdir`
   source `ref`, as the tag `vX.Y.Z`)
 
+`package-lock.json` also records the version (its root `"version"`, its
+`packages[""]` entry, and the `packages/plugin` and `packages/web` entries).
+`check:versions` does **not** look at it, so after editing the 5 locations
+refresh it with `npm install --package-lock-only` and commit the diff along
+with them.
+
 Run:
 
 ```sh
@@ -81,7 +87,7 @@ pushed, a real GitHub Release build starts automatically.
 
 ## 3. What `release.yml` does
 
-Pushing a `v*` tag runs three jobs in sequence:
+Pushing a `v*` tag runs four jobs in sequence:
 
 1. **`web`** -- checks out the repo, installs dependencies with
    `npm ci --ignore-scripts`, and runs `npm run build:web` to build the web
@@ -99,9 +105,26 @@ Pushing a `v*` tag runs three jobs in sequence:
    that `GOOS`/`GOARCH` and uploads the resulting binary as its own build
    artifact (e.g. `graph-engine-darwin-arm64`).
 
-3. **`release`** -- runs after all 4 `build` jobs complete. It downloads all
-   4 binary artifacts into `dist/` (using a `graph-engine-*` pattern so the
-   unrelated `webdist` artifact isn't pulled in), generates
+3. **`vulncheck`** -- runs after all 4 `build` jobs complete. It downloads
+   the same 4 binary artifacts the `release` job will publish (same
+   `graph-engine-*` pattern) and, for each one, checks that `go version
+   <binary>` reports at least the Go version pinned in
+   `packages/core-go/go.mod`'s `toolchain` line and that `govulncheck
+   -mode=binary <binary>` finds no vulnerability reachable from the code. It
+   fails the release if either check fails on any binary, and also if it did
+   not find exactly 4 binaries -- so a download pattern that stops matching
+   cannot pass as a green job that scanned nothing. It runs as its own job,
+   not as a step of `build`, so the job that produces the published binaries
+   does not gain third-party build code; `govulncheck` is installed at a
+   pinned version, not `@latest`.
+
+   Note that this job depends on the Go vulnerability database, so the same
+   commit can pass today and fail tomorrow -- that is intentional: a newly
+   published, reachable vulnerability should stop a release.
+
+4. **`release`** -- runs after `build` and `vulncheck` complete. It
+   downloads all 4 binary artifacts into `dist/` (using a `graph-engine-*`
+   pattern so the unrelated `webdist` artifact isn't pulled in), generates
    `dist/checksums.txt` via `sha256sum * > checksums.txt`, downloads the
    `third-party-notices` artifact into a separate `notices/` directory (kept
    out of `dist/` so it is never included in `checksums.txt`), and finally
@@ -129,7 +152,8 @@ gh run list --workflow=release.yml
 gh run watch <run-id>
 ```
 
-The full `web` -> `build` (x4) -> `release` pipeline takes a few minutes.
+The full `web` -> `build` (x4) -> `vulncheck` -> `release` pipeline takes a
+few minutes.
 Do not move on to step 4 until `gh run watch` reports the run finished
 successfully -- checking the Release before the `release` job completes
 will show it incomplete or missing entirely.
