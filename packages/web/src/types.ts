@@ -19,9 +19,11 @@ export const TICKET_STATUSES: readonly TicketStatus[] = ['TODO', 'REFINED', 'IN 
 // AWAITING FIX (DFLT-00042) marks a review/review_gate node that failed and
 // looped back along its iteration_loop edge: it is waiting for the loop
 // target (reset to TODO) to be reworked, as opposed to TODO, which also
-// covers a node that has never run. The engine re-claims it (as IN REVIEW)
-// once its prerequisites are DONE again -- which, when the loop target isn't
-// a direct prerequisite, can be almost immediately.
+// covers a node that has never run. A loop-back (DFLT-00101) resets the loop
+// target *and* every DONE node on a success-edge path from that target to the
+// failing node, so this node is re-claimed (as IN REVIEW) only after those
+// rewound nodes have been re-run -- it is not offered again ahead of the
+// rework, as it was when the loop target was not a direct prerequisite.
 export type NodeStatus = 'TODO' | 'IN PROGRESS' | 'IN REVIEW' | 'DONE' | 'REJECTED' | 'AWAITING FIX';
 
 export type NodeType =
