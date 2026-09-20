@@ -782,9 +782,13 @@ func loopBackRewindsFailedNode(targetID, failedNodeID string, edges []domain.Gra
 // superseded, and this refusal is what keeps that verdict off the record --
 // the whole point of rewinding it. Callers (process-ticket) must treat that
 // refusal as routine: go back to get-executable and redo the node when it is
-// handed out again, rather than reporting a failure. The verdict's reasoning
-// is lost with it, so a gate re-run after a rewind legitimately raises the
-// same findings again.
+// handed out again, rather than reporting a failure. What is refused is the
+// verdict, not the write-up behind it: agents save that with add-artifact
+// before calling here, and neither that path nor this one looks at the node's
+// status, so a superseded review stays on the node beside whatever the re-run
+// produces (artifacts are only ever appended; the most recent one is the
+// current verdict). Nothing records the refused call as a verdict, so a gate
+// re-run after a rewind legitimately raises the same findings again.
 //
 // Two things it deliberately does not check: the ticket's `blocked` flag and
 // whether the node's prerequisites are DONE. Parallel branches make both
@@ -1015,9 +1019,14 @@ func (e *GraphEngine) CompleteNode(nodeID string, passed bool, artifacts []domai
 			// non-TODO status" the thing exactly one caller can win, and
 			// losing it means a sibling opened the round first, so this
 			// failure counts nothing after all. (HTTPRepository cannot
-			// express a CAS and composes two calls instead, so against that
-			// backend the narrow window remains -- see GraphRepository.
-			// ClaimNode.)
+			// express a CAS and composes a GET and a PATCH instead, so
+			// against that backend this race is not closed at all. Do not
+			// read "narrow" into it there: the window is two network round
+			// trips wide -- milliseconds to hundreds of milliseconds against
+			// the single UPDATE this relies on -- and gates that finish
+			// together can still each count a round. See GraphRepository.
+			// ClaimNode, and the known limitation in
+			// docs/release-notes/v0.7.0.md.)
 			//
 			// The count written is read back by the claim itself rather than
 			// taken from the snapshot, so it cannot revert a bump that landed
