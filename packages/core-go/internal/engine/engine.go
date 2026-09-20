@@ -1029,6 +1029,27 @@ func (e *GraphEngine) syncTicketStatus(ticketID string) error {
 	if !ok {
 		return nil
 	}
+	// Nothing to sync when the derived status already matches what's stored:
+	// skip the write entirely (DFLT-00100). This is the same "don't take a
+	// write lock when there is nothing to write" fix the ticket applies to
+	// Init's backfill, and it matters for the same reason -- a read-only
+	// command must not become a contender for the write lock. get-executable
+	// runs syncTicketStatus on every invocation, so without this guard
+	// *every* read of the executable set rewrote the ticket row, and on
+	// SQLite that write is a deferred read-then-write transaction upgrade,
+	// which busy_timeout cannot cover (SQLite returns SQLITE_BUSY/517
+	// immediately rather than invoking the busy handler, to avoid deadlock).
+	// Skipping the no-op write removes the contention instead of waiting it
+	// out, without introducing BEGIN IMMEDIATE (out of scope for
+	// DFLT-00100).
+	//
+	// Deliberate behaviour change: a ticket whose derived status is unchanged
+	// no longer gets its updated_at bumped by complete-node/get-executable.
+	// updated_at now means "something about this ticket actually changed",
+	// which is what a caller reading it would expect anyway.
+	if detail.Status == newStatus {
+		return nil
+	}
 	_, err = e.repo.UpdateTicket(ticketID, store.TicketPatch{Status: &newStatus})
 	return err
 }

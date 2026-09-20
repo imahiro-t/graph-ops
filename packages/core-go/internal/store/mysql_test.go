@@ -316,3 +316,50 @@ func TestMySQLRepository_UpdateTicketFillsDefaultForLegacyNullPriority(t *testin
 
 	assertUpdateTicketFillsLegacyPriority(t, repo.db, repo.UpdateTicket, ids)
 }
+
+// TestMySQLRepository_InitIssuesNoUpdateWhenNoPriorityNeedsBackfill is the
+// MySQL half of the DFLT-00100 guard (CHK-07): MySQL's Init ran the
+// backfill's unindexed, whole-table UPDATE on every command, holding a write
+// lock each time. countBackfillUpdates observes the UPDATE directly, since
+// MySQL has no counterpart to SQLite's total_changes().
+func TestMySQLRepository_InitIssuesNoUpdateWhenNoPriorityNeedsBackfill(t *testing.T) {
+	repo := newTestMySQLRepo(t)
+	proj, err := repo.CreateProject("Priority Guard", "PRIG")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	// CreateTicket always stores an explicit priority, so nothing is left
+	// to migrate -- the steady state of any DB used after DFLT-00083.
+	if _, err := repo.CreateTicket(proj.ID, domain.Ticket{
+		Title: "explicit", Status: domain.TicketTODO, Priority: domain.TicketPriorityHigh,
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	var updates int
+	testHookTicketPriorityBackfillUpdate = func() { updates++ }
+	t.Cleanup(func() { testHookTicketPriorityBackfillUpdate = nil })
+
+	if err := repo.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if updates != 0 {
+		t.Errorf("Init issued %d backfill UPDATEs on a DB with nothing to migrate, want 0", updates)
+	}
+
+	// The guard must not have disabled the migration: a legacy row still
+	// gets one UPDATE, and only one.
+	insertLegacyPriorityTickets(t, repo.db, proj.ID, proj.Prefix)
+	if err := repo.Init(); err != nil {
+		t.Fatalf("Init (with rows to migrate): %v", err)
+	}
+	if updates != 1 {
+		t.Errorf("Init issued %d backfill UPDATEs with legacy rows present, want 1", updates)
+	}
+	if err := repo.Init(); err != nil {
+		t.Fatalf("Init (after the backfill): %v", err)
+	}
+	if updates != 1 {
+		t.Errorf("Init issued another backfill UPDATE after the rows were migrated (%d total), want 1", updates)
+	}
+}
