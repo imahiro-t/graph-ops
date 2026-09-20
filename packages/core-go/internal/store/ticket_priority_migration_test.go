@@ -193,3 +193,69 @@ func TestSQLiteRepository_CreateTicketWithoutPriorityStoresDefault(t *testing.T)
 		t.Errorf("stored priority = %+v, want MEDIUM (not NULL)", stored)
 	}
 }
+
+// --- DFLT-00100: Init runs on every graph-engine command, so a backfill
+// that always issued its UPDATE took a write lock on a DB with nothing left
+// to migrate, turning read-only commands into contenders for that lock
+// (BUG-01) and making MySQL's Init scan the whole tickets table under it
+// every time (CHK-07). The guard has to be observable as "no write was
+// issued", not merely "no log line was printed": the unguarded code also
+// logged nothing when no row matched. ---
+
+// sqliteTotalChanges is SQLite's count of rows inserted, updated or deleted
+// on this connection since it was opened. SQLiteRepository pins the pool to
+// a single connection (SetMaxOpenConns(1)), so the counter is a faithful
+// before/after measure of whether Init wrote anything at all.
+func sqliteTotalChanges(t *testing.T, db *sql.DB) int64 {
+	t.Helper()
+	var n int64
+	if err := db.QueryRow(`SELECT total_changes()`).Scan(&n); err != nil {
+		t.Fatalf("reading total_changes(): %v", err)
+	}
+	return n
+}
+
+func TestSQLiteRepository_InitIssuesNoWriteWhenNoPriorityNeedsBackfill(t *testing.T) {
+	repo, proj := newTestRepoWithProject(t)
+	// Every ticket has an explicit priority, so the migration has nothing
+	// to do -- the steady state of any DB created after DFLT-00083.
+	if _, err := repo.CreateTicket(proj.ID, domain.Ticket{
+		Title: "explicit", Status: domain.TicketTODO, Priority: domain.TicketPriorityHigh,
+	}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	before := sqliteTotalChanges(t, repo.db)
+	if err := repo.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if after := sqliteTotalChanges(t, repo.db); after != before {
+		t.Errorf("Init changed %d rows on a DB with nothing to migrate, want 0 (it must not take a write lock)", after-before)
+	}
+}
+
+func TestSQLiteRepository_InitStillWritesWhenAPriorityNeedsBackfill(t *testing.T) {
+	repo, proj := newTestRepoWithProject(t)
+	ids := insertLegacyPriorityTickets(t, repo.db, proj.ID, proj.Prefix)
+
+	before := sqliteTotalChanges(t, repo.db)
+	if err := repo.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	// The NULL row and the empty-string row, and only those two.
+	if got := sqliteTotalChanges(t, repo.db) - before; got != 2 {
+		t.Errorf("Init changed %d rows, want the 2 rows with no priority", got)
+	}
+	// A second Init has nothing left to do and must write nothing.
+	before = sqliteTotalChanges(t, repo.db)
+	if err := repo.Init(); err != nil {
+		t.Fatalf("Init (second run): %v", err)
+	}
+	if got := sqliteTotalChanges(t, repo.db) - before; got != 0 {
+		t.Errorf("second Init changed %d rows, want 0", got)
+	}
+	rows := readPriorityRows(t, repo.db, ids)
+	if got := rows["N"].priority; !got.Valid || got.String != string(domain.TicketPriorityMedium) {
+		t.Errorf("ticket N: priority = %+v, want MEDIUM", got)
+	}
+}
