@@ -913,6 +913,40 @@ func (e *GraphEngine) UnstickNode(nodeID string) (domain.GraphNode, error) {
 	return updated, nil
 }
 
+// UpdateNode applies patch to nodeID and then brings the owning ticket's
+// status back in line with its nodes, exactly as CompleteNode, ReopenNodes
+// and UnstickNode do (DFLT-00103 / BUG-05).
+//
+// It exists because PATCH /api/nodes/{id} used to call repo.UpdateNode
+// directly, which is the one node-mutating path in the codebase that skipped
+// syncTicketStatus: a PATCH that moved the last node to DONE left the ticket
+// sitting at IN PROGRESS forever, and nothing but another mutation through a
+// different path would ever fix it. Routing that handler through the engine
+// rather than teaching it to call a second repo method keeps "a node changed,
+// so re-derive the ticket" a rule of the engine, not something each caller
+// has to remember.
+//
+// A CLOSED ticket is not resurrected and its closed_reason is not touched:
+// syncTicketStatus returns early for one (DFLT-00043), and nothing here
+// writes to the ticket other than through it.
+func (e *GraphEngine) UpdateNode(nodeID string, patch store.NodePatch) (domain.GraphNode, error) {
+	node, err := e.repo.GetNode(nodeID)
+	if err != nil {
+		return domain.GraphNode{}, err
+	}
+	if node == nil {
+		return domain.GraphNode{}, domain.NewAPIError(domain.ErrCodeNodeNotFound, "node not found: %s", nodeID)
+	}
+	updated, err := e.repo.UpdateNode(nodeID, patch)
+	if err != nil {
+		return domain.GraphNode{}, err
+	}
+	if err := e.syncTicketStatus(node.TicketID); err != nil {
+		return domain.GraphNode{}, err
+	}
+	return updated, nil
+}
+
 // deriveTicketStatus computes the ticket status implied by detail's ticket/
 // node state (DONE > IN RELEASE > IN REVIEW > IN PROGRESS, in that
 // precedence), with ok=false when none of those apply (e.g. no nodes, or

@@ -14,10 +14,6 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:49173',
         changeOrigin: true
-      },
-      '/artifacts-static': {
-        target: 'http://127.0.0.1:49173',
-        changeOrigin: true
       }
     }
   }

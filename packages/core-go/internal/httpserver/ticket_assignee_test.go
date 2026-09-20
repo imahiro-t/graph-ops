@@ -213,7 +213,10 @@ func TestUpdateNode_AssigneeSetOrLeftAlone(t *testing.T) {
 		want string
 	}{
 		{"set", map[string]any{"assignee": "佐藤"}, "佐藤"},
-		{"omitted", map[string]any{"name": "名前だけ変更"}, "鈴木"},
+		// Any still-accepted field other than assignee: assignee must stay
+		// put when its key is absent. ("name" stood in here until
+		// DFLT-00103 withdrew it from this endpoint.)
+		{"omitted", map[string]any{"is_manual": true}, "鈴木"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, ticketID, nodeID := newNodeWithAssignee(t)

@@ -214,6 +214,14 @@
     "manualNode": "Manual operation node",
     "loopBackLabel": "Loop-back"
   },
+  "markdownViewer": {
+    "loadRemoteImage": "Load image from {{host}}:",
+    "openRemoteImage": "Open image from {{host}} in a new tab:",
+    "remoteImageFailedLink": "Could not load from {{host}} -- open in a new tab:",
+    "remoteImageLoaded": "Image loaded: {{description}}",
+    "remoteImageFailed": "Could not load the image from {{host}}: {{description}}",
+    "untitledImage": "(no description)"
+  },
   "artifactPreview": {
     "loading": "Loading...",
     "loadError": "Failed to load the artifact: {{message}}"
@@ -491,6 +499,9 @@
     "LABEL_NAME_TAKEN": "A label with the same name already exists (case-insensitive).",
     "INVALID_LABEL_NAME": "Label names must be 1 to 50 characters.",
     "INVALID_LABEL_COLOR": "Invalid label color. Choose one from the palette.",
+    "API_ROUTE_NOT_FOUND": "That API endpoint does not exist on this server. The app and the server may be running different versions; reload the page and try again.",
+    "REQUEST_BODY_TOO_LARGE": "The request was too large for the server to accept. Try again with a smaller file or less content.",
+    "ROUTE_NOT_FOUND": "That address is no longer served by this server. Open what you were looking for from the Web UI rather than from a saved link or bookmark.",
     "UNKNOWN": "An unexpected error occurred. Please try again.",
     "HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED": "The saved token cannot be used for a different endpoint URL. Enter the token again after changing the URL."
   },

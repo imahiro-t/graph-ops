@@ -1,9 +1,12 @@
 // Top-level "設定" modal: lets the user switch between "全体設定" (global,
 // user tier) and "プロジェクト単位設定" (project, team tier resolved from
 // the selected project's local path in this environment -- see
-// Project.local_path) and, within a scope, edit node-type
-// instructions / the workflow graph / review-gate configuration / the
-// plan, review and report templates. See the
+// Project.local_path) and, within a scope, edit node-type instructions /
+// review-gate configuration / skill instructions / the plan, review and
+// report templates / labels / app settings -- one tab each, see `tabs`
+// below. (There is no workflow-graph tab: the skeleton is fixed by the
+// plugin default and only review gates are overridable -- see
+// internal/config.Merge's WORKFLOW_NODES_LOCKED.) See the
 // execution plan (art-2aaa5d92 on DFLT-00010-00001) for the scope/tab
 // design rationale and packages/core-go/internal/httpserver/settings.go for
 // the backing API.

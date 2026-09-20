@@ -67,6 +67,31 @@ func ParseTicketPriority(s string) (TicketPriority, error) {
 	}
 }
 
+// ParseTicketStatus validates s against the ticket statuses this domain
+// defines, and is the single place that rule lives -- the same role
+// ParseTicketPriority plays for priorities. Every entry point that accepts a
+// status from outside the process (today: PATCH /api/tickets/{id}) calls
+// this instead of casting the caller's string straight into a TicketStatus,
+// which is how an arbitrary string used to end up stored in the column
+// (DFLT-00103 / BUG-05).
+//
+// TicketClosed is accepted here -- it is a real status, and refusing to parse
+// it would make this function lie about the domain. Whether a particular
+// entry point may *set* it is a separate question belonging to that entry
+// point: the HTTP PATCH handler rejects it, because closing carries a reason
+// (engine.CloseTicket) that a bare status write would silently skip.
+func ParseTicketStatus(s string) (TicketStatus, error) {
+	switch st := TicketStatus(s); st {
+	case TicketTODO, TicketRefined, TicketInProgress, TicketInReview,
+		TicketInRelease, TicketDone, TicketClosed:
+		return st, nil
+	default:
+		return "", fmt.Errorf("invalid ticket status %q: must be one of %q, %q, %q, %q, %q, %q, %q", s,
+			TicketTODO, TicketRefined, TicketInProgress, TicketInReview,
+			TicketInRelease, TicketDone, TicketClosed)
+	}
+}
+
 type NodeStatus string
 
 const (
@@ -99,6 +124,22 @@ const (
 	// constraint, so no migration is needed to store the new value.
 	NodeAwaitingFix NodeStatus = "AWAITING FIX"
 )
+
+// ParseNodeStatus validates s against the node statuses this domain defines,
+// the NodeStatus counterpart to ParseTicketStatus. Unlike NodeType below,
+// NodeStatus really is a closed enum: the engine decides what to do with a
+// node by comparing against every one of these values (GetExecutableNodes,
+// deriveTicketStatus), so a status outside the set is not an extension point
+// -- it is a node the engine can no longer reason about.
+func ParseNodeStatus(s string) (NodeStatus, error) {
+	switch st := NodeStatus(s); st {
+	case NodeTODO, NodeInProgress, NodeInReview, NodeDone, NodeRejected, NodeAwaitingFix:
+		return st, nil
+	default:
+		return "", fmt.Errorf("invalid node status %q: must be one of %q, %q, %q, %q, %q, %q", s,
+			NodeTODO, NodeInProgress, NodeInReview, NodeDone, NodeRejected, NodeAwaitingFix)
+	}
+}
 
 // NodeType is a plain string, not a closed enum: project/user config and
 // per-ticket LLM patches can introduce new node types without code changes.

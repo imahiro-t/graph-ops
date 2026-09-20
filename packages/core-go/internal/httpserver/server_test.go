@@ -206,12 +206,19 @@ func TestHostHeader_OnlyAddressesThisServerAnswersTo(t *testing.T) {
 }
 
 // TestHostHeader_GuardsStaticAndArtifactRoutesToo verifies the check wraps
-// everything Routes() serves, not just /api: a rebound origin reading stored
-// artifact files is as much of a leak as one driving the API.
+// everything Routes() serves, not just the plain JSON API: a rebound origin
+// reading a stored artifact's bytes is as much of a leak as one driving the
+// API, and the SPA itself must not load either.
+//
+// The artifact path used to be /artifacts-static/..., the filesystem route
+// DFLT-00103 removed; GET /api/artifacts/{id}/content is now the only way to
+// read an artifact's bytes over HTTP, so that is what stands in for it here.
+// The artifact id need not exist -- the rejection happens before any handler
+// runs, which is the point.
 func TestHostHeader_GuardsStaticAndArtifactRoutesToo(t *testing.T) {
 	s, _, _ := newTestServer(t)
 
-	for _, path := range []string{"/", "/artifacts-static/anything.html"} {
+	for _, path := range []string{"/", "/api/artifacts/art-does-not-exist/content"} {
 		t.Run(path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			req.Host = "evil.example.com"
