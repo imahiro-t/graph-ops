@@ -23,7 +23,7 @@ Everything GraphOps creates stays on your machine, or in a database you choose:
 
 - **Downloading the binary**: the first time the plugin runs after an install or update, it downloads the `graph-engine` binary and `checksums.txt` for that version from this repository's GitHub Releases over HTTPS. GitHub's [Terms of Service](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) and [Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement) apply to that request.
 - **Installing the plugin**: Claude Code fetches the plugin from GitHub with `git`.
-- **Web UI**: the local UI server listens on `127.0.0.1` by default, and the UI itself loads no resources from external sites. It is reachable from other machines only if you change `host` in your settings (or `GRAPH_HOST`). A remote image inside a Markdown artifact is not fetched just because the artifact is displayed: the viewer shows the image's host and requests it only after you click to load it. An HTML artifact you preview in the UI can still load whatever external resources the artifact itself references.
+- **Web UI**: the local UI server listens on `127.0.0.1` by default, and the UI itself loads no resources from external sites unless you explicitly ask it to. It is reachable from other machines only if you change `host` in your settings (or `GRAPH_HOST`). A remote image inside a Markdown artifact is not fetched just because the artifact is displayed: the viewer shows the image's host and requests it only after you click to load it. An HTML artifact you preview in the UI can still load whatever external resources the artifact itself references.
 - **MySQL**: if you configure MySQL, GraphOps connects to the server you specify.
 
 GraphOps makes no other network requests.
@@ -61,7 +61,7 @@ GraphOps が作るデータは、すべてお使いのマシン上か、ご自�
 
 - **バイナリのダウンロード**: インストールまたは更新後にプラグインが初めて動くとき、そのバージョンの `graph-engine` バイナリと `checksums.txt` を、このリポジトリの GitHub Releases から HTTPS でダウンロードします。この通信には GitHub の[利用規約](https://docs.github.com/ja/site-policy/github-terms/github-terms-of-service)と[プライバシーステートメント](https://docs.github.com/ja/site-policy/privacy-policies/github-general-privacy-statement)が適用されます。
 - **プラグインのインストール**: Claude Code が `git` で GitHub からプラグインを取得します。
-- **Web UI**: ローカルの UI サーバーは既定で `127.0.0.1` だけで待ち受け、UI 自体は外部サイトからリソースを読み込みません。設定の `host`（または `GRAPH_HOST`）を変えない限り、他のマシンからは接続できません。Markdown 成果物の中の外部画像は、表示しただけでは読み込まれません。画像のホスト名が表示され、読み込みをクリックしたときに初めて取得されます。ただし、UI でプレビューする HTML 成果物は、その成果物自体が参照している外部リソースを読み込むことがあります。
+- **Web UI**: ローカルの UI サーバーは既定で `127.0.0.1` だけで待ち受け、UI 自体は、利用者が明示的に操作しない限り外部サイトからリソースを読み込みません。設定の `host`（または `GRAPH_HOST`）を変えない限り、他のマシンからは接続できません。Markdown 成果物の中の外部画像は、表示しただけでは読み込まれません。画像のホスト名が表示され、読み込みをクリックしたときに初めて取得されます。ただし、UI でプレビューする HTML 成果物は、その成果物自体が参照している外部リソースを読み込むことがあります。
 - **MySQL**: MySQL を設定した場合は、指定したサーバーに接続します。
 
 これ以外のネットワーク通信は行いません。
