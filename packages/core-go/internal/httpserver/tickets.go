@@ -441,9 +441,15 @@ func (s *Server) handleCompleteNode(w http.ResponseWriter, r *http.Request) {
 		artifacts = append(artifacts, prepared)
 	}
 
+	// statusForError rather than a flat 400 (DFLT-00102): the engine now
+	// refuses a node that cannot be completed from its current status with
+	// INVALID_NODE_STATE, which is a 409 -- the request is well-formed and
+	// the caller's fix is to change the node's state, not the call -- and a
+	// node that does not exist with NODE_NOT_FOUND, which is a 404. Calling
+	// both of those "bad request" told the Web UI nothing it could act on.
 	result, err := s.engine.CompleteNode(id, passed, artifacts)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, statusForError(err, http.StatusBadRequest), err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)

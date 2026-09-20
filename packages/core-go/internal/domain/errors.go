@@ -147,6 +147,14 @@ const (
 	// failure. Distinct from VALIDATION_ERROR so the Web UI can say "this
 	// artifact is too big to upload" rather than "check your input".
 	ErrCodeRequestBodyTooLarge ErrorCode = "REQUEST_BODY_TOO_LARGE"
+	// ErrCodeInvalidNodeState: a node was asked to complete from a status it
+	// cannot complete from -- one that was never claimed, or one that has
+	// already finished (DFLT-00102 / BUG-04). Returned with a 409, not a
+	// 400: the request is well-formed and would have been accepted a moment
+	// earlier or later, so what has to change is the node's state, not the
+	// call. Recovery is unstick-node (for a node stuck at IN PROGRESS /
+	// IN REVIEW) or reopen-nodes (to redo a completed one).
+	ErrCodeInvalidNodeState ErrorCode = "INVALID_NODE_STATE"
 	// ErrCodeRouteNotFound: the request named a non-/api/ route this server
 	// deliberately no longer serves (DFLT-00103 removed /artifacts-static/).
 	// Separate from API_ROUTE_NOT_FOUND so "an endpoint you called is gone"
