@@ -8,13 +8,19 @@ import (
 	"github.com/graph-ops/core-go/internal/store"
 )
 
-// --- DFLT-00101 / BUG-02: a loop-back rewinds not just its target but every
-// DONE node between the target and the failing node. Before this, the default
-// workflow's `test_review` -> `impl` loop-back left the four review gates and
-// `gherkin_test` DONE, so an implementation that was never re-reviewed or
-// re-tested could reach `report`/`release_approval`, and `test_review` itself
-// was handed straight back by the next get-executable call -- re-judging the
-// previous run's test results before the rework existed. ---
+// --- DFLT-00101 / BUG-02: a loop-back rewinds not just its target but the
+// work already done off it. Before this, the default workflow's `test_review`
+// -> `impl` loop-back left the four review gates and `gherkin_test` DONE, so
+// an implementation that was never re-reviewed or re-tested could reach
+// `report`/`release_approval`, and `test_review` itself was handed straight
+// back by the next get-executable call -- re-judging the previous run's test
+// results before the rework existed.
+//
+// DFLT-00119 then widened the rewind from "the DONE nodes on a path between
+// the target and the failing node" to the target's whole `success`-edge
+// forward closure, claimed nodes included; the tests below are updated to
+// that rule, and parallel_gate_rewind_test.go covers the parallel-gate shape
+// it was widened for. ---
 
 // defaultWorkflowAtTestReview drives a fresh ticket through the *default*
 // workflow -- ExpandGraph with no patch, i.e. exactly the shape
@@ -133,12 +139,15 @@ func TestCompleteNode_DefaultWorkflowLoopBackRewindsReviewsAndTests(t *testing.T
 	}
 	// The failing reviewer itself stays AWAITING FIX (DFLT-00042), not TODO.
 	assertNodeStatus(t, repo, ticketID, "test_review", domain.NodeAwaitingFix, 0)
-	// Upstream of the target, and downstream of the failing node, are both
-	// left alone: the former never produced the output being redone, the
-	// latter never ran against it.
+	// Upstream of the target is left alone: the rewind starts AT the target
+	// and only walks forward, and those nodes never produced the output being
+	// redone.
 	for _, cfg := range []string{"plan", "plan_review", "plan_approval", "gherkin_spec", "gherkin_review"} {
 		assertNodeStatus(t, repo, ticketID, cfg, domain.NodeDone, 0)
 	}
+	// Past the failing node the rewind has nothing to do -- those nodes are
+	// in the closure since DFLT-00119, but they never ran, so they are
+	// already TODO and are skipped rather than rewritten.
 	for _, cfg := range []string{"report", "report_review", "release_approval", "release"} {
 		assertNodeStatus(t, repo, ticketID, cfg, domain.NodeTODO, 0)
 	}
@@ -189,47 +198,20 @@ func TestCompleteNode_DefaultWorkflowLoopBackRewindsReviewsAndTests(t *testing.T
 	}
 }
 
-// TestCompleteNode_LoopBackLeavesSiblingGatesAlone pins the deliberate limit
-// of the rewind (see loopBackRewindSet): with the default workflow's four
-// gates all looping back to `impl`, one gate failing does not invalidate the
-// other three's verdicts, because they are not on a success path to the
-// failing gate. Their judgments of the pre-rework implementation survive --
-// the intended scope of this ticket, not an oversight.
-func TestCompleteNode_LoopBackLeavesSiblingGatesAlone(t *testing.T) {
-	e, repo, projectID := newTestEngine(t)
-	ticketID, _ := defaultWorkflowAtTestReview(t, e, projectID)
-	codeReview := nodeByConfigID(t, repo, ticketID, "code_review")
-	// The gate is DONE by now; a gate that is actually judging is IN REVIEW,
-	// so put it back into that state rather than failing a DONE node.
-	setNodeStatus(t, repo, codeReview.ID, domain.NodeInReview)
+// (The sibling-gate case DFLT-00101 deliberately left out of scope -- one
+// gate failing while its parallel siblings keep their verdicts -- is
+// DFLT-00119's, and lives in parallel_gate_rewind_test.go's case (a).)
 
-	res, err := e.CompleteNode(codeReview.ID, false, nil)
-	if err != nil {
-		t.Fatalf("CompleteNode(code_review, fail): %v", err)
-	}
-	if res.NextStatus != "AWAITING FIX" || !res.LoopedBack {
-		t.Fatalf("expected {AWAITING FIX true}, got %+v", res)
-	}
-
-	assertNodeStatus(t, repo, ticketID, "impl", domain.NodeTODO, 1)
-	assertNodeStatus(t, repo, ticketID, "code_review", domain.NodeAwaitingFix, 0)
-	for _, cfg := range []string{"qa_review", "security_review", "non_functional_review", "gherkin_test"} {
-		assertNodeStatus(t, repo, ticketID, cfg, domain.NodeDone, 0)
-	}
-	assertNodeStatus(t, repo, ticketID, "test_review", domain.NodeInReview, 0)
-}
-
-// TestCompleteNode_LoopBackRewindsDoneNodesOnly pins the "DONE only" filter:
-// a node on the path that is currently being worked (IN PROGRESS/IN REVIEW) is
-// left as it is, because resetting it would race whatever holds that claim --
-// the engine never decides on its own that a claim is stale (see UnstickNode).
-// The state set up here (a gate still IN REVIEW while gherkin_test, which
-// depends on it, is already DONE) cannot arise from the default workflow on
-// its own; it is written directly to exercise the filter. Its consequence is
-// that the untouched claim keeps blocking its own successors afterwards, and
-// unstick-node is the way out -- exactly the recovery GrantIterations' doc
-// comment describes.
-func TestCompleteNode_LoopBackRewindsDoneNodesOnly(t *testing.T) {
+// TestCompleteNode_LoopBackRewindsClaimedNodesToo pins DFLT-00119's other
+// reversal: a node in the closure that is being worked right now (IN
+// PROGRESS/IN REVIEW) is rewound like any other. DFLT-00101 left such a node
+// alone to avoid racing its worker; the race is the lesser problem, because
+// that worker is judging output the target is about to replace and its
+// verdict must not be recorded (checkCompletable refuses it -- see
+// TestCompleteNode_LateVerdictFromRewoundGateIsRefused). The consequence
+// pinned here is that unstick-node is no longer part of the recovery: the
+// claimed gate comes back from get-executable by itself.
+func TestCompleteNode_LoopBackRewindsClaimedNodesToo(t *testing.T) {
 	e, repo, projectID := newTestEngine(t)
 	ticketID, cat := defaultWorkflowAtTestReview(t, e, projectID)
 	codeReview := nodeByConfigID(t, repo, ticketID, "code_review")
@@ -241,8 +223,7 @@ func TestCompleteNode_LoopBackRewindsDoneNodesOnly(t *testing.T) {
 	}
 
 	assertNodeStatus(t, repo, ticketID, "impl", domain.NodeTODO, 1)
-	assertNodeStatus(t, repo, ticketID, "code_review", domain.NodeInReview, 0)
-	for _, cfg := range []string{"qa_review", "security_review", "non_functional_review", "gherkin_test"} {
+	for _, cfg := range []string{"code_review", "qa_review", "security_review", "non_functional_review", "gherkin_test"} {
 		assertNodeStatus(t, repo, ticketID, cfg, domain.NodeTODO, 0)
 	}
 
@@ -253,18 +234,11 @@ func TestCompleteNode_LoopBackRewindsDoneNodesOnly(t *testing.T) {
 	if _, err := e.CompleteNode(exec[0].ID, true, nil); err != nil {
 		t.Fatalf("CompleteNode(impl rework): %v", err)
 	}
-	// The three rewound gates come back; the one still holding a claim does
-	// not, and gherkin_test stays behind it until unstick-node frees it.
+	// All four gates come back, the formerly-claimed one included, with no
+	// unstick-node in between.
 	exec, _ = e.GetExecutableNodes(ticketID, cat)
-	if len(exec) != 3 {
-		t.Fatalf("expected the three rewound gates alone, got %v", execConfigIDs(exec))
-	}
-	if _, err := e.UnstickNode(codeReview.ID); err != nil {
-		t.Fatalf("UnstickNode(code_review): %v", err)
-	}
-	exec, _ = e.GetExecutableNodes(ticketID, cat)
-	if len(exec) != 1 || *exec[0].ConfigID != "code_review" {
-		t.Fatalf("expected code_review to become executable again after unstick-node, got %v", execConfigIDs(exec))
+	if len(exec) != 4 {
+		t.Fatalf("expected all four gates to be re-offered, got %v", execConfigIDs(exec))
 	}
 }
 
@@ -330,10 +304,13 @@ func TestCompleteNode_LoopBackRewindsApprovalGateOnPath(t *testing.T) {
 
 // TestCompleteNode_LoopBackWithNoSuccessPathToFailedNodeRewindsTargetOnly
 // pins the fallback for a loop_back_to that points sideways rather than back
-// up the failing node's own lineage: no node is both downstream of the target
-// and upstream of the failing node, so the rewind set is empty and the
-// behaviour is the pre-DFLT-00101 one (target only). Nothing on the unrelated
-// branch is disturbed either.
+// up the failing node's own lineage: `side_task` has no success-edge
+// successors at all, so its forward closure is empty and only the target
+// itself is reset. `impl` and `gherkin_test` sit on the branch that produced
+// the failing node, not on the target's, and are left alone. The failure
+// still spends one of the target's iterations -- see
+// TestLoopBackRewindsFailedNode for why a sideways loop-back must keep
+// counting.
 func TestCompleteNode_LoopBackWithNoSuccessPathToFailedNodeRewindsTargetOnly(t *testing.T) {
 	e, repo, projectID := newTestEngine(t)
 	cat := baseCatalog(t)
@@ -417,9 +394,12 @@ func TestCompleteNode_LoopBackAtIterationLimitRewindsNothing(t *testing.T) {
 }
 
 // TestLoopBackRewindSet exercises the helper directly against a fixed
-// node/edge set (no DB), covering the two ways a naive closure goes wrong:
-// `down` is reachable from the target but does not reach the failing node, and
-// `sibling` reaches the failing node but not from the target.
+// node/edge set (no DB). The set is the loop target's `success`-edge forward
+// closure minus the target and the failing node, whatever status the members
+// are in bar TODO: `claimed` (IN REVIEW) and `down` (past the failing node)
+// are both in it, while `sibling` -- which reaches the failing node but is not
+// reachable from the target -- is not, because the rewind starts at the target
+// and only ever walks forward.
 func TestLoopBackRewindSet(t *testing.T) {
 	byID := map[string]domain.GraphNode{
 		"target":  {ID: "target", Status: domain.NodeDone},
@@ -440,13 +420,48 @@ func TestLoopBackRewindSet(t *testing.T) {
 	}
 
 	got := loopBackRewindSet("target", "failed", byID, edges)
-	if len(got) != 1 || got[0] != "mid" {
-		t.Errorf("expected [mid] (claimed is not DONE, down is past the failure, sibling is off the target's path), got %v", got)
+	want := []string{"claimed", "down", "mid"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v (the target's forward closure bar itself and the failing node), got %v", want, got)
+	}
+	for i, id := range want {
+		if got[i] != id {
+			t.Errorf("rewind set[%d] = %q, want %q (ids come back sorted)", i, got[i], id)
+		}
 	}
 
-	// An unreachable failing node yields an empty set, i.e. the loop-back
-	// falls back to resetting its target alone.
+	// A target with nothing downstream of it yields an empty set, i.e. the
+	// loop-back resets its target alone. `sibling` stays out of both calls.
 	if got := loopBackRewindSet("down", "failed", byID, edges); len(got) != 0 {
-		t.Errorf("expected no rewind when the failing node is not downstream of the target, got %v", got)
+		t.Errorf("expected no rewind when the target has no success-edge successors, got %v", got)
+	}
+}
+
+// TestLoopBackRewindsFailedNode pins the vertical/sideways distinction
+// CompleteNode uses to decide whether a failure opens a new iteration of its
+// loop target (see the loop-back branch): a failing node inside the target's
+// forward closure is one the loop-back itself rewinds, so it cannot run again
+// until the target has been redone; one outside it can, and must therefore
+// keep spending iterations or the ceiling stops being a ceiling.
+func TestLoopBackRewindsFailedNode(t *testing.T) {
+	edges := []domain.GraphEdge{
+		{FromNodeID: "target", ToNodeID: "mid", Condition: domain.EdgeSuccess},
+		{FromNodeID: "mid", ToNodeID: "failed", Condition: domain.EdgeSuccess},
+		{FromNodeID: "failed", ToNodeID: "down", Condition: domain.EdgeSuccess},
+		{FromNodeID: "aside", ToNodeID: "down", Condition: domain.EdgeSuccess},
+		{FromNodeID: "failed", ToNodeID: "target", Condition: domain.EdgeLoop},
+	}
+	if !loopBackRewindsFailedNode("target", "failed", edges) {
+		t.Error("expected the failing node to count as downstream of its loop target")
+	}
+	// Sideways: nothing leads from `aside` to `failed`, so a loop_back_to
+	// pointing there leaves the failing node free to run again.
+	if loopBackRewindsFailedNode("aside", "failed", edges) {
+		t.Error("expected a loop target with no success path to the failing node to count as sideways")
+	}
+	// The iteration_loop edge back to the target is never followed, so the
+	// failing node cannot reach itself through its own loop edge.
+	if loopBackRewindsFailedNode("failed", "failed", edges) {
+		t.Error("expected a node that loops back to itself not to count as its own rewind")
 	}
 }

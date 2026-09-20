@@ -2,6 +2,7 @@ package engine
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/graph-ops/core-go/internal/config"
@@ -774,19 +775,38 @@ func TestReopenNodes_RejectsNodeNotBelongingToTicket(t *testing.T) {
 	}
 }
 
-func TestReopenNodes_RejectsNodeThatIsNeitherDoneNorRejected(t *testing.T) {
+// TestReopenNodes_RejectsNodeBeingWorked pins the one status range
+// reopen-nodes still refuses. DFLT-00119 widened it to accept TODO and
+// AWAITING FIX (a blocked loop target is usually at TODO, and refusing it left
+// such a ticket unrecoverable from the CLI), but a node something may still be
+// working is left to unstick-node: deciding a claim is stale is a judgment
+// call that has to be asked for explicitly.
+func TestReopenNodes_RejectsNodeBeingWorked(t *testing.T) {
 	e, repo, projectID := newTestEngine(t)
 	ticketID, _ := approvalGateGraph(t, e, projectID, false)
 	gate := nodeByConfigID(t, repo, ticketID, "approval")
 	if _, err := e.CompleteNode(gate.ID, false, nil); err != nil {
 		t.Fatalf("CompleteNode(approval, rejected): %v", err)
 	}
-	// after_approval is still TODO (never claimed, since the gate blocking
-	// it was rejected before it could run).
 	after := nodeByConfigID(t, repo, ticketID, "after_approval")
+	setNodeStatus(t, repo, after.ID, domain.NodeInProgress)
 
-	if _, err := e.ReopenNodes(ticketID, []string{after.ID}); err == nil {
-		t.Fatal("expected an error reopening a node that is not DONE or REJECTED")
+	_, err := e.ReopenNodes(ticketID, []string{after.ID})
+	if err == nil {
+		t.Fatal("expected an error reopening a node that is IN PROGRESS")
+	}
+	if !strings.Contains(err.Error(), "unstick-node") {
+		t.Errorf("expected the refusal to point at unstick-node, got %v", err)
+	}
+
+	// The same node at TODO is accepted, and costs no iteration.
+	setNodeStatus(t, repo, after.ID, domain.NodeTODO)
+	if _, err := e.ReopenNodes(ticketID, []string{after.ID}); err != nil {
+		t.Fatalf("expected a TODO node to be reopenable: %v", err)
+	}
+	got, _ := repo.GetNode(after.ID)
+	if got.Status != domain.NodeTODO || got.IterationCount != 0 {
+		t.Errorf("expected the TODO node to stay TODO at iteration_count 0, got %s / %d", got.Status, got.IterationCount)
 	}
 }
 
