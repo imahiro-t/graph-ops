@@ -65,7 +65,9 @@ func TestSQLiteBusyTimeoutWaitsOutAnotherConnectionsWriteLock(t *testing.T) {
 	}
 	blocker := newBusyTestDB(t, dbPath)
 
-	// BEGIN IMMEDIATE takes the write lock up front and holds it.
+	// database/sql's Begin issues a plain (deferred) BEGIN, which takes no
+	// lock at all; it is the INSERT right after it that takes the write lock,
+	// and the transaction then holds it until Commit.
 	tx, err := blocker.db.Begin()
 	if err != nil {
 		t.Fatalf("Begin on the blocking connection: %v", err)
@@ -107,6 +109,13 @@ func TestSQLiteBusyTimeoutWaitsOutAnotherConnectionsWriteLock(t *testing.T) {
 // transaction keeps failing under concurrent processes: updateTicket
 // (labels.go), which syncTicketStatus drives from complete-node and
 // get-executable, and the ID allocation in CreateTicket/CreateNode.
+//
+// DFLT-00100 removed most of the exposure rather than the failure mode:
+// syncTicketStatus now skips UpdateTicket entirely when the derived status
+// already matches the stored one, so complete-node/get-executable only enter
+// this transaction on a real status transition. The transaction itself is
+// still deferred, and still fails this way when two processes do transition
+// the same ticket at the same moment.
 //
 // Fixing that needs BEGIN IMMEDIATE (DSN _txlock=immediate) or a retry, both
 // of which DFLT-00100 puts out of scope. If a later ticket takes it on, this

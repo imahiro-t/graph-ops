@@ -201,10 +201,14 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 	// every deferred read-then-write transaction in this package still
 	// fails at once under concurrent processes: updateTicket (labels.go),
 	// which syncTicketStatus drives from complete-node and get-executable,
-	// and the ID allocation in CreateTicket/CreateNode. Measured with 37
-	// parallel CLI calls, that is still a few failures per run. Closing it
-	// needs BEGIN IMMEDIATE (DSN _txlock=immediate) or a retry, both of
-	// which DFLT-00100 puts out of scope; see
+	// and the ID allocation in CreateTicket/CreateNode. DFLT-00100 shrank
+	// the exposure from the other end instead -- syncTicketStatus no longer
+	// calls UpdateTicket when the derived status already matches, so those
+	// two commands only enter the transaction on a real status transition
+	// -- but the transaction is still deferred, so concurrent transitions
+	// of the same ticket can still fail. Closing that needs BEGIN IMMEDIATE
+	// (DSN _txlock=immediate) or a retry, both of which DFLT-00100 puts out
+	// of scope; see
 	// TestSQLiteBusyTimeoutDoesNotCoverDeferredTransactionUpgrade.
 	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)", dbPath)
 	db, err := sql.Open("sqlite", dsn)
