@@ -305,18 +305,21 @@ Commands:
                                            this fixed artifact name.)
   reopen-nodes <ticketId> <nodeId1,nodeId2,...>
                                           (mechanical primitive for rejection triage (DFLT-00016):
-                                           resets the given already-DONE/REJECTED nodes (chosen by
-                                           process-ticket, never by this command) back to TODO, plus
-                                           whatever DONE/REJECTED work is reachable from them via a
-                                           success edge (forward closure), bumping each one's
-                                           iteration_count by 1 and clearing the ticket's blocked
-                                           flag. Requires the ticket to currently be blocked. Errors,
-                                           writing nothing, if any collected node would exceed its
-                                           max_iterations -- no partial application. That makes it
-                                           useless on its own against a ticket an ITERATION LIMIT
-                                           blocked: the loop target is at max_iterations by
-                                           definition there, so this command always refuses. Raise
-                                           the budget with grant-iterations first -- see below.)
+                                           resets the given nodes (chosen by process-ticket, never by
+                                           this command) back to TODO, plus whatever work is reachable
+                                           from them via a success edge (forward closure), and clears
+                                           the ticket's blocked flag. Accepts nodes that are DONE,
+                                           REJECTED, TODO or AWAITING FIX; a node being worked right
+                                           now (IN PROGRESS/IN REVIEW) is unstick-node's job. Only
+                                           DONE/REJECTED nodes -- the ones that actually produced
+                                           something being thrown away -- have iteration_count bumped;
+                                           TODO/AWAITING FIX nodes never ran, so they cost no attempt.
+                                           Requires the ticket to currently be blocked. Errors, writing
+                                           nothing, if any bumped node would exceed its max_iterations
+                                           -- no partial application. Against a ticket an ITERATION
+                                           LIMIT blocked, the loop target is at max_iterations by
+                                           definition, so raise the budget with grant-iterations first
+                                           -- see below.)
   grant-iterations <ticketId> <nodeId1,nodeId2,...> [--extra <n>]
                                           (raises the given nodes' max_iterations by n (default 1),
                                            touching nothing else -- not their status, not their
@@ -324,10 +327,11 @@ Commands:
                                            attempts were already spent is kept. It is step 1 of
                                            recovering a ticket blocked by an iteration limit:
                                              1. grant-iterations <ticketId> <loop target>
-                                             2. reopen-nodes <ticketId> <loop target>   (now succeeds)
-                                             3. unstick-node <failing reviewer>         (reopen-nodes
-                                                skips IN REVIEW nodes, so the reviewer that failed is
-                                                still claimed and needs this)
+                                             2. reopen-nodes <ticketId> <loop target>   (now succeeds,
+                                                whether the loop target is DONE or already TODO)
+                                             3. unstick-node <nodeId>                   (only if some
+                                                node is stuck at IN PROGRESS/IN REVIEW -- reopen-nodes
+                                                never touches those)
                                            A deliberate human decision each time: n is capped per
                                            call, and no flag makes retries unlimited. An unknown id,
                                            an id from another ticket, or an out-of-range n is an

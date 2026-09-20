@@ -638,79 +638,106 @@ func reachableVia(from string, adjacency map[string][]string) map[string]bool {
 	return seen
 }
 
-// loopBackRewindSet returns the ids of the nodes a loop-back must rewind to
-// TODO alongside its target: the DONE nodes sitting on a `success`-edge path
-// from the loop target to the failing node -- i.e. the intersection of "is
-// reachable from the target by success edges" and "reaches the failing node
-// by success edges" -- with the target and the failing node themselves
-// excluded, since CompleteNode writes each of those itself (TODO with a bumped
-// iteration count, and AWAITING FIX, respectively).
-//
-// Why an intersection rather than just the forward closure ReopenNodes
-// computes: resetting everything reachable from the target would also discard
-// work downstream of the failing node, which never ran against this attempt
-// at all (the failing node is the reviewer that just rejected -- nothing past
-// it can legitimately be DONE yet), while resetting everything that reaches
-// the failing node would sweep in sibling branches that have nothing to do
-// with the target's rework. Only the nodes on a path between the two actually
-// judged or exercised the output the target is about to redo. Without this,
-// the default workflow's `test_review` -> `impl` loop-back left
-// `gherkin_test` and all four review gates DONE, so an implementation that
-// was never re-tested or re-reviewed could reach `report` and
-// `release_approval` (DFLT-00101 / BUG-02), and `test_review` itself was
-// re-offered by the very next GetExecutableNodes call -- re-judging the
-// previous run's test results before the rework even existed.
-//
-// Only DONE nodes are rewound, the same filter ReopenNodes' `reopenable`
-// applies, and for the same reasons: a node IN PROGRESS/IN REVIEW is being
-// worked right now and resetting it would race that worker (deciding a claim
-// is stale is a judgment call the engine never makes on its own -- see
-// UnstickNode), while TODO/AWAITING FIX/REJECTED nodes have no completed
-// result to invalidate. A node left IN PROGRESS/IN REVIEW this way therefore
-// still blocks its own successors afterwards, and UnstickNode remains the
-// sanctioned way out of that.
-//
-// A DONE approval_gate on the path *is* rewound, despite being a manual node:
-// its approval was given for output the target is about to redo, so leaving it
-// DONE would wave the reworked result past a stale human decision. The
-// deliberate consequence is that such a ticket stops for a fresh approval
-// after the rework (GetExecutableNodes never hands out manual nodes).
-//
-// Sibling reviewers that pass while another fails stay DONE by design: with
-// the default workflow's four review gates all looping back to `impl`, a
-// `code_review` failure does not reach `qa_review` et al. by success edges, so
-// their verdicts on the pre-rework implementation survive. That is the
-// intended scope of this ticket's rewind (the alternative -- rewinding every
-// node that merely shares the target -- was explicitly not chosen), not an
-// oversight.
-//
-// Ids come back sorted, purely so the resulting writes are in a deterministic
-// order rather than Go's randomized map order.
-func loopBackRewindSet(targetID, failedNodeID string, byID map[string]domain.GraphNode, edges []domain.GraphEdge) []string {
+// successorsBySuccessEdge builds the `success`-edge adjacency list the rewind
+// and its "is the failing node downstream of the target" question both walk.
+// iteration_loop edges are deliberately left out: they point backward, and
+// following them would make every loop target reachable from its own
+// reviewers.
+func successorsBySuccessEdge(edges []domain.GraphEdge) map[string][]string {
 	successors := make(map[string][]string, len(edges))
-	predecessors := make(map[string][]string, len(edges))
 	for _, edge := range edges {
 		if edge.Condition != domain.EdgeSuccess {
 			continue
 		}
 		successors[edge.FromNodeID] = append(successors[edge.FromNodeID], edge.ToNodeID)
-		predecessors[edge.ToNodeID] = append(predecessors[edge.ToNodeID], edge.FromNodeID)
 	}
+	return successors
+}
 
-	downstreamOfTarget := reachableVia(targetID, successors)
-	upstreamOfFailed := reachableVia(failedNodeID, predecessors)
+// loopBackRewindSet returns the ids of the nodes a loop-back must rewind to
+// TODO alongside its target: everything reachable from the loop target by
+// `success` edges -- its full forward closure, the same rule ReopenNodes
+// applies -- that is not already TODO, with the target and the failing node
+// themselves excluded, since CompleteNode writes each of those itself (TODO
+// with, usually, a bumped iteration count, and AWAITING FIX, respectively).
+//
+// Why the whole forward closure. Once the target is going to be redone, every
+// result downstream of it was produced against output that no longer exists.
+// DFLT-00101 narrowed this to the nodes on a path from the target to the
+// failing node, which left two holes that DFLT-00119 closes:
+//
+//   - Sibling gates kept their verdicts. The default workflow hangs four
+//     review_gates off `impl` in parallel, each looping back to `impl`. A
+//     `qa_review` failure does not reach `code_review` by success edges, so
+//     `code_review` stayed DONE -- and the rewritten implementation then
+//     sailed past a gate that had never seen it. Observed in DFLT-00100,
+//     where the ticket's most consequential change reached release approval
+//     without ever passing code review. The same applied to `gherkin_test`
+//     whenever the node that failed was a sibling rather than `test_review`.
+//   - Work past the failing node kept its DONE status. It is rarer (nothing
+//     downstream of a reviewer that just rejected is usually DONE yet), but
+//     nothing prevented it -- a parallel branch can finish while another
+//     rejects -- and it was judged against the same superseded output.
+//
+// Nodes that are not TODO are rewound whatever state they are in, including
+// IN PROGRESS and IN REVIEW. DFLT-00101 excluded those to avoid racing their
+// worker; DFLT-00119 reverses that, because the race is the lesser problem:
+// such a worker is judging the output the target is about to replace, so its
+// verdict must not be recorded. checkCompletable is what actually discards it
+// -- an automatic node rewound to TODO refuses the late CompleteNode call
+// outright, writing nothing (see there). The cost is that the rewound node is
+// handed out again by the next GetExecutableNodes while the old worker may
+// still be running, so the same gate can briefly be worked twice; that is
+// accepted (DFLT-00119 completion criterion 2) rather than prevented, and
+// UnstickNode is no longer needed to free a claim a rewind swept up.
+//
+// TODO nodes are left out only because they are already where a rewind would
+// put them; the rule is "reset everything in the closure", not "reset the
+// completed ones".
+//
+// A DONE approval_gate in the closure *is* rewound, despite being a manual
+// node: its approval was given for output the target is about to redo, so
+// leaving it DONE would wave the reworked result past a stale human decision.
+// The deliberate consequence is that such a ticket stops for a fresh approval
+// after the rework (GetExecutableNodes never hands out manual nodes).
+//
+// Rewound nodes keep their own iteration_count -- only the loop target's
+// moves. See CompleteNode's loop-back branch for why, and for when even the
+// target's does not move.
+//
+// Ids come back sorted, purely so the resulting writes are in a deterministic
+// order rather than Go's randomized map order.
+func loopBackRewindSet(targetID, failedNodeID string, byID map[string]domain.GraphNode, edges []domain.GraphEdge) []string {
+	downstreamOfTarget := reachableVia(targetID, successorsBySuccessEdge(edges))
 
 	ids := make([]string, 0, len(downstreamOfTarget))
 	for id := range downstreamOfTarget {
-		if id == targetID || id == failedNodeID || !upstreamOfFailed[id] {
+		if id == targetID || id == failedNodeID {
 			continue
 		}
-		if n, ok := byID[id]; ok && n.Status == domain.NodeDone {
+		if n, ok := byID[id]; ok && n.Status != domain.NodeTODO {
 			ids = append(ids, id)
 		}
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// loopBackRewindsFailedNode reports whether the node that just failed sits in
+// the loop target's `success`-edge forward closure -- i.e. whether the very
+// loop-back it is triggering would have rewound it, had CompleteNode not
+// marked it AWAITING FIX instead.
+//
+// This is what tells a "vertical" loop-back (the default workflow's gates and
+// reviews, all downstream of `impl`) apart from a "sideways" one (a
+// loop_back_to pointing at a node on an unrelated branch). CompleteNode needs
+// the distinction to decide whether a failure counts as a fresh iteration of
+// the target -- see there.
+func loopBackRewindsFailedNode(targetID, failedNodeID string, edges []domain.GraphEdge) bool {
+	if targetID == failedNodeID {
+		return false
+	}
+	return reachableVia(targetID, successorsBySuccessEdge(edges))[failedNodeID]
 }
 
 // checkCompletable decides whether a node may be completed at all, from its
@@ -746,6 +773,23 @@ func loopBackRewindSet(targetID, failedNodeID string, byID map[string]domain.Gra
 // regardless of node status -- a closed ticket takes no more work (the same
 // line GetExecutableNodes and syncTicketStatus already hold).
 //
+// "TODO on an automatic node was never claimed" carries a second meaning
+// since DFLT-00119, and the message for that case says so: a loop-back now
+// rewinds the loop target's whole forward closure, IN PROGRESS/IN REVIEW
+// nodes included (see loopBackRewindSet), so a gate that was mid-judgment
+// when a sibling gate sent the work back is put straight to TODO. Its
+// subagent finishes and calls CompleteNode on output that has since been
+// superseded, and this refusal is what keeps that verdict off the record --
+// the whole point of rewinding it. Callers (process-ticket) must treat that
+// refusal as routine: go back to get-executable and redo the node when it is
+// handed out again, rather than reporting a failure. What is refused is the
+// verdict, not the write-up behind it: agents save that with add-artifact
+// before calling here, and neither that path nor this one looks at the node's
+// status, so a superseded review stays on the node beside whatever the re-run
+// produces (artifacts are only ever appended; the most recent one is the
+// current verdict). Nothing records the refused call as a verdict, so a gate
+// re-run after a rewind legitimately raises the same findings again.
+//
 // Two things it deliberately does not check: the ticket's `blocked` flag and
 // whether the node's prerequisites are DONE. Parallel branches make both
 // wrong -- one branch's gate rejection blocks the ticket while a sibling node
@@ -765,6 +809,14 @@ func checkCompletable(node *domain.GraphNode, detail *domain.TicketDetail) error
 	if node.IsManual && node.Status == domain.NodeTODO {
 		return nil
 	}
+	if node.Status == domain.NodeTODO {
+		return domain.NewAPIError(domain.ErrCodeInvalidNodeState,
+			"node %s is TODO, not IN PROGRESS or IN REVIEW; only a node in one of those states can be completed. "+
+				"An automatic node is at TODO either because get-executable never handed it out, or because a loop-back rewound it "+
+				"while this run was still working -- in that case the output this verdict judged has already been redone, so the "+
+				"verdict is deliberately not recorded. Go back to get-executable and redo the node when it is handed out again (%s)",
+			node.ID, recovery)
+	}
 	allowed := "IN PROGRESS or IN REVIEW"
 	if node.IsManual {
 		allowed = "TODO, IN PROGRESS or IN REVIEW"
@@ -782,15 +834,21 @@ type CompleteNodeResult struct {
 // CompleteNode records a node's pass/fail outcome (plus any produced
 // artifacts) and advances the graph: on pass the node is marked DONE and the
 // ticket status is resynced; on fail it walks the node's iteration_loop edge
-// back to the loop target, resetting that target to TODO and bumping its
-// iteration count, resetting the DONE nodes between the two back to TODO as
-// well (without touching their iteration counts -- see loopBackRewindSet for
-// which nodes those are and why), and marking the failing node itself
-// AWAITING FIX (NextStatus "AWAITING FIX", DFLT-00042), or blocks
-// the ticket once max_iterations is exceeded (or if there's no loop edge to
-// take at all). The one exception is NodeTypeApprovalGate: a "reject" there
-// (passed=false) always blocks the ticket immediately, regardless of any
-// iteration_loop edge -- see the dedicated branch below.
+// back to the loop target, resetting that target to TODO, resetting the
+// target's whole `success`-edge forward closure to TODO as well (without
+// touching their iteration counts -- see loopBackRewindSet for which nodes
+// those are and why), and marking the failing node itself AWAITING FIX
+// (NextStatus "AWAITING FIX", DFLT-00042), or blocks the ticket once
+// max_iterations is exceeded (or if there's no loop edge to take at all). The
+// one exception is NodeTypeApprovalGate: a "reject" there (passed=false)
+// always blocks the ticket immediately, regardless of any iteration_loop edge
+// -- see the dedicated branch below.
+//
+// The loop target's iteration_count is bumped once per round of rework, not
+// once per failure: several review gates hanging off the same target and
+// rejecting for the same defect spend one iteration between them
+// (DFLT-00119). The loop-back branch below spells out how a round is
+// identified and why a sideways loop_back_to is counted differently.
 //
 // The node's current status is checked first, by checkCompletable, and a node
 // that may not be completed from where it stands is refused with an
@@ -901,8 +959,35 @@ func (e *GraphEngine) CompleteNode(nodeID string, passed bool, artifacts []domai
 		if target == nil {
 			continue
 		}
-		nextIteration := target.IterationCount + 1
-		if nextIteration > target.MaxIterations {
+		// Does this failure start a new round of rework, or is it one more
+		// verdict inside a round some other node has already sent back?
+		// (DFLT-00119 completion criterion 3.) With four review gates hanging
+		// off `impl` in parallel, one defect used to cost four iterations --
+		// the default budget of 3 meant such a ticket could block before the
+		// implementation had been redone even once (observed in DFLT-00103).
+		//
+		// A round is "already counted" when the target is sitting at TODO
+		// *and* this failing node is one the rewind of that round swept up:
+		// it cannot have run again since, because it is downstream of a
+		// target that has not been redone, so its verdict belongs to the
+		// round already on the counter.
+		//
+		// The second half of that condition is what keeps the iteration
+		// ceiling a ceiling. A sideways loop_back_to -- a failing node that
+		// is NOT in the target's forward closure -- can be handed out and
+		// fail again and again without the target ever running (its own
+		// prerequisites are unrelated to the target, so allNonLoopPrereqsDone
+		// keeps saying yes). Were those failures free, that loop would never
+		// reach max_iterations and never block. Each one therefore counts,
+		// exactly as it did before DFLT-00119.
+		rewindsFailedNode := loopBackRewindsFailedNode(target.ID, node.ID, detail.Edges)
+		newIteration := !(rewindsFailedNode && target.Status == domain.NodeTODO)
+
+		// The budget is only spent, and so only checked, by a failure that
+		// opens a new round. Checking it on a failure that counts nothing is
+		// how the parallel gates used to block a ticket with the second
+		// verdict of the first round.
+		if newIteration && target.IterationCount+1 > target.MaxIterations {
 			if err := e.blockTicket(node.TicketID); err != nil {
 				return CompleteNodeResult{}, err
 			}
@@ -920,8 +1005,57 @@ func (e *GraphEngine) CompleteNode(nodeID string, passed bool, artifacts []domai
 		rewind := loopBackRewindSet(target.ID, node.ID, byID, detail.Edges)
 
 		todo := domain.NodeTODO
-		if _, err := e.repo.UpdateNode(target.ID, store.NodePatch{Status: &todo, IterationCount: &nextIteration}); err != nil {
-			return CompleteNodeResult{}, err
+		switch {
+		case !newIteration:
+			// Nothing to write: the target is already TODO and this round's
+			// iteration is already on its counter.
+		case rewindsFailedNode:
+			// ClaimNode, not UpdateNode, for the same reason
+			// GetExecutableNodes uses it: `target` is a snapshot, and the
+			// parallel gates this case is about can call CompleteNode at the
+			// same moment. Read-then-write would let two of them both see the
+			// target at DONE and both bump the count -- the very double
+			// counting above. The CAS makes "move the target out of a
+			// non-TODO status" the thing exactly one caller can win, and
+			// losing it means a sibling opened the round first, so this
+			// failure counts nothing after all. (HTTPRepository cannot
+			// express a CAS and composes a GET and a PATCH instead, so
+			// against that backend this race is not closed at all. Do not
+			// read "narrow" into it there: the window is two network round
+			// trips wide -- milliseconds to hundreds of milliseconds against
+			// the single UPDATE this relies on -- and gates that finish
+			// together can still each count a round. See GraphRepository.
+			// ClaimNode, and the known limitation in
+			// docs/release-notes/v0.7.0.md.)
+			//
+			// The count written is read back by the claim itself rather than
+			// taken from the snapshot, so it cannot revert a bump that landed
+			// in between. The budget was still checked against the snapshot:
+			// for the count to have moved since, the target must have been
+			// redone in between, which means the check is simply one round
+			// late -- the next failure blocks.
+			claimed, err := e.repo.ClaimNode(target.ID, todo, []domain.NodeStatus{todo})
+			if err != nil {
+				return CompleteNodeResult{}, err
+			}
+			if claimed == nil {
+				// A sibling opened this round between the read above and
+				// this write. Its bump is the round's; this failure adds
+				// nothing and has nothing left to write on the target.
+				break
+			}
+			nextIteration := claimed.IterationCount + 1
+			if _, err := e.repo.UpdateNode(target.ID, store.NodePatch{IterationCount: &nextIteration}); err != nil {
+				return CompleteNodeResult{}, err
+			}
+		default:
+			// Sideways loop-back: this failure always opens a round of its
+			// own (see above), so there is no claim to race for -- the target
+			// may legitimately already be TODO and still owe a bump.
+			nextIteration := target.IterationCount + 1
+			if _, err := e.repo.UpdateNode(target.ID, store.NodePatch{Status: &todo, IterationCount: &nextIteration}); err != nil {
+				return CompleteNodeResult{}, err
+			}
 		}
 		// Status only, no IterationCount in the patch: the loop target's
 		// count is the loop's counter ("how many times has the target been
@@ -971,29 +1105,55 @@ func (e *GraphEngine) CompleteNode(nodeID string, passed bool, artifacts []domai
 // the ticket's blocked flag, so execution can resume.
 //
 // Preconditions, checked up front so a bad call leaves nothing written:
+//
 //   - the ticket must currently be Blocked. ReopenNodes exists to recover
 //     from exactly that state (an approval_gate rejection or an
 //     iteration_loop exceeding max_iterations); calling it on a healthy
 //     ticket would race whatever is currently executing.
-//   - every id in nodeIDs must belong to this ticket and currently be DONE
-//     or NodeRejected (an approval_gate can itself be a root -- rejecting it
-//     is often the reason the ticket is blocked in the first place, and
-//     re-approving it requires it to be TODO again, not stuck at REJECTED
-//     forever).
+//
+//   - every id in nodeIDs must belong to this ticket and currently be DONE,
+//     REJECTED, TODO or AWAITING FIX. DONE/REJECTED are the original pair (an
+//     approval_gate can itself be a root -- rejecting it is often the reason
+//     the ticket is blocked in the first place, and re-approving it requires
+//     it to be TODO again, not stuck at REJECTED forever). TODO and AWAITING
+//     FIX were added by DFLT-00119, because after that ticket a loop target
+//     is at TODO, not DONE, when an iteration limit blocks the ticket, and
+//     reopen-nodes used to refuse exactly the node the recovery names: with
+//     grant-iterations only raising the ceiling and GetExecutableNodes
+//     returning nothing while `blocked` is set, a ticket in that state could
+//     not be recovered from the CLI at all, only by editing statuses in the
+//     Web UI.
+//
+//     IN PROGRESS and IN REVIEW stay out: something may still be working
+//     them, and deciding a claim is stale is UnstickNode's judgment call to
+//     be asked for explicitly, not one this method makes on its own.
 //
 // Forward closure: nodeIDs is only the root set process-ticket identified;
-// anything reachable from it by a `success` edge that is currently DONE (or,
-// for an approval_gate swept up this way, NodeRejected) is included too --
-// leaving a downstream node's stale DONE status/artifacts in place while its
-// input gets redone upstream would leave the graph inconsistent.
-// iteration_loop edges are never followed (they point backward, not
-// forward, and don't participate in this sweep).
+// anything reachable from it by a `success` edge that is itself reopenable is
+// included too -- leaving a downstream node's stale DONE status/artifacts in
+// place while its input gets redone upstream would leave the graph
+// inconsistent. iteration_loop edges are never followed (they point backward,
+// not forward, and don't participate in this sweep).
 //
-// Iteration budget: every collected node (root or swept-in) has
-// IterationCount bumped by one as it's reset. If any of them would exceed
-// MaxIterations doing so, this method writes nothing at all and returns an
-// error -- process-ticket must not have to reason about a partially-applied
-// reopen leaving the graph half-reset.
+// Widening `reopenable` widened this sweep as well, deliberately: a node the
+// predicate rejects is not merely left out of the set, it stops the walk down
+// that branch. Before DFLT-00119 a TODO node ended the branch there, so DONE
+// work sitting behind one (a rewound gate with a finished report past it, say)
+// was missed and kept a stale status while its input was redone. Now the walk
+// passes through TODO/AWAITING FIX nodes and collects that work too. The
+// visible consequences: more nodes reset than before from the same roots, and
+// a call that used to succeed can now hit the budget check below via a node it
+// did not previously reach.
+//
+// Iteration budget: a collected node has IterationCount bumped by one as it's
+// reset only if it had actually produced something to throw away -- DONE or
+// REJECTED. TODO and AWAITING FIX nodes never ran (AWAITING FIX is a reviewer
+// waiting on its target's rework), so reopening them costs no attempt, and
+// billing one would push the recovery this method exists for back towards the
+// very limit it is recovering from. Only the nodes that are bumped are
+// budget-checked. If any of them would exceed MaxIterations, this method
+// writes nothing at all and returns an error -- process-ticket must not have
+// to reason about a partially-applied reopen leaving the graph half-reset.
 func (e *GraphEngine) ReopenNodes(ticketID string, nodeIDs []string) (domain.TicketDetail, error) {
 	if len(nodeIDs) == 0 {
 		return domain.TicketDetail{}, fmt.Errorf("no node ids given to reopen")
@@ -1015,6 +1175,15 @@ func (e *GraphEngine) ReopenNodes(ticketID string, nodeIDs []string) (domain.Tic
 		byID[n.ID] = n
 	}
 	reopenable := func(status domain.NodeStatus) bool {
+		switch status {
+		case domain.NodeDone, domain.NodeRejected, domain.NodeTODO, domain.NodeAwaitingFix:
+			return true
+		}
+		return false
+	}
+	// Which of the reopenable statuses spend an attempt when reset: see the
+	// doc comment's "Iteration budget".
+	spendsIteration := func(status domain.NodeStatus) bool {
 		return status == domain.NodeDone || status == domain.NodeRejected
 	}
 
@@ -1026,7 +1195,7 @@ func (e *GraphEngine) ReopenNodes(ticketID string, nodeIDs []string) (domain.Tic
 			return domain.TicketDetail{}, fmt.Errorf("node %s does not belong to ticket %s", id, ticketID)
 		}
 		if !reopenable(n.Status) {
-			return domain.TicketDetail{}, fmt.Errorf("node %s is %s, not DONE or REJECTED; only a completed/rejected node can be reopened", id, n.Status)
+			return domain.TicketDetail{}, fmt.Errorf("node %s is %s, not DONE, REJECTED, TODO or AWAITING FIX; a node that is being worked right now cannot be reopened -- use unstick-node to release it first", id, n.Status)
 		}
 		if !toReset[id] {
 			toReset[id] = true
@@ -1057,9 +1226,15 @@ func (e *GraphEngine) ReopenNodes(ticketID string, nodeIDs []string) (domain.Tic
 	}
 
 	// Validate every collected node's iteration budget before writing
-	// anything (see doc comment: no partial application).
+	// anything (see doc comment: no partial application). Only the nodes that
+	// are actually going to be bumped are checked -- a TODO or AWAITING FIX
+	// node spends no attempt, so its budget cannot be the thing that stops
+	// the recovery.
 	for id := range toReset {
 		n := byID[id]
+		if !spendsIteration(n.Status) {
+			continue
+		}
 		if n.IterationCount+1 > n.MaxIterations {
 			return domain.TicketDetail{}, fmt.Errorf("node %s (%s) would exceed max_iterations (%d) if reopened; cannot auto-retry further", id, n.Name, n.MaxIterations)
 		}
@@ -1068,8 +1243,12 @@ func (e *GraphEngine) ReopenNodes(ticketID string, nodeIDs []string) (domain.Tic
 	todo := domain.NodeTODO
 	for id := range toReset {
 		n := byID[id]
-		nextIteration := n.IterationCount + 1
-		if _, err := e.repo.UpdateNode(id, store.NodePatch{Status: &todo, IterationCount: &nextIteration}); err != nil {
+		patch := store.NodePatch{Status: &todo}
+		if spendsIteration(n.Status) {
+			nextIteration := n.IterationCount + 1
+			patch.IterationCount = &nextIteration
+		}
+		if _, err := e.repo.UpdateNode(id, patch); err != nil {
 			return domain.TicketDetail{}, err
 		}
 	}
@@ -1103,17 +1282,29 @@ const maxIterationsGrantPerCall = 10
 // GrantIterations raises the max_iterations budget of the given nodes by
 // `extra`, leaving their status and iteration_count alone. It is the missing
 // first step of recovering a ticket that an iteration limit blocked
-// (DFLT-00101 / BUG-14): at that point the loop target sits DONE with
-// iteration_count == max_iterations, so ReopenNodes -- which bumps every node
-// it resets and refuses the whole call if any would exceed its budget --
-// always fails, and the failing reviewer is left IN REVIEW. The sanctioned
-// recovery is therefore:
+// (DFLT-00101 / BUG-14): at that point the loop target has
+// iteration_count == max_iterations, so ReopenNodes -- which bumps every
+// completed node it resets and refuses the whole call if any would exceed its
+// budget -- always fails. The sanctioned recovery is therefore:
 //
 //	grant-iterations <ticketId> <loop target>   (raise the budget)
 //	reopen-nodes <ticketId> <loop target>       (now succeeds; unblocks the ticket)
-//	unstick-node <failing reviewer>             (IN REVIEW nodes are not
-//	                                             reopenable, so they stay put
-//	                                             and need this)
+//
+// The loop target may be DONE (the block came from a sideways loop-back, or
+// from a reopen that ran out of budget) or TODO (it was already rewound by an
+// earlier failure of the same round, which is the usual shape after
+// DFLT-00119). ReopenNodes accepts both; a TODO target is reset without
+// spending an attempt.
+//
+// A third step is needed only for a node left IN PROGRESS/IN REVIEW, which
+// ReopenNodes will not touch:
+//
+//	unstick-node <that node>
+//
+// Since DFLT-00119 the failing reviewer is not normally one of them -- a
+// loop-back that actually rewinds puts the whole forward closure, claims
+// included, back to TODO. It stays claimed only when the loop-back never
+// happened, i.e. when the budget check blocked the ticket before any write.
 //
 // Deliberately NOT a reset of iteration_count: the count is the ticket's
 // record of how many automatic attempts the loop has already consumed, and

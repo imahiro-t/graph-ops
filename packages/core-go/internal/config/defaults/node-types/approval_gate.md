@@ -45,8 +45,9 @@ artifact on the same `POST /api/nodes/{id}/complete` request.
     identifies the node(s) responsible and calls
     `reopen-nodes <ticketId> <nodeId,...>`, which resets exactly those nodes
     (plus anything downstream that already ran off them) back to TODO, bumps
-    their iteration counts, and un-blocks the ticket so execution resumes
-    automatically from there.
+    the iteration count of each one that had actually finished (DONE or
+    REJECTED; ones reset from TODO or AWAITING FIX spend no iteration), and
+    un-blocks the ticket so execution resumes automatically from there.
   - **The reason requires a requirements-level rethink** that redoing existing
     nodes cannot fix: process-ticket calls nothing and reports back to the
     user instead. The ticket stays blocked and the REJECTED gate stays
