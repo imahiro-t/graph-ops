@@ -489,6 +489,24 @@ func allNonLoopPrereqsDone(nodeID string, byID map[string]domain.GraphNode, edge
 	return true
 }
 
+// claimableExclusions lists the statuses a node must NOT be in to be claimed:
+// DONE has already produced its result, and IN PROGRESS / IN REVIEW mean
+// somebody is working on it right now. Everything else (TODO, AWAITING FIX,
+// REJECTED) is fair game -- unchanged from before the claim became a CAS, and
+// deliberately so: GetExecutableNodes passes this same list as the CAS's
+// excluded set, so the pre-filter it drives and the condition the database
+// enforces are one definition rather than two that can drift apart.
+var claimableExclusions = []domain.NodeStatus{domain.NodeDone, domain.NodeInProgress, domain.NodeInReview}
+
+func isClaimed(status domain.NodeStatus) bool {
+	for _, s := range claimableExclusions {
+		if status == s {
+			return true
+		}
+	}
+	return false
+}
+
 // GetExecutableNodes returns the nodes whose non-loop prerequisites are all
 // DONE, excluding manual nodes (which require human action) and nodes that
 // are already in progress, in review, or done. Both TODO and AWAITING FIX
@@ -552,7 +570,7 @@ func (e *GraphEngine) GetExecutableNodes(ticketID string, catalog config.Catalog
 
 	executable := []domain.GraphNode{}
 	for _, n := range detail.Nodes {
-		if n.Status == domain.NodeDone || n.Status == domain.NodeInProgress || n.Status == domain.NodeInReview {
+		if isClaimed(n.Status) {
 			continue
 		}
 		if n.IsManual {
@@ -566,11 +584,26 @@ func (e *GraphEngine) GetExecutableNodes(ticketID string, catalog config.Catalog
 		if n.Type == domain.NodeTypeReview || n.Type == domain.NodeTypeReviewGate {
 			claimedStatus = domain.NodeInReview
 		}
-		claimed, err := e.repo.UpdateNode(n.ID, store.NodePatch{Status: &claimedStatus})
+		// ClaimNode, not UpdateNode: the status check above and the write
+		// that acts on it have to be one step. The statuses read into
+		// `detail` are a snapshot, and process-ticket runs several
+		// subagents that call this method at the same moment -- with a
+		// read here and a write there, two of them could both see the
+		// same node at TODO and both be handed it (CHK-01). The excluded
+		// set is exactly the skip condition above, so the range of
+		// claimable statuses is unchanged.
+		claimed, err := e.repo.ClaimNode(n.ID, claimedStatus, claimableExclusions)
 		if err != nil {
 			return nil, err
 		}
-		executable = append(executable, claimed)
+		// Somebody else got there first (or the node has since been
+		// deleted). Leave it out of this call's result and carry on --
+		// losing a race is how parallel execution is supposed to look,
+		// not an error to report to the caller.
+		if claimed == nil {
+			continue
+		}
+		executable = append(executable, *claimed)
 	}
 
 	// Always resync, not just when something was actually claimed: a manual

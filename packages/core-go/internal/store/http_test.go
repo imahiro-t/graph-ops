@@ -343,11 +343,30 @@ func operationTable() map[string]opCase {
 	}
 }
 
+// composedHTTPMethods names the GraphRepository methods HTTPRepository
+// satisfies by combining operations the datasource already exposes, rather
+// than by calling one of its own. They are excluded from the operation table
+// and from the OpenAPI operationId check below because there is no wire
+// operation for them to match: adding one would oblige every datasource
+// implementation (the Jira sample included) to grow an endpoint it could not
+// implement any better than this composition does.
+//
+// ClaimNode (DFLT-00102) is GetNode followed by UpdateNode. The SQL backends
+// do it as a single compare-and-swap; over HTTP the remote is the system of
+// record and the check and the write stay two calls, which
+// GraphRepository.ClaimNode's doc comment states outright.
+var composedHTTPMethods = map[string]bool{"ClaimNode": true}
+
+// graphRepositoryMethodNames lists the methods that must each map to exactly
+// one datasource operation -- every GraphRepository method except the composed
+// ones above.
 func graphRepositoryMethodNames() []string {
 	typ := reflect.TypeOf((*GraphRepository)(nil)).Elem()
 	var names []string
 	for i := 0; i < typ.NumMethod(); i++ {
-		names = append(names, typ.Method(i).Name)
+		if name := typ.Method(i).Name; !composedHTTPMethods[name] {
+			names = append(names, name)
+		}
 	}
 	sort.Strings(names)
 	return names
@@ -365,6 +384,47 @@ func TestHTTPRepository_OperationTableCoversAll32Methods(t *testing.T) {
 	sort.Strings(tableNames)
 	if !reflect.DeepEqual(names, tableNames) {
 		t.Fatalf("operation table keys %v != GraphRepository methods %v", tableNames, names)
+	}
+}
+
+// TestHTTPRepository_ClaimNodeComposesExistingOperations pins the claim's
+// shape over HTTP: it reaches the datasource only through operations the
+// protocol already has (GET /nodes/{id}, then PATCH /nodes/{id}), never a new
+// one, and it reports a node somebody else already holds as (nil, nil)
+// without issuing the PATCH at all.
+func TestHTTPRepository_ClaimNodeComposesExistingOperations(t *testing.T) {
+	p, srv := startPlugin(t, testToken)
+	r := openHTTP(t, srv.URL, testToken)
+	f := seedFixture(t, r)
+	excluded := []domain.NodeStatus{domain.NodeDone, domain.NodeInProgress, domain.NodeInReview}
+	p.ResetRequests()
+
+	claimed, err := r.ClaimNode(f.nodeID, domain.NodeInProgress, excluded)
+	must(t, err)
+	if claimed == nil || claimed.Status != domain.NodeInProgress {
+		t.Fatalf("ClaimNode = %+v, want the node at IN PROGRESS", claimed)
+	}
+	var got []string
+	for _, req := range p.Requests() {
+		got = append(got, req.Method+" "+req.Path)
+	}
+	want := []string{"GET /nodes/" + f.nodeID, "PATCH /nodes/" + f.nodeID}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ClaimNode issued %v, want %v", got, want)
+	}
+
+	// It is IN PROGRESS now, so it is in the excluded set: the second claim
+	// must come back empty, and must not write.
+	p.ResetRequests()
+	again, err := r.ClaimNode(f.nodeID, domain.NodeInProgress, excluded)
+	must(t, err)
+	if again != nil {
+		t.Fatalf("second ClaimNode = %+v, want nil (already claimed)", again)
+	}
+	for _, req := range p.Requests() {
+		if req.Method != http.MethodGet {
+			t.Fatalf("a refused claim issued %s %s; it must not write", req.Method, req.Path)
+		}
 	}
 }
 

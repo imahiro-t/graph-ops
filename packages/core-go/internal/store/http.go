@@ -631,6 +631,31 @@ func (r *HTTPRepository) UpdateNode(id string, patch NodePatch) (domain.GraphNod
 	return out, nil
 }
 
+// ClaimNode implements GraphRepository.ClaimNode, deliberately without the
+// atomicity the SQL backends give it: see that interface's doc comment for why
+// the REST datasource keeps a fetch-then-update. The status check is still
+// made, so a node another caller has already claimed is reported as
+// (nil, nil) in every case but a genuine race.
+func (r *HTTPRepository) ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus) (*domain.GraphNode, error) {
+	cur, err := r.GetNode(id)
+	if err != nil {
+		return nil, err
+	}
+	if cur == nil {
+		return nil, nil
+	}
+	for _, s := range excluded {
+		if cur.Status == s {
+			return nil, nil
+		}
+	}
+	updated, err := r.UpdateNode(id, NodePatch{Status: &newStatus})
+	if err != nil {
+		return nil, err
+	}
+	return &updated, nil
+}
+
 func (r *HTTPRepository) DeleteNode(id string) error {
 	return r.do(http.MethodDelete, "/nodes/"+esc(id), nil, nil)
 }
