@@ -12,61 +12,14 @@ import (
 
 // DFLT-00080: server-side consumers of a project's local path
 // (graph-config.json's projectPaths) other than the project API itself --
-// the settings scope, catalog loading and the app-settings writer.
-
-func writeTeamWorkflow(t *testing.T, root, content string) {
-	t.Helper()
-	dir := filepath.Join(root, ".graph-ops")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "workflow.yaml"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-const maxIter7 = "version: 1\nreview_gates:\n  code_review:\n    max_iterations: 7\n"
-
-func codeReviewMaxIterations(t *testing.T, s *Server, ticketID string) int {
-	t.Helper()
-	cat, err := s.loadCatalogForTicket(ticketID)
-	if err != nil {
-		t.Fatalf("loadCatalogForTicket: %v", err)
-	}
-	gate, ok := cat.ReviewGates["code_review"]
-	if !ok || gate.MaxIterations == nil {
-		return -1
-	}
-	return *gate.MaxIterations
-}
-
-func TestLoadCatalogForTicket_UsesProjectLocalPath(t *testing.T) {
-	s, repo := newBareTestServer(t)
-	s.cfg.UserExtensionsDir = t.TempDir()
-	alpha, _ := repo.CreateProject("Alpha", "")
-	ticket, _ := repo.CreateTicket(alpha.ID, domain.Ticket{Title: "t", Status: domain.TicketTODO})
-	local := t.TempDir()
-	writeTeamWorkflow(t, local, maxIter7)
-	setLocalPath(t, s, alpha.ID, local)
-
-	if got := codeReviewMaxIterations(t, s, ticket.ID); got != 7 {
-		t.Errorf("code_review.max_iterations = %d, want 7 from the project's local path", got)
-	}
-}
-
-func TestLoadCatalogForTicket_NoLocalPathFallsBackToServerCatalog(t *testing.T) {
-	s, repo := newBareTestServer(t)
-	s.cfg.UserExtensionsDir = t.TempDir()
-	beta, _ := repo.CreateProject("Beta", "")
-	ticket, _ := repo.CreateTicket(beta.ID, domain.Ticket{Title: "t", Status: domain.TicketTODO})
-	// The server's own WorkDir carries a team workflow; with no local path
-	// for Beta, that default resolution must be what is used.
-	writeTeamWorkflow(t, s.cfg.WorkDir, "version: 1\nreview_gates:\n  code_review:\n    max_iterations: 5\n")
-
-	if got := codeReviewMaxIterations(t, s, ticket.ID); got != 5 {
-		t.Errorf("code_review.max_iterations = %d, want 5 from the server's own WorkDir", got)
-	}
-}
+// the settings scope and the app-settings writer.
+//
+// Catalog loading used to be a third consumer, covered here by
+// TestLoadCatalogForTicket_*. DFLT-00103 removed GET
+// /api/tickets/{id}/executable-nodes, the only handler that loaded a catalog
+// for a ticket, and loadCatalogForTicket with it -- over HTTP a catalog is
+// now only ever read through the settings API, which resolves the local path
+// via settingsScope and is covered below.
 
 func TestSettingsProjectScope_UsesLocalPath(t *testing.T) {
 	s, repo := newBareTestServer(t)

@@ -102,7 +102,43 @@ type GraphRepository interface {
 	CreateNode(n domain.GraphNode) (domain.GraphNode, error)
 	GetNode(id string) (*domain.GraphNode, error)
 	ListNodesByTicket(ticketID string) ([]domain.GraphNode, error)
+	// UpdateNode writes only the columns patch actually names (plus
+	// updated_at, always). Two concurrent updates touching different
+	// columns therefore both survive; before DFLT-00102 each wrote the
+	// whole row back and the later one reverted the earlier one's column.
+	// The returned node is read back after the write, so it shows the row
+	// as it stands rather than the caller's own patch applied to a stale
+	// snapshot. A missing node is an error.
 	UpdateNode(id string, patch NodePatch) (domain.GraphNode, error)
+	// ClaimNode atomically moves the node to newStatus, but only while its
+	// current status is none of excluded. It is how a caller takes
+	// ownership of a node without two callers taking the same one: the
+	// check and the write are a single UPDATE, so the loser of a race sees
+	// no row change rather than overwriting the winner's claim.
+	//
+	// Returns (nil, nil) -- not an error -- when no row matched, meaning
+	// either the node is gone or somebody else claimed it first. Callers
+	// treat that as "not mine" and move on; it is an ordinary outcome of
+	// parallel execution, not a failure.
+	//
+	// newStatus must be one of excluded, so that a node already sitting at
+	// newStatus fails the WHERE clause. Leave it out and such a node
+	// matches, gets its status rewritten to the value it already had, and
+	// is returned as a fresh claim -- handing a caller a node somebody else
+	// is already working on, which is the very thing this method exists to
+	// prevent. (The row count does not save us: claimNodeCAS always writes
+	// a new updated_at, so the UPDATE reports one changed row even when the
+	// status does not move.) The engine's use satisfies this by
+	// construction -- it excludes exactly the claimed statuses, newStatus
+	// among them.
+	//
+	// HTTPRepository is the exception: it has no way to express a CAS over
+	// the REST API it talks to (the remote is the system of record, and
+	// adding one would ripple through docs/http-datasource/openapi.yaml and
+	// the Jira sample), so it implements this by fetching the node and then
+	// updating it. Against that backend the check and the write are two
+	// calls and a concurrent claim can still slip between them.
+	ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus) (*domain.GraphNode, error)
 	DeleteNode(id string) error
 
 	CreateEdge(e domain.GraphEdge) (domain.GraphEdge, error)
@@ -123,6 +159,10 @@ type GraphRepository interface {
 	CreateProject(name, prefix string) (domain.Project, error)
 	GetProject(id string) (*domain.Project, error)
 	ListProjects() ([]domain.Project, error)
+	// UpdateProject writes only the columns patch names (plus updated_at,
+	// always), for the reason given on UpdateNode: a patch with a nil Name
+	// used to write back the name it had read, undoing a rename that landed
+	// in between.
 	UpdateProject(id string, patch ProjectPatch) (domain.Project, error)
 	// DeleteProject deletes the project and every ticket that belongs to it
 	// (cascading, in turn, to their nodes/edges/artifacts -- see schemaDDL's

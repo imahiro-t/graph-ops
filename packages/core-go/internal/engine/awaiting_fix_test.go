@@ -299,6 +299,12 @@ func TestGetExecutableNodes_LegacyTodoReviewerStillReclaimed(t *testing.T) {
 // TestCompleteNode_ExceedingMaxIterationsLeavesStatusesUnchanged is the
 // completion-criterion-4 regression: the blocking failure (target already at
 // max_iterations) must not mark the claimed reviewer AWAITING FIX.
+//
+// This is the minimal graph (plan -> plan_review, nothing in between), so
+// DFLT-00101's intermediate-node rewind cannot apply here and the
+// expectations below are unchanged by it. The multi-node counterpart -- a
+// blocked loop-back leaving the nodes between target and reviewer untouched
+// too -- is TestCompleteNode_LoopBackAtIterationLimitRewindsNothing.
 func TestCompleteNode_ExceedingMaxIterationsLeavesStatusesUnchanged(t *testing.T) {
 	e, repo, projectID := newTestEngine(t)
 	ticketID, cat := seedPlanDoneAndClaimPlanReview(t, e, projectID)

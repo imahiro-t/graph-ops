@@ -214,6 +214,14 @@
     "manualNode": "手動操作ノード",
     "loopBackLabel": "差し戻しループ"
   },
+  "markdownViewer": {
+    "loadRemoteImage": "{{host}} から画像を読み込む:",
+    "openRemoteImage": "{{host}} の画像を新しいタブで開く:",
+    "remoteImageFailedLink": "{{host}} から読み込めません。新しいタブで開く:",
+    "remoteImageLoaded": "画像を読み込みました: {{description}}",
+    "remoteImageFailed": "{{host}} から画像を読み込めませんでした: {{description}}",
+    "untitledImage": "（説明なし）"
+  },
   "artifactPreview": {
     "loading": "読み込み中...",
     "loadError": "成果物の読み込みに失敗しました: {{message}}"
@@ -470,6 +478,7 @@
     "TITLE_REQUIRED": "タイトルは必須です。",
     "TICKET_NOT_FOUND": "対象のチケットが見つかりませんでした。",
     "NODE_NOT_FOUND": "対象のノードが見つかりませんでした。",
+    "INVALID_NODE_STATE": "このノードは現在の状態では完了できません。すでに完了しているか、まだ開始していない可能性があります。画面を再読み込みして最新の状態をご確認ください。",
     "VALIDATION_ERROR": "入力内容に誤りがあります。ご確認のうえ再度お試しください。",
     "INTERNAL_ERROR": "サーバー側でエラーが発生しました。しばらくしてから再度お試しください。",
     "INVALID_PREFIX": "プレフィックスは英数字1〜5文字で指定してください。",
@@ -496,6 +505,9 @@
     "LABEL_NAME_TAKEN": "同じ名前のラベルがすでにあります（大文字小文字は区別しません）。",
     "INVALID_LABEL_NAME": "ラベル名は 1〜50 文字で入力してください。",
     "INVALID_LABEL_COLOR": "ラベルの色が不正です。パレットから選んでください。",
+    "API_ROUTE_NOT_FOUND": "指定されたAPIエンドポイントはこのサーバーに存在しません。アプリとサーバーのバージョンが異なっている可能性があります。ページを再読み込みしてから再度お試しください。",
+    "REQUEST_BODY_TOO_LARGE": "リクエストのサイズがサーバーの上限を超えています。ファイルや内容を小さくしてから再度お試しください。",
+    "ROUTE_NOT_FOUND": "このアドレスはこのサーバーでは提供されなくなりました。保存したリンクやブックマークからではなく、Web UI から開き直してください。",
     "UNKNOWN": "予期しないエラーが発生しました。再度お試しください。",
     "HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED": "保存済みのトークンは別のエンドポイント URL には使用できません。URL を変更した場合はトークンを再入力してください。"
   },

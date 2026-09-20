@@ -16,6 +16,15 @@ import (
 // outside tests.
 var testHookBeforeLegacyWorkDirDrop func()
 
+// testHookTicketPriorityBackfillUpdate, when non-nil, runs just before the
+// DFLT-00083 backfill issues its UPDATE -- that is, only when the guard in
+// backfillNullTicketPriority decided a write is actually needed. Tests use
+// it to observe that a DB with nothing to migrate is not written to, on
+// either backend: MySQL has no equivalent of SQLite's total_changes(), and
+// the absence of the log line proves nothing (the unguarded code logged
+// nothing either when no row matched). Always nil outside tests.
+var testHookTicketPriorityBackfillUpdate func()
+
 // dropLegacyProjectsWorkDirColumn is the backend-independent body of the
 // DFLT-00080 migration that removes projects.work_dir (its values are not
 // carried anywhere -- see SQLiteRepository.dropLegacyProjectsWorkDir).
@@ -69,7 +78,32 @@ func dropLegacyProjectsWorkDirColumn(backend string, columnExists func() (bool, 
 // their "last updated" display. The column DDL itself stays nullable:
 // tightening it would need a table rebuild on SQLite and would make new and
 // migrated schemas diverge.
+//
+// Every Init runs it, and Init runs on every command -- so before the
+// SELECT EXISTS guard below, even a read-only command took a write lock on
+// a DB with nothing left to migrate, which is next to always. That made
+// read-only commands contend with the parallel writers of a process-ticket
+// run on SQLite (DFLT-00100 / BUG-01), and made MySQL's Init scan the whole
+// unindexed tickets table under a write lock on every call (CHK-07). The
+// guard sits on this shared body precisely so both backends get it.
+//
+// Check-then-update is not atomic: another process could insert a
+// NULL/empty priority row between the SELECT and a skipped UPDATE. That is
+// harmless -- no current write path produces such a row (CreateTicket and
+// UpdateTicket both default to MEDIUM), and anything a legacy writer did
+// slip in is picked up by the next Init. The DFLT-00080 work_dir migration
+// above takes the same view of its own check-then-drop.
 func backfillNullTicketPriority(db *sql.DB) error {
+	var needed bool
+	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM tickets WHERE priority IS NULL OR priority = '')`).Scan(&needed); err != nil {
+		return fmt.Errorf("checking for tickets with no priority: %w", err)
+	}
+	if !needed {
+		return nil
+	}
+	if testHookTicketPriorityBackfillUpdate != nil {
+		testHookTicketPriorityBackfillUpdate()
+	}
 	res, err := db.Exec(`UPDATE tickets SET priority = ? WHERE priority IS NULL OR priority = ''`, string(domain.DefaultTicketPriority))
 	if err != nil {
 		return fmt.Errorf("backfilling NULL/empty ticket priority: %w", err)

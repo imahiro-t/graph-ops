@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 )
 
@@ -407,7 +408,9 @@ func TestSecurityLog_RemoteIP(t *testing.T) {
 func TestSecurityLog_PathClass(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"/api/tickets", "api"},
-		{"/artifacts-static/foo.html", "artifacts-static"},
+		// DFLT-00103 removed the filesystem route this path used to reach;
+		// it now falls through to the SPA handler like any other non-API path.
+		{"/artifacts-static/foo.html", "web"},
 		{"/", "web"},
 		{"/some/other/path", "web"},
 	} {
@@ -481,5 +484,91 @@ func TestSecurityLog_DefaultLoggerIsNotDiscarded(t *testing.T) {
 	}
 	if _, ok := s.rejectLog.logger.Handler().(*slog.TextHandler); !ok {
 		t.Errorf("expected the default handler to be a *slog.TextHandler, got %T", s.rejectLog.logger.Handler())
+	}
+}
+
+// T10: the 413 from withRequestBodyLimit is recorded. Repeated over-cap
+// bodies are the only trace an operator would have of the memory-exhaustion
+// attempt SEC-08 is about, and the rejection is detected by the status the
+// middleware's wrapper saw, several frames above where the error was raised
+// -- so it is worth a test of its own that the wiring holds.
+func TestSecurityLog_RequestBodyTooLarge(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	buf := captureRejectLog(t, s)
+
+	const marker = "SENSITIVE-PAYLOAD-MARKER"
+	body := `{"title":"` + marker + strings.Repeat("A", maxRequestBodyBytes+1024) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/tickets", strings.NewReader(body))
+	req.Host = testHost
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(csrfHeaderName, "1")
+	rec := httptest.NewRecorder()
+	s.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if n := logLineCount(buf); n != 1 {
+		t.Fatalf("expected exactly 1 log line, got %d: %s", n, buf.String())
+	}
+	line := buf.String()
+	if got := attrValue(t, line, "code"); got != string(domain.ErrCodeRequestBodyTooLarge) {
+		t.Errorf("code = %q, want %q", got, domain.ErrCodeRequestBodyTooLarge)
+	}
+	if got := attrValue(t, line, "status"); got != "413" {
+		t.Errorf("status = %q, want 413", got)
+	}
+	if got := attrValue(t, line, "path_class"); got != "api" {
+		t.Errorf("path_class = %q, want api", got)
+	}
+	// The masking policy holds for this rejection too: nothing the caller
+	// sent appears in the line.
+	assertNoneContain(t, line, marker, "/api/tickets")
+}
+
+// T11: an unrouted /api/ path is recorded as well. A run of these is how
+// endpoint probing, or a client still calling a route this release removed,
+// becomes visible at all.
+func TestSecurityLog_APIRouteNotFound(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	buf := captureRejectLog(t, s)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tickets/PFX-00001/executable-nodes", nil)
+	req.Host = testHost
+	rec := httptest.NewRecorder()
+	s.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if n := logLineCount(buf); n != 1 {
+		t.Fatalf("expected exactly 1 log line, got %d: %s", n, buf.String())
+	}
+	line := buf.String()
+	if got := attrValue(t, line, "code"); got != string(domain.ErrCodeAPIRouteNotFound) {
+		t.Errorf("code = %q, want %q", got, domain.ErrCodeAPIRouteNotFound)
+	}
+	if got := attrValue(t, line, "status"); got != "404" {
+		t.Errorf("status = %q, want 404", got)
+	}
+	// The path is what the caller chose, so it is classified, never written.
+	assertNoneContain(t, line, "PFX-00001", "executable-nodes")
+}
+
+// T12: a request that is answered normally writes nothing. The body-limit
+// middleware now watches every non-GET response's status, and a middleware
+// that logs on the way out must not turn ordinary traffic into warnings.
+func TestSecurityLog_SuccessfulRequestLogsNothing(t *testing.T) {
+	s, _, projectID := newTestServer(t)
+	buf := captureRejectLog(t, s)
+
+	rec := doJSON(t, s, http.MethodPost, "/api/tickets", map[string]any{
+		"title": "ordinary", "project_id": projectID,
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if n := logLineCount(buf); n != 0 {
+		t.Errorf("expected no log lines for a successful request, got %d: %s", n, buf.String())
 	}
 }

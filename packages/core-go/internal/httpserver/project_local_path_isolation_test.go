@@ -3,7 +3,6 @@ package httpserver
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -106,7 +105,16 @@ func TestProjectLocalPathIsolation_APIReturnsOwnPath(t *testing.T) {
 	}
 }
 
-func TestProjectLocalPathIsolation_LaunchAndCatalogUseOwnPath(t *testing.T) {
+// Two environments sharing one DB resolve the same project's local path
+// independently: each one's Claude launch directory comes from its own
+// graph-config.json, and neither is disturbed by the other writing its own.
+//
+// This used to assert the same thing for catalog resolution as well
+// (loadCatalogForTicket). DFLT-00103 removed the only HTTP handler that
+// loaded a catalog for a ticket, and that helper with it, so the launch
+// directory is now the whole of what this pair of environments resolves
+// per-ticket.
+func TestProjectLocalPathIsolation_LaunchDirUsesOwnPath(t *testing.T) {
 	_, a, b := newSharedDBEnvs(t)
 	shared := createSharedProject(t, a)
 	ticket, err := a.repo.CreateTicket(shared.ID, domain.Ticket{Title: "T-1", Status: domain.TicketTODO})
@@ -114,28 +122,18 @@ func TestProjectLocalPathIsolation_LaunchAndCatalogUseOwnPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, tc := range []struct {
-		env     sharedEnv
-		maxIter int
-	}{{a, 3}, {b, 4}} {
+	for _, env := range []sharedEnv{a, b} {
 		local := t.TempDir()
-		writeTeamWorkflow(t, local, fmt.Sprintf("version: 1\nreview_gates:\n  code_review:\n    max_iterations: %d\n", tc.maxIter))
-		patchLocalPath(t, tc.env.s, shared.ID, local)
+		patchLocalPath(t, env.s, shared.ID, local)
 
-		if got := tc.env.s.resolveLaunchWorkDir("", ticket.ID); got != local {
+		if got := env.s.resolveLaunchWorkDir("", ticket.ID); got != local {
 			t.Errorf("launch dir = %q, want %q", got, local)
-		}
-		if got := codeReviewMaxIterations(t, tc.env.s, ticket.ID); got != tc.maxIter {
-			t.Errorf("catalog code_review.max_iterations = %d, want %d (from %s)", got, tc.maxIter, local)
 		}
 	}
 	// Re-check A after B wrote its own path: A still resolves to its own.
 	aLocal := a.s.projectLocalPath(shared.ID)
 	if got := a.s.resolveLaunchWorkDir("", ticket.ID); got != aLocal || got == b.s.projectLocalPath(shared.ID) {
 		t.Errorf("env A launch dir changed after env B's PATCH: %q", got)
-	}
-	if got := codeReviewMaxIterations(t, a.s, ticket.ID); got != 3 {
-		t.Errorf("env A catalog changed after env B's PATCH: %d", got)
 	}
 }
 
