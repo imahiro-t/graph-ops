@@ -118,6 +118,16 @@ Pushing a `v*` tag runs four jobs in sequence:
    does not gain third-party build code; `govulncheck` is installed at a
    pinned version, not `@latest`.
 
+   This job's own `setup-go` uses an explicit `go-version: '1.26.x'` instead
+   of `go-version-file: packages/core-go/go.mod` -- the Go that runs the
+   scanner is independent of the Go that built the binaries (each binary
+   reports its own), and `govulncheck` needs a newer Go than the pinned
+   toolchain to build at all (`golang.org/x/vuln` v1.8.0 requires Go 1.26,
+   and `setup-go` sets `GOTOOLCHAIN=local`, so nothing is downloaded
+   implicitly). Only the `build` job follows the `go.mod` pin; do not change
+   it to an explicit version, and do not change this one back to
+   `go-version-file`.
+
    Note that this job depends on the Go vulnerability database, so the same
    commit can pass today and fail tomorrow -- that is intentional: a newly
    published, reachable vulnerability should stop a release.
