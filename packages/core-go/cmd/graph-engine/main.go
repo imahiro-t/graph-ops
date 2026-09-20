@@ -115,6 +115,8 @@ func run(cmd string, args []string) error {
 		return cmdCompleteNode(eng, repo, args)
 	case "reopen-nodes":
 		return cmdReopenNodes(eng, args)
+	case "grant-iterations":
+		return cmdGrantIterations(eng, args)
 	case "unstick-node":
 		return cmdUnstickNode(eng, args)
 	case "add-artifact":
@@ -310,7 +312,26 @@ Commands:
                                            iteration_count by 1 and clearing the ticket's blocked
                                            flag. Requires the ticket to currently be blocked. Errors,
                                            writing nothing, if any collected node would exceed its
-                                           max_iterations -- no partial application.)
+                                           max_iterations -- no partial application. That makes it
+                                           useless on its own against a ticket an ITERATION LIMIT
+                                           blocked: the loop target is at max_iterations by
+                                           definition there, so this command always refuses. Raise
+                                           the budget with grant-iterations first -- see below.)
+  grant-iterations <ticketId> <nodeId1,nodeId2,...> [--extra <n>]
+                                          (raises the given nodes' max_iterations by n (default 1),
+                                           touching nothing else -- not their status, not their
+                                           iteration_count -- so the history of how many automatic
+                                           attempts were already spent is kept. It is step 1 of
+                                           recovering a ticket blocked by an iteration limit:
+                                             1. grant-iterations <ticketId> <loop target>
+                                             2. reopen-nodes <ticketId> <loop target>   (now succeeds)
+                                             3. unstick-node <failing reviewer>         (reopen-nodes
+                                                skips IN REVIEW nodes, so the reviewer that failed is
+                                                still claimed and needs this)
+                                           A deliberate human decision each time: n is capped per
+                                           call, and no flag makes retries unlimited. An unknown id,
+                                           an id from another ticket, or an out-of-range n is an
+                                           error that writes nothing.)
   unstick-node <nodeId>                  (resets a single node stuck at IN PROGRESS/IN REVIEW back to
                                            TODO, no iteration_count change, no Blocked precondition --
                                            for a node get-executable claimed but that no worker ever
@@ -1177,6 +1198,55 @@ func cmdReopenNodes(eng *engine.GraphEngine, args []string) error {
 		return err
 	}
 	return printJSON(detail)
+}
+
+// cmdGrantIterations is the CLI-only entry point for
+// engine.GrantIterations (see its doc comment for the full contract and the
+// three-step recovery it starts). CLI-only for the same reason reopen-nodes
+// and unstick-node are: overriding a convergence limit is a deliberate
+// operator decision, not a button in the Web UI.
+//
+// It takes <ticketId> before the node ids, matching reopen-nodes, so the same
+// "node X does not belong to ticket Y" check catches a mistyped or
+// wrong-ticket id before anything is written.
+func cmdGrantIterations(eng *engine.GraphEngine, args []string) error {
+	const usage = `usage: graph-engine grant-iterations <ticketId> <nodeId1,nodeId2,...> [--extra <n>]`
+	if len(args) < 2 {
+		return fmt.Errorf(usage)
+	}
+	var nodeIDs []string
+	for _, raw := range strings.Split(args[1], ",") {
+		id := strings.TrimSpace(raw)
+		if id != "" {
+			nodeIDs = append(nodeIDs, id)
+		}
+	}
+	if len(nodeIDs) == 0 {
+		return fmt.Errorf("%s: no node ids given", usage)
+	}
+	extra := 1
+	rest := args[2:]
+	for i := 0; i < len(rest); i++ {
+		if rest[i] == "--extra" {
+			if i+1 >= len(rest) {
+				return fmt.Errorf("%s: --extra requires a value", usage)
+			}
+			n, err := strconv.Atoi(rest[i+1])
+			if err != nil {
+				return fmt.Errorf("%s: --extra must be a whole number, got %q", usage, rest[i+1])
+			}
+			extra = n
+			i++
+			continue
+		}
+		return fmt.Errorf("%s: unrecognized argument %q", usage, rest[i])
+	}
+
+	nodes, err := eng.GrantIterations(args[0], nodeIDs, extra)
+	if err != nil {
+		return err
+	}
+	return printJSON(nodes)
 }
 
 // cmdUnstickNode is the CLI-only entry point for engine.UnstickNode (see its
