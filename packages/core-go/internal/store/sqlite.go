@@ -184,7 +184,29 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 	if err := os.MkdirAll(dbDir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating sqlite db directory %s: %w", dbDir, err)
 	}
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)", dbPath)
+	// busy_timeout is what makes a write lock held by another *process* a
+	// wait instead of an immediate failure (DFLT-00100 / BUG-01).
+	// modernc.org/sqlite leaves the busy timeout at 0 unless the DSN sets
+	// it, and SetMaxOpenConns(1) below only serializes this process's own
+	// connections -- so before this pragma, process-ticket's parallel node
+	// subagents (each its own graph-engine process on the same file) lost
+	// artifacts and node completions to "database is locked". 5000ms is
+	// fixed on purpose rather than configurable: it is far longer than the
+	// milliseconds a CLI call holds the lock, so it absorbs the contention
+	// without giving anyone a knob to mistune.
+	//
+	// It does not cover every conflict, and the gap is not academic. SQLite
+	// skips the busy handler entirely when a transaction that has already
+	// read tries to become a writer -- waiting there could deadlock -- so
+	// every deferred read-then-write transaction in this package still
+	// fails at once under concurrent processes: updateTicket (labels.go),
+	// which syncTicketStatus drives from complete-node and get-executable,
+	// and the ID allocation in CreateTicket/CreateNode. Measured with 37
+	// parallel CLI calls, that is still a few failures per run. Closing it
+	// needs BEGIN IMMEDIATE (DSN _txlock=immediate) or a retry, both of
+	// which DFLT-00100 puts out of scope; see
+	// TestSQLiteBusyTimeoutDoesNotCoverDeferredTransactionUpgrade.
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)", dbPath)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite db: %w", err)

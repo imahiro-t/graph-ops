@@ -119,6 +119,10 @@ const cliSubprocessEnv = "GRAPH_ENGINE_TEST_RUN_MAIN"
 // runCLISubprocess re-runs.
 func runMainIfSubprocess() {
 	if args := os.Getenv(cliSubprocessEnv); args != "" {
+		// No-op unless the parent set a start barrier (see
+		// concurrent_cli_test.go); only the concurrency regression test
+		// needs several CLI processes to reach the DB at the same moment.
+		waitForCLISubprocessStartBarrier()
 		os.Args = append([]string{"graph-engine"}, strings.Split(args, "\x1f")...)
 		main()
 		os.Exit(0)
@@ -142,11 +146,12 @@ func newSubprocessSQLiteRepo(t *testing.T) (store.GraphRepository, string, strin
 	return repo, dir, dbPath
 }
 
-// runCLISubprocess runs the CLI (this test binary, re-entering testName and
-// thus runMainIfSubprocess) with args against the SQLite DB at dbPath, and
-// returns its combined output and exit code.
-func runCLISubprocess(t *testing.T, testName, dir, dbPath string, args ...string) (string, int) {
-	t.Helper()
+// newCLISubprocessCmd builds the command that runs the CLI (this test
+// binary, re-entering testName and thus runMainIfSubprocess) with args
+// against the SQLite DB at dbPath. Split out of runCLISubprocess so the
+// concurrency regression test can start several of these at once with the
+// same environment instead of spelling it out a second time.
+func newCLISubprocessCmd(testName, dir, dbPath string, args ...string) *exec.Cmd {
 	cmd := exec.Command(os.Args[0], "-test.run=^"+testName+"$")
 	cmd.Env = append(os.Environ(),
 		cliSubprocessEnv+"="+strings.Join(args, "\x1f"),
@@ -155,15 +160,31 @@ func runCLISubprocess(t *testing.T, testName, dir, dbPath string, args ...string
 		"GRAPH_ARTIFACTS_DIR="+filepath.Join(dir, "artifacts"),
 		"HOME="+dir,
 	)
-	out, err := cmd.CombinedOutput()
+	return cmd
+}
+
+// cliSubprocessExitCode turns the error from a finished CLI subprocess into
+// an exit code, failing the test on anything that is not the process itself
+// exiting non-zero.
+func cliSubprocessExitCode(t *testing.T, err error, out []byte) int {
+	t.Helper()
 	if err == nil {
-		return string(out), 0
+		return 0
 	}
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("running the CLI subprocess: %v\n%s", err, out)
 	}
-	return string(out), exitErr.ExitCode()
+	return exitErr.ExitCode()
+}
+
+// runCLISubprocess runs the CLI (this test binary, re-entering testName and
+// thus runMainIfSubprocess) with args against the SQLite DB at dbPath, and
+// returns its combined output and exit code.
+func runCLISubprocess(t *testing.T, testName, dir, dbPath string, args ...string) (string, int) {
+	t.Helper()
+	out, err := newCLISubprocessCmd(testName, dir, dbPath, args...).CombinedOutput()
+	return string(out), cliSubprocessExitCode(t, err, out)
 }
 
 // DFLT-00024 removed update-ticket because it existed only to edit the
