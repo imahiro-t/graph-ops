@@ -20,7 +20,7 @@ Summary
 | Module                                | Version                                      | License               |
 |----------------------------------------|-----------------------------------------------|------------------------|
 | github.com/google/uuid                 | v1.6.0                                        | BSD-3-Clause          |
-| filippo.io/edwards25519                | v1.1.0                                        | BSD-3-Clause          |
+| filippo.io/edwards25519                | v1.1.1                                        | BSD-3-Clause          |
 | golang.org/x/sys                       | v0.47.0                                        | BSD-3-Clause          |
 | modernc.org/libc                       | v1.75.6                                        | BSD-3-Clause          |
 | github.com/remyoudompheng/bigfft       | v0.0.0-20230129092748-24d4a6f8daec             | BSD-3-Clause          |
@@ -71,7 +71,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ================================================================================
-filippo.io/edwards25519 v1.1.0 -- BSD-3-Clause
+filippo.io/edwards25519 v1.1.1 -- BSD-3-Clause
 ================================================================================
 
 Copyright (c) 2009 The Go Authors. All rights reserved.

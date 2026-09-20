@@ -37,6 +37,17 @@ name: Release graph-engine binaries
 #   - Every job has a `timeout-minutes`, so a hang (e.g. a wedged `npm ci`)
 #     fails fast instead of holding a runner for GitHub's 6 hour default.
 #
+# Before any of it is published, the `vulncheck` job scans the binaries the
+# `build` jobs produced: each one must have been built with at least the Go
+# version pinned in packages/core-go/go.mod's `toolchain` line, and
+# `govulncheck -mode=binary` must report nothing reachable from its code. The
+# `release` job needs `vulncheck`, so a binary with a reachable vulnerability
+# never reaches a Release. The scan first checks it found exactly the 4
+# expected binaries: a download pattern that stops matching must fail the job,
+# not pass it having scanned nothing. It is a separate job rather than a step
+# in `build` so that the job producing the published binaries runs no extra
+# third-party code, and it installs a pinned govulncheck rather than @latest.
+#
 # Also publishes a checksums.txt (plain `sha256sum` output) covering every
 # binary asset. install-binary.js fetches this alongside the binary and
 # refuses to install anything whose SHA256 doesn't match -- see that
@@ -177,9 +188,107 @@ jobs:
           name: ${{ matrix.asset }}
           path: dist/${{ matrix.asset }}
 
+  vulncheck:
+    name: Scan release binaries for known vulnerabilities
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Checked out only for packages/core-go/go.mod: setup-go reads the Go
+      # version from it, and the scan below reads its `toolchain` line to know
+      # which Go version the binaries must have been built with.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # `cache: false` on purpose (see the header comment).
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: packages/core-go/go.mod
+          cache: false
+
+      # Only the binaries -- the same pattern the `release` job uses, so this
+      # job scans exactly the set of files that gets published.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: graph-engine-*
+          path: dist
+          merge-multiple: true
+
+      # Pinned, not `@latest`: a release must not run a version of this tool
+      # that nobody has seen before.
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+
+      - name: Scan every release binary
+        run: |
+          set -euo pipefail
+
+          # A glob or a download pattern that matches nothing would make the
+          # loop below run zero times and let this job pass without having
+          # scanned anything, so the count is checked first: exactly one
+          # binary per entry of the `build` matrix.
+          expected=4
+          if [ ! -d dist ]; then
+            echo "dist/ does not exist; no release binary was downloaded." >&2
+            exit 1
+          fi
+          binaries="$(find dist -maxdepth 1 -type f -name 'graph-engine-*' | sort)"
+          found="$(printf '%s\n' "$binaries" | grep -c . || true)"
+          if [ "$found" -ne "$expected" ]; then
+            echo "Expected $expected release binaries under dist/, found $found:" >&2
+            echo "$binaries" >&2
+            exit 1
+          fi
+
+          # The Go version every binary must have been built with, at minimum.
+          # This is the pin: without the toolchain line, setup-go builds with
+          # the `go` directive's version (go1.25.0 shipped the binaries of
+          # v0.6.0, which had 27 reachable standard library vulnerabilities).
+          min_go="$(awk '/^toolchain /{print $2; exit}' packages/core-go/go.mod)"
+          if [ -z "$min_go" ]; then
+            echo "packages/core-go/go.mod has no toolchain line; refusing to publish binaries built with an unpinned Go toolchain." >&2
+            exit 1
+          fi
+
+          # Every binary is checked before the job fails, so a single run
+          # reports all of the bad ones instead of only the first.
+          failed=""
+          scanned=0
+          while IFS= read -r binary; do
+            echo "::group::$binary"
+            ok=1
+
+            built_with="$(go version "$binary" | awk '{print $2}')"
+            echo "built with ${built_with:-(unknown)}, minimum $min_go"
+            if [ -z "$built_with" ] || ! printf '%s\n%s\n' "${min_go#go}" "${built_with#go}" | sort -V -C; then
+              echo "$binary was built with ${built_with:-(unknown)}, older than the pinned $min_go." >&2
+              ok=0
+            fi
+
+            if ! govulncheck -mode=binary "$binary"; then
+              echo "$binary has known vulnerabilities reachable from its code." >&2
+              ok=0
+            fi
+
+            [ "$ok" -eq 1 ] || failed="$failed $binary"
+            scanned=$((scanned + 1))
+            echo "::endgroup::"
+          done <<< "$binaries"
+
+          if [ "$scanned" -ne "$expected" ]; then
+            echo "Only scanned $scanned of $expected binaries." >&2
+            exit 1
+          fi
+          if [ -n "$failed" ]; then
+            echo "Refusing to publish. Failed binaries:$failed" >&2
+            exit 1
+          fi
+          echo "Scanned $scanned binaries: all built with $min_go or newer, none with reachable vulnerabilities."
+
   release:
     name: Publish GitHub Release
-    needs: build
+    needs: [build, vulncheck]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The only job that can write to the repository (tags / Releases). It
