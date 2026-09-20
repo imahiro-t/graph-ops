@@ -1,6 +1,6 @@
 {
   "name": "graph-ops",
-  "version": "0.6.2",
+  "version": "0.6.1",
   "private": true,
   "license": "MIT",
   "workspaces": [

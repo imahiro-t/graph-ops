@@ -1,7 +1,7 @@
 {
   "name": "graph-ops",
   "description": "GraphOps plugin for structured DAG development workflows with automated review gates and loop iterations",
-  "version": "0.6.2",
+  "version": "0.6.1",
   "author": { "name": "Takashi Imahiro", "email": "imahiro-t@users.noreply.github.com" },
   "homepage": "https://github.com/imahiro-t/graph-ops",
   "repository": "https://github.com/imahiro-t/graph-ops",
