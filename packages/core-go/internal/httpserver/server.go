@@ -113,7 +113,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/tickets/{id}/refine", s.handleRefine)
 	mux.HandleFunc("POST /api/tickets/{id}/close", s.handleCloseTicket)
 	mux.HandleFunc("POST /api/tickets/{id}/reopen", s.handleReopenTicket)
-	mux.HandleFunc("GET /api/tickets/{id}/executable-nodes", s.handleExecutableNodes)
 	mux.HandleFunc("POST /api/tickets/{id}/artifacts", s.handleCreateArtifact)
 	mux.HandleFunc("GET /api/tickets/{id}/artifacts/download", s.handleDownloadTicketArtifacts)
 	mux.HandleFunc("GET /api/artifacts/{id}/content", s.handleGetArtifactContent)
@@ -141,16 +140,37 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/settings/review-template", s.handleGetSettingsReviewTemplate)
 	mux.HandleFunc("PUT /api/settings/review-template", s.handlePutSettingsReviewTemplate)
 
-	mux.Handle("/artifacts-static/", http.StripPrefix("/artifacts-static/", http.FileServer(http.Dir(s.cfg.ArtifactsDir))))
+	// An /api/ path with no route of its own is a 404 from the API, not the
+	// SPA. Without this it would fall through to the catch-all below and be
+	// answered with index.html and a 200 -- so a client calling a misspelled,
+	// or since-removed, endpoint would get HTML where it expected JSON and no
+	// indication anything was wrong. DFLT-00103 removed GET
+	// /api/tickets/{id}/executable-nodes; "removed" has to mean gone, not
+	// "quietly answers with the web UI".
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusNotFound, domain.NewAPIError(domain.ErrCodeAPIRouteNotFound,
+			"no such API endpoint: %s %s", r.Method, r.URL.Path))
+	})
 
 	// Serve the embedded, built web UI for everything else. In `npm run dev`
 	// this handler is simply never hit (Vite's dev server + proxy is used
 	// instead); it only matters for the single-binary `serve` path.
 	mux.Handle("/", staticWebHandler())
 
-	// withAllowedHost is outermost: a request whose Host header does not
-	// name this server is answered before any other layer looks at it.
-	return withAllowedHost(s.cfg.Host, s.rejectLog, withCORS(s.rejectLog, mux))
+	// Layering, outermost first:
+	//
+	//  1. withSecurityHeaders -- outermost of all, so that EVERY response
+	//     carries the clickjacking headers, including the 403s the two
+	//     layers below produce before any handler runs. Being outermost is
+	//     also what makes it impossible to forget the headers when a route
+	//     is added: nothing registered on mux can bypass it.
+	//  2. withAllowedHost -- a request whose Host header does not name this
+	//     server is answered before any other layer looks at it.
+	//  3. withCORS -- answers preflights and enforces the CSRF header.
+	//  4. withRequestBodyLimit -- innermost, wrapping only the mux: a
+	//     request rejected by 2 or 3 never has its body read at all, so
+	//     capping it any further out would buy nothing.
+	return withSecurityHeaders(withAllowedHost(s.cfg.Host, s.rejectLog, withCORS(s.rejectLog, withRequestBodyLimit(mux))))
 }
 
 // csrfHeaderName is the header every state-changing request to this API must
@@ -352,6 +372,77 @@ func withCORS(rl *rejectLogger, h http.Handler) http.Handler {
 	})
 }
 
+// withSecurityHeaders stamps the clickjacking defense on every response this
+// server produces (DFLT-00103 / SEC-04). The two headers say the same thing
+// to two generations of browser: CSP frame-ancestors is what current ones
+// honour, X-Frame-Options is what older ones understand.
+//
+// Why this matters for an API nobody authenticates: the three layers that
+// already exist -- the Host check (allowedHost), the loopback-only Origin
+// echo and the required CSRF header -- all defend against a *foreign* page
+// scripting this server. None of them defends against a foreign page
+// *framing* it. A page that embeds http://127.0.0.1:49173/ in an <iframe>
+// gets the real SPA, running on its real origin: the Host header is
+// legitimate, apiFetch attaches the CSRF header itself, and no cross-origin
+// read is ever attempted. All the attacker has to add is a transparent
+// overlay and one click from the user -- and this UI's one-click actions
+// include passing a review approval gate and launching Claude Code in an
+// external terminal (packages/web/src/components/TicketItem.tsx). Refusing
+// to be framed at all is what closes that.
+//
+// Set (not Add) on purpose: a handler that needs a different policy for its
+// own response -- writeArtifactContent, the single documented exception --
+// overwrites these values rather than appending a second, conflicting
+// header. Two Content-Security-Policy headers would be intersected by the
+// browser, which is exactly the wrong semantics there: the artifact preview
+// needs frame-ancestors 'self', and intersecting that with 'none' would
+// leave it unframeable and break the UI's inline preview.
+func withSecurityHeaders(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		h.ServeHTTP(w, r)
+	})
+}
+
+// maxRequestBodyBytes caps how much of a request body this server will read
+// (DFLT-00103 / SEC-08). 64 MiB matches the ceiling the HTTP data source
+// client already uses for a response body (internal/store/http.go), and is
+// the smallest value that cannot break an existing legitimate call: an
+// artifact is posted as JSON with its bytes base64-encoded inline (an image
+// or a report's HTML), so the wire size is ~4/3 of the file's.
+//
+// The point is not to police size precisely -- it is that a body of
+// unbounded length must not be buffered into memory by an unauthenticated
+// server, which is what `--host 0.0.0.0` makes reachable from the network.
+const maxRequestBodyBytes = 64 << 20
+
+// withRequestBodyLimit caps every request body at maxRequestBodyBytes.
+//
+// One middleware rather than a MaxBytesReader in each handler: this package
+// decodes a JSON body in ~20 places, and the failure mode of forgetting one
+// of them is invisible until someone exploits it. Wrapping r.Body here means
+// a handler added later is covered without its author knowing this exists.
+//
+// GET/HEAD/OPTIONS are skipped because they carry no body worth reading;
+// wrapping them would only add a pointless allocation per request.
+//
+// A body that exceeds the cap surfaces as *http.MaxBytesError out of
+// whatever decoder read it, and writeError turns that into 413 regardless of
+// the status the handler asked for -- see writeError.
+func withRequestBodyLimit(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+		default:
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+			}
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -371,6 +462,13 @@ type apiErrorPayload struct {
 // *domain.APIError, its Code is used as-is; otherwise a code is inferred
 // from the HTTP status (400 -> VALIDATION_ERROR, 404 -> TICKET_NOT_FOUND,
 // anything else -> INTERNAL_ERROR).
+//
+// One case overrides the caller entirely: a body that hit
+// maxRequestBodyBytes (withRequestBodyLimit). Handlers differ in what status
+// they pass for a failed decode -- some 400, some 500 -- and "the server
+// broke" is the wrong answer to "you sent too much". Classifying it here,
+// where every error response in this package already passes, is what makes
+// the 413 uniform without auditing ~20 call sites.
 func writeError(w http.ResponseWriter, status int, err error) {
 	code := domain.ErrCodeInternal
 	switch status {
@@ -385,6 +483,12 @@ func writeError(w http.ResponseWriter, status int, err error) {
 		code = apiErr.Code
 	}
 
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		status = http.StatusRequestEntityTooLarge
+		code = domain.ErrCodeRequestBodyTooLarge
+	}
+
 	writeJSON(w, status, map[string]apiErrorPayload{
 		"error": {Code: code, Message: err.Error()},
 	})
@@ -396,52 +500,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"db":           s.cfg.DBPath,
 		"artifactsDir": s.cfg.ArtifactsDir,
 	})
-}
-
-// loadCatalog re-reads the three-tier workflow config on every refine call so
-// edits to project/user config files take effect without restarting the
-// server.
-func (s *Server) loadCatalog() (config.Catalog, error) {
-	// languageOverride is always "" here: an HTTP request carries no
-	// per-call session context the way a CLI invocation's --language flag
-	// does, so language resolution rests solely on the persistent
-	// user/team Document.Language tiers LoadWithRoots reads itself -- see
-	// the execution plan's section 1.4 ("HTTP...における明示引数の扱い") and
-	// section 1.6a for why this file needs no separate
-	// ResolveLanguage/LocalizedDefault call the way settings.go does.
-	return config.LoadWithRoots(s.cfg.WorkDir, s.cfg.UserExtensionsDir, s.cfg.TeamExtensionsDir, "")
-}
-
-// loadCatalogForTicket is loadCatalog, but -- when ticketID resolves to a
-// ticket whose Project has a local path in this environment (graph-config.json's
-// projectPaths, DFLT-00080) -- resolves the team tier from that local path
-// instead of the server process's own cwd (s.cfg.WorkDir). A project with no
-// local path falls back to loadCatalog, never an error.
-//
-// Without this, editing a project's settings through the settings UI (which
-// always writes under that project's local path, see settingsScope in
-// settings.go) would never actually affect that project's tickets unless the
-// server process happened to be running with the project's directory as its
-// cwd -- silently breaking the "変更が実際のチケット実行に反映される"
-// completion criterion for any multi-project deployment. An explicit
-// GRAPH_TEAM_EXTENSIONS_DIR (s.cfg.TeamExtensionsDir) still always wins, same
-// precedence as every other team-tier resolution in this codebase, so an
-// operator who has deliberately pinned a single shared team config is never
-// silently overridden by whichever project a ticket happens to belong to.
-func (s *Server) loadCatalogForTicket(ticketID string) (config.Catalog, error) {
-	if s.cfg.TeamExtensionsDir != "" {
-		return s.loadCatalog()
-	}
-	ticket, err := s.repo.GetTicket(ticketID)
-	if err != nil || ticket == nil {
-		return s.loadCatalog()
-	}
-	localPath := s.projectLocalPath(ticket.ProjectID)
-	if localPath == "" {
-		return s.loadCatalog()
-	}
-	// languageOverride "" -- see loadCatalog's doc comment above.
-	return config.LoadWithRoots(localPath, s.cfg.UserExtensionsDir, "", "")
 }
 
 // resolveRoots resolves the same user-/team-tier roots the CLI resolves from

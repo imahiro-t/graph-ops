@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Image as ImageIcon } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -18,10 +20,89 @@ interface Props {
   label?: string;
 }
 
+// isRemoteImageSrc reports whether loading src would reach an origin other
+// than the app's own.
+//
+// data: and blob: URLs carry their bytes with them, and a relative path
+// resolves against this origin, so none of those tells anyone anything. An
+// absolute http(s) URL does -- and so does a protocol-relative "//host/x",
+// which is why this parses rather than string-matching "http". An
+// unparseable src is treated as remote: the safe answer to "I don't know
+// where this points" is not to fetch it.
+export function isRemoteImageSrc(src: string): boolean {
+  if (!src) return false;
+  if (/^(data|blob):/i.test(src)) return false;
+  try {
+    return new URL(src, window.location.href).origin !== window.location.origin;
+  } catch {
+    return true;
+  }
+}
+
+// RemoteImage renders a remote <img> only after the reader asks for it
+// (DFLT-00103 / SEC-09).
+//
+// An artifact is written by an agent, and until DFLT-00103 merely opening
+// one was enough to make the browser fetch every image URL in it. That is a
+// request to someone else's server, carrying the reader's IP and the fact
+// that they are looking at this artifact right now, with nobody having
+// chosen to make it. Showing the host and waiting for a click puts that
+// choice back where it belongs.
+//
+// It is a real <button>, not a clickable div: this has to be reachable and
+// activatable from the keyboard, and its accessible name has to say both
+// what the image is and where it would come from.
+const RemoteImage: React.FC<{ src: string; alt?: string; title?: string }> = ({ src, alt, title }) => {
+  const { t } = useTranslation();
+  const [loaded, setLoaded] = useState(false);
+
+  if (loaded) {
+    return <img src={src} alt={alt || ''} title={title} className="max-w-full h-auto rounded" />;
+  }
+
+  let host = src;
+  try {
+    host = new URL(src, window.location.href).host || src;
+  } catch {
+    // Keep the raw src: an unparseable URL has no host to show, and the
+    // reader is better served seeing exactly what is written than nothing.
+  }
+  const description = alt?.trim() || t('markdownViewer.untitledImage');
+
+  return (
+    <button
+      type="button"
+      onClick={() => setLoaded(true)}
+      title={src}
+      className="inline-flex items-center gap-1.5 max-w-full text-left px-2 py-1 rounded border border-dashed border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+    >
+      <ImageIcon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+      <span className="truncate">{t('markdownViewer.loadRemoteImage', { description, host })}</span>
+    </button>
+  );
+};
+
 // Tailwind styling per element (no @tailwindcss/typography plugin in this
 // project -- see tailwind.config.js) so rendered markdown matches the app's
 // existing slate/indigo look rather than browser defaults.
 const components: Components = {
+  // Only a remote image is deferred. A data:/blob: URI or a same-origin path
+  // reaches nobody, so making the reader click those would be friction with
+  // nothing bought for it.
+  //
+  // An empty src renders nothing rather than `<img src="">`, which some
+  // browsers resolve to the page's own URL and request again. It happens for
+  // any scheme react-markdown's own sanitization strips (data: among them),
+  // so it is the normal path, not a corner case.
+  img: ({ src, alt, title }) => {
+    const source = typeof src === 'string' ? src : '';
+    if (!source) return null;
+    return isRemoteImageSrc(source) ? (
+      <RemoteImage src={source} alt={alt} title={title} />
+    ) : (
+      <img src={source} alt={alt || ''} title={title} className="max-w-full h-auto rounded" />
+    );
+  },
   h1: ({ children }) => <h1 className="text-base font-bold text-slate-900 dark:text-slate-100 mt-3 mb-1.5 first:mt-0">{children}</h1>,
   h2: ({ children }) => <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100 mt-3 mb-1.5 first:mt-0">{children}</h2>,
   h3: ({ children }) => <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-2.5 mb-1 first:mt-0">{children}</h3>,

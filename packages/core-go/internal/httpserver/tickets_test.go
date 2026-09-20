@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/graph-ops/core-go/internal/config"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
@@ -302,76 +301,5 @@ func TestHandleCreateArtifact_InlineContentNotValidatedForNonReportNode(t *testi
 	})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected 201 (no report-format enforcement on non-report nodes), got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-// Scenario (DFLT-00051 execution plan, section 3.1/4 item 8): a ticket's
-// first-ever GET /api/tickets/{id}/executable-nodes poll -- the Web UI's
-// seeding path (handleExecutableNodes -> loadCatalogForTicket ->
-// engine.GetExecutableNodes -> EnsureGraphStarted) -- must localize the
-// seeded plan/plan_review node names exactly the way the CLI's
-// get-executable/expand-graph would for the same team-tier language
-// setting, since both ultimately resolve through the same
-// config.LoadWithRoots. The project's local path (graph-config.json's
-// projectPaths) is what loadCatalogForTicket resolves the team tier from
-// here (s.cfg has no TeamExtensionsDir override -- see newTestServer),
-// matching how the settings UI always writes project-scoped overrides under
-// that local path.
-func TestHandleExecutableNodes_SeedsLocalizedNamesFromProjectLanguage(t *testing.T) {
-	s, repo, projectID := newTestServer(t)
-	project, err := repo.GetProject(projectID)
-	if err != nil || project == nil {
-		t.Fatalf("GetProject: %v", err)
-	}
-
-	teamDir := filepath.Join(testProjectLocalPath(t, s, project.ID), ".graph-ops")
-	if err := os.MkdirAll(teamDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(teamDir, "workflow.yaml"), []byte("version: 1\nlanguage: ja\n"), 0o644); err != nil {
-		t.Fatalf("write workflow.yaml: %v", err)
-	}
-
-	ticket, err := repo.CreateTicket(projectID, domain.Ticket{Title: "t", Status: domain.TicketTODO, AutoExecutable: true})
-	if err != nil {
-		t.Fatalf("CreateTicket: %v", err)
-	}
-
-	rec := doJSON(t, s, http.MethodGet, "/api/tickets/"+ticket.ID+"/executable-nodes", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET executable-nodes expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	var nodes []domain.GraphNode
-	if err := json.Unmarshal(rec.Body.Bytes(), &nodes); err != nil {
-		t.Fatalf("decode response: %v (body: %s)", err, rec.Body.String())
-	}
-	if len(nodes) == 0 {
-		t.Fatalf("expected at least one executable (seed) node, got none")
-	}
-	var planName string
-	for _, n := range nodes {
-		if n.ConfigID != nil && *n.ConfigID == "plan" {
-			planName = n.Name
-		}
-	}
-	if planName != "計画作成" {
-		t.Errorf("seeded plan node Name = %q, want 計画作成 (localized via the project's team-tier language)", planName)
-	}
-
-	// Cross-check against what the CLI's own resolution path
-	// (config.LoadWithRoots, no --language override) would produce for the
-	// same project local path -- the two entry points must never disagree.
-	cliCat, err := config.LoadWithRoots(testProjectLocalPath(t, s, project.ID), "", "", "")
-	if err != nil {
-		t.Fatalf("config.LoadWithRoots: %v", err)
-	}
-	var cliPlanName string
-	for _, n := range cliCat.Nodes {
-		if n.ID == "plan" {
-			cliPlanName = n.Name
-		}
-	}
-	if cliPlanName != planName {
-		t.Errorf("CLI-path plan name %q must match HTTP-path plan name %q", cliPlanName, planName)
 	}
 }

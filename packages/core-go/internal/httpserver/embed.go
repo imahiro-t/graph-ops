@@ -18,7 +18,8 @@ var webdistFS embed.FS
 // staticWebHandler serves the embedded frontend build, with an SPA fallback:
 // a request path that isn't a real file in the build (e.g. /artifacts/{id}/
 // preview, the artifact-preview deep link opened by "open in new tab" for
-// gherkin/text artifacts -- see TicketItem.tsx's openInNewTabLink) is served
+// gherkin, text and html artifacts -- see TicketItem.tsx's
+// openInNewTabLink) is served
 // index.html instead of a 404, so the app's own tiny path-based switch in
 // main.tsx can take over client-side. Vite's dev server already does this by
 // default (its default appType is "spa"); this makes the built single-binary

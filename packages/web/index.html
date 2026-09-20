@@ -2,6 +2,32 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Defense in depth, not the primary defense (DFLT-00103). What it buys:
+      artifact markdown is agent-authored, and this keeps the page from
+      reaching out to an origin nobody chose -- no external image, font,
+      stylesheet or fetch -- so viewing an artifact cannot become a signal
+      to a third party.
+
+      Notes on the specific directives:
+        - frame-ancestors is deliberately absent: it is ignored in a <meta>
+          CSP. Clickjacking is handled by the server's own response headers
+          (internal/httpserver's withSecurityHeaders), which is the only
+          place it can be.
+        - script-src / style-src need 'unsafe-inline': the theme script just
+          below runs inline, and both Vite's dev server and Tailwind inject
+          inline styles. Hashing is not an option when the build generates
+          them.
+        - connect-src allows ws: for Vite's HMR socket in `npm run dev`; the
+          built single-binary server never opens one.
+        - img-src has no external origin, which is the point: a remote <img>
+          in an artifact is what MarkdownViewer makes click-to-load, and
+          this is the backstop for any other path to one.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'none'"
+    />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GraphOps Console</title>

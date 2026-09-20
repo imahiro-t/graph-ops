@@ -503,7 +503,11 @@ func TestHandleGetArtifactContent_SetsSandboxCSPAndNosniff(t *testing.T) {
 		t.Fatalf("CreateNode: %v", err)
 	}
 
-	const wantCSP = "sandbox allow-scripts"
+	// One header carrying both directives (DFLT-00103): the sandbox that
+	// isolates a top-level open, and the frame-ancestors that lets the
+	// UI's own sandboxed <iframe> preview keep working where the
+	// server-wide frame-ancestors 'none' would forbid it.
+	const wantCSP = "sandbox allow-scripts; frame-ancestors 'self'"
 	const wantNosniff = "nosniff"
 
 	cases := []struct {

@@ -119,16 +119,20 @@ func remoteIP(remoteAddr string) string {
 	return host
 }
 
-// pathClass buckets a request path into one of the three route groups
-// Routes() actually serves, without ever logging the path itself (a path
-// can carry attacker-chosen or otherwise sensitive substrings, e.g. a
-// ticket ID or artifact ID).
+// pathClass buckets a request path into one of the two route groups Routes()
+// actually serves, without ever logging the path itself (a path can carry
+// attacker-chosen or otherwise sensitive substrings, e.g. a ticket ID or
+// artifact ID).
+//
+// There used to be a third bucket, "artifacts-static", for the filesystem
+// route that served the artifacts directory. DFLT-00103 removed that route,
+// and the bucket with it: everything outside /api/ is now the SPA (including
+// its catch-all fallback), so a separate class would only ever be an empty
+// one.
 func pathClass(path string) string {
 	switch {
 	case strings.HasPrefix(path, "/api/"):
 		return "api"
-	case strings.HasPrefix(path, "/artifacts-static/"):
-		return "artifacts-static"
 	default:
 		return "web"
 	}

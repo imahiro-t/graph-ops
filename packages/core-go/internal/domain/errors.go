@@ -136,6 +136,17 @@ const (
 	// ErrCodeInvalidLabelColor: a label color is not one of the fixed
 	// palette keys (domain.LabelColors).
 	ErrCodeInvalidLabelColor ErrorCode = "INVALID_LABEL_COLOR"
+	// ErrCodeAPIRouteNotFound: the request named an /api/ path this server
+	// has no route for (DFLT-00103). Returned with a 404 and distinct from
+	// TICKET_NOT_FOUND, which means "the route exists, the row doesn't": the
+	// two call for completely different fixes on the caller's side.
+	ErrCodeAPIRouteNotFound ErrorCode = "API_ROUTE_NOT_FOUND"
+	// ErrCodeRequestBodyTooLarge: the request body exceeded the server's cap
+	// (internal/httpserver's maxRequestBodyBytes, DFLT-00103). Returned with
+	// a 413, never a 5xx: the request is the caller's to fix, not a server
+	// failure. Distinct from VALIDATION_ERROR so the Web UI can say "this
+	// artifact is too big to upload" rather than "check your input".
+	ErrCodeRequestBodyTooLarge ErrorCode = "REQUEST_BODY_TOO_LARGE"
 )
 
 // APIError pairs a machine-readable Code with a developer-facing English

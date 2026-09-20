@@ -2,8 +2,10 @@
 // /api/settings/catalog, /api/settings/node-types(/{type}), the skill and
 // template endpoints, ...) -- see
 // packages/core-go/internal/httpserver/settings.go for the actual contract.
-// Every call site (NodeTypesEditor/WorkflowEditor/ReviewGatesEditor) shares
-// this instead of re-building query strings/error handling independently.
+// Every call site (the editors under components/settings/ -- NodeTypesEditor,
+// ReviewGatesEditor, SkillsEditor, TemplatesEditor, ReportTemplateEditor,
+// AppSettingsEditor -- plus labelsApi) shares this instead of re-building
+// query strings/error handling independently.
 import { TFunction } from 'i18next';
 import {
   AppSettingsFile,
@@ -25,10 +27,10 @@ import { localizedApiErrorMessage } from './apiError';
 // Every endpoint in this module answers the same way: a JSON body on success,
 // and on failure a status outside 2xx with the backend's {"error": {...}}
 // shape that localizedApiErrorMessage turns into a user-facing string. That
-// pair of lines used to be repeated verbatim at the end of all twelve
-// exported functions (DFLT-00023 D-4), which made it a per-function decision
-// -- and therefore something a thirteenth function could quietly get wrong --
-// rather than the module-wide rule it actually is.
+// pair of lines used to be repeated verbatim at the end of all seventeen
+// exported functions below (DFLT-00023 D-4), which made it a per-function
+// decision -- and therefore something the next function added could quietly
+// get wrong -- rather than the module-wide rule it actually is.
 //
 // The thrown Error carries the *localized* message because these functions
 // are called straight from components whose catch blocks render e.message; a

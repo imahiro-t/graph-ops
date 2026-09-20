@@ -168,14 +168,28 @@ func (s *Server) handleGetTicket(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleUpdateTicket applies a partial update.
+//
+// Every field is validated before s.repo.UpdateTicket is called, never after
+// and never inside the store (DFLT-00103 / BUG-05). That ordering is what
+// makes "a rejected PATCH changes nothing" structural rather than a property
+// each new field has to be tested for: at the point the first write happens,
+// the whole body has already been accepted.
 func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body struct {
-		Title          *string              `json:"title"`
-		Description    *string              `json:"description"`
-		Status         *domain.TicketStatus `json:"status"`
-		AutoExecutable *bool                `json:"auto_executable"`
-		Blocked        *bool                `json:"blocked"`
+		// Title is *string, not a plain string, so "key absent" (leave it
+		// alone) stays distinguishable from `"title": ""` -- which is
+		// rejected below, since a ticket with no title is unreadable in
+		// every list the UI renders.
+		Title       *string `json:"title"`
+		Description *string `json:"description"`
+		// Status arrives as a *string and goes through
+		// domain.ParseTicketStatus; typed as *domain.TicketStatus it would
+		// be a cast, not a check, and any string at all would reach the
+		// column.
+		Status         *string `json:"status"`
+		AutoExecutable *bool   `json:"auto_executable"`
+		Blocked        *bool   `json:"blocked"`
 		// Assignee: see nullableString's doc comment for why this isn't a
 		// plain *string, and domain.Ticket.Assignee's doc comment for what
 		// it means -- driven by the Web UI's "assign to me"/"unassign"
@@ -198,9 +212,34 @@ func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if body.Title != nil && strings.TrimSpace(*body.Title) == "" {
+		writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeTitleRequired,
+			"title cannot be empty"))
+		return
+	}
+
 	patch := store.TicketPatch{
-		Title: body.Title, Description: body.Description, Status: body.Status,
+		Title: body.Title, Description: body.Description,
 		AutoExecutable: body.AutoExecutable, Blocked: body.Blocked,
+	}
+	if body.Status != nil {
+		status, err := domain.ParseTicketStatus(*body.Status)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation, "%s", err))
+			return
+		}
+		// CLOSED is a real status but not one this endpoint may set: closing
+		// records a reason alongside it (engine.CloseTicket, DFLT-00043), and
+		// a bare status write would leave a ticket closed with no reason
+		// while bypassing the one code path that owns that transition.
+		// Reopening is the same story in reverse (engine.ReopenTicket).
+		if status == domain.TicketClosed {
+			writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation,
+				"status cannot be set to %q here: use POST /api/tickets/{id}/close, which records a reason",
+				domain.TicketClosed))
+			return
+		}
+		patch.Status = &status
 	}
 	if body.LabelIDs.Present {
 		if body.LabelIDs.Null {
@@ -309,21 +348,6 @@ func (s *Server) handleReopenTicket(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ticket)
 }
 
-func (s *Server) handleExecutableNodes(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	catalog, err := s.loadCatalogForTicket(id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	nodes, err := s.engine.GetExecutableNodes(id, catalog)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, nodes)
-}
-
 // handleCompleteNode accepts an optional "artifacts" array inline in the
 // same request as the pass/fail verdict, as a convenience so a caller
 // doesn't have to make N separate POST .../artifacts calls before
@@ -414,45 +438,95 @@ func (s *Server) handleCompleteNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// nodePatchWithdrawnFields names, for the error message, the PATCH
+// /api/nodes/{id} fields DFLT-00103 withdrew. They are refused explicitly
+// rather than silently ignored as unknown JSON keys would be, so a caller
+// that was setting one gets told instead of watching its write vanish.
+//
+// Why each went:
+//
+//   - name / type: a node's identity comes from the workflow catalog the
+//     graph was expanded from, not from whoever last sent a PATCH. `type` in
+//     particular cannot be validated the way `status` can -- domain.NodeType
+//     is deliberately open, so that a workflow.yaml may introduce its own
+//     types -- which left "accept any string" as the only alternative to
+//     removing it, and any string is exactly what BUG-05 was about.
+//   - iteration_count: the engine maintains it as review gates loop
+//     (CompleteNode). A value written from outside is not a smaller version
+//     of that bookkeeping, it is a corruption of it.
+//
+// No caller was found for any of the three: the Web UI never issues this
+// PATCH at all (it completes nodes through POST /api/nodes/{id}/complete),
+// and the CLI goes through the engine rather than HTTP.
+const nodePatchWithdrawnFields = "name, type, iteration_count"
+
 func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body struct {
-		Name           *string            `json:"name"`
-		Type           *domain.NodeType   `json:"type"`
-		Status         *domain.NodeStatus `json:"status"`
-		IterationCount *int               `json:"iteration_count"`
-		MaxIterations  *int               `json:"max_iterations"`
+		// Status arrives as a *string and is parsed, for the same reason as
+		// on handleUpdateTicket: a *domain.NodeStatus field would make the
+		// decoder accept any string as a status.
+		Status        *string `json:"status"`
+		MaxIterations *int    `json:"max_iterations"`
 		// Assignee: see nullableString's doc comment for why this isn't a
 		// plain *string.
 		Assignee nullableString `json:"assignee"`
 		IsManual *bool          `json:"is_manual"`
+
+		// Withdrawn fields, kept only to be refused -- see
+		// nodePatchWithdrawnFields. json.RawMessage records "the key was
+		// present" without committing to a type, so even a well-formed value
+		// is reported rather than applied.
+		Name           json.RawMessage `json:"name"`
+		Type           json.RawMessage `json:"type"`
+		IterationCount json.RawMessage `json:"iteration_count"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	existing, err := s.repo.GetNode(id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if existing == nil {
-		writeError(w, http.StatusNotFound, domain.NewAPIError(domain.ErrCodeNodeNotFound, "node not found: %s", id))
-		return
+	// Ordered, not a map, so the field named in the message is the same one
+	// on every run for a body that carries several of them.
+	for _, sent := range []struct {
+		field string
+		raw   json.RawMessage
+	}{
+		{"name", body.Name}, {"type", body.Type}, {"iteration_count", body.IterationCount},
+	} {
+		if sent.raw != nil {
+			writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation,
+				"%q can no longer be set through PATCH /api/nodes/{id} (withdrawn fields: %s)",
+				sent.field, nodePatchWithdrawnFields))
+			return
+		}
 	}
 
-	patch := store.NodePatch{
-		Name: body.Name, Type: body.Type, Status: body.Status,
-		IterationCount: body.IterationCount, MaxIterations: body.MaxIterations,
-		IsManual: body.IsManual,
+	patch := store.NodePatch{MaxIterations: body.MaxIterations, IsManual: body.IsManual}
+	if body.Status != nil {
+		status, err := domain.ParseNodeStatus(*body.Status)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation, "%s", err))
+			return
+		}
+		patch.Status = &status
+	}
+	if body.MaxIterations != nil && *body.MaxIterations < 1 {
+		writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeInvalidMaxIterations,
+			"max_iterations must be 1 or greater, got %d", *body.MaxIterations))
+		return
 	}
 	if body.Assignee.Present {
 		patch.Assignee = &body.Assignee.Value
 	}
 
-	updated, err := s.repo.UpdateNode(id, patch)
+	// Through the engine, not s.repo, so the owning ticket's status is
+	// re-derived from its nodes the way it is for every other node mutation
+	// -- see engine.UpdateNode (DFLT-00103 / BUG-05). A node this server
+	// doesn't have comes back as NODE_NOT_FOUND and is answered 404 by
+	// statusForError, the same as before.
+	updated, err := s.engine.UpdateNode(id, patch)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		writeError(w, statusForError(err, http.StatusBadRequest), err)
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
@@ -722,11 +796,13 @@ func (s *Server) safeArtifactPath(path string) (string, error) {
 // handleGetArtifactContent serves an artifact's raw bytes (its html source,
 // its image data, ...) with an appropriate Content-Type, decoded from
 // artifacts.content via artifactcontent.Payload -- the DB-only preview path
-// DFLT-00006 requires: unlike /artifacts-static/, this never depends on the
-// local filesystem of whichever machine created the artifact, so it works
-// the same from any machine that can reach this API server, which is the
-// whole point of "must always be placed in the DB" for a team sharing one
-// remote DB.
+// DFLT-00006 requires: it never depends on the local filesystem of whichever
+// machine created the artifact, so it works the same from any machine that
+// can reach this API server, which is the whole point of "must always be
+// placed in the DB" for a team sharing one remote DB. (It is also the only
+// way to read an artifact's bytes over HTTP: DFLT-00103 removed the
+// filesystem-backed route that used to serve the artifacts directory
+// directly, on the app's own origin and with no sandbox.)
 //
 // The response is also isolated from the app's own origin: see the
 // Content-Security-Policy / X-Content-Type-Options comment in
@@ -792,7 +868,26 @@ func writeArtifactContent(w http.ResponseWriter, data []byte, contentType, filen
 	// executes an image as script, so the header is harmless there, and a
 	// single unconditional call can't be forgotten the next time an artifact
 	// type is added.
-	w.Header().Set("Content-Security-Policy", "sandbox allow-scripts")
+	//
+	// frame-ancestors 'self' rides in the same header, replacing the
+	// frame-ancestors 'none' withSecurityHeaders set for every other
+	// response (DFLT-00103). This endpoint is the one documented exception
+	// to that rule, because the UI previews an artifact by pointing a
+	// sandboxed <iframe> at it -- both inline on the ticket screen and on
+	// the /artifacts/{id}/preview page (packages/web/src/components/
+	// TicketItem.tsx, ArtifactPreviewPage.tsx). 'self' is what keeps that
+	// working while still refusing a foreign page's frame. It has to be one
+	// header with both directives: two Content-Security-Policy headers are
+	// intersected by the browser, so leaving the middleware's 'none' in
+	// place alongside would forbid every ancestor and break the preview.
+	//
+	// X-Frame-Options has no per-origin form ('self' has no equivalent
+	// beyond SAMEORIGIN), so the middleware's DENY is downgraded to
+	// SAMEORIGIN here rather than dropped: the app's own origin is exactly
+	// what SAMEORIGIN allows, and leaving the header off entirely would give
+	// a browser that predates CSP frame-ancestors no answer at all.
+	w.Header().Set("Content-Security-Policy", "sandbox allow-scripts; frame-ancestors 'self'")
+	w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if filename != "" {
 		if attachment {

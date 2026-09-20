@@ -407,7 +407,9 @@ func TestSecurityLog_RemoteIP(t *testing.T) {
 func TestSecurityLog_PathClass(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"/api/tickets", "api"},
-		{"/artifacts-static/foo.html", "artifacts-static"},
+		// DFLT-00103 removed the filesystem route this path used to reach;
+		// it now falls through to the SPA handler like any other non-API path.
+		{"/artifacts-static/foo.html", "web"},
 		{"/", "web"},
 		{"/some/other/path", "web"},
 	} {

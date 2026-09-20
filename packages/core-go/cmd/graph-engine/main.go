@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/graph-ops/core-go/internal/artifactcontent"
 	"github.com/graph-ops/core-go/internal/config"
@@ -1680,5 +1681,27 @@ func cmdServe(rc runtimeConfig, args []string) error {
 	if !runtimeconfig.IsLoopbackHost(host) {
 		fmt.Printf("WARNING: this API has no authentication; %s exposes it beyond this machine.\n", addr)
 	}
-	return http.ListenAndServe(addr, srv.Routes())
+	// An explicit http.Server rather than http.ListenAndServe, for the
+	// timeouts the package-level helper cannot set (DFLT-00103 / SEC-08).
+	// They matter because `--host 0.0.0.0` makes this unauthenticated server
+	// reachable from the network, where a handful of sockets that dribble out
+	// a request header one byte at a time (Slowloris) would otherwise each
+	// hold a goroutine open indefinitely.
+	//
+	// ReadHeaderTimeout is the one that closes that, and it is safe to set
+	// because a request's headers are small no matter what the request is.
+	// ReadTimeout and WriteTimeout are deliberately left unset: they cap the
+	// whole exchange, body included, which here can legitimately be a
+	// multi-megabyte artifact upload or the zip GET
+	// /api/tickets/{id}/artifacts/download streams out, and a client on a
+	// slow link would see those cut off mid-transfer. IdleTimeout bounds
+	// keep-alive connections that are between requests, where nothing is in
+	// flight to interrupt.
+	httpSrv := &http.Server{
+		Addr:              addr,
+		Handler:           srv.Routes(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	return httpSrv.ListenAndServe()
 }
