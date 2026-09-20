@@ -203,7 +203,11 @@ func TestCompleteNode_ApprovalGateDoubleProcessingIsRefused(t *testing.T) {
 
 // TestCompleteNode_ErrorMessageNamesStateAndRecovery keeps the refusal
 // actionable: the message has to say where the node is, where it would have
-// to be, and how to get it there.
+// to be, and how to get it there. All three recovery commands are named on
+// every refusal, because the reason differs per status and the message would
+// otherwise be wrong for the most likely case of all: an automatic node still
+// at TODO was never handed out, and neither unstick-node nor reopen-nodes
+// does anything for it -- get-executable is what claims it.
 func TestCompleteNode_ErrorMessageNamesStateAndRecovery(t *testing.T) {
 	e, repo, projectID := newTestEngine(t)
 	cat := baseCatalog(t)
@@ -214,7 +218,7 @@ func TestCompleteNode_ErrorMessageNamesStateAndRecovery(t *testing.T) {
 
 	_, err := e.CompleteNode(node.ID, true, nil)
 	apiErr := assertInvalidNodeState(t, err)
-	for _, want := range []string{"DONE", "IN PROGRESS", "IN REVIEW", "unstick-node", "reopen-nodes"} {
+	for _, want := range []string{"DONE", "IN PROGRESS", "IN REVIEW", "get-executable", "unstick-node", "reopen-nodes"} {
 		if !strings.Contains(apiErr.Message, want) {
 			t.Errorf("message %q does not mention %q", apiErr.Message, want)
 		}

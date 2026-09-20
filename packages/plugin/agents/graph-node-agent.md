@@ -63,4 +63,16 @@ cat "<scratchFile>" | graph-engine add-artifact "<ticketId>" "<nodeId>" "<artifa
 ```bash
 graph-engine complete-node "<nodeId>" <true|false>
 ```
-Call this yourself once your work (and, for review nodes, your pass/fail judgment) is final. Nothing else marks the node done.
+Call this yourself once your work (and, for review nodes, your pass/fail judgment) is final. Nothing else marks the node done. The verdict argument is exactly `true` or `false`; anything else -- `False`, `0`, `no`, or the old `passed:`-prefixed form -- is a usage error that completes nothing.
+
+### If `complete-node` fails with `INVALID_NODE_STATE`
+
+The engine refuses to complete a node that is not in a state it can be completed from -- an automatic node still at `TODO` (never handed out by `get-executable`), or one already at `DONE`/`REJECTED`/`AWAITING FIX`, or any node of a `CLOSED` ticket. The call writes nothing at all when it is refused: no status change, no artifacts.
+
+**Do not retry the call** -- it is not a transient failure, and `complete-node` is not idempotent, so a retry cannot succeed where the first attempt was refused. Instead:
+
+1. Run `graph-engine get-ticket "<ticketId>"` and read your node's current status.
+2. If it is `DONE` or `REJECTED`, the outcome is already recorded -- somebody (the Web UI, a human, or a call of yours that in fact succeeded) closed the node. Change nothing. The artifacts you saved in step 4 are still on the node; artifacts are only ever appended, so nothing was lost.
+3. In any other case, treat it as a situation you were not given the context to resolve. Do not try to force the completion, and do not run recovery commands (`unstick-node`, `reopen-nodes`, `grant-iterations`) yourself -- those belong to the session driving the ticket.
+
+Either way, finish by reporting what happened: what work you did, that `complete-node` was refused, and the node's actual status. **Never report the node as completed when the call was refused** -- that is exactly the mismatch between the record and reality that this check exists to prevent.

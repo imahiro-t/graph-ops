@@ -121,11 +121,16 @@ type GraphRepository interface {
 	// treat that as "not mine" and move on; it is an ordinary outcome of
 	// parallel execution, not a failure.
 	//
-	// newStatus must be one of excluded. The CAS reports "already claimed"
-	// by counting the rows the UPDATE changed, and MySQL counts a row that
-	// ends up with the values it already had as unchanged -- so a claim
-	// that would leave the status as it found it could not be told apart
-	// from one that matched nothing at all.
+	// newStatus must be one of excluded, so that a node already sitting at
+	// newStatus fails the WHERE clause. Leave it out and such a node
+	// matches, gets its status rewritten to the value it already had, and
+	// is returned as a fresh claim -- handing a caller a node somebody else
+	// is already working on, which is the very thing this method exists to
+	// prevent. (The row count does not save us: claimNodeCAS always writes
+	// a new updated_at, so the UPDATE reports one changed row even when the
+	// status does not move.) The engine's use satisfies this by
+	// construction -- it excludes exactly the claimed statuses, newStatus
+	// among them.
 	//
 	// HTTPRepository is the exception: it has no way to express a CAS over
 	// the REST API it talks to (the remote is the system of record, and

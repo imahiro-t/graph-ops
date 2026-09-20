@@ -28,6 +28,37 @@ update-ticket) once per TLS mode, one package at a time, and drops the
 database on exit. The CLI tests only touch projects they create themselves
 and delete them afterwards.
 
+### How long it takes, and why
+
+A full run (three TLS modes) takes **4 to 5 minutes** on a developer laptop,
+most of it `internal/store` (40-75 seconds per mode, depending on the machine
+and on what else is running). Four concurrency tests account for about half of
+that package's time -- roughly a third of the whole run:
+
+- `TestUpdateNode_ConcurrentDifferentColumnsBothSurvive`
+- `TestUpdateProject_NilNamePatchDoesNotRollBackARename`
+- `TestClaimNode_ConcurrentClaimsYieldExactlyOneWinner`
+- `TestGetExecutableNodes_ConcurrentCallsNeverHandOutTheSameNode`
+
+That cost is deliberate, because those four are what actually catch the bugs
+they cover (lost updates across columns, and the same node being claimed
+twice). The deterministic tests next to them -- which columns a patch puts in
+the `SET` clause, which statuses a claim may move from -- pass against the
+pre-fix code as well: they pin down the mechanism, not the regression.
+
+Two things follow for anyone tempted to make them cheaper:
+
+- **If you lower their round counts, redo the check that the pre-fix code
+  fails.** The counts were picked to make the old read-modify-write behaviour
+  fail every time, not to be comfortable; a smaller number can let it pass and
+  the test then guards nothing. Redo that check against MySQL in particular:
+  `TestUpdateProject_NilNamePatchDoesNotRollBackARename` can pass by luck on
+  SQLite, where `SetMaxOpenConns(1)` serializes statements and narrows the
+  window, so MySQL is effectively the only backend that detects it.
+- **The TLS mode has nothing to do with the races**, so a single mode
+  (`./dev/mysql/test.sh verify-full`) is enough while iterating on them; run
+  all three before concluding the suite is green.
+
 ## Start / stop by hand
 
 ```sh

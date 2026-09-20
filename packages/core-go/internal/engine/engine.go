@@ -753,7 +753,7 @@ func loopBackRewindSet(targetID, failedNodeID string, byID map[string]domain.Gra
 // throw away work that was correctly done and was already in flight when the
 // block landed.
 func checkCompletable(node *domain.GraphNode, detail *domain.TicketDetail) error {
-	const recovery = "use unstick-node to release a node stuck at IN PROGRESS/IN REVIEW, or reopen-nodes to redo a completed one"
+	const recovery = "use get-executable to hand out an automatic node still at TODO, unstick-node to release a node stuck at IN PROGRESS/IN REVIEW, or reopen-nodes to redo a completed one"
 
 	if detail.Status == domain.TicketClosed {
 		return domain.NewAPIError(domain.ErrCodeInvalidNodeState,
