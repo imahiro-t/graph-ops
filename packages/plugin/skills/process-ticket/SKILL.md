@@ -132,7 +132,7 @@ Once both seed nodes (`plan`, `plan_review`) pass, `get-executable` returns an e
      4. A leftover notification can arrive after the session has already moved on (for example the user answered in the terminal first, and the watcher then saw that same change). Check with `get-ticket` as above; if the gate was already handled, do nothing -- never call `complete-node` or `reopen-nodes` twice for one decision. If the session moves on while a watcher is still running, you may stop that background task.
      Do not ask the user *which nodes to redo* -- that triage is this skill's job, not theirs (see step 4).
    - If it's empty and only a manual `release` node remains, ask the user to confirm the release/deployment has actually been carried out, then complete it.
-   - If `blocked: true` and no manual node is waiting on a first decision, an approval_gate was likely rejected (or an iteration limit was reached) -- go to step 4 before reporting anything to the user.
+   - If `blocked: true` and no manual node is waiting on a first decision, before reporting anything to the user look at *why* it is blocked in `get-ticket`: an `approval_gate` at `REJECTED` means a rejection to triage (step 4), while a review/review_gate still at `IN REVIEW` next to a loop target whose `iteration_count` has reached its `max_iterations` means a loop ran out of retries (step 5). The two have different entry points and different recoveries.
 2. For **each node returned, launch one subagent via the Agent tool using the `graph-node-agent` subagent type** (this plugin's default agent definition for graph-node work -- see `${CLAUDE_PLUGIN_ROOT}/agents/graph-node-agent.md`; fall back to a generic Agent-tool call with the same task content if that subagent type isn't available in your environment). When multiple nodes are returned at once (e.g. the parallel review gates), **issue multiple Agent calls within the same message so they truly run in parallel**. Launch a subagent the same way even for a single node (this session itself never does node work).
 3. Give each subagent's task the ticket id and the node's id/type/name -- that's all `graph-node-agent` needs to load the ticket's context, fetch that node type's merged instructions (plugin default + any user/team extension content, resolved by the engine itself), do the work, save artifacts, and call `complete-node` on its own. This works the same way for the engine's built-in node types (`plan`, `investigation`, `gherkin_spec`, `implementation`, `review`, `review_gate`, `gherkin_test`, `documentation`, `report`, `release`) and for any custom node type this patch introduced -- a custom type simply has no plugin-default instruction layer, so the agent works from whatever user/team extension text exists for that exact type name (via `get-node-type-context`) or, absent that too, from the node's name.
 4. Wait for every launched subagent to finish before moving on to the next `get-executable` call.
@@ -150,7 +150,9 @@ graph-engine complete-node "<nodeId>" <true|false>
 
 Repeat "3. Execution loop" until every automatic node is done or a manual node is reached.
 
-A node showing `AWAITING FIX` in `get-ticket` is a review/review_gate that looped back and is waiting for its loop target's rework; it needs no special handling -- `get-executable` returns it again automatically once its prerequisites are `DONE`.
+A node showing `AWAITING FIX` in `get-ticket` is a review/review_gate that failed and looped back, and is waiting for its loop target's rework; it needs no special handling. A loop-back resets more than the loop target alone: every `DONE` node on a `success`-edge path from the target to the failing node goes back to `TODO` too, so the work that was judged against the old output is redone rather than left standing. In the implementation+Gherkin shape above, `test_review` failing back to `impl` therefore also resets the four review gates and `gherkin_test`. `get-executable` then hands out only the loop target at first, and offers the `AWAITING FIX` node again automatically once those rewound nodes have been re-run -- so simply repeating the step 3 loop is the whole of the handling. Expect the same nodes to appear more than once across a ticket for this reason.
+
+Two deliberate limits: a rewound node that is still `IN PROGRESS`/`IN REVIEW` (something else claimed it) is left as it is -- see `unstick-node` in step 5 if it stays that way -- and sibling reviewers that *passed* keep their verdicts, since they are not on a path to the one that failed.
 
 ## 4. Triage after an approval_gate rejection
 
@@ -163,6 +165,26 @@ When `get-executable` is empty, `blocked: true`, and `get-ticket` shows an `appr
      ```bash
      graph-engine reopen-nodes "<ticketId>" "<nodeId1>,<nodeId2>,..."
      ```
-     This resets exactly those nodes to `TODO` (plus anything downstream that already ran off them, via the engine's own forward-closure sweep -- you never need to enumerate downstream nodes yourself), bumps their iteration counts, and clears the ticket's blocked flag. If it errors because a node would exceed its `max_iterations`, report that to the user instead of retrying further. Resume the normal execution loop (step 3) afterward.
+     This resets exactly those nodes to `TODO` (plus anything downstream that already ran off them, via the engine's own forward-closure sweep -- you never need to enumerate downstream nodes yourself), bumps their iteration counts, and clears the ticket's blocked flag. If it errors because a node would exceed its `max_iterations`, the budget has to be raised first -- see step 5. Resume the normal execution loop (step 3) afterward.
    - **The reason requires a requirements-level rethink** that no amount of redoing existing nodes would fix (e.g. disagreement with the ticket's premises, not with how it was executed): call nothing. Report the rejection reason and your assessment to the user and end the session -- the ticket stays blocked and the gate stays `REJECTED` until a human resolves it (e.g. via `refine-ticket` or further discussion).
 4. Never ask the user to pick which nodes to reopen, and never reopen nodes without first reading the actual rejection reason and ticket artifacts -- both defeat the point of this being an automatic judgment rather than a manual one.
+
+## 5. Recovery after an iteration limit
+
+This is a different entry point from step 4, with a different cause: nothing was rejected by a human and there is no `rejection_reason` to read. A review/review_gate failed, tried to loop back, and found its loop target already at `iteration_count == max_iterations`, so the engine blocked the ticket instead of retrying. `get-ticket` shows the ticket `blocked: true`, the loop target still `DONE` at its ceiling, and the failing reviewer still `IN REVIEW` (deliberately: a blocked loop-back writes nothing at all, so there is no half-rewound graph to reason about).
+
+`reopen-nodes` alone cannot recover this. It bumps every node it resets and refuses the whole call if any would exceed its budget -- and the loop target is out of budget by definition here. The recovery is three commands, in this order:
+
+```bash
+graph-engine grant-iterations "<ticketId>" "<loopTargetNodeId>"   # +1 by default; --extra <n> for more
+graph-engine reopen-nodes "<ticketId>" "<loopTargetNodeId>"       # now succeeds; clears blocked
+graph-engine unstick-node "<failingReviewerNodeId>"               # only if it is still IN REVIEW
+```
+
+- `grant-iterations` raises `max_iterations` and touches nothing else -- not the node's status, not its `iteration_count`, so the record of how many automatic attempts were already spent survives. It does not unblock the ticket on its own.
+- `reopen-nodes` then does the actual reset, as in step 4.
+- `unstick-node` is needed because `reopen-nodes` only ever collects `DONE`/`REJECTED` nodes: the reviewer that failed is `IN REVIEW`, so it is left claimed and would never be offered again. Check with `get-ticket` before calling it, and only call it once nothing is still working that node.
+
+Then resume the normal execution loop (step 3).
+
+**Before granting anything, decide whether more automatic retries are actually the answer.** An exhausted iteration budget usually means the loop is not converging -- the same criticism keeps coming back and the rework keeps missing it. Read the loop target's artifacts and the failing reviewer's verdicts first. If the reviews are circling a disagreement about the requirements rather than about execution quality, report that to the user and leave the ticket blocked, exactly as in step 4's second outcome; granting more iterations would just burn them. Grant only when the reviews show real progress that simply needs another pass, and keep `--extra` small (the engine caps it per call, and no flag makes retries unlimited).
