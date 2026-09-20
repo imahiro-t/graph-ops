@@ -22,8 +22,11 @@ export const TICKET_STATUSES: readonly TicketStatus[] = ['TODO', 'REFINED', 'IN 
 // covers a node that has never run. A loop-back (DFLT-00101) resets the loop
 // target *and* every DONE node on a success-edge path from that target to the
 // failing node, so this node is re-claimed (as IN REVIEW) only after those
-// rewound nodes have been re-run -- it is not offered again ahead of the
-// rework, as it was when the loop target was not a direct prerequisite.
+// rewound nodes have been re-run: as long as that path holds at least one
+// such node, it is not offered again ahead of the rework, as it was when the
+// loop target was not a direct prerequisite. Where the rewound set comes out
+// empty (no success-edge path from the target to this node), only the loop
+// target is reset and this node can still be re-claimed before the rework.
 export type NodeStatus = 'TODO' | 'IN PROGRESS' | 'IN REVIEW' | 'DONE' | 'REJECTED' | 'AWAITING FIX';
 
 export type NodeType =
