@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -335,6 +336,13 @@ func TestNoPassedColonNotationInRepository(t *testing.T) {
 			}
 			body, readErr := os.ReadFile(path)
 			if readErr != nil {
+				return nil
+			}
+			// Built binaries sit untracked next to the sources
+			// (packages/core-go/graph-engine, packages/plugin/libexec/),
+			// and a stale one still carries the old help string in its
+			// string table. Only shipped text is in scope here.
+			if bytes.IndexByte(body, 0) >= 0 {
 				return nil
 			}
 			for i, line := range strings.Split(string(body), "\n") {
