@@ -115,13 +115,16 @@ const (
 	// target's output and is now waiting for that target to be reworked, as
 	// opposed to NodeTODO, which also covers a node that has never run at
 	// all (DFLT-00042). GetExecutableNodes claims it exactly like a TODO node
-	// once its non-loop prerequisites are all DONE again -- in a graph where
-	// the loop target is not a direct prerequisite (e.g. test_review looping
-	// back to impl while depending on gherkin_test), that can be the very
-	// next call, so the status may only be visible briefly. It participates
-	// in no syncTicketStatus branch (see engine.go), so it changes no ticket-
-	// status derivation; like NodeRejected, the column has no CHECK
-	// constraint, so no migration is needed to store the new value.
+	// once its non-loop prerequisites are all DONE again. Since DFLT-00119 a
+	// loop-back rewinds the loop target's whole forward closure, so those
+	// prerequisites are normally rewound along with it (test_review's
+	// gherkin_test, say) and this node waits for the rework rather than being
+	// re-offered at once. It can be claimed on the very next call only where
+	// its remaining prerequisites lie outside that closure -- a sideways
+	// loop_back_to -- so the status is only briefly visible there. It
+	// participates in no syncTicketStatus branch (see engine.go), so it
+	// changes no ticket-status derivation; like NodeRejected, the column has
+	// no CHECK constraint, so no migration is needed to store the new value.
 	NodeAwaitingFix NodeStatus = "AWAITING FIX"
 )
 
