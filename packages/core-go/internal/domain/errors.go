@@ -98,6 +98,23 @@ const (
 	// (re-fetch the list, stop offering "create" again) instead of letting
 	// the user retry into a duplicate project in the shared DB.
 	ErrCodeProjectCreatedLocalPathNotSaved ErrorCode = "PROJECT_CREATED_LOCAL_PATH_NOT_SAVED"
+	// ErrCodeAppSettingsArtifactsDirNotSaved: PUT /api/settings/app saved
+	// every setting it owns except artifactsDir, which is a home-only key
+	// and therefore goes to $HOME/.graph-ops/config.json in a second write
+	// (DFLT-00104) -- and that write failed. Returned with a 500. Distinct
+	// from INTERNAL_ERROR because the two say opposite things to the user:
+	// "nothing happened, try again later" would be wrong here, since the
+	// other settings ARE saved and only this one field has to be set again.
+	ErrCodeAppSettingsArtifactsDirNotSaved ErrorCode = "APP_SETTINGS_ARTIFACTS_DIR_NOT_SAVED"
+	// ErrCodeHomeConfigUnreadable: the home config file
+	// ($HOME/.graph-ops/config.json) exists but could not be read or parsed,
+	// so the home-only keys could not be saved -- and will not be read at
+	// the next startup either (DFLT-00104). Returned with a 500 from PUT
+	// /api/settings/app, and used as a warning code by GET, which still
+	// succeeds. Distinct from ErrCodeAppSettingsArtifactsDirNotSaved because
+	// the cause is a specific file the user has to repair or delete: every
+	// retry fails identically until they do.
+	ErrCodeHomeConfigUnreadable ErrorCode = "HOME_CONFIG_UNREADABLE"
 	// ErrCodeWorkflowNodesLocked: a settings catalog save set workflow.nodes
 	// or workflow.seed. The skeleton graph (plan/plan_review/approval gates/
 	// release) and its seed are fixed by the plugin default only -- no

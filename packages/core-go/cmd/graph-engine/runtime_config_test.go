@@ -736,15 +736,18 @@ func TestLoadRuntimeConfig_PathPrecedenceStillHolds(t *testing.T) {
 			if tt.envArtifacts != "" {
 				t.Setenv("GRAPH_ARTIFACTS_DIR", filepath.Join(cwd, tt.envArtifacts))
 			}
-			if tt.fileDB != "" || tt.fileArtifacts != "" {
-				cfg := runtimeconfig.FileConfig{}
-				if tt.fileDB != "" {
-					cfg.DBPath = filepath.Join(cwd, tt.fileDB)
-				}
-				if tt.fileArtifacts != "" {
-					cfg.ArtifactsDir = filepath.Join(cwd, tt.fileArtifacts)
-				}
-				writeGraphConfig(t, cwd, cfg)
+			if tt.fileDB != "" {
+				writeGraphConfig(t, cwd, runtimeconfig.FileConfig{DBPath: filepath.Join(cwd, tt.fileDB)})
+			}
+			// artifactsDir goes in the HOME config, not the
+			// working-directory one: since DFLT-00104 it is a home-only key,
+			// and a working-directory graph-config.json's copy of it is
+			// ignored (see runtimeconfig.HomeOnlyKeys). The precedence being
+			// pinned here -- env var beats config file beats default -- is
+			// unchanged; only which file counts as "the config file" for
+			// this one key is.
+			if tt.fileArtifacts != "" {
+				writeHomeGraphConfig(t, home, runtimeconfig.FileConfig{ArtifactsDir: filepath.Join(cwd, tt.fileArtifacts)})
 			}
 
 			rc, err := loadRuntimeConfig()

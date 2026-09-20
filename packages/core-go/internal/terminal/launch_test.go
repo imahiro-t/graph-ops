@@ -300,9 +300,15 @@ func TestWriteCommandScript_HasNoBOMBeforeShebang(t *testing.T) {
 // escaping rule in isolation (there is no PowerShell available in this
 // dev/CI environment to round-trip through, unlike TestShellQuote's
 // real-shell check): a PowerShell single-quoted string is fully literal, so
-// the only character that needs escaping is an embedded single quote
+// the only characters that need escaping are the embedded single quotes
 // (doubled); everything else -- including '%', '"', '&', '|', '^', '!', a
 // backtick, and a literal embedded newline -- must survive unescaped.
+//
+// "Single quote" means all five of them -- the ASCII apostrophe and the four
+// smart quotes PowerShell's tokenizer treats as the same thing (finding
+// CHK-02; see powerShellSingleQuotes). The expectations below are written
+// out as fixed strings rather than derived from a tokenizer reimplemented in
+// the test, which would only restate the assumption instead of checking it.
 func TestPowershellQuote_EscapesSpecialCharacters(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"hello", `'hello'`},
@@ -313,11 +319,56 @@ func TestPowershellQuote_EscapesSpecialCharacters(t *testing.T) {
 		{"line1\nline2", "'line1\nline2'"},
 		{"", `''`},
 		{"'''", `''''''''`},
+		// The injection attempt from CHK-02, once per smart quote: each one
+		// would have closed the literal had it not been doubled, leaving
+		// "; calc; " to be parsed as PowerShell.
+		{"'; calc; '", `'''; calc; '''`},
+		{"\u2018; calc; \u2018", "'\u2018\u2018; calc; \u2018\u2018'"},
+		{"\u2019; calc; \u2019", "'\u2019\u2019; calc; \u2019\u2019'"},
+		{"\u201a; calc; \u201a", "'\u201a\u201a; calc; \u201a\u201a'"},
+		{"\u201b; calc; \u201b", "'\u201b\u201b; calc; \u201b\u201b'"},
+		// Mixed kinds: each is doubled as itself, never converted.
+		{"a\u2019b'c\u201bd", "'a\u2019\u2019b''c\u201b\u201bd'"},
+		// A double quote and the other quotation marks PowerShell does not
+		// treat as single quotes stay exactly as they are.
+		{"\u201c\u201d\u00ab\u00bb", "'\u201c\u201d\u00ab\u00bb'"},
 	}
 	for _, c := range cases {
 		if got := powershellQuote(c.in); got != c.want {
 			t.Errorf("powershellQuote(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// TestWriteWindowsCommandScript_SmartQuotePromptStaysLiteral is CHK-02 at
+// the level the finding is actually about: the whole generated .ps1 for a
+// prompt carrying the smart-quote spelling of "'; calc; '". The expectation
+// is the complete file contents, so nothing about the quoting can drift
+// without this failing.
+func TestWriteWindowsCommandScript_SmartQuotePromptStaysLiteral(t *testing.T) {
+	path, err := writeWindowsCommandScript(`C:\work`, "claude", "\u2019; calc; \u2019")
+	if err != nil {
+		t.Fatalf("writeWindowsCommandScript: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(path) })
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading generated script: %v", err)
+	}
+	want := utf8BOM + "Set-Location -LiteralPath 'C:\\work'\r\nclaude '\u2019\u2019; calc; \u2019\u2019'\r\n"
+	if got := string(content); got != want {
+		t.Errorf("script =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestShellQuote_LeavesSmartQuotesAlone is the other side of CHK-02: `sh`
+// gives U+2018..U+201B no syntactic meaning, so doubling them there would
+// corrupt the prompt rather than protect it. Only the ASCII apostrophe is
+// escaped, and by sh's own rule rather than PowerShell's.
+func TestShellQuote_LeavesSmartQuotesAlone(t *testing.T) {
+	if got, want := shellQuote("it's \u2019 ok"), `'it'\''s `+"\u2019"+` ok'`; got != want {
+		t.Errorf("shellQuote = %q, want %q", got, want)
 	}
 }
 

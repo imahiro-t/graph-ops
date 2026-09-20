@@ -28,9 +28,67 @@ import (
 // stored plaintext secret cannot leave the process this way. Build one of
 // these with newAppSettingsResponse rather than by hand.
 type appSettingsResponse struct {
-	File       redactedFileConfig   `json:"file"`
-	Effective  effectiveAppSettings `json:"effective"`
-	ConfigPath string               `json:"config_path"`
+	File      redactedFileConfig   `json:"file"`
+	Effective effectiveAppSettings `json:"effective"`
+	// ConfigPath is the file most of File was read from, and the one a PUT
+	// writes most of it back to -- runtimeconfig.ResolvePath's answer, with
+	// the meaning it has always had.
+	ConfigPath string `json:"config_path"`
+	// HomeConfigPath is where the home-only keys (see
+	// runtimeconfig.HomeOnlyKeys -- of the fields this endpoint edits, only
+	// artifactsDir is one) are read from and written to instead, or "" when
+	// the home directory could not be resolved. When it differs from
+	// ConfigPath, a PUT really does write to two files, and the UI has to be
+	// able to say so: a "saved to <ConfigPath>" note that silently covered
+	// artifactsDir too would be exactly the "I set it in the UI and it did
+	// not take effect" confusion DFLT-00104's completion criterion 3 is
+	// about, only phrased as a wrong label instead of a lost value.
+	HomeConfigPath string `json:"home_config_path"`
+	// Warnings are fixed, machine-readable codes for things the server did
+	// not do, on a request it nonetheless completed (HTTP 200). Clients look
+	// each code up in their own message catalogue, the way they already do
+	// for error codes; a code is never a sentence. See
+	// warnHomeConfigUnavailable and warnHomeConfigUnreadable -- a GET can
+	// carry the latter, so the page shows the home config being broken
+	// before anything has been saved.
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// warnHomeConfigUnavailable is the one code appSettingsResponse.Warnings
+// currently carries: the home directory could not be resolved, so the
+// home-only keys in the request (artifactsDir) were not saved anywhere,
+// while every other field was. Saving them to the resolved path instead
+// would write a value that LoadEffective is then guaranteed to ignore, which
+// is worse than not saving it -- so the request succeeds, minus that field,
+// and says so.
+const warnHomeConfigUnavailable = "HOME_CONFIG_UNAVAILABLE"
+
+// warnHomeConfigUnreadable is the other code: the home config file exists but
+// could not be read or parsed, so the home-only keys are coming from nowhere
+// -- neither this response's artifactsDir nor the next startup's. The CLI
+// prints the same fact on stderr, but a user who only ever opens the Web UI
+// never sees that, and without this the page would show an empty artifacts
+// directory with nothing to explain it (DFLT-00104, non-functional review
+// NF-2). A PUT cannot merely warn about it (it has nowhere safe to write, and
+// overwriting a file it failed to parse would discard whatever the user has
+// in there), so on that side the same condition is
+// domain.ErrCodeHomeConfigUnreadable -- and this is spelled as that constant
+// rather than as a second literal, so the warning and the error can never
+// drift into two different names for one state. warnHomeConfigUnavailable
+// above stays a local constant because it has no error form: an unresolvable
+// home directory only ever produces a successful response.
+const warnHomeConfigUnreadable = string(domain.ErrCodeHomeConfigUnreadable)
+
+// appSettingsWarnings returns the codes describing what an otherwise
+// successful request could not do, given the load it is answering from.
+// extra carries the codes only a PUT can raise (the home directory being
+// unresolvable, which a GET has nothing to report about).
+func appSettingsWarnings(eff runtimeconfig.Effective, extra ...string) []string {
+	warnings := append([]string(nil), extra...)
+	if eff.HomeConfigErr != nil {
+		warnings = append(warnings, warnHomeConfigUnreadable)
+	}
+	return warnings
 }
 
 type effectiveAppSettings struct {
@@ -72,13 +130,36 @@ type redactedFileConfig runtimeconfig.FileConfig
 func newRedactedFileConfig(cfg runtimeconfig.FileConfig) redactedFileConfig {
 	cfg.MySQLPassword = runtimeconfig.RedactSecret(cfg.MySQLPassword)
 	cfg.HTTPDataSourceToken = runtimeconfig.RedactSecret(cfg.HTTPDataSourceToken)
+	// The three home-only keys this page does not edit are dropped rather
+	// than sent (security review S-4). They are the settings that decide
+	// what this machine runs and who can reach it, and since LoadEffective
+	// now reaches into the home config for them, leaving them in would put
+	// them on the wire in environments where the old code never read them at
+	// all. Nothing in the UI reads them, so no client loses anything; all
+	// three are omitempty, so they simply do not appear. artifactsDir, the
+	// fourth, IS edited here and stays.
+	cfg.TerminalCommand = ""
+	cfg.ClaudeBinary = ""
+	cfg.Host = ""
 	return redactedFileConfig(cfg)
 }
 
 // newAppSettingsResponse is the single construction point for this
 // endpoint's response, so neither handler can forget the redaction.
-func newAppSettingsResponse(fileCfg runtimeconfig.FileConfig, effective effectiveAppSettings, path string) appSettingsResponse {
-	return appSettingsResponse{File: newRedactedFileConfig(fileCfg), Effective: effective, ConfigPath: path}
+//
+// eff comes from runtimeconfig.LoadEffective, so File shows the values that
+// will actually apply after a restart -- for the home-only keys that means
+// the home config's, not whatever a working-directory graph-config.json
+// happens to say. Showing the latter is what would let a user "fix"
+// artifactsDir in the form, save it, and find nothing changed.
+func newAppSettingsResponse(eff runtimeconfig.Effective, effective effectiveAppSettings, warnings []string) appSettingsResponse {
+	return appSettingsResponse{
+		File:           newRedactedFileConfig(eff.Config),
+		Effective:      effective,
+		ConfigPath:     eff.Path,
+		HomeConfigPath: eff.HomeConfigPath,
+		Warnings:       warnings,
+	}
 }
 
 // defaultMySQLPort is the port assumed when a client leaves mysqlPort unset
@@ -363,7 +444,7 @@ func (s *Server) effectiveAppSettings() (effectiveAppSettings, error) {
 // anyone who can reach the port: it deliberately answers with a redacted
 // FileConfig, never the raw one.
 func (s *Server) handleGetAppSettings(w http.ResponseWriter, r *http.Request) {
-	fileCfg, path, err := runtimeconfig.Load(s.cfg.WorkDir, s.cfg.HomeDir)
+	eff, err := runtimeconfig.LoadEffective(s.cfg.WorkDir, s.cfg.HomeDir)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -373,7 +454,7 @@ func (s *Server) handleGetAppSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, newAppSettingsResponse(fileCfg, effective, path))
+	writeJSON(w, http.StatusOK, newAppSettingsResponse(eff, effective, appSettingsWarnings(eff)))
 }
 
 // handlePutAppSettings saves the fields this endpoint owns
@@ -388,6 +469,22 @@ func (s *Server) handleGetAppSettings(w http.ResponseWriter, r *http.Request) {
 // with every other in-process writer of the same file -- in particular the
 // project API's projectPaths edits (DFLT-00080) -- so a concurrent PATCH
 // /api/projects/{id} and this PUT can never lose each other's change.
+//
+// artifactsDir is the exception to "into graph-config.json": it is a
+// home-only key (see runtimeconfig.HomeOnlyKeys), so it is saved separately,
+// through runtimeconfig.UpdateHome, into the home config file. Writing it to
+// the resolved path when that path is a working-directory graph-config.json
+// would store a value that the next startup is then guaranteed to ignore --
+// DFLT-00104's "changed it in the UI, nothing happened". The response's
+// home_config_path names the file it did go to. The two writes are not one
+// atomic operation; on a failure of the second the response says which
+// settings were saved and which one was not, under a code of its own
+// (APP_SETTINGS_ARTIFACTS_DIR_NOT_SAVED, or HOME_CONFIG_UNREADABLE when the
+// home config is the reason) and with a log line, since "try again later" is
+// exactly the wrong thing to tell someone whose other settings did save. An
+// unresolvable home directory is different again: there is nothing to fail,
+// so the second stage turns into a HOME_CONFIG_UNAVAILABLE warning on an
+// otherwise successful save.
 //
 // Those owned fields are a full replacement, not a patch: each one is
 // written from the request body as submitted, so a field the body leaves out
@@ -485,7 +582,7 @@ func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 
 	target := newMySQLTarget(body.MySQLHost, body.MySQLPort, body.MySQLDatabase, body.MySQLUser, body.MySQLTLS, body.MySQLTLSCA)
 	var passwordErr error
-	fileCfg, path, err := runtimeconfig.Update(s.cfg.WorkDir, s.cfg.HomeDir, func(fileCfg *runtimeconfig.FileConfig) error {
+	_, path, err := runtimeconfig.Update(s.cfg.WorkDir, s.cfg.HomeDir, func(fileCfg *runtimeconfig.FileConfig) error {
 		// Resolve the password before any of the body's values are copied
 		// over fileCfg: the comparison resolveSubmittedMySQLPassword makes is
 		// against what is *currently* on disk, which is exactly what the next
@@ -531,7 +628,12 @@ func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 		fileCfg.MySQLTLSCA = body.MySQLTLSCA
 		fileCfg.HTTPDataSourceURL = body.HTTPDataSourceURL
 		fileCfg.HTTPDataSourceToken = httpToken
-		fileCfg.ArtifactsDir = body.ArtifactsDir
+		// artifactsDir is deliberately absent here: it is a home-only key
+		// and is written below, to the home config, by the second stage.
+		// Leaving it untouched here also means a working-directory
+		// graph-config.json that carries a stale artifactsDir keeps it --
+		// this endpoint edits the user's settings, and rewriting a file that
+		// belongs to a checked-out repository is not its business.
 		fileCfg.UserExtensionsDir = body.UserExtensionsDir
 		fileCfg.PaginationPageSize = body.PaginationPageSize
 		fileCfg.MyName = body.MyName
@@ -545,12 +647,64 @@ func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+
+	// Second stage: the home-only keys, into the home config. When that is
+	// the same file the first stage just wrote, this is simply a second
+	// write to it (serialized by the same fileMu), and the outcome is what
+	// it always was.
+	var warnings []string
+	if s.cfg.HomeDir == "" {
+		// Nowhere trusted to put it. Everything else was saved, so this is a
+		// 200 with a warning rather than a failure: refusing the whole
+		// request would make an unresolvable home directory block editing
+		// the page size too.
+		warnings = append(warnings, warnHomeConfigUnavailable)
+	} else if _, homePath, err := runtimeconfig.UpdateHome(s.cfg.HomeDir, func(homeCfg *runtimeconfig.FileConfig) error {
+		homeCfg.ArtifactsDir = body.ArtifactsDir
+		return nil
+	}); err != nil {
+		// The two stages are not one atomic write, so this is a half-done
+		// state: every other setting is on disk under its new value while
+		// artifactsDir still holds the old one. writeError does not log 5xx
+		// responses (see handleCreateProject, which faces the same shape of
+		// problem), so record it here for whoever investigates later.
+		s.logger.Error("app settings were saved but artifactsDir could not be written to the home config",
+			slog.String("event", "app_settings_artifacts_dir_save_failed"),
+			slog.String("config_path", path),
+			slog.String("home_config_path", homePath),
+			slog.String("error", err.Error()))
+		// A dedicated code, not ErrCodeInternal: the client shows the user a
+		// message chosen by the code alone (the message below is
+		// developer-facing), and "something went wrong, try again later" is
+		// the one thing that must not be said about a save that did land --
+		// minus one field, which the user has to set again. When the cause
+		// is the home config being unparseable, say that instead: retrying
+		// cannot help until the file itself is repaired or removed.
+		code := domain.ErrCodeAppSettingsArtifactsDirNotSaved
+		var readErr *runtimeconfig.HomeConfigReadError
+		if errors.As(err, &readErr) {
+			code = domain.ErrCodeHomeConfigUnreadable
+		}
+		writeError(w, http.StatusInternalServerError, domain.NewAPIError(code,
+			"saved every other setting to %s, but could not save artifactsDir to %s: %s", path, homePath, err.Error()))
+		return
+	}
+
 	effective, err := s.effectiveAppSettings()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, newAppSettingsResponse(fileCfg, effective, path))
+	// Re-read rather than echoing what was submitted, so `file` shows the
+	// merged result the next startup will actually see -- including an
+	// artifactsDir that came back from the home config rather than from this
+	// request.
+	eff, err := runtimeconfig.LoadEffective(s.cfg.WorkDir, s.cfg.HomeDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, newAppSettingsResponse(eff, effective, appSettingsWarnings(eff, warnings...)))
 }
 
 // testMySQLConnectionResponse is POST /api/settings/app/test-mysql-connection's

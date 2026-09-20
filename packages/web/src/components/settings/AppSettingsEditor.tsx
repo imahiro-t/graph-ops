@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { Loader2, Save, CheckCircle2, XCircle, Trash2, FolderCog, AlertTriangle, PlugZap } from 'lucide-react';
 import {
   AppSettingsFile,
+  APP_SETTINGS_WARNINGS,
   DBBackend,
   EffectiveAppSettings,
   MySQLTLSMode,
@@ -154,6 +155,15 @@ export const AppSettingsEditor: React.FC<Props> = ({
   const [savedForm, setSavedForm] = useState<FormState>(emptyForm);
   const [effective, setEffective] = useState<EffectiveAppSettings | null>(null);
   const [configPath, setConfigPath] = useState('');
+  // Where artifactsDir actually lands. It differs from configPath exactly
+  // when a working-directory graph-config.json is in play, and that is the
+  // case where a single "saved to <configPath>" note would be telling the
+  // user the wrong file (DFLT-00104, completion criterion 3).
+  const [homeConfigPath, setHomeConfigPath] = useState('');
+  // Codes for what the server could not do, from whichever request answered
+  // last. A GET raises them too (an unreadable home config is visible before
+  // anything is saved), so this is not cleared on load, it is replaced.
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -194,6 +204,8 @@ export const AppSettingsEditor: React.FC<Props> = ({
       setSavedForm(toForm(data.file));
       setEffective(data.effective);
       setConfigPath(data.config_path);
+      setHomeConfigPath(data.home_config_path ?? '');
+      setWarnings(data.warnings ?? []);
     } catch (e) {
       setError(errorMessage(e, tRef.current('errors.UNKNOWN')));
     } finally {
@@ -228,6 +240,8 @@ export const AppSettingsEditor: React.FC<Props> = ({
       setSavedForm(nextForm);
       setEffective(data.effective);
       setConfigPath(data.config_path);
+      setHomeConfigPath(data.home_config_path ?? '');
+      setWarnings(data.warnings ?? []);
       // Unlike every other field here, the page size and my-name are pure
       // frontend/display behavior with nothing to restart -- apply them
       // immediately. They come from nextForm, i.e. what actually landed on
@@ -471,7 +485,28 @@ export const AppSettingsEditor: React.FC<Props> = ({
 
       <div className="p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[11px] rounded-lg border border-slate-200 dark:border-slate-700">
         {t('settings.appSettings.restartNote', { path: configPath })}
+        {/* Only when the two really are different files: repeating the same
+            path in a second sentence would be noise everywhere else. */}
+        {homeConfigPath && homeConfigPath !== configPath && (
+          <> {t('settings.appSettings.homeOnlyNote', { path: homeConfigPath })}</>
+        )}
       </div>
+
+      {warnings.includes(APP_SETTINGS_WARNINGS.homeConfigUnavailable) && (
+        <div className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[11px] rounded-lg border border-amber-200 dark:border-amber-900">
+          {t('settings.appSettings.homeConfigUnavailable')}
+        </div>
+      )}
+
+      {/* Raised by the GET as well, so a broken home config is visible when
+          the page opens rather than only after a save has failed. The path
+          is named because repairing or deleting that one file is the only
+          thing that fixes it. */}
+      {warnings.includes(APP_SETTINGS_WARNINGS.homeConfigUnreadable) && (
+        <div className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[11px] rounded-lg border border-amber-200 dark:border-amber-900">
+          {t('settings.appSettings.homeConfigUnreadable', { path: homeConfigPath })}
+        </div>
+      )}
 
       {/* Storage */}
       <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2">

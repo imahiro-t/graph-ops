@@ -413,10 +413,40 @@ export interface EffectiveAppSettings {
   paginationPageSize: number;
 }
 
+// The warning codes GET/PUT /api/settings/app can put in `warnings`, spelled
+// once here rather than at each comparison. Both are
+// packages/core-go/internal/httpserver/app_settings.go's constants of the
+// same name, and each has a `settings.appSettings.*` message beside it in
+// the translation catalogues -- a code is never a sentence, so a code with
+// no message would show the user nothing at all.
+export const APP_SETTINGS_WARNINGS = {
+  // The home directory could not be resolved, so artifactsDir alone was not
+  // saved anywhere. Everything else was.
+  homeConfigUnavailable: 'HOME_CONFIG_UNAVAILABLE',
+  // $HOME/.graph-ops/config.json exists but could not be read or parsed, so
+  // the home-only settings are coming from nowhere -- not into this response
+  // and not into the next startup either. A save cannot fix it: repairing or
+  // removing that file is the only way out, which is why the same condition
+  // is an error code (not a warning) on a PUT.
+  homeConfigUnreadable: 'HOME_CONFIG_UNREADABLE'
+} as const;
+
+export type AppSettingsWarning = (typeof APP_SETTINGS_WARNINGS)[keyof typeof APP_SETTINGS_WARNINGS];
+
 export interface AppSettingsResponse {
   file: AppSettingsFile;
   effective: EffectiveAppSettings;
   config_path: string;
+  // Where the "home-only" settings are read from and written to instead of
+  // config_path -- of the fields this form edits, only artifactsDir is one
+  // (see packages/core-go/internal/runtimeconfig's HomeOnlyKeys). Equal to
+  // config_path in the common case; '' when the home directory could not be
+  // resolved. Optional so a response from an older server still type-checks.
+  home_config_path?: string;
+  // Fixed codes for things the server did not do on a request it still
+  // completed -- see AppSettingsWarning for the ones defined so far. A code
+  // the client does not know is simply not shown, so this stays string[].
+  warnings?: string[];
 }
 
 // POST /api/settings/app/test-mysql-connection's response. See

@@ -9,12 +9,21 @@
 // the inherited stdio, exiting with its exit code (128 + signal number when
 // it was killed by a signal). Everything this script itself prints goes to
 // stderr; stdout is graph-engine's own.
+//
+// "This script's arguments" are process.argv's, except on Windows when the
+// .cmd shim relayed them through the environment instead of through cmd.exe's
+// all-arguments token -- see scripts/cmd-args.js for why it does that and
+// what resolveArgv picks. That shim can also report that it found an argument
+// it cannot relay at all, in which case nothing is run: exiting 2 with the
+// reason on stderr is the point, since the alternative is running a command
+// that is missing part of what the user typed.
 'use strict';
 
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { ensureEngine } = require('./install-binary');
+const { resolveArgv } = require('./cmd-args');
 
 async function main(argv) {
   const pluginRoot = path.resolve(__dirname, '..');
@@ -26,7 +35,10 @@ async function main(argv) {
     return 1;
   }
 
-  const res = spawnSync(bin, argv, { stdio: 'inherit' });
+  // env is passed explicitly rather than left to default to process.env, to
+  // make it visible that what the child inherits is the environment
+  // resolveArgv has already stripped the relay variables out of.
+  const res = spawnSync(bin, argv, { stdio: 'inherit', env: process.env });
   if (res.error) {
     process.stderr.write(`graph-ops: failed to run ${bin}: ${res.error.message}\n`);
     return res.error.code === 'ENOENT' ? 127 : 126;
@@ -40,6 +52,12 @@ async function main(argv) {
   return 1;
 }
 
-main(process.argv.slice(2)).then((code) => {
-  process.exitCode = code;
-});
+const { argv, error } = resolveArgv();
+if (error !== null) {
+  process.stderr.write(`graph-ops: ${error}\n`);
+  process.exitCode = 2;
+} else {
+  main(argv).then((code) => {
+    process.exitCode = code;
+  });
+}

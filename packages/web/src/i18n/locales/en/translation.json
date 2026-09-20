@@ -373,6 +373,9 @@
     "appSettings": {
       "globalOnly": "This setting can only be edited in Global Settings. Switch the scope above to \"Global Settings\".",
       "restartNote": "Changes here take effect the next time the server starts (saved to: {{path}}).",
+      "homeOnlyNote": "\"Artifacts directory\" is never read from the working directory's graph-config.json, so it is saved to {{path}} instead.",
+      "homeConfigUnavailable": "The home directory could not be resolved, so \"Artifacts directory\" alone was not saved. Every other setting was.",
+      "homeConfigUnreadable": "{{path}} could not be read, so \"Artifacts directory\" is not in effect and cannot be saved. Repair or delete that file; every other setting here is unaffected.",
       "currentlyInEffect": "Currently in effect: {{value}}",
       "storage": {
         "title": "Data Storage",
@@ -496,6 +499,8 @@
     "PROJECT_LOCAL_PATH_NOT_SET": "This project has no local path in this environment. Set its local path under Project Management in the App Settings tab (Global Settings).",
     "PROJECT_TEAM_ROOT_IS_USER_ROOT": "This project's settings directory would be the same as the Global Settings directory (its local path is your home directory), so it has no project settings. Use Global Settings, or set the local path to the project's own directory.",
     "PROJECT_CREATED_LOCAL_PATH_NOT_SAVED": "The project was created in the DB, but saving its local path for this environment failed. Do not create it again; set its local path under Project Management in the App Settings tab (Global Settings) instead.",
+    "APP_SETTINGS_ARTIFACTS_DIR_NOT_SAVED": "Every setting except \"Artifacts directory\" was saved. That one is kept in your home config file and could not be written there, so it still holds its previous value \u2014 set it again once the file is writable.",
+    "HOME_CONFIG_UNREADABLE": "Your home config file ($HOME/.graph-ops/config.json) could not be read, so \"Artifacts directory\" was not saved and will not be read at the next startup either. Every other setting was saved. Repair or delete that file, then set it again.",
     "LABEL_NOT_FOUND": "Label not found. It was deleted or belongs to another project.",
     "LABEL_NAME_TAKEN": "A label with the same name already exists (case-insensitive).",
     "INVALID_LABEL_NAME": "Label names must be 1 to 50 characters.",
