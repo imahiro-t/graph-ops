@@ -680,18 +680,80 @@ func TestCurrentProject_IsolatedBetweenEnvironments(t *testing.T) {
 		t.Errorf("env A list = %+v, want only %q", list, alphaTicket.ID)
 	}
 
-	// And a ticket created in A without an explicit project still goes to
-	// Alpha, not to whatever B selected.
-	rec = doJSON(t, envA, http.MethodPost, "/api/tickets", map[string]any{"title": "t"})
+	// And an unscoped create in each environment lands in that
+	// environment's own project -- the same request body, two destinations.
+	createUnscoped := func(env *Server, label string) domain.Ticket {
+		t.Helper()
+		rec := doJSON(t, env, http.MethodPost, "/api/tickets", map[string]any{"title": label})
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("%s POST: %d: %s", label, rec.Code, rec.Body.String())
+		}
+		var created domain.Ticket
+		if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return created
+	}
+	if got := createUnscoped(envA, "env A"); got.ProjectID != alpha.ID {
+		t.Errorf("env A created the ticket in %q, want %q", got.ProjectID, alpha.ID)
+	}
+	if got := createUnscoped(envB, "env B"); got.ProjectID != gamma.ID {
+		t.Errorf("env B created the ticket in %q, want %q", got.ProjectID, gamma.ID)
+	}
+}
+
+// DFLT-00106: an explicit project_id decides on its own. The environment's
+// current project is deliberately set to something else here, so a ticket
+// landing in it would mean the explicit id had been ignored or merged with
+// the fallback.
+func TestHandleCreateTicket_ExplicitProjectIDBeatsCurrentProject(t *testing.T) {
+	s, repo := newBareTestServer(t)
+	alpha, _ := repo.CreateProject("Alpha", "")
+	beta, _ := repo.CreateProject("Beta", "")
+	setCurrent(t, s, alpha.ID)
+
+	rec := doJSON(t, s, http.MethodPost, "/api/tickets", map[string]any{"title": "t", "project_id": beta.ID})
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("env A POST: %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
 	}
 	var created domain.Ticket
 	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if created.ProjectID != alpha.ID {
-		t.Errorf("env A created the ticket in %q, want %q", created.ProjectID, alpha.ID)
+	if created.ProjectID != beta.ID {
+		t.Errorf("created in %q, want the explicitly named %q", created.ProjectID, beta.ID)
+	}
+	if tickets, err := repo.ListTicketsByProject(alpha.ID); err != nil || len(tickets) != 0 {
+		t.Errorf("nothing may land in the current project, got %+v (err=%v)", tickets, err)
+	}
+	if got := currentProjectIDOnDisk(t, s); got == nil || *got != alpha.ID {
+		t.Errorf("currentProjectId = %v, want it unchanged at %q", got, alpha.ID)
+	}
+}
+
+// DFLT-00106: an environment that deliberately deselected its project ("")
+// fails the same way an environment that never had one does -- and in
+// particular does not fall back to the shared app_state value that is still
+// sitting in the data source.
+func TestHandleCreateTicket_ExplicitlyEmptyCurrentProjectFails(t *testing.T) {
+	s, repo := newBareTestServer(t)
+	alpha, _ := repo.CreateProject("Alpha", "")
+	if err := repo.SetCurrentProjectID(alpha.ID); err != nil {
+		t.Fatalf("SetCurrentProjectID: %v", err)
+	}
+	if err := currentproject.Clear(s.cfg.WorkDir, s.cfg.HomeDir); err != nil {
+		t.Fatalf("currentproject.Clear: %v", err)
+	}
+
+	rec := doJSON(t, s, http.MethodPost, "/api/tickets", map[string]any{"title": "t"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if apiErr := decodeError(t, rec); apiErr.Code != domain.ErrCodeNoCurrentProject {
+		t.Errorf("expected %s, got %s", domain.ErrCodeNoCurrentProject, apiErr.Code)
+	}
+	if tickets, err := repo.ListTicketsByProject(alpha.ID); err != nil || len(tickets) != 0 {
+		t.Errorf("no ticket may have been created, got %+v (err=%v)", tickets, err)
 	}
 }
 
