@@ -255,6 +255,11 @@ export const App: React.FC = () => {
   const fetchAllTickets = useCallback(async (projectId: string) => {
     if (!projectId) {
       setTickets([]);
+      // A run for the project that just went away (deleted from the
+      // settings modal, say) may still be in flight; it is stale now and so
+      // skips its own setLoading(false). Nothing else would clear the
+      // spinner, so this path has to.
+      setLoading(false);
       return;
     }
     const isStale = () => projectId !== currentProjectIdRef.current;

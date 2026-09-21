@@ -221,6 +221,54 @@ describe('App project scoping', () => {
       await screen.findByText('BETA-00001');
       await waitFor(() => expect(screen.getByTitle(i18n.t('toolbar.refreshTitle'))).toBeEnabled());
     });
+
+    // The other way the header can move while a fetch is on its way: the
+    // current project is deleted from the settings modal. refreshProjects
+    // then leaves no current project, the effect calls fetchAllTickets('')
+    // -- which fetches nothing -- and Alpha's run, arriving afterwards, is
+    // stale and so skips setLoading(false) by design. Unless the empty-id
+    // path clears the spinner itself, nothing ever does, and the refresh
+    // button stays spinning and disabled for good.
+    it('does not leave the spinner stuck when the current project is deleted mid-fetch', async () => {
+      const user = userEvent.setup();
+
+      let releaseAlpha!: () => void;
+      const heldAlpha = new Promise<void>(resolve => {
+        releaseAlpha = resolve;
+      });
+      const realFetch = backend.fetch.bind(backend);
+      backend.fetch = async (input, init) => {
+        const url = String(input);
+        if (url === `/api/tickets?project_id=${alpha.id}`) await heldAlpha;
+        // DeleteProject also clears the current project server-side.
+        const m = url.match(/^\/api\/projects\/([^/]+)$/);
+        if (m && init?.method === 'DELETE') {
+          backend.projects = backend.projects.filter(p => p.id !== m[1]);
+          if (backend.currentProjectId === m[1]) backend.currentProjectId = '';
+          return new Response(JSON.stringify({ success: true }), { status: 200 });
+        }
+        return realFetch(input, init);
+      };
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+      render(<App />);
+      await screen.findByRole('button', { name: /Alpha/ });
+      const refresh = screen.getByTitle(i18n.t('toolbar.refreshTitle'));
+      await waitFor(() => expect(refresh).toBeDisabled());
+
+      await user.click(screen.getByTitle(i18n.t('header.settings')));
+      await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.appSettings') }));
+      const [deleteAlpha] = await screen.findAllByTitle(i18n.t('settings.appSettings.projects.delete'));
+      await user.click(deleteAlpha);
+      await screen.findByText(i18n.t('projectSwitcher.noProjectYet'));
+
+      // Alpha's list finally answers, for a project that no longer exists.
+      releaseAlpha();
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(screen.getByTitle(i18n.t('toolbar.refreshTitle'))).toBeEnabled();
+      expect(screen.queryByText('ALP-00001')).not.toBeInTheDocument();
+    });
   });
 
   // GET /api/current-project reads this environment's graph-config.json
