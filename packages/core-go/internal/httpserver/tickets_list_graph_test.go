@@ -272,6 +272,20 @@ func TestHandleListTickets_FallsBackWhenRepoHasNoBulkRead(t *testing.T) {
 	if got := len(jsonArray(t, list[b.ID], "nodes")); got != 0 {
 		t.Errorf("ticket %s: got %d nodes, want 0", b.ID, got)
 	}
+	// Edges are asserted separately from nodes because ticketGraphs hands the
+	// two over on two separate lines: a test that only counts nodes still
+	// passes when the edge assignment is gone. Dropping it is not a quiet gap
+	// in the UI either -- TicketItem.tsx's isNodeReached is
+	// ticket.edges.every(...), and every() is true for an empty array, so an
+	// empty edges list makes every TODO approval gate blink at once, the bug
+	// DFLT-00016 fixed. seedGraphTicket wires node 0 -> node 1, so ticket A
+	// has exactly one edge and the node-less ticket B has none.
+	if got := len(jsonArray(t, list[a.ID], "edges")); got != 1 {
+		t.Errorf("ticket %s: got %d edges, want 1", a.ID, got)
+	}
+	if got := len(jsonArray(t, list[b.ID], "edges")); got != 0 {
+		t.Errorf("ticket %s: got %d edges, want 0", b.ID, got)
+	}
 	if _, present := list[a.ID]["artifacts"]; present {
 		t.Errorf("the fallback path carries an \"artifacts\" key")
 	}

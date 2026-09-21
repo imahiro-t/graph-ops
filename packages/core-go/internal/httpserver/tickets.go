@@ -109,9 +109,26 @@ func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 // ListNodesByTicket/ListEdgesByTicket pair. Against the HTTP data source
 // that pair is two sequential remote calls per listed ticket (2N+1 for a
 // listing of N), where GetTicketDetail is a single GET /tickets/{id}/detail
-// (N+1) -- the same number of remote calls this endpoint cost before it
-// began carrying graphs, so no backend regresses on call count or on
-// round-trip latency. The price is that the detail response also carries
+// (N+1).
+//
+// Mind what that N+1 is measured over: a whole poll, not this endpoint. This
+// endpoint by itself got more expensive -- 2 remote calls before
+// (GetCurrentProjectID plus the listing), N+2 now. What keeps the poll even
+// is the per-ticket detail fetch the browser no longer sends; the fan-out
+// moved from the browser to here rather than disappearing.
+//
+// Latency does not come out even, and this is the slow side of it. The loop
+// below is sequential, so against a remote data source a poll's fallback
+// costs N x RTT, where the browser used to issue its N detail fetches
+// concurrently (roughly 6 at a time on one origin). For a large N a poll
+// therefore takes longer in wall-clock terms than it did before this
+// endpoint carried graphs. Nothing caps the total: the 30s timeout in
+// store/http.go is per call, not per handler. Once N x RTT exceeds the Web
+// UI's 15s poll interval (about 75 tickets at a 200ms RTT) polls begin to
+// overlap. A data source expected to serve that many tickets should
+// implement a bulk read instead of leaning on this path.
+//
+// The other price of GetTicketDetail is that the detail response also carries
 // that ticket's artifacts, whose bodies travel from the data source to this
 // server only to be dropped here. That traffic stays on the
 // server<->data-source hop, never reaches the browser, and is exactly what

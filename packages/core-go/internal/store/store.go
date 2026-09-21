@@ -205,9 +205,10 @@ type GraphRepository interface {
 // (docs/http-datasource/openapi.yaml, examples/jira-datasource), so a new
 // method there would demand a new endpoint of every existing data-source
 // implementation. Callers type-assert for this interface instead and fall
-// back to the per-ticket calls when a backend does not provide it; against
-// such a backend the browser still makes one request, the server-side fan-out
-// just remains.
+// back to one GetTicketDetail per ticket when a backend does not provide it
+// -- not to the ListNodesByTicket/ListEdgesByTicket pair, which would be two
+// calls per ticket instead of one. Against such a backend the browser still
+// makes one request, the server-side fan-out just remains.
 //
 // The argument is a set of ticket IDs rather than a project ID because the
 // caller (handleListTickets) also has a cross-project path, ?all=true.
