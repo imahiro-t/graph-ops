@@ -305,6 +305,72 @@ describe('App project scoping', () => {
       expect(screen.queryByText(i18n.t('emptyState.loadingTickets'))).not.toBeInTheDocument();
     });
 
+    // The list body is not the only thing drawn from the ticket list: the
+    // summary counts and the assignee filter's options are rendered outside
+    // the body's "loading" branch, so they depend on the tag check alone.
+    // The two projects are seeded with different ticket counts and
+    // different assignees so that a leak of Alpha's list would show up as
+    // a wrong number and a wrong option, not as the same value by accident.
+    it('does not show the previous project\'s summary counts or assignees under the new header', async () => {
+      seed({
+        tickets: [
+          { id: 'ALP-00001', project_id: alpha.id, title: 'Alpha 1', status: 'IN PROGRESS', priority: 'HIGH', assignee: 'alice', labelIds: [] },
+          { id: 'ALP-00002', project_id: alpha.id, title: 'Alpha 2', status: 'IN PROGRESS', priority: 'HIGH', assignee: 'alice', labelIds: [] },
+          { id: 'ALP-00003', project_id: alpha.id, title: 'Alpha 3', status: 'TODO', priority: 'LOW', assignee: 'alice', labelIds: [] },
+          { id: 'BETA-00001', project_id: beta.id, title: 'Beta 1', status: 'TODO', priority: 'MEDIUM', assignee: 'bob', labelIds: [] }
+        ]
+      });
+      const user = userEvent.setup();
+      let releaseBeta!: () => void;
+      const heldBeta = new Promise<void>(resolve => {
+        releaseBeta = resolve;
+      });
+      const realFetch = backend.fetch.bind(backend);
+      backend.fetch = async (input, init) => {
+        if (String(input) === `/api/tickets?project_id=${beta.id}`) await heldBeta;
+        return realFetch(input, init);
+      };
+      // The status words ("進行中" etc.) also appear on ticket badges, so
+      // look them up inside the summary card only.
+      const summaryValue = (key: string) => {
+        const card = screen.getByText(i18n.t('summary.title')).parentElement!.parentElement!;
+        return within(card).getByText(i18n.t(key)).previousElementSibling?.textContent;
+      };
+      const assigneeButton = () => screen.getByRole('button', { name: /^担当者: / });
+      const assigneeOptions = () =>
+        within(screen.getByRole('group', { name: i18n.t('toolbar.assigneeGroupLabel') }))
+          .queryAllByRole('checkbox')
+          .map(c => c.closest('label')?.textContent?.trim());
+
+      render(<App />);
+      await screen.findByText('ALP-00001');
+      expect(summaryValue('summary.total')).toBe('3');
+      expect(summaryValue('summary.inProgress')).toBe('2');
+      await user.click(assigneeButton());
+      expect(assigneeOptions()).toContain('alice');
+      await user.click(assigneeButton());
+
+      await user.click(screen.getByRole('button', { name: /Alpha/ }));
+      await user.click(screen.getByRole('button', { name: /Beta/ }));
+      await screen.findByRole('button', { name: /Beta/ });
+      await new Promise(r => setTimeout(r, 50));
+
+      // Beta's list is still on its way: nothing of Alpha's may be counted.
+      expect(screen.getByText(i18n.t('emptyState.loadingTickets'))).toBeInTheDocument();
+      expect(summaryValue('summary.total')).toBe('0');
+      expect(summaryValue('summary.inProgress')).toBe('0');
+      await user.click(assigneeButton());
+      expect(assigneeOptions()).not.toContain('alice');
+      await user.click(assigneeButton());
+
+      releaseBeta();
+      await screen.findByText('BETA-00001');
+      expect(summaryValue('summary.total')).toBe('1');
+      await user.click(assigneeButton());
+      expect(assigneeOptions()).toContain('bob');
+      expect(assigneeOptions()).not.toContain('alice');
+    });
+
     // The label filter's options are the third thing the completion
     // criterion names, and they have the same window: Alpha's labels must
     // not be offered under Beta's header while Beta's are on their way.
@@ -352,6 +418,50 @@ describe('App project scoping', () => {
 
       releaseBetaLabels();
       await waitFor(() => expect(options()).toEqual(['Beta のラベル']));
+    });
+  });
+
+  // Only the newest run of fetchAllTickets may write, so a poll that starts
+  // a new run while the previous one is still in flight throws the previous
+  // one's result away. When one full fetch (the list plus one request per
+  // ticket) takes longer than the 15s interval -- many tickets, or a slow
+  // HTTP data source -- every run used to be overtaken before it finished:
+  // the list stayed on "loading" and the spinner never stopped. The poll now
+  // skips its tick while a run for the same project is still in flight.
+  describe('when one fetch takes longer than the poll interval', () => {
+    beforeEach(() => seed());
+
+    it('still shows the list and stops the spinner', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const realFetch = backend.fetch.bind(backend);
+      backend.fetch = async (input, init) => {
+        if (String(input) === `/api/tickets?project_id=${alpha.id}`) {
+          await new Promise(r => setTimeout(r, 20_000));
+        }
+        return realFetch(input, init);
+      };
+
+      render(<App />);
+      await screen.findByRole('button', { name: /Alpha/ });
+      await waitFor(() => expect(ticketListRequests()).toHaveLength(1));
+      const refresh = screen.getByTitle(i18n.t('toolbar.refreshTitle'));
+      expect(refresh).toBeDisabled();
+
+      // The 15s tick falls inside the first fetch; the first fetch answers
+      // at 20s and must be shown rather than overtaken.
+      await vi.advanceTimersByTimeAsync(20_500);
+      await screen.findByText('ALP-00001');
+      await waitFor(() => expect(refresh).toBeEnabled());
+      // The tick was skipped rather than sent: the first run was still
+      // fetching the same thing.
+      expect(ticketListRequests()).toHaveLength(1);
+
+      // Polling carries on once nothing is in flight.
+      await vi.advanceTimersByTimeAsync(10_000);
+      await waitFor(() => expect(ticketListRequests()).toHaveLength(2));
+      expect(new Set(ticketListRequests())).toEqual(new Set([`/api/tickets?project_id=${alpha.id}`]));
+      // A slow poll of an already-loaded list keeps showing it.
+      expect(screen.getByText('ALP-00001')).toBeInTheDocument();
     });
   });
 

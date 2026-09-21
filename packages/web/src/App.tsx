@@ -318,7 +318,19 @@ export const App: React.FC = () => {
   // label refresh and the "last updated" stamp, and setLoading(false)
   // because a superseded run finishing must not clear the spinner the
   // newest run put up; the newest run clears it itself.
+  //
+  // The flip side of "only the newest run writes" is that a run must be
+  // allowed to finish before another one takes its place, or nothing is
+  // ever written at all. The 15s poll therefore does not start a run while
+  // one for the same project is still in flight (see the list effect
+  // below): on a project whose full fetch takes longer than the interval --
+  // many tickets, or a slow HTTP data source -- each poll used to supersede
+  // the run before it, and the list stayed on "loading" with the spinner
+  // going for good. ticketFetchesInFlightRef counts the runs per project id
+  // for that check; it is per project so that a run left over from the
+  // project the user just switched away from never holds back the new one.
   const ticketFetchSeqRef = useRef(0);
+  const ticketFetchesInFlightRef = useRef(new Map<string, number>());
   const fetchAllTickets = useCallback(async (projectId: string) => {
     const seq = ++ticketFetchSeqRef.current;
     if (!projectId) {
@@ -330,6 +342,8 @@ export const App: React.FC = () => {
       return;
     }
     const isSuperseded = () => seq !== ticketFetchSeqRef.current || projectId !== currentProjectIdRef.current;
+    const inFlight = ticketFetchesInFlightRef.current;
+    inFlight.set(projectId, (inFlight.get(projectId) ?? 0) + 1);
     setLoading(true);
     try {
       const res = await fetch(`/api/tickets?project_id=${encodeURIComponent(projectId)}`);
@@ -359,6 +373,9 @@ export const App: React.FC = () => {
         setTicketList(prev => (prev?.projectId === projectId ? prev : { projectId, value: [] }));
       }
     } finally {
+      const remaining = (inFlight.get(projectId) ?? 1) - 1;
+      if (remaining > 0) inFlight.set(projectId, remaining);
+      else inFlight.delete(projectId);
       if (!isSuperseded()) setLoading(false);
     }
   }, [currentProjectIdRef]);
@@ -473,22 +490,32 @@ export const App: React.FC = () => {
   // external terminal the app can't see directly (no more SSE stream to
   // react to). With no project resolved yet, nothing is fetched at all.
   //
-  // Having the poll live in an effect that *depends on* currentProject.id is
-  // what keeps every request pointed at the header's project without each
-  // call site having to remember: switching tears the old interval down
-  // (cleanup) and starts one for the new id, so after a switch no timer can
-  // ever fire for the previous project again.
+  // This effect is layer 2 ("requests") of the project-scoping comment at
+  // the state declarations. Having the poll live in an effect that *depends
+  // on* currentProject.id keeps every request pointed at the header's
+  // project without each call site having to remember: switching tears the
+  // old interval down (cleanup) and starts one for the new id, so after a
+  // switch no timer can ever fire for the previous project again.
   //
-  // That is the whole of what the effect guarantees, and it is only half of
-  // "the header and the list always agree": a request the old timer (or the
-  // switch itself) already started is still on its way and will still come
-  // back. Discarding that response is fetchAllTickets' job, not this
-  // cleanup's -- see the guard there.
+  // It does not decide what is shown -- the tag check at render (layer 1)
+  // does -- and it cannot recall a request the old timer (or the switch
+  // itself) already started. Dropping that response when it comes back is
+  // fetchAllTickets' guard (layer 3).
+  //
+  // The fetch made on entering the effect (first load, or a switch) always
+  // runs. Only a poll tick is skipped, and only while a run for this same
+  // project is still in flight: otherwise a fetch slower than the interval
+  // would be superseded by the next tick every time and never be shown
+  // (see ticketFetchesInFlightRef). The skipped tick costs nothing -- the
+  // run in flight is already fetching the same thing.
   useEffect(() => {
     const projectId = currentProject?.id ?? '';
     fetchAllTickets(projectId);
     if (!projectId) return;
-    const interval = setInterval(() => fetchAllTickets(projectId), 15000);
+    const interval = setInterval(() => {
+      if (ticketFetchesInFlightRef.current.has(projectId)) return;
+      fetchAllTickets(projectId);
+    }, 15000);
     return () => clearInterval(interval);
   }, [currentProject?.id, fetchAllTickets]);
 
