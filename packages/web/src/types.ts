@@ -203,9 +203,27 @@ export interface Artifact {
   created_at: string;
 }
 
-export interface TicketDetail extends Ticket {
+// GET /api/tickets' element (backend: domain.TicketGraph): a ticket plus its
+// execution graph, with no artifacts at all -- not even an empty array, so a
+// mistaken read is a type error rather than a silently empty list.
+//
+// DFLT-00112: the 15s poll used to fetch this list and then one
+// GET /api/tickets/{id} per listed ticket, which made a poll "1 + N"
+// requests and re-sent every text artifact's whole body although only an
+// expanded ticket's panel reads them. Nodes/edges are needed by the
+// collapsed cards too (progress bar, node chips, approval-gate highlight,
+// the dashboard totals), so they ride along here; artifacts are fetched only
+// for expanded tickets, via TicketDetail.
+export interface TicketGraph extends Ticket {
   nodes: GraphNode[];
   edges: GraphEdge[];
+}
+
+// GET /api/tickets/{id}'s response, and the shape App keeps in state: a
+// TicketGraph plus the artifacts. For a ticket nobody has expanded, the
+// artifacts are simply an empty array (nothing has been fetched for it yet)
+// -- see App.tsx's mergeTicketSummaries.
+export interface TicketDetail extends TicketGraph {
   artifacts: Artifact[];
 }
 

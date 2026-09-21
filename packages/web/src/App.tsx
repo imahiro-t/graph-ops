@@ -16,7 +16,7 @@ import {
   MonitorCog,
   Languages
 } from 'lucide-react';
-import { Label, Ticket, TicketDetail, TicketStatus, TicketPriority, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
+import { Label, TicketDetail, TicketGraph, TicketStatus, TicketPriority, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
 import { getStatusMeta, matchesStatusFilter } from './statusMeta';
 import { getPriorityMeta, matchesPriorityFilter } from './priorityMeta';
 import { matchesLabelFilter } from './labelMeta';
@@ -50,6 +50,25 @@ const THEME_ICON: Record<ThemePreference, React.FC<{ className?: string }>> = {
   dark: Moon,
   system: MonitorCog
 };
+
+// How often the dashboard re-reads the ticket list. Unchanged by DFLT-00112
+// (that ticket cut the number of requests per round, not their frequency);
+// named here so the polling tests can advance exactly one round.
+export const POLL_INTERVAL_MS = 15000;
+
+// Rebuilds the ticket state from a list response, carrying each ticket's
+// already-fetched artifacts over by id.
+//
+// GET /api/tickets does not return artifacts at all (DFLT-00112), so
+// dropping this merge would blank the Gherkin/HTML/artifact tabs of an
+// expanded ticket on every poll -- the artifacts would reappear only once
+// that ticket's own detail request resolved. A ticket the response no longer
+// lists simply falls out; a newly listed one starts with no artifacts until
+// it is expanded.
+export function mergeTicketSummaries(prev: TicketDetail[], summaries: TicketGraph[]): TicketDetail[] {
+  const artifactsById = new Map(prev.map(t => [t.id, t.artifacts]));
+  return summaries.map(summary => ({ ...summary, artifacts: artifactsById.get(summary.id) ?? [] }));
+}
 
 export const App: React.FC = () => {
   const { t, i18n } = useTranslation();
@@ -179,10 +198,14 @@ export const App: React.FC = () => {
     });
   }, [projectLabels]);
 
-  // Pagination -- ticket details (nodes/edges/artifacts) are fetched for
-  // every ticket up front (see fetchAllTickets), so this is purely a
+  // Pagination -- every ticket, on whatever page, is loaded up front with
+  // its nodes and edges (see fetchAllTickets), so this is purely a
   // client-side slice of the already-filtered list, not a server-paged
-  // fetch. Reset to page 1 whenever a filter changes so the user never
+  // fetch. That is also why paging is not what decides what gets loaded:
+  // the dashboard totals and the off-page cards' progress bars read the
+  // graphs of tickets the current page doesn't show.
+  //
+  // Reset to page 1 whenever a filter changes so the user never
   // lands on a stale, now out-of-range page. The page size itself is a
   // "全体設定" app-setting (GET /api/settings/app); unlike that endpoint's
   // other fields, it takes effect immediately on save (see
@@ -195,6 +218,14 @@ export const App: React.FC = () => {
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
   // Every completed ticket fetch (startup, the 15s poll, manual refresh,
   // after an edit) also re-fetches the current project's labels.
+  //
+  // This is why a polling round is two requests, not one: GET /api/tickets
+  // and GET /api/projects/{id}/labels. That second one is deliberately kept
+  // (DFLT-00112) -- it is a single request regardless of how many tickets
+  // exist, so it does not reintroduce the per-ticket fan-out the ticket set
+  // out to remove, and it is what makes a teammate's label edits show up
+  // with the regular poll. It follows fetchAllTickets, so it stops with the
+  // polling on a hidden tab too.
   useEffect(() => {
     if (lastFetchedAt) refreshProjectLabels();
   }, [lastFetchedAt, refreshProjectLabels]);
@@ -204,32 +235,54 @@ export const App: React.FC = () => {
   const [isClaudeGlobalOpen, setIsClaudeGlobalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Fetch tickets and their details
-  const fetchAllTickets = async () => {
+  // Fetches one ticket's detail (GET /api/tickets/{id}) -- the only response
+  // that carries artifacts -- and replaces that ticket in the list. Called
+  // for the tickets the user has actually expanded, since they are the only
+  // ones whose panel reads ticket.artifacts (see TicketItem.tsx: every use
+  // sits inside its `isExpanded &&` block).
+  const fetchTicketDetail = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/tickets/${encodeURIComponent(id)}`);
+      if (!res.ok) throw new Error(`GET /api/tickets/${id}: ${res.status}`);
+      const detail: TicketDetail = await res.json();
+      setTickets(prev => prev.map(t => (t.id === detail.id ? detail : t)));
+    } catch (e) {
+      // Keep whatever the list response gave us for this ticket rather than
+      // dropping it: a failed detail fetch must not make a card disappear.
+      console.error('Failed to load ticket detail', e);
+    }
+  }, []);
+
+  // Fetch the ticket list, plus the detail of whichever tickets are expanded.
+  //
+  // DFLT-00112: one round is a single GET /api/tickets (which now carries
+  // every ticket's nodes/edges) plus at most one detail request per expanded
+  // ticket -- it used to be one detail request per *listed* ticket, so 100
+  // tickets meant 101 requests every 15s, each re-sending the full text of
+  // every stored plan and review verdict.
+  //
+  // expandedTicketIds is read through a ref because this callback is held by
+  // the polling interval: reading the state directly would freeze whichever
+  // set was expanded when the interval was set up.
+  const expandedTicketIdsRef = useLatest(expandedTicketIds);
+  const fetchAllTickets = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch('/api/tickets');
-      const ticketSummaries: Ticket[] = await res.json();
+      if (!res.ok) throw new Error(`GET /api/tickets: ${res.status}`);
+      const summaries: TicketGraph[] = await res.json();
 
-      const details = await Promise.all(
-        ticketSummaries.map(async t => {
-          try {
-            const dRes = await fetch(`/api/tickets/${t.id}`);
-            return await dRes.json();
-          } catch {
-            return { ...t, nodes: [], edges: [], artifacts: [] };
-          }
-        })
-      );
-
-      setTickets(details);
+      setTickets(prev => mergeTicketSummaries(prev, summaries));
       setLastFetchedAt(new Date());
+
+      const expanded = summaries.filter(t => expandedTicketIdsRef.current.has(t.id));
+      await Promise.all(expanded.map(t => fetchTicketDetail(t.id)));
     } catch (e) {
       console.error('Failed to load tickets', e);
     } finally {
       setLoading(false);
     }
-  };
+  }, [expandedTicketIdsRef, fetchTicketDetail]);
 
   // Fetches the full project list (for the project switcher menu).
   const fetchProjects = async () => {
@@ -293,12 +346,55 @@ export const App: React.FC = () => {
     fetchProjects();
     fetchCurrentProject();
     fetchTicketsPerPage();
-    // Ticket/graph changes now happen in an external terminal the app can't
-    // see directly (no more SSE stream to react to), so poll periodically to
-    // keep the dashboard reasonably live.
-    const interval = setInterval(fetchAllTickets, 15000);
-    return () => clearInterval(interval);
-  }, [fetchTicketsPerPage]);
+    // The recurring poll lives in its own effect below, so it can be
+    // suspended and resumed without re-running this startup load. Both
+    // dependencies are useCallbacks over refs/stable callbacks, so this
+    // really does run once -- listing fetchAllTickets here is honest
+    // bookkeeping, not a second load.
+  }, [fetchAllTickets, fetchTicketsPerPage]);
+
+  // Ticket/graph changes happen in an external terminal the app can't see
+  // directly (no more SSE stream to react to), so poll periodically to keep
+  // the dashboard reasonably live.
+  //
+  // While the tab is in the background nothing is polled at all
+  // (DFLT-00112): a forgotten open tab used to keep hitting the DB -- every
+  // 15s, per tab, for every viewer of a shared backend -- for a dashboard
+  // nobody was looking at. Coming back to the foreground fetches once
+  // immediately (so the view is never up to 15s stale at the moment it
+  // becomes visible again) and restarts the interval from that fetch.
+  //
+  // The timer id is kept in a ref so start/stop always act on the one live
+  // timer; two intervals would double the request rate for the rest of the
+  // session.
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    const stopPolling = () => {
+      if (pollTimerRef.current !== null) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+    const startPolling = () => {
+      stopPolling();
+      pollTimerRef.current = setInterval(() => void fetchAllTickets(), POLL_INTERVAL_MS);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        stopPolling();
+        return;
+      }
+      void fetchAllTickets();
+      startPolling();
+    };
+
+    if (document.visibilityState === 'visible') startPolling();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [fetchAllTickets]);
 
   // Consumes the `?newProject=1&workDir=<dir>` query the `graph-engine ui`
   // CLI command (the `/ui` slash command's backend) appends to the root URL
@@ -376,12 +472,18 @@ export const App: React.FC = () => {
   };
 
   const handleToggleExpand = (id: string) => {
+    const isExpanding = !expandedTicketIds.has(id);
     setExpandedTicketIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+    // Artifacts only arrive with a ticket's own detail response, which the
+    // poll now fetches for expanded tickets only -- without this immediate
+    // fetch the panel's Gherkin/HTML/artifact tabs would stay empty until
+    // the next round, i.e. for up to 15 seconds after the click.
+    if (isExpanding) void fetchTicketDetail(id);
   };
 
   // Ticket creation goes through the create-ticket skill (opened in an

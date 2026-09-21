@@ -608,7 +608,7 @@ func (r *SQLiteRepository) CreateEdge(e domain.GraphEdge) (domain.GraphEdge, err
 
 func (r *SQLiteRepository) ListEdgesByTicket(ticketID string) ([]domain.GraphEdge, error) {
 	rows, err := r.db.Query(
-		`SELECT id, ticket_id, from_node_id, to_node_id, condition, created_at FROM edges WHERE ticket_id = ? ORDER BY created_at ASC`,
+		`SELECT `+sqliteEdgeSelectCols+` FROM edges WHERE ticket_id = ? ORDER BY created_at ASC`,
 		ticketID,
 	)
 	if err != nil {
@@ -617,13 +617,19 @@ func (r *SQLiteRepository) ListEdgesByTicket(ticketID string) ([]domain.GraphEdg
 	defer rows.Close()
 	out := []domain.GraphEdge{}
 	for rows.Next() {
-		var e domain.GraphEdge
-		if err := rows.Scan(&e.ID, &e.TicketID, &e.FromNodeID, &e.ToNodeID, &e.Condition, &e.CreatedAt); err != nil {
+		e, err := scanEdge(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// ListTicketGraphs implements TicketGraphLister; see that interface's doc
+// comment for the contract.
+func (r *SQLiteRepository) ListTicketGraphs(ticketIDs []string) (map[string][]domain.GraphNode, map[string][]domain.GraphEdge, error) {
+	return listTicketGraphs(r.db, sqliteEdgeSelectCols, ticketIDs)
 }
 
 func (r *SQLiteRepository) ClearEdgesByTicket(ticketID string) error {

@@ -57,6 +57,12 @@ func (n *nullableString) UnmarshalJSON(data []byte) error {
 // pass ?project_id=<id> to list a specific project's tickets
 // explicitly, or ?all=true to bypass project scoping entirely and list
 // every ticket across every project.
+//
+// Every element carries that ticket's nodes and edges but not its artifacts
+// (domain.TicketGraph, DFLT-00112), so the Web UI's 15s poll is a single
+// request whose size no longer grows with the artifact bodies stored on the
+// listed tickets. Both paths above go through the same post-processing, so
+// ?all=true returns the same shape as the project-scoped default.
 func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 	var tickets []domain.Ticket
 	var err error
@@ -82,7 +88,107 @@ func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, tickets)
+	graphs, err := s.ticketGraphs(tickets)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, graphs)
+}
+
+// ticketGraphs pairs each ticket with its nodes and edges for
+// handleListTickets. It reads them in a fixed number of queries when the
+// repository offers store.TicketGraphLister (both SQL backends do), and
+// otherwise falls back to GetTicketDetail -- one call per ticket, the only
+// read every GraphRepository has that returns a whole graph at once. That is
+// the case for the HTTP data source, where the remote protocol has no bulk
+// read (see store.TicketGraphLister). Either way the browser makes one
+// request; only the server-side fan-out differs.
+//
+// The fallback deliberately calls GetTicketDetail rather than the
+// ListNodesByTicket/ListEdgesByTicket pair. Against the HTTP data source
+// that pair is two sequential remote calls per listed ticket (2N+1 for a
+// listing of N), where GetTicketDetail is a single GET /tickets/{id}/detail
+// (N+1).
+//
+// Mind what that N+1 is measured over: a whole poll, not this endpoint. This
+// endpoint by itself got more expensive -- 2 remote calls before
+// (GetCurrentProjectID plus the listing), N+2 now. What keeps the poll even
+// is the per-ticket detail fetch the browser no longer sends; the fan-out
+// moved from the browser to here rather than disappearing.
+//
+// Latency does not come out even, and this is the slow side of it. The loop
+// below is sequential, so against a remote data source a poll's fallback
+// costs N x RTT, where the browser used to issue its N detail fetches
+// concurrently (roughly 6 at a time on one origin). For a large N a poll
+// therefore takes longer in wall-clock terms than it did before this
+// endpoint carried graphs. Nothing caps the total: the 30s timeout in
+// store/http.go is per call, not per handler. Once N x RTT exceeds the Web
+// UI's 15s poll interval (about 75 tickets at a 200ms RTT) polls begin to
+// overlap. A data source expected to serve that many tickets should
+// implement a bulk read instead of leaning on this path.
+//
+// The other price of GetTicketDetail is that the detail response also carries
+// that ticket's artifacts, whose bodies travel from the data source to this
+// server only to be dropped here. That traffic stays on the
+// server<->data-source hop, never reaches the browser, and is exactly what
+// the Web UI's old per-ticket detail fetch already moved over that same hop,
+// so it is not a regression either. Backends with a bulk read
+// (store.TicketGraphLister: SQLite, MySQL) never take this path and never
+// read artifacts at all.
+//
+// Nil slices are normalized to empty ones so a ticket without nodes
+// serializes as [] rather than null: the Web UI calls ticket.nodes.length
+// and ticket.edges.filter(...) unconditionally.
+func (s *Server) ticketGraphs(tickets []domain.Ticket) ([]domain.TicketGraph, error) {
+	out := make([]domain.TicketGraph, 0, len(tickets))
+	if len(tickets) == 0 {
+		return out, nil
+	}
+
+	nodesByTicket := map[string][]domain.GraphNode{}
+	edgesByTicket := map[string][]domain.GraphEdge{}
+	if lister, ok := s.repo.(store.TicketGraphLister); ok {
+		ids := make([]string, 0, len(tickets))
+		for _, t := range tickets {
+			ids = append(ids, t.ID)
+		}
+		var err error
+		if nodesByTicket, edgesByTicket, err = lister.ListTicketGraphs(ids); err != nil {
+			return nil, err
+		}
+	} else {
+		for _, t := range tickets {
+			detail, err := s.repo.GetTicketDetail(t.ID)
+			if err != nil {
+				return nil, err
+			}
+			// A nil detail (ticket not found) means the ticket
+			// disappeared between the listing and this read. Leaving it
+			// out of the maps gives it the empty graph the
+			// normalization below produces -- which is what the
+			// per-ticket list calls returned for an unknown ticket too,
+			// so a ticket vanishing mid-poll still does not fail the
+			// whole request.
+			if detail == nil {
+				continue
+			}
+			nodesByTicket[t.ID] = detail.Nodes
+			edgesByTicket[t.ID] = detail.Edges
+		}
+	}
+
+	for _, t := range tickets {
+		g := domain.TicketGraph{Ticket: t, Nodes: nodesByTicket[t.ID], Edges: edgesByTicket[t.ID]}
+		if g.Nodes == nil {
+			g.Nodes = []domain.GraphNode{}
+		}
+		if g.Edges == nil {
+			g.Edges = []domain.GraphEdge{}
+		}
+		out = append(out, g)
+	}
+	return out, nil
 }
 
 // handleCreateTicket defaults to the currently-selected project when
