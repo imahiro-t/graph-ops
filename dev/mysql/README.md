@@ -28,6 +28,49 @@ update-ticket) once per TLS mode, one package at a time, and drops the
 database on exit. The CLI tests only touch projects they create themselves
 and delete them afterwards.
 
+### The `mysql` job in CI mirrors this script -- keep the two in sync
+
+`.github/workflows/ci.yml` has a `mysql` job that runs the same three packages
+against a MySQL service container on every pull request and every push to
+`main`, so the rule in `CLAUDE.md` -- run this script for any change to the DB
+layer -- is no longer carried by each developer remembering it alone.
+
+The two cannot share code: this script drives `dev/mysql/compose.yaml`, while
+a service container is started before the repository is checked out and so can
+be handed nothing from the tree. What must stay identical is what is actually
+exercised -- the three package paths, the `GRAPH_TEST_MYSQL_*` variable names,
+and `-count=1 -p 1` (the three packages share one database and must not run
+concurrently). **Change either side and change the other**; the job carries
+the same note.
+
+Two of the differences between them are forced by the service container and
+are not worth trying to remove:
+
+- **The throwaway database.** This script creates one per run and drops it on
+  exit. The job lets the container create `graph_ops_ci` on startup and throws
+  the whole container away with the job.
+- **The CA certificate.** Here it comes from compose's `certs` service. In CI
+  it is copied out of the running container
+  (`docker cp <container>:/var/lib/mysql/ca.pem`), because MySQL 8.4 generates
+  its own CA and server certificate into `/var/lib/mysql` on first start.
+
+**CI covers two of the three TLS modes: `disabled` and `verify-ca`.**
+`verify-full` -- the production default -- cannot run there: MySQL's
+auto-generated server certificate carries no subjectAltName at all, so the
+hostname check fails with "cannot validate certificate for 127.0.0.1 because
+it doesn't contain any IP SANs". `dev/mysql/compose.yaml` avoids this by
+generating a certificate that names `localhost` and `127.0.0.1`, which is why
+all three modes work here. Getting `verify-full` onto CI is tracked as
+DFLT-00125; until that lands, **this script is the only place `verify-full` is
+ever exercised**, so run it locally before concluding a change to the DB layer
+is green.
+
+The job also fails if the tests only *looked* green: every MySQL-backed test
+skips itself when `GRAPH_TEST_MYSQL_HOST` is unset, so a step there counts the
+skips and the tests that really connected, and fails on a single skip or on
+too few passes. If you add or remove MySQL-backed tests, or change the text
+those tests skip with, check that step's counts in `ci.yml` along with them.
+
 ### How long it takes, and why
 
 A full run (three TLS modes) takes **4 to 5 minutes** on a developer laptop,
