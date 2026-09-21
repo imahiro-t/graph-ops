@@ -427,3 +427,27 @@ type TicketDetail struct {
 	Edges     []GraphEdge `json:"edges"`
 	Artifacts []Artifact  `json:"artifacts"`
 }
+
+// TicketGraph is one element of GET /api/tickets (DFLT-00112): a ticket plus
+// its execution graph, and deliberately *without* its artifacts.
+//
+// The Web UI polls that endpoint every 15s. It used to get bare tickets and
+// then fetch TicketDetail for each one, which made a poll "1 + N" requests
+// and re-transferred every text artifact's whole body (plans, review
+// verdicts) even though only an expanded ticket's panel ever reads them.
+// Nodes and edges are narrow rows and the collapsed cards do need them
+// (progress bar, node chips, approval-gate highlight, the dashboard
+// totals), so they moved into the list; artifacts stay behind in
+// GET /api/tickets/{id}, which is now fetched only for expanded tickets.
+//
+// Having no Artifacts field at all -- rather than an empty one -- is what
+// keeps the key out of the JSON entirely, so this response can't quietly
+// start carrying artifact bodies again.
+//
+// Nodes/Edges are always serialized as arrays, never null: the UI reads
+// ticket.nodes.length unconditionally.
+type TicketGraph struct {
+	Ticket
+	Nodes []GraphNode `json:"nodes"`
+	Edges []GraphEdge `json:"edges"`
+}

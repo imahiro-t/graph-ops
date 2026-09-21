@@ -57,6 +57,12 @@ func (n *nullableString) UnmarshalJSON(data []byte) error {
 // pass ?project_id=<id> to list a specific project's tickets
 // explicitly, or ?all=true to bypass project scoping entirely and list
 // every ticket across every project.
+//
+// Every element carries that ticket's nodes and edges but not its artifacts
+// (domain.TicketGraph, DFLT-00112), so the Web UI's 15s poll is a single
+// request whose size no longer grows with the artifact bodies stored on the
+// listed tickets. Both paths above go through the same post-processing, so
+// ?all=true returns the same shape as the project-scoped default.
 func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 	var tickets []domain.Ticket
 	var err error
@@ -82,7 +88,68 @@ func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, tickets)
+	graphs, err := s.ticketGraphs(tickets)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, graphs)
+}
+
+// ticketGraphs pairs each ticket with its nodes and edges for
+// handleListTickets. It reads them in a fixed number of queries when the
+// repository offers store.TicketGraphLister (both SQL backends do), and
+// otherwise falls back to the per-ticket calls every GraphRepository has --
+// which is the case for the HTTP data source, where the remote protocol has
+// no bulk read (see store.TicketGraphLister). Either way the browser makes
+// one request; only the server-side fan-out differs.
+//
+// Nil slices are normalized to empty ones so a ticket without nodes
+// serializes as [] rather than null: the Web UI calls ticket.nodes.length
+// and ticket.edges.filter(...) unconditionally.
+func (s *Server) ticketGraphs(tickets []domain.Ticket) ([]domain.TicketGraph, error) {
+	out := make([]domain.TicketGraph, 0, len(tickets))
+	if len(tickets) == 0 {
+		return out, nil
+	}
+
+	nodesByTicket := map[string][]domain.GraphNode{}
+	edgesByTicket := map[string][]domain.GraphEdge{}
+	if lister, ok := s.repo.(store.TicketGraphLister); ok {
+		ids := make([]string, 0, len(tickets))
+		for _, t := range tickets {
+			ids = append(ids, t.ID)
+		}
+		var err error
+		if nodesByTicket, edgesByTicket, err = lister.ListTicketGraphs(ids); err != nil {
+			return nil, err
+		}
+	} else {
+		for _, t := range tickets {
+			nodes, err := s.repo.ListNodesByTicket(t.ID)
+			if err != nil {
+				return nil, err
+			}
+			edges, err := s.repo.ListEdgesByTicket(t.ID)
+			if err != nil {
+				return nil, err
+			}
+			nodesByTicket[t.ID] = nodes
+			edgesByTicket[t.ID] = edges
+		}
+	}
+
+	for _, t := range tickets {
+		g := domain.TicketGraph{Ticket: t, Nodes: nodesByTicket[t.ID], Edges: edgesByTicket[t.ID]}
+		if g.Nodes == nil {
+			g.Nodes = []domain.GraphNode{}
+		}
+		if g.Edges == nil {
+			g.Edges = []domain.GraphEdge{}
+		}
+		out = append(out, g)
+	}
+	return out, nil
 }
 
 // handleCreateTicket defaults to the currently-selected project when

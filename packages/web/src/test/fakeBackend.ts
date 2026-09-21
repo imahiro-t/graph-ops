@@ -11,13 +11,38 @@
 // Mutating `backend.tickets` / `backend.labels` / `backend.currentProjectId`
 // between renders is the intended way to simulate a change on the server.
 import { vi } from 'vitest';
-import { LabelColor, Project, TicketPriority, TicketStatus } from '../types';
+import { ArtifactType, LabelColor, NodeStatus, NodeType, Project, TicketPriority, TicketStatus } from '../types';
 
 export interface FakeLabel {
   id: string;
   project_id: string;
   name: string;
   color: LabelColor;
+}
+
+// A ticket's execution graph and artifacts, seeded per ticket. Only the
+// fields the UI actually reads have to be given; the rest are filled in with
+// plausible defaults by the *JSON helpers below.
+export interface FakeNode {
+  id: string;
+  name?: string;
+  type?: NodeType;
+  status: NodeStatus;
+}
+
+export interface FakeEdge {
+  id: string;
+  from: string;
+  to: string;
+  condition?: string;
+}
+
+export interface FakeArtifact {
+  id: string;
+  node_id: string;
+  name: string;
+  type: ArtifactType;
+  content?: string;
 }
 
 export interface FakeTicket {
@@ -29,6 +54,11 @@ export interface FakeTicket {
   // Absent/empty is "unassigned", the same three shapes the API can return.
   assignee?: string | null;
   labelIds: string[];
+  // Default to empty, so the tests that predate DFLT-00112 keep seeding
+  // graph-less tickets without saying so.
+  nodes?: FakeNode[];
+  edges?: FakeEdge[];
+  artifacts?: FakeArtifact[];
 }
 
 export interface FakeBackendSeed {
@@ -52,7 +82,44 @@ function respond(status: number, body: unknown) {
 export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
   const labelJSON = (l: FakeLabel) => ({ ...l, created_at: '', updated_at: '' });
 
-  const ticketJSON = (tk: FakeTicket) => ({
+  const nodeJSON = (tk: FakeTicket, n: FakeNode) => ({
+    id: n.id,
+    ticket_id: tk.id,
+    name: n.name ?? n.id,
+    type: n.type ?? 'implementation',
+    status: n.status,
+    iteration_count: 0,
+    max_iterations: 3,
+    is_manual: (n.type ?? 'implementation') === 'approval_gate',
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z'
+  });
+
+  const edgeJSON = (tk: FakeTicket, e: FakeEdge) => ({
+    id: e.id,
+    ticket_id: tk.id,
+    from_node_id: e.from,
+    to_node_id: e.to,
+    condition: e.condition ?? 'always',
+    created_at: '2026-01-01T00:00:00Z'
+  });
+
+  const artifactJSON = (tk: FakeTicket, a: FakeArtifact) => ({
+    id: a.id,
+    ticket_id: tk.id,
+    node_id: a.node_id,
+    name: a.name,
+    type: a.type,
+    content: a.content ?? null,
+    has_content: a.content != null,
+    created_at: '2026-01-01T00:00:00Z'
+  });
+
+  // GET /api/tickets' element (domain.TicketGraph): the ticket plus its
+  // graph, with no "artifacts" key at all -- DFLT-00112 moved the artifacts
+  // out of the polled list and into the per-ticket detail below, so a fake
+  // that still answered with them would let a regression pass unnoticed.
+  const ticketListJSON = (tk: FakeTicket) => ({
     id: tk.id,
     project_id: tk.project_id,
     title: tk.title,
@@ -68,9 +135,15 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
       .filter(l => tk.labelIds.includes(l.id))
       .map(labelJSON)
       .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())),
-    nodes: [],
-    edges: [],
-    artifacts: []
+    nodes: (tk.nodes ?? []).map(n => nodeJSON(tk, n)),
+    edges: (tk.edges ?? []).map(e => edgeJSON(tk, e))
+  });
+
+  // GET /api/tickets/{id}'s response (domain.TicketDetail): the same thing
+  // plus the artifacts, bodies included.
+  const ticketDetailJSON = (tk: FakeTicket) => ({
+    ...ticketListJSON(tk),
+    artifacts: (tk.artifacts ?? []).map(a => artifactJSON(tk, a))
   });
 
   const backend: FakeBackend = {
@@ -89,12 +162,13 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
       if (url === '/api/tickets' && method === 'GET') {
         return respond(
           200,
-          backend.tickets.filter(tk => tk.project_id === backend.currentProjectId).map(ticketJSON)
+          backend.tickets.filter(tk => tk.project_id === backend.currentProjectId).map(ticketListJSON)
         );
       }
       if ((m = url.match(/^\/api\/tickets\/([^/?]+)$/)) && method === 'GET') {
-        const tk = backend.tickets.find(x => x.id === m![1]);
-        return tk ? respond(200, ticketJSON(tk)) : respond(404, { error: { code: 'TICKET_NOT_FOUND', message: '' } });
+        const id = decodeURIComponent(m[1]);
+        const tk = backend.tickets.find(x => x.id === id);
+        return tk ? respond(200, ticketDetailJSON(tk)) : respond(404, { error: { code: 'TICKET_NOT_FOUND', message: '' } });
       }
       if (url === '/api/projects' && method === 'GET') return respond(200, backend.projects);
       if (url === '/api/current-project' && method === 'GET') {

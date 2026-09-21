@@ -192,3 +192,29 @@ type GraphRepository interface {
 	GetCurrentProjectID() (string, error)
 	SetCurrentProjectID(projectID string) error
 }
+
+// TicketGraphLister is an optional add-on to GraphRepository (DFLT-00112):
+// load the nodes and edges of many tickets at once, grouped by ticket ID,
+// rather than one ListNodesByTicket/ListEdgesByTicket pair per ticket. It is
+// what keeps GET /api/tickets -- which now carries each ticket's graph so
+// the Web UI's poll is a single request -- from turning into an N+1 against
+// the DB.
+//
+// It is deliberately *not* part of GraphRepository. HTTPRepository
+// implements that interface against a remote data source
+// (docs/http-datasource/openapi.yaml, examples/jira-datasource), so a new
+// method there would demand a new endpoint of every existing data-source
+// implementation. Callers type-assert for this interface instead and fall
+// back to the per-ticket calls when a backend does not provide it; against
+// such a backend the browser still makes one request, the server-side fan-out
+// just remains.
+//
+// The argument is a set of ticket IDs rather than a project ID because the
+// caller (handleListTickets) also has a cross-project path, ?all=true.
+//
+// Tickets with no nodes/edges are absent from the returned maps rather than
+// mapped to an empty slice. IDs may repeat; the implementation de-duplicates
+// them. Artifacts are never read.
+type TicketGraphLister interface {
+	ListTicketGraphs(ticketIDs []string) (map[string][]domain.GraphNode, map[string][]domain.GraphEdge, error)
+}
