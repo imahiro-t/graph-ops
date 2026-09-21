@@ -99,10 +99,26 @@ func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 // ticketGraphs pairs each ticket with its nodes and edges for
 // handleListTickets. It reads them in a fixed number of queries when the
 // repository offers store.TicketGraphLister (both SQL backends do), and
-// otherwise falls back to the per-ticket calls every GraphRepository has --
-// which is the case for the HTTP data source, where the remote protocol has
-// no bulk read (see store.TicketGraphLister). Either way the browser makes
-// one request; only the server-side fan-out differs.
+// otherwise falls back to GetTicketDetail -- one call per ticket, the only
+// read every GraphRepository has that returns a whole graph at once. That is
+// the case for the HTTP data source, where the remote protocol has no bulk
+// read (see store.TicketGraphLister). Either way the browser makes one
+// request; only the server-side fan-out differs.
+//
+// The fallback deliberately calls GetTicketDetail rather than the
+// ListNodesByTicket/ListEdgesByTicket pair. Against the HTTP data source
+// that pair is two sequential remote calls per listed ticket (2N+1 for a
+// listing of N), where GetTicketDetail is a single GET /tickets/{id}/detail
+// (N+1) -- the same number of remote calls this endpoint cost before it
+// began carrying graphs, so no backend regresses on call count or on
+// round-trip latency. The price is that the detail response also carries
+// that ticket's artifacts, whose bodies travel from the data source to this
+// server only to be dropped here. That traffic stays on the
+// server<->data-source hop, never reaches the browser, and is exactly what
+// the Web UI's old per-ticket detail fetch already moved over that same hop,
+// so it is not a regression either. Backends with a bulk read
+// (store.TicketGraphLister: SQLite, MySQL) never take this path and never
+// read artifacts at all.
 //
 // Nil slices are normalized to empty ones so a ticket without nodes
 // serializes as [] rather than null: the Web UI calls ticket.nodes.length
@@ -126,16 +142,22 @@ func (s *Server) ticketGraphs(tickets []domain.Ticket) ([]domain.TicketGraph, er
 		}
 	} else {
 		for _, t := range tickets {
-			nodes, err := s.repo.ListNodesByTicket(t.ID)
+			detail, err := s.repo.GetTicketDetail(t.ID)
 			if err != nil {
 				return nil, err
 			}
-			edges, err := s.repo.ListEdgesByTicket(t.ID)
-			if err != nil {
-				return nil, err
+			// A nil detail (ticket not found) means the ticket
+			// disappeared between the listing and this read. Leaving it
+			// out of the maps gives it the empty graph the
+			// normalization below produces -- which is what the
+			// per-ticket list calls returned for an unknown ticket too,
+			// so a ticket vanishing mid-poll still does not fail the
+			// whole request.
+			if detail == nil {
+				continue
 			}
-			nodesByTicket[t.ID] = nodes
-			edgesByTicket[t.ID] = edges
+			nodesByTicket[t.ID] = detail.Nodes
+			edgesByTicket[t.ID] = detail.Edges
 		}
 	}
 

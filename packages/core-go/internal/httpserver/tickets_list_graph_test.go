@@ -222,10 +222,18 @@ func TestHandleListTickets_AllTrueHasSameShape(t *testing.T) {
 // whose remote protocol has no bulk graph read. Embedding the interface
 // (rather than a concrete repository) is what drops the extra method: the
 // wrapper only has GraphRepository's own methods.
+//
+// Every call the fallback could make is counted, because against the HTTP
+// data source each one is a separate remote round trip: what the fallback
+// must cost is exactly one downstream read per listed ticket, not two.
 type repoWithoutBulkGraphs struct {
 	store.GraphRepository
-	nodeCalls int
-	edgeCalls int
+	nodeCalls   int
+	edgeCalls   int
+	detailCalls int
+	// detailNotFound makes GetTicketDetail report every ticket as missing,
+	// standing in for a ticket deleted between the listing and the read.
+	detailNotFound bool
 }
 
 func (r *repoWithoutBulkGraphs) ListNodesByTicket(ticketID string) ([]domain.GraphNode, error) {
@@ -236,6 +244,14 @@ func (r *repoWithoutBulkGraphs) ListNodesByTicket(ticketID string) ([]domain.Gra
 func (r *repoWithoutBulkGraphs) ListEdgesByTicket(ticketID string) ([]domain.GraphEdge, error) {
 	r.edgeCalls++
 	return r.GraphRepository.ListEdgesByTicket(ticketID)
+}
+
+func (r *repoWithoutBulkGraphs) GetTicketDetail(ticketID string) (*domain.TicketDetail, error) {
+	r.detailCalls++
+	if r.detailNotFound {
+		return nil, nil
+	}
+	return r.GraphRepository.GetTicketDetail(ticketID)
 }
 
 func TestHandleListTickets_FallsBackWhenRepoHasNoBulkRead(t *testing.T) {
@@ -259,7 +275,45 @@ func TestHandleListTickets_FallsBackWhenRepoHasNoBulkRead(t *testing.T) {
 	if _, present := list[a.ID]["artifacts"]; present {
 		t.Errorf("the fallback path carries an \"artifacts\" key")
 	}
-	if fallback.nodeCalls != 2 || fallback.edgeCalls != 2 {
-		t.Errorf("fallback made %d node / %d edge calls, want 2 / 2 (one per listed ticket)", fallback.nodeCalls, fallback.edgeCalls)
+
+	// The call count is the point of this test. Against the HTTP data
+	// source every downstream call is a remote round trip, so the fallback
+	// must spend exactly one per listed ticket -- GET /tickets/{id}/detail,
+	// which brings nodes and edges back together. The
+	// ListNodesByTicket/ListEdgesByTicket pair would be two sequential
+	// round trips per ticket (2N+1 for the whole poll instead of N+1),
+	// doubling the load on the data source that this ticket set out to
+	// reduce.
+	if fallback.detailCalls != 2 {
+		t.Errorf("fallback made %d GetTicketDetail calls, want 2 (one per listed ticket)", fallback.detailCalls)
+	}
+	if fallback.nodeCalls != 0 || fallback.edgeCalls != 0 {
+		t.Errorf("fallback made %d ListNodesByTicket / %d ListEdgesByTicket calls, want 0 / 0: "+
+			"per-ticket node+edge reads are two remote round trips where one detail read suffices",
+			fallback.nodeCalls, fallback.edgeCalls)
+	}
+}
+
+// A ticket that disappears between the listing and the fallback's graph read
+// must not fail the whole poll: it comes back with an empty graph, which is
+// what the per-ticket node/edge reads returned for an unknown ticket as
+// well.
+func TestHandleListTickets_FallbackTolerationOfVanishedTicket(t *testing.T) {
+	s, repo, projectID := newTestServer(t)
+	a := seedGraphTicket(t, repo, projectID, "A", 3, "本文")
+
+	fallback := &repoWithoutBulkGraphs{GraphRepository: repo, detailNotFound: true}
+	s.repo = fallback
+
+	list := decodeTicketList(t, doJSON(t, s, "GET", "/api/tickets", nil))
+	item, ok := list[a.ID]
+	if !ok {
+		t.Fatalf("ticket %s missing from the list response", a.ID)
+	}
+	if got := len(jsonArray(t, item, "nodes")); got != 0 {
+		t.Errorf("got %d nodes, want 0", got)
+	}
+	if got := len(jsonArray(t, item, "edges")); got != 0 {
+		t.Errorf("got %d edges, want 0", got)
 	}
 }
