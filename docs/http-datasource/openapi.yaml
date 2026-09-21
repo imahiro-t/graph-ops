@@ -674,13 +674,18 @@ paths:
         person's switch change what everyone sharing this data source saw.
 
         Both operations stay in the protocol for compatibility, and GET must
-        still be implemented. graph-engine calls it while an environment's
-        graph-config.json has no currentProjectId of its own: the first answer
-        it gets is written there, which carries an existing selection over
-        when upgrading, and the endpoint is never called again in that
-        environment. Until then, an error from GET is an error from
-        graph-engine's own current-project read, so keep answering it -- with
-        "" if the plugin has nothing stored.
+        still be implemented -- it is not a one-off migration call that can be
+        dropped once an upgrade is done. graph-engine calls GET only while an
+        environment's graph-config.json has no currentProjectId of its own:
+        once on an environment upgrading with a selection to inherit (a
+        non-empty answer is written there, which carries that selection over,
+        and GET is not called again in that environment), and on each read
+        until a project is selected on one that has none (an answer of "" is
+        not written, so the next read calls GET again -- the Web UI reads the
+        current project on every page load). For as long as it is called, an
+        error from GET is an error from graph-engine's own current-project
+        read (graph-engine then fails the request that needed it), so keep
+        answering it -- with "" if the plugin has nothing stored.
 
         PUT is no longer called at all. A plugin may keep storing what it is
         given, but nothing sends it.
