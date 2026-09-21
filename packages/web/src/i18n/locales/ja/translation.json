@@ -50,7 +50,8 @@
     "nodeProgress": "ノード進捗"
   },
   "emptyState": {
-    "noTicketsMatch": "条件に一致するチケットがありません"
+    "noTicketsMatch": "条件に一致するチケットがありません",
+    "loadingTickets": "チケットを読み込んでいます..."
   },
   "pagination": {
     "range": "{{total}}件中 {{from}}〜{{to}}件を表示",

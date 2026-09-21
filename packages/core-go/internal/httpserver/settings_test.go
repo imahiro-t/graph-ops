@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/graph-ops/core-go/internal/currentproject"
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
@@ -32,14 +33,23 @@ func newSettingsTestServer(t *testing.T) (*Server, store.GraphRepository, string
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	if err := repo.SetCurrentProjectID(proj.ID); err != nil {
-		t.Fatalf("SetCurrentProjectID: %v", err)
-	}
 	eng := engine.New(repo)
-	cfg := Config{ArtifactsDir: t.TempDir(), UserExtensionsDir: t.TempDir(), HomeDir: t.TempDir()}
+	// WorkDir is sandboxed alongside HomeDir so that BOTH graph-config.json
+	// candidate paths are temp dirs: with WorkDir empty the cwd candidate is
+	// the relative path "graph-config.json", and PUT /api/settings/app
+	// writes through runtimeconfig.Update, which would then create that file
+	// inside the repository.
+	cfg := Config{ArtifactsDir: t.TempDir(), UserExtensionsDir: t.TempDir(), WorkDir: t.TempDir(), HomeDir: t.TempDir()}
 	s := New(repo, eng, cfg)
 	if _, err := runtimeconfig.SetProjectPath(cfg.WorkDir, cfg.HomeDir, proj.ID, t.TempDir()); err != nil {
 		t.Fatalf("SetProjectPath: %v", err)
+	}
+	// Selected for this environment (DFLT-00106), not in the DB: the
+	// settings endpoints resolve a project scope through its local path, but
+	// a fixture that pretended the DB drives the current project would be
+	// misleading now that nothing reads it.
+	if err := currentproject.Set(cfg.WorkDir, cfg.HomeDir, proj.ID); err != nil {
+		t.Fatalf("currentproject.Set: %v", err)
 	}
 	return s, repo, proj.ID
 }

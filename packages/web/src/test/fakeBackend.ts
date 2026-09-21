@@ -86,11 +86,19 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined;
       let m: RegExpMatchArray | null;
 
-      if (url === '/api/tickets' && method === 'GET') {
-        return respond(
-          200,
-          backend.tickets.filter(tk => tk.project_id === backend.currentProjectId).map(ticketJSON)
-        );
+      // GET /api/tickets is scoped by the CALLER's query, never by the
+      // backend's current project (DFLT-00106): ?project_id=<id> filters,
+      // ?all=true returns everything and wins over project_id, and neither
+      // returns an empty list. Filtering by backend.currentProjectId here --
+      // which is what this used to do -- would hide the very bug the app's
+      // tests now guard against, since an unscoped request would still come
+      // back with the right project's tickets.
+      if (url.split('?')[0] === '/api/tickets' && method === 'GET') {
+        const query = new URLSearchParams(url.split('?')[1] ?? '');
+        if (query.get('all') === 'true') return respond(200, backend.tickets.map(ticketJSON));
+        const projectId = query.get('project_id') ?? '';
+        if (!projectId) return respond(200, []);
+        return respond(200, backend.tickets.filter(tk => tk.project_id === projectId).map(ticketJSON));
       }
       if ((m = url.match(/^\/api\/tickets\/([^/?]+)$/)) && method === 'GET') {
         const tk = backend.tickets.find(x => x.id === m![1]);

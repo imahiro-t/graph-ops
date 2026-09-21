@@ -52,11 +52,22 @@ func (n *nullableString) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// handleListTickets defaults to the currently-selected project (completion
-// criterion: "switching projects shows only that project's ticket list"):
-// pass ?project_id=<id> to list a specific project's tickets
-// explicitly, or ?all=true to bypass project scoping entirely and list
-// every ticket across every project.
+// handleListTickets requires the caller to say which project it wants:
+// ?project_id=<id> lists that project's tickets, ?all=true lists every
+// ticket across every project (and wins over project_id), and omitting both
+// returns an empty list. A project_id naming no project is an empty list
+// too, not an error, for the same reason -- filtering simply matches
+// nothing.
+//
+// Until DFLT-00106 an omitted project_id fell back to "the" current project,
+// which came from a single app_state row shared by everyone on the same data
+// source. Since the current project is now per-environment, and a shared
+// one was what let a teammate's switch silently repopulate somebody else's
+// list with another project's tickets while the header still named the old
+// one, there is no server-side default left to fall back to: the client
+// names the project it is displaying, on every request, or gets nothing.
+// This is a breaking change for any other caller of GET /api/tickets --
+// ?all=true is the replacement for "just give me everything".
 func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 	var tickets []domain.Ticket
 	var err error
@@ -65,13 +76,6 @@ func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 		tickets, err = s.repo.ListTickets()
 	default:
 		projectID := r.URL.Query().Get("project_id")
-		if projectID == "" {
-			projectID, err = s.repo.GetCurrentProjectID()
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err)
-				return
-			}
-		}
 		if projectID == "" {
 			tickets = []domain.Ticket{}
 		} else {
@@ -85,10 +89,20 @@ func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tickets)
 }
 
-// handleCreateTicket defaults to the currently-selected project when
+// handleCreateTicket defaults to this environment's current project
+// (graph-config.json's currentProjectId, see internal/currentproject) when
 // project_id is omitted from the body; if there is neither an explicit
 // project_id nor a current project, the request fails with
 // ErrCodeNoCurrentProject rather than silently picking one.
+//
+// Unlike handleListTickets, this one keeps its fallback (DFLT-00106): the
+// value it falls back to is now this machine's own, so it can no longer be
+// moved by somebody else on the same data source -- which is what made the
+// old shared fallback a way to write a ticket into a stranger's project.
+// A currentProjectId left dangling by a project somebody else deleted is a
+// 404 PROJECT_NOT_FOUND from the store, naming the missing ID, and no
+// ticket is created; falling through to some other project would be exactly
+// the misrouting this is about.
 //
 // There is no assignee field here: a new ticket is always created unassigned
 // (see engine.CreateTicket), regardless of whether a caller's body includes
@@ -133,7 +147,7 @@ func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 	projectID := body.ProjectID
 	if projectID == "" {
 		var err error
-		projectID, err = s.repo.GetCurrentProjectID()
+		projectID, err = s.currentProjectID()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return

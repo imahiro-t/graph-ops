@@ -68,15 +68,24 @@ export const App: React.FC = () => {
   // those buttons.
   const [myName, setMyName] = useState('');
 
-  // Project scoping (GET/POST /api/projects, GET/PUT /api/current-project):
-  // the ticket list the server returns is always scoped to whichever
-  // project is "current" (see fetchAllTickets's plain `/api/tickets` call --
-  // project filtering is the server's default behavior, not something the
-  // client requests explicitly). currentProject is null both before the
-  // initial GET /api/current-project resolves and, permanently, on an
-  // install that has never created a project yet.
+  // Project scoping (GET/POST /api/projects, GET/PUT /api/current-project).
+  //
+  // Since DFLT-00106 the client, not the server, decides which project the
+  // ticket list shows: every fetch goes to
+  // `/api/tickets?project_id=<currentProject.id>` (GET /api/tickets with no
+  // project_id returns an empty list now). The server used to filter by a
+  // "current project" shared by everyone on the same data source, so a
+  // teammate switching projects replaced this list's contents on the next
+  // 15s poll while the header still named the old project. Tying the fetch
+  // to the very id the header renders makes that mismatch unrepresentable.
+  //
+  // currentProject is null in two different situations, which the UI must
+  // not conflate: before the initial GET /api/current-project resolves, and
+  // on an install with no project selected. isCurrentProjectResolved tells
+  // them apart -- the first is "loading", the second is "create a project".
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
+  const [isCurrentProjectResolved, setIsCurrentProjectResolved] = useState(false);
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
   // The header's project switcher button: where ProjectSetupModal returns
@@ -204,11 +213,21 @@ export const App: React.FC = () => {
   const [isClaudeGlobalOpen, setIsClaudeGlobalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Fetch tickets and their details
-  const fetchAllTickets = async () => {
+  // Fetch one project's tickets and their details.
+  //
+  // projectId is mandatory (DFLT-00106): an empty one means "the current
+  // project isn't known yet", and the right answer to that is to fetch
+  // nothing at all rather than to ask the server for its idea of a default
+  // -- it no longer has one. Showing another project's tickets under this
+  // project's header is precisely the bug this replaces.
+  const fetchAllTickets = useCallback(async (projectId: string) => {
+    if (!projectId) {
+      setTickets([]);
+      return;
+    }
     setLoading(true);
     try {
-      const res = await fetch('/api/tickets');
+      const res = await fetch(`/api/tickets?project_id=${encodeURIComponent(projectId)}`);
       const ticketSummaries: Ticket[] = await res.json();
 
       const details = await Promise.all(
@@ -229,7 +248,17 @@ export const App: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  // refreshTickets re-fetches whichever project the header is currently
+  // showing. It is what every "something changed, reload the list" callback
+  // uses (the toolbar's refresh button, a ticket edit, the create-ticket
+  // launch, a label change), so none of them has to thread the project id
+  // through by hand -- and none of them can accidentally fetch unscoped.
+  const refreshTickets = useCallback(
+    () => fetchAllTickets(currentProjectIdRef.current),
+    [fetchAllTickets, currentProjectIdRef]
+  );
 
   // Fetches the full project list (for the project switcher menu).
   const fetchProjects = async () => {
@@ -248,6 +277,9 @@ export const App: React.FC = () => {
   // This is only ever used to *restore* state on load -- it must never
   // trigger a Claude Code terminal launch (see switchToProject, which is the
   // only path that does), or every page refresh would pop open a terminal.
+  // A failure resolves to "no project selected" as well: the alternative is
+  // staying in the loading state forever. Either way the attempt is over,
+  // which is what isCurrentProjectResolved records.
   const fetchCurrentProject = async () => {
     try {
       const res = await fetch('/api/current-project');
@@ -257,6 +289,8 @@ export const App: React.FC = () => {
     } catch (e) {
       console.error('Failed to load current project', e);
       setCurrentProject(null);
+    } finally {
+      setIsCurrentProjectResolved(true);
     }
   };
 
@@ -288,17 +322,32 @@ export const App: React.FC = () => {
     }
   }, [tRef]);
 
+  // Startup. Deliberately does NOT fetch tickets: which project's tickets
+  // those would be isn't known until fetchCurrentProject resolves, and the
+  // effect below is the only thing that fetches them (DFLT-00106).
   useEffect(() => {
-    fetchAllTickets();
     fetchProjects();
     fetchCurrentProject();
     fetchTicketsPerPage();
-    // Ticket/graph changes now happen in an external terminal the app can't
-    // see directly (no more SSE stream to react to), so poll periodically to
-    // keep the dashboard reasonably live.
-    const interval = setInterval(fetchAllTickets, 15000);
-    return () => clearInterval(interval);
   }, [fetchTicketsPerPage]);
+
+  // The ticket list, keyed on the project the header is showing: fetched
+  // immediately and then polled, since ticket/graph changes happen in an
+  // external terminal the app can't see directly (no more SSE stream to
+  // react to). With no project resolved yet, nothing is fetched at all.
+  //
+  // Having the poll live in an effect that *depends on* currentProject.id is
+  // what makes "the header and the list always agree" structural rather than
+  // something each call site has to remember: switching projects tears the
+  // old interval down (cleanup) and starts one for the new id, so no request
+  // for the previous project can still be in flight on a timer.
+  useEffect(() => {
+    const projectId = currentProject?.id ?? '';
+    fetchAllTickets(projectId);
+    if (!projectId) return;
+    const interval = setInterval(() => fetchAllTickets(projectId), 15000);
+    return () => clearInterval(interval);
+  }, [currentProject?.id, fetchAllTickets]);
 
   // Consumes the `?newProject=1&workDir=<dir>` query the `graph-engine ui`
   // CLI command (the `/ui` slash command's backend) appends to the root URL
@@ -351,7 +400,8 @@ export const App: React.FC = () => {
     // apply to the new one.
     setFilterLabelIds([]);
     setPage(1);
-    fetchAllTickets();
+    // No explicit fetch: the ticket-list effect keys on currentProject.id,
+    // so setCurrentProject above already re-points it at the new project.
   };
 
   // ProjectSetupModal's "create new" path: the POST already happened there.
@@ -372,7 +422,7 @@ export const App: React.FC = () => {
     setFilterLabelIds([]);
     setPage(1);
     await fetchProjects();
-    fetchAllTickets();
+    // The ticket-list effect follows setCurrentProject; see switchToProject.
   };
 
   const handleToggleExpand = (id: string) => {
@@ -390,7 +440,7 @@ export const App: React.FC = () => {
   // form-to-REST path - that decides what a "created ticket" looks like.
   // It also deliberately does NOT trigger refine/graph-building afterward:
   // those are separate, later steps in the ticket lifecycle now.
-  const { isLaunching: isCreating, lastMessage: createStatus, launch: runCreateTicket, reset: resetCreateStatus } = useClaudeLaunch(fetchAllTickets);
+  const { isLaunching: isCreating, lastMessage: createStatus, launch: runCreateTicket, reset: resetCreateStatus } = useClaudeLaunch(refreshTickets);
 
   // Empty/whitespace-only requests never reach here: CreateTicketModal guards
   // both the button and the Cmd/Ctrl+Enter path. Returns whether the launch
@@ -656,7 +706,7 @@ export const App: React.FC = () => {
 
           <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400 text-xs">
             <button
-              onClick={fetchAllTickets}
+              onClick={refreshTickets}
               disabled={loading}
               className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition"
               title={t('toolbar.refreshTitle')}
@@ -709,7 +759,19 @@ export const App: React.FC = () => {
 
         {/* Tickets Accordion List */}
         <div>
-          {!currentProject ? (
+          {/* Three states, not two (DFLT-00106): until GET
+              /api/current-project has answered, the list is *unknown*, not
+              empty -- showing "no project has been created yet" plus a
+              create button to somebody who does have one, for as long as
+              that request takes, would invite them to create a duplicate. */}
+          {!isCurrentProjectResolved ? (
+            <div
+              className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm"
+              aria-busy="true"
+            >
+              {t('emptyState.loadingTickets')}
+            </div>
+          ) : !currentProject ? (
             <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm space-y-3">
               <p>{t('projectSwitcher.noProjectYet')}</p>
               <button
@@ -735,7 +797,7 @@ export const App: React.FC = () => {
                   ticket={ticket}
                   isExpanded={expandedTicketIds.has(ticket.id)}
                   onToggleExpand={() => handleToggleExpand(ticket.id)}
-                  onRefresh={fetchAllTickets}
+                  onRefresh={refreshTickets}
                   myName={myName}
                   projectLabels={projectLabels}
                 />
@@ -808,7 +870,7 @@ export const App: React.FC = () => {
         onLabelsChanged={() => {
           // A rename/recolor/delete shows on tickets, so re-fetch both.
           refreshProjectLabels();
-          fetchAllTickets();
+          refreshTickets();
         }}
       />
 

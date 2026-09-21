@@ -114,6 +114,33 @@ type FileConfig struct {
 	// with no entry simply has no local path ("未設定"). Read it through
 	// ProjectPath and write it through SetProjectPath / Update.
 	ProjectPaths map[string]string `json:"projectPaths,omitempty"`
+
+	// CurrentProjectID is this environment's currently-selected project --
+	// what the Web UI's header shows, what `graph-engine use-project` sets,
+	// and what POST /api/tickets and create-ticket fall back to when no
+	// project is given (DFLT-00106). Like ProjectPaths it lives here rather
+	// than in the DB: "which project am I looking at right now" is a
+	// property of one person at one machine, while the DB (a MySQL or an
+	// HTTP data source possibly shared by a whole team) holds the projects
+	// themselves. It used to be app_state.current_project_id, a single
+	// shared row, so a teammate switching projects silently changed what
+	// everyone else's ticket list and `create-ticket` targeted.
+	//
+	// It is a *string, not a string, because three states have to be told
+	// apart and omitempty can only express two:
+	//
+	//   nil  -- never set in this environment; internal/currentproject.Get
+	//           inherits app_state.current_project_id from the DB once and
+	//           writes it here (the one-way migration for environments that
+	//           predate DFLT-00106).
+	//   ""   -- deliberately deselected (e.g. the current project was
+	//           deleted). Authoritative: the migration must NOT re-run, or
+	//           every deletion would resurrect the stale shared DB value.
+	//   id   -- this environment's current project.
+	//
+	// Read and write it through internal/currentproject, never directly, so
+	// that distinction is applied in exactly one place.
+	CurrentProjectID *string `json:"currentProjectId,omitempty"`
 }
 
 // DefaultHost is the interface `serve` binds to when nothing overrides it:

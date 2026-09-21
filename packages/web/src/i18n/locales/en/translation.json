@@ -50,7 +50,8 @@
     "nodeProgress": "Node Progress"
   },
   "emptyState": {
-    "noTicketsMatch": "No tickets match the current filters"
+    "noTicketsMatch": "No tickets match the current filters",
+    "loadingTickets": "Loading tickets..."
   },
   "pagination": {
     "range": "Showing {{from}}-{{to}} of {{total}}",

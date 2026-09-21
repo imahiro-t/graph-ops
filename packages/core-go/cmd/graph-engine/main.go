@@ -20,6 +20,7 @@ import (
 
 	"github.com/graph-ops/core-go/internal/artifactcontent"
 	"github.com/graph-ops/core-go/internal/config"
+	"github.com/graph-ops/core-go/internal/currentproject"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/httpserver"
@@ -92,7 +93,7 @@ func run(cmd string, args []string) error {
 	case "list-projects":
 		return cmdListProjects(repo, rc)
 	case "use-project":
-		return cmdUseProject(repo, args)
+		return cmdUseProject(repo, rc, args)
 	case "refine-ticket":
 		return cmdRefineTicket(eng, args)
 	case "close-ticket":
@@ -203,9 +204,13 @@ Commands:
                                            omitted -> cwd, relative -> resolved against the cwd.
                                            Does not switch the current project; follow up with use-project)
   list-projects                           (each project with this environment's "local_path", "" if unset)
-  use-project <projectId>                (sets the current project; POST /api/tickets and GET /api/tickets
-                                           default to whichever project is current. create-ticket uses it
-                                           only as a fallback when the cwd matches no project's local path)
+  use-project <projectId>                (sets this environment's current project, saved to
+                                           graph-config.json's currentProjectId (not the DB), so it never
+                                           changes what anyone else sharing the same data source sees.
+                                           POST /api/tickets defaults to it; GET /api/tickets does not --
+                                           that one needs an explicit ?project_id= or ?all=true.
+                                           create-ticket uses it only as a fallback when the cwd matches
+                                           no project's local path)
   create-ticket <title> [description|-] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...
                                           (description "-" -> read from stdin and saved byte for byte;
                                            prefer it for long Markdown or text with quotes, $ or
@@ -492,10 +497,14 @@ func readDescriptionArg(arg, usage string) (string, error) {
 //
 // This deliberately differs from POST /api/tickets (handleCreateTicket),
 // which resolves only via the current project: an HTTP request carries no
-// working directory, whereas the CLI always runs somewhere, and the global
-// current project can be switched from the Web UI at any time independently
-// of where the CLI is invoked (DFLT-00025). Do not "fix" one to match the
-// other.
+// working directory, whereas the CLI always runs somewhere, and the current
+// project can be switched from the Web UI at any time independently of where
+// the CLI is invoked (DFLT-00025). Do not "fix" one to match the other.
+//
+// Since DFLT-00106 that current project is this environment's own
+// (graph-config.json's currentProjectId) rather than a row shared with
+// everyone else on the same data source -- so step 2 can no longer send a
+// ticket into a project somebody else happened to select last.
 //
 // --priority (DFLT-00059) is validated with domain.ParseTicketPriority
 // before anything is written, same as the HTTP API's create/update paths --
@@ -585,7 +594,9 @@ func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc run
 		return printJSON(ticket)
 	}
 
-	project, source, err := resolveCreateTicketProject(repo, rc.WorkDir, rc.ProjectPaths)
+	project, source, err := resolveCreateTicketProject(repo, rc.WorkDir, rc.ProjectPaths, func() (string, error) {
+		return currentproject.Get(rc.WorkDir, rc.HomeDir, repo, nil)
+	})
 	if err != nil {
 		return err
 	}
@@ -679,7 +690,16 @@ func cmdListProjects(repo store.GraphRepository, rc runtimeConfig) error {
 	return printJSON(out)
 }
 
-func cmdUseProject(repo store.GraphRepository, args []string) error {
+// cmdUseProject selects a project for THIS environment. Since DFLT-00106 the
+// selection is written to this machine's graph-config.json
+// (currentProjectId, via internal/currentproject) instead of the DB's
+// app_state -- on a MySQL or HTTP data source shared with a team, that DB row
+// was one global variable, so running use-project here used to change where a
+// colleague's `create-ticket` wrote and which tickets their Web UI listed.
+//
+// An unknown project ID fails before anything is written, so a typo leaves
+// the previous selection intact.
+func cmdUseProject(repo store.GraphRepository, rc runtimeConfig, args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: graph-engine use-project <projectId>")
 	}
@@ -690,7 +710,7 @@ func cmdUseProject(repo store.GraphRepository, args []string) error {
 	if project == nil {
 		return fmt.Errorf("project %s not found", args[0])
 	}
-	if err := repo.SetCurrentProjectID(project.ID); err != nil {
+	if err := currentproject.Set(rc.WorkDir, rc.HomeDir, project.ID); err != nil {
 		return err
 	}
 	return printJSON(project)

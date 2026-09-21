@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/graph-ops/core-go/internal/currentproject"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
@@ -213,16 +214,26 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteProject deletes the project and every ticket under it
 // (cascading to their nodes/edges/artifacts -- see
-// store.SQLiteRepository.DeleteProject), clearing the "current project"
-// pointer first if it referenced this project. Always 200 (with
+// store.SQLiteRepository.DeleteProject). Always 200 (with
 // {"success":true}), even if the project didn't exist -- deletion is
 // idempotent, same as handleDeleteTicket.
 //
-// After the DB delete, this environment's projectPaths entry for the
-// project is removed on a best-effort basis: failing to do so is only
-// logged, never turned into an error response, because the project is
-// already gone and a leftover entry for an unknown ID is ignored everywhere
-// (see runtimeconfig.FindProjectIDForDir).
+// After the DB delete, this environment's graph-config.json is tidied up on
+// a best-effort basis: the project's projectPaths entry is dropped, and its
+// currentProjectId is cleared if it named the deleted project. Both are one
+// runtimeconfig.Update -- two would leave a window where the file names a
+// project that is already gone, and would take the file lock twice for one
+// deletion. Failing is only logged, never turned into an error response,
+// because the project is already gone and both leftovers are handled
+// everywhere they are read (an unknown projectPaths ID is ignored -- see
+// runtimeconfig.FindProjectIDForDir -- and a dangling currentProjectId reads
+// as "no project selected"; see handleGetCurrentProject).
+//
+// Clearing currentProjectId only reaches THIS environment's file
+// (DFLT-00106). Anybody else who had the same project selected keeps a
+// dangling ID until they select something else; that is the price of the
+// setting being per-environment, and it is why every reader of it has a
+// defined behaviour for an ID that names nothing.
 func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := s.repo.DeleteProject(id); err != nil {
@@ -230,16 +241,23 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, _, err := runtimeconfig.Update(s.cfg.WorkDir, s.cfg.HomeDir, func(cfg *runtimeconfig.FileConfig) error {
-		if _, ok := cfg.ProjectPaths[id]; !ok {
+		_, hasPath := cfg.ProjectPaths[id]
+		wasCurrent := currentproject.IsCurrent(*cfg, id)
+		if !hasPath && !wasCurrent {
 			return errNothingToClean
 		}
-		delete(cfg.ProjectPaths, id)
-		if len(cfg.ProjectPaths) == 0 {
-			cfg.ProjectPaths = nil
+		if hasPath {
+			delete(cfg.ProjectPaths, id)
+			if len(cfg.ProjectPaths) == 0 {
+				cfg.ProjectPaths = nil
+			}
+		}
+		if wasCurrent {
+			currentproject.SetIn(cfg, "")
 		}
 		return nil
 	}); err != nil && !errors.Is(err, errNothingToClean) {
-		s.logger.Warn("failed to remove deleted project's local path from graph-config.json",
+		s.logger.Warn("failed to clean up the deleted project's entries in graph-config.json",
 			slog.String("event", "project_local_path_cleanup_failed"),
 			slog.String("project_id", id),
 			slog.String("error", err.Error()))
@@ -248,15 +266,34 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 }
 
 // errNothingToClean aborts handleDeleteProject's Update without rewriting
-// graph-config.json when there is no entry to remove.
-var errNothingToClean = errors.New("no projectPaths entry to remove")
+// graph-config.json when the deleted project has neither a projectPaths
+// entry nor is this environment's current project.
+var errNothingToClean = errors.New("nothing to clean up in graph-config.json")
+
+// currentProjectID returns this environment's current project ID from
+// graph-config.json (see internal/currentproject), reading the file fresh on
+// every call rather than caching it in s.cfg at startup: `graph-engine
+// use-project` is a separate process writing the same file, and its change
+// has to show up on the next request, not the next restart.
+func (s *Server) currentProjectID() (string, error) {
+	return currentproject.Get(s.cfg.WorkDir, s.cfg.HomeDir, s.repo, s.logger)
+}
 
 // handleGetCurrentProject returns the currently-selected project, or JSON
 // null if none has ever been selected (a brand-new install before its first
 // `create-project`/POST /api/projects, see the ticket's completion
 // criteria).
+//
+// JSON null is also the answer when currentProjectId names a project that no
+// longer exists -- a project another member deleted from the shared DB
+// leaves a dangling ID behind in every other environment's
+// graph-config.json. The Web UI renders that as "no project selected", which
+// is exactly right, and the ID is deliberately left in the file rather than
+// rewritten by a GET. Note that the write side does NOT match: POST
+// /api/tickets and create-ticket fail loudly on the same dangling ID instead
+// of quietly writing somewhere else (DFLT-00106).
 func (s *Server) handleGetCurrentProject(w http.ResponseWriter, r *http.Request) {
-	id, err := s.repo.GetCurrentProjectID()
+	id, err := s.currentProjectID()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -277,6 +314,12 @@ func (s *Server) handleGetCurrentProject(w http.ResponseWriter, r *http.Request)
 	s.writeProject(w, http.StatusOK, *project)
 }
 
+// handleSetCurrentProject selects a project for THIS environment: the ID is
+// stored in this machine's graph-config.json (see internal/currentproject),
+// never in the DB, so switching projects here does not move anybody else's
+// ticket list (DFLT-00106). The request and response shapes are unchanged.
+//
+// An unknown project_id is a 404 and nothing is written.
 func (s *Server) handleSetCurrentProject(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ProjectID string `json:"project_id"`
@@ -298,7 +341,7 @@ func (s *Server) handleSetCurrentProject(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusNotFound, domain.NewAPIError(domain.ErrCodeProjectNotFound, "project not found: %s", body.ProjectID))
 		return
 	}
-	if err := s.repo.SetCurrentProjectID(project.ID); err != nil {
+	if err := currentproject.Set(s.cfg.WorkDir, s.cfg.HomeDir, project.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/graph-ops/core-go/internal/currentproject"
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 )
 
 // sandboxRC is a runtimeConfig whose graph-config.json lookup (WorkDir, then
 // HomeDir) is confined to fresh temp dirs, for commands that write the local
-// settings file (create-project's projectPaths).
+// settings file (create-project's projectPaths, use-project's currentProjectId).
 func sandboxRC(t *testing.T) runtimeConfig {
 	t.Helper()
 	return runtimeConfig{WorkDir: t.TempDir(), HomeDir: t.TempDir()}
@@ -23,6 +24,19 @@ func savedProjectPaths(t *testing.T, rc runtimeConfig) map[string]string {
 		t.Fatalf("runtimeconfig.Load: %v", err)
 	}
 	return cfg.ProjectPaths
+}
+
+// savedCurrentProjectID returns graph-config.json's currentProjectId as
+// stored: nil when the key is absent ("never set here, inherit from the data
+// source once"), otherwise a pointer to the value -- including "", which
+// means "deliberately deselected" (DFLT-00106).
+func savedCurrentProjectID(t *testing.T, rc runtimeConfig) *string {
+	t.Helper()
+	cfg, _, err := runtimeconfig.Load(rc.WorkDir, rc.HomeDir)
+	if err != nil {
+		t.Fatalf("runtimeconfig.Load: %v", err)
+	}
+	return cfg.CurrentProjectID
 }
 
 // TestCmdCreateProject_DefaultsWorkdirAndAutoPrefix covers create-project
@@ -101,32 +115,112 @@ func TestCmdCreateProject_RelativeWorkdirResolvedAgainstCwd(t *testing.T) {
 // TestCmdUseProject_SetsCurrentProject covers use-project switching the
 // current project, and create-ticket subsequently defaulting to it without
 // an explicit --project flag.
+//
+// Since DFLT-00106 the selection goes to this environment's
+// graph-config.json rather than the DB's app_state, so the assertion is on
+// the settings file -- and on the DB row NOT moving, which is what keeps a
+// colleague on the same shared data source out of it.
 func TestCmdUseProject_SetsCurrentProject(t *testing.T) {
 	repo := newTestRepo(t)
 	eng := engine.New(repo)
+	rc := sandboxRC(t)
 
 	captureStdout(t, func() {
-		if err := cmdCreateProject(repo, sandboxRC(t), []string{"P", "--prefix", "ABCDE", "--workdir", t.TempDir()}); err != nil {
+		if err := cmdCreateProject(repo, rc, []string{"P", "--prefix", "ABCDE", "--workdir", t.TempDir()}); err != nil {
 			t.Fatalf("cmdCreateProject: %v", err)
 		}
 	})
 	projects, _ := repo.ListProjects()
 	proj := projects[0]
 
-	if err := cmdUseProject(repo, []string{proj.ID}); err != nil {
-		t.Fatalf("cmdUseProject: %v", err)
+	captureStdout(t, func() {
+		if err := cmdUseProject(repo, rc, []string{proj.ID}); err != nil {
+			t.Fatalf("cmdUseProject: %v", err)
+		}
+	})
+	if cur := savedCurrentProjectID(t, rc); cur == nil || *cur != proj.ID {
+		t.Fatalf("expected graph-config.json's currentProjectId to be %q, got %v", proj.ID, cur)
 	}
-	cur, err := repo.GetCurrentProjectID()
-	if err != nil || cur != proj.ID {
-		t.Fatalf("expected current project %q, got %q (err=%v)", proj.ID, cur, err)
+	if cur, err := repo.GetCurrentProjectID(); err != nil || cur != "" {
+		t.Fatalf("use-project must not write the shared data source, got %q (err=%v)", cur, err)
 	}
 
-	if err := cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"title"}); err != nil {
+	if err := cmdCreateTicket(eng, repo, rc, []string{"title"}); err != nil {
 		t.Fatalf("cmdCreateTicket without --project should default to current project: %v", err)
 	}
 	tickets, _ := repo.ListTicketsByProject(proj.ID)
 	if len(tickets) != 1 || tickets[0].ID != "ABCDE-00001" {
 		t.Fatalf("expected ticket ABCDE-00001 under the current project, got %+v", tickets)
+	}
+}
+
+// TestCmdUseProject_UnknownProjectKeepsSelection covers a typo'd id failing
+// before anything is written, leaving the previous selection intact.
+func TestCmdUseProject_UnknownProjectKeepsSelection(t *testing.T) {
+	repo := newTestRepo(t)
+	rc := sandboxRC(t)
+	proj, err := repo.CreateProject("P", "ABCDE")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if err := currentproject.Set(rc.WorkDir, rc.HomeDir, proj.ID); err != nil {
+		t.Fatalf("currentproject.Set: %v", err)
+	}
+
+	if err := cmdUseProject(repo, rc, []string{"proj-missing"}); err == nil {
+		t.Fatal("expected use-project with an unknown project id to fail")
+	}
+	if cur := savedCurrentProjectID(t, rc); cur == nil || *cur != proj.ID {
+		t.Fatalf("expected currentProjectId to stay %q, got %v", proj.ID, cur)
+	}
+}
+
+// TestCmdUseProject_DoesNotAffectAnotherEnvironment is DFLT-00106's headline
+// completion criterion at the CLI level: two environments (two
+// graph-config.json files) on ONE data source, one of them running
+// use-project, and the other's `create-ticket` without --project still
+// landing in its own project. Before this, both read the same app_state row.
+func TestCmdUseProject_DoesNotAffectAnotherEnvironment(t *testing.T) {
+	repo := newTestRepo(t)
+	eng := engine.New(repo)
+	envA, envB := sandboxRC(t), sandboxRC(t)
+
+	alpha, err := repo.CreateProject("Alpha", "ALPHA")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	beta, err := repo.CreateProject("Beta", "BETA0")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if err := currentproject.Set(envB.WorkDir, envB.HomeDir, beta.ID); err != nil {
+		t.Fatalf("currentproject.Set: %v", err)
+	}
+
+	captureStdout(t, func() {
+		if err := cmdUseProject(repo, envA, []string{alpha.ID}); err != nil {
+			t.Fatalf("cmdUseProject: %v", err)
+		}
+	})
+
+	// Env B's cwd (a fresh temp dir) matches no project's local path, so
+	// resolution falls through to env B's own current project.
+	captureStderr(t, func() {
+		captureStdout(t, func() {
+			if err := cmdCreateTicket(eng, repo, envB, []string{"タイトル"}); err != nil {
+				t.Fatalf("cmdCreateTicket: %v", err)
+			}
+		})
+	})
+
+	if tickets, err := repo.ListTicketsByProject(beta.ID); err != nil || len(tickets) != 1 {
+		t.Errorf("expected env B's ticket in Beta, got %+v (err=%v)", tickets, err)
+	}
+	if tickets, err := repo.ListTicketsByProject(alpha.ID); err != nil || len(tickets) != 0 {
+		t.Errorf("env A's use-project must not have redirected env B, got %+v (err=%v)", tickets, err)
+	}
+	if got := savedCurrentProjectID(t, envB); got == nil || *got != beta.ID {
+		t.Errorf("env B's currentProjectId = %v, want it unchanged at %q", got, beta.ID)
 	}
 }
 
@@ -137,7 +231,7 @@ func TestCmdCreateTicket_NoCurrentProjectFailsWithoutFlag(t *testing.T) {
 	repo := newTestRepo(t)
 	eng := engine.New(repo)
 
-	err := cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"title"})
+	err := cmdCreateTicket(eng, repo, sandboxRC(t), []string{"title"})
 	if err == nil {
 		t.Fatal("expected an error when no project is selected and none is passed via --project")
 	}
@@ -153,7 +247,7 @@ func TestCmdCreateTicket_ExplicitProjectFlag(t *testing.T) {
 		t.Fatalf("CreateProject: %v", err)
 	}
 
-	if err := cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"title", "desc", "--project", proj.ID}); err != nil {
+	if err := cmdCreateTicket(eng, repo, sandboxRC(t), []string{"title", "desc", "--project", proj.ID}); err != nil {
 		t.Fatalf("cmdCreateTicket: %v", err)
 	}
 	tickets, _ := repo.ListTicketsByProject(proj.ID)

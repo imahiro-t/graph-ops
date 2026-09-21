@@ -32,7 +32,7 @@ func TestCmdCreateTicket_PriorityFlag(t *testing.T) {
 
 			var runErr error
 			out := captureStdout(t, func() {
-				runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, tc.args(projectID))
+				runErr = cmdCreateTicket(eng, repo, sandboxRC(t), tc.args(projectID))
 			})
 			if runErr != nil {
 				t.Fatalf("cmdCreateTicket: %v", runErr)
@@ -56,7 +56,7 @@ func TestCmdCreateTicket_NoPriorityFlagDefaultsToMedium(t *testing.T) {
 	eng := engine.New(repo)
 
 	out := captureStdout(t, func() {
-		if err := cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"t1", "--project", projectID}); err != nil {
+		if err := cmdCreateTicket(eng, repo, sandboxRC(t), []string{"t1", "--project", projectID}); err != nil {
 			t.Fatalf("cmdCreateTicket: %v", err)
 		}
 	})
@@ -79,7 +79,7 @@ func TestCmdCreateTicket_EachPriorityValue(t *testing.T) {
 			repo, projectID := newTestRepoWithProject(t)
 			eng := engine.New(repo)
 			out := captureStdout(t, func() {
-				if err := cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"t1", "--project", projectID, "--priority", p}); err != nil {
+				if err := cmdCreateTicket(eng, repo, sandboxRC(t), []string{"t1", "--project", projectID, "--priority", p}); err != nil {
 					t.Fatalf("cmdCreateTicket: %v", err)
 				}
 			})
@@ -98,7 +98,7 @@ func TestCmdCreateTicket_InvalidPriorityIsUsageErrorAndCreatesNothing(t *testing
 	repo, projectID := newTestRepoWithProject(t)
 	eng := engine.New(repo)
 
-	err := cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"t1", "--project", projectID, "--priority", "URGENT"})
+	err := cmdCreateTicket(eng, repo, sandboxRC(t), []string{"t1", "--project", projectID, "--priority", "URGENT"})
 	if err == nil || !strings.Contains(err.Error(), createTicketUsage) {
 		t.Fatalf("expected the create-ticket usage error, got %v", err)
 	}

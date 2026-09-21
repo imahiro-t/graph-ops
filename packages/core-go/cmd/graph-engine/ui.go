@@ -300,10 +300,15 @@ func fetchProjectsViaAPI(baseURL string) ([]uiProject, error) {
 }
 
 // switchCurrentProjectViaAPI calls the running server's own PUT
-// /api/current-project (rather than repo.SetCurrentProjectID directly), so
-// this write always goes through the one process actually holding the DB
-// connection the rest of the running server uses -- consistent with how the
-// Web UI's own project switcher does it.
+// /api/current-project (rather than writing the selection here), so this
+// write always goes through the one process actually holding the DB
+// connection and the graph-config.json the rest of the running server uses
+// -- consistent with how the Web UI's own project switcher does it.
+//
+// Since DFLT-00106 the selection is stored in graph-config.json rather than
+// the DB, which makes going through the server more important, not less:
+// this CLI and the `serve` process are two processes writing one file, and
+// runtimeconfig's mutex only serializes writers inside a single process.
 func switchCurrentProjectViaAPI(baseURL, projectID string) error {
 	body, err := json.Marshal(map[string]string{"project_id": projectID})
 	if err != nil {

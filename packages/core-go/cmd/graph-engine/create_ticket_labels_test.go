@@ -64,7 +64,7 @@ func TestCmdCreateTicket_MultipleLabels(t *testing.T) {
 	eng := engine.New(repo)
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"--label", "バグ", "ログイン不具合", "説明", "--label", "UI", "--project", projectID})
+		runErr = cmdCreateTicket(eng, repo, sandboxRC(t), []string{"--label", "バグ", "ログイン不具合", "説明", "--label", "UI", "--project", projectID})
 	})
 	if runErr != nil {
 		t.Fatalf("cmdCreateTicket: %v", runErr)
@@ -98,7 +98,7 @@ func TestCmdCreateTicket_LabelFlagPositions(t *testing.T) {
 			}
 			var runErr error
 			out := captureStdout(t, func() {
-				runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, resolved)
+				runErr = cmdCreateTicket(eng, repo, sandboxRC(t), resolved)
 			})
 			if runErr != nil {
 				t.Fatalf("cmdCreateTicket: %v", runErr)
@@ -119,7 +119,7 @@ func TestCmdCreateTicket_LabelNamesTrimmedCaseInsensitiveDeduplicated(t *testing
 	eng := engine.New(repo)
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"T", "D", "--label", "bug", "--label", " BUG ", "--project", projectID})
+		runErr = cmdCreateTicket(eng, repo, sandboxRC(t), []string{"T", "D", "--label", "bug", "--label", " BUG ", "--project", projectID})
 	})
 	if runErr != nil {
 		t.Fatalf("cmdCreateTicket: %v", runErr)
@@ -133,7 +133,7 @@ func TestCmdCreateTicket_NoLabelFlagGivesEmptyLabels(t *testing.T) {
 	repo, projectID := cliLabelSetup(t)
 	eng := engine.New(repo)
 	out := captureStdout(t, func() {
-		if err := cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"T", "D", "--project", projectID}); err != nil {
+		if err := cmdCreateTicket(eng, repo, sandboxRC(t), []string{"T", "D", "--project", projectID}); err != nil {
 			t.Fatalf("cmdCreateTicket: %v", err)
 		}
 	})
@@ -165,7 +165,7 @@ func TestCmdCreateTicket_UnregisteredLabelIsErrorAndCreatesNothing(t *testing.T)
 	} {
 		var runErr error
 		out := captureStdout(t, func() {
-			runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, args)
+			runErr = cmdCreateTicket(eng, repo, sandboxRC(t), args)
 		})
 		var apiErr *domain.APIError
 		if runErr == nil || !errors.As(runErr, &apiErr) || apiErr.Code != domain.ErrCodeLabelNotFound {
@@ -198,7 +198,7 @@ func TestCmdLabelFlagWithoutValueIsUsageError(t *testing.T) {
 	}
 	before := countProjectTickets(t, repo, projectID)
 
-	err = cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"T", "D", "--label"})
+	err = cmdCreateTicket(eng, repo, sandboxRC(t), []string{"T", "D", "--label"})
 	if err == nil || !strings.Contains(err.Error(), "usage: graph-engine create-ticket") || !strings.Contains(err.Error(), "--label requires a value") {
 		t.Errorf("create-ticket: expected a usage error, got %v", err)
 	}

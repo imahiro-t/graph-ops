@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/graph-ops/core-go/internal/currentproject"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
@@ -24,10 +26,11 @@ const testHost = "127.0.0.1:49173"
 
 // newTestServer sets up a Server backed by a fresh SQLite DB and a temp
 // ArtifactsDir, mirroring internal/engine's newTestEngine helper. It also
-// creates a project and selects it as current, so tests that POST to
-// /api/tickets without an explicit project_id (as every test here predates
-// project support and does) keep working unchanged; the project's ID is
-// returned for tests that call repo.CreateTicket directly.
+// creates a project and selects it as this environment's current one, so
+// tests that POST to /api/tickets without an explicit project_id (as every
+// test here predates project support and does) keep working unchanged; the
+// project's ID is returned for tests that call repo.CreateTicket directly
+// and for the ?project_id= a GET /api/tickets now needs (DFLT-00106).
 func newTestServer(t *testing.T) (*Server, store.GraphRepository, string) {
 	t.Helper()
 	repo, err := store.NewSQLiteRepository(filepath.Join(t.TempDir(), "test.db"))
@@ -41,19 +44,34 @@ func newTestServer(t *testing.T) (*Server, store.GraphRepository, string) {
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	if err := repo.SetCurrentProjectID(proj.ID); err != nil {
-		t.Fatalf("SetCurrentProjectID: %v", err)
-	}
 	eng := engine.New(repo)
-	// HomeDir is sandboxed so graph-config.json (projectPaths) is written
-	// under a temp dir; the project gets its own temp local path, standing in
-	// for the DB work_dir it had before DFLT-00080.
-	cfg := Config{ArtifactsDir: t.TempDir(), HomeDir: t.TempDir()}
+	// Both WorkDir and HomeDir are sandboxed, so every graph-config.json
+	// candidate path (cwd first, then home -- see
+	// runtimeconfig.CandidatePaths) lands under a temp dir. WorkDir used to
+	// be left empty, which made the cwd candidate the RELATIVE path
+	// "graph-config.json": harmless while only projectPaths was written from
+	// an absolute-HomeDir path, but since DFLT-00106 the handlers write
+	// currentProjectId too, and a test doing so would have created a
+	// graph-config.json inside the repository itself.
+	cfg := Config{ArtifactsDir: t.TempDir(), WorkDir: t.TempDir(), HomeDir: t.TempDir()}
 	s := New(repo, eng, cfg)
+	// The project gets its own temp local path, standing in for the DB
+	// work_dir it had before DFLT-00080.
 	if _, err := runtimeconfig.SetProjectPath(cfg.WorkDir, cfg.HomeDir, proj.ID, t.TempDir()); err != nil {
 		t.Fatalf("SetProjectPath: %v", err)
 	}
+	if err := currentproject.Set(cfg.WorkDir, cfg.HomeDir, proj.ID); err != nil {
+		t.Fatalf("currentproject.Set: %v", err)
+	}
 	return s, repo, proj.ID
+}
+
+// listTicketsPath is GET /api/tickets scoped to one project. Since
+// DFLT-00106 the endpoint has no server-side default project left, so every
+// test that wants a ticket back has to name the project -- exactly as the
+// Web UI now does.
+func listTicketsPath(projectID string) string {
+	return "/api/tickets?project_id=" + url.QueryEscape(projectID)
 }
 
 // testProjectLocalPath returns projectID's local path in s's graph-config.json,

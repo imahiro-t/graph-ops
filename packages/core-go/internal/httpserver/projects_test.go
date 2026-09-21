@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/graph-ops/core-go/internal/currentproject"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
@@ -38,6 +39,28 @@ func newBareTestServer(t *testing.T) (*Server, store.GraphRepository) {
 	eng := engine.New(repo)
 	cfg := Config{ArtifactsDir: t.TempDir(), WorkDir: t.TempDir(), HomeDir: t.TempDir()}
 	return New(repo, eng, cfg), repo
+}
+
+// setCurrent selects a project for s's environment the way PUT
+// /api/current-project and `graph-engine use-project` do: in
+// graph-config.json, not in the DB (DFLT-00106).
+func setCurrent(t *testing.T, s *Server, projectID string) {
+	t.Helper()
+	if err := currentproject.Set(s.cfg.WorkDir, s.cfg.HomeDir, projectID); err != nil {
+		t.Fatalf("currentproject.Set(%q): %v", projectID, err)
+	}
+}
+
+// currentProjectIDOnDisk returns s's graph-config.json currentProjectId as
+// stored: nil when the key is absent (never set here), otherwise a pointer
+// to the value -- "" included, which means "deliberately deselected".
+func currentProjectIDOnDisk(t *testing.T, s *Server) *string {
+	t.Helper()
+	cfg, _, err := runtimeconfig.Load(s.cfg.WorkDir, s.cfg.HomeDir)
+	if err != nil {
+		t.Fatalf("runtimeconfig.Load: %v", err)
+	}
+	return cfg.CurrentProjectID
 }
 
 // projectPathsOnDisk loads s's graph-config.json projectPaths.
@@ -527,34 +550,310 @@ func TestConcurrentLocalPathAndAppSettingsWritesDoNotLoseUpdates(t *testing.T) {
 	}
 }
 
-// Scenario: switching projects shows only that project's tickets in the
-// list, and ?all=true fetches across every project.
-func TestHandleListTickets_ScopedToCurrentProject(t *testing.T) {
+// DFLT-00106: GET /api/tickets is scoped by the caller's ?project_id=, never
+// by a current project the server picks -- ?all=true is the only way to
+// cross projects, and asking for neither gets an empty list rather than
+// somebody's idea of a default.
+func TestHandleListTickets_ScopedByProjectIDQuery(t *testing.T) {
 	s, repo := newBareTestServer(t)
 	a, _ := repo.CreateProject("Project A", "")
 	b, _ := repo.CreateProject("Project B", "")
 	ta, _ := repo.CreateTicket(a.ID, domain.Ticket{Title: "A-1", Status: domain.TicketTODO})
 	tb, _ := repo.CreateTicket(b.ID, domain.Ticket{Title: "B-1", Status: domain.TicketTODO})
 
-	repo.SetCurrentProjectID(a.ID)
-	rec := doJSON(t, s, http.MethodGet, "/api/tickets", nil)
+	// The current project of this environment is deliberately set to A and
+	// must not influence any of the answers below.
+	setCurrent(t, s, a.ID)
+
+	list := func(path string) []domain.Ticket {
+		t.Helper()
+		rec := doJSON(t, s, http.MethodGet, path, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: expected 200, got %d: %s", path, rec.Code, rec.Body.String())
+		}
+		var out []domain.Ticket
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("GET %s: decode: %v (%s)", path, err, rec.Body.String())
+		}
+		return out
+	}
+
+	if got := list(listTicketsPath(a.ID)); len(got) != 1 || got[0].ID != ta.ID {
+		t.Fatalf("expected only ticket %q for project A, got %+v", ta.ID, got)
+	}
+	if got := list(listTicketsPath(b.ID)); len(got) != 1 || got[0].ID != tb.ID {
+		t.Fatalf("expected only ticket %q for project B, got %+v", tb.ID, got)
+	}
+	if got := list("/api/tickets?all=true"); len(got) != 2 {
+		t.Fatalf("expected 2 tickets with ?all=true, got %d", len(got))
+	}
+	// all=true still wins over an explicit project_id (unchanged behaviour).
+	if got := list(listTicketsPath(b.ID) + "&all=true"); len(got) != 2 {
+		t.Fatalf("expected ?all=true to beat project_id, got %d", len(got))
+	}
+	// No project named: an empty list, NOT the current project's tickets.
+	if got := list("/api/tickets"); len(got) != 0 {
+		t.Fatalf("expected [] without project_id, got %+v", got)
+	}
+	if rec := doJSON(t, s, http.MethodGet, "/api/tickets", nil); rec.Body.String() != "[]\n" {
+		t.Errorf("expected a JSON empty array, got %q", rec.Body.String())
+	}
+	// A project_id naming nothing is an empty list too, not a fallback.
+	if got := list(listTicketsPath("proj-missing")); len(got) != 0 {
+		t.Fatalf("expected [] for an unknown project_id, got %+v", got)
+	}
+}
+
+// DFLT-00106: PUT /api/current-project stores the selection in this
+// environment's graph-config.json and leaves the data source's shared
+// app_state row alone, so a second environment on the same DB is unaffected.
+func TestHandleSetCurrentProject_WritesConfigNotDB(t *testing.T) {
+	s, repo := newBareTestServer(t)
+	a, _ := repo.CreateProject("Project A", "")
+
+	rec := doJSON(t, s, http.MethodPut, "/api/current-project", map[string]any{"project_id": a.ID})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := currentProjectIDOnDisk(t, s); got == nil || *got != a.ID {
+		t.Errorf("graph-config.json currentProjectId = %v, want %q", got, a.ID)
+	}
+	if cur, err := repo.GetCurrentProjectID(); err != nil || cur != "" {
+		t.Errorf("the shared app_state row must not be written, got %q (err=%v)", cur, err)
+	}
+}
+
+// DFLT-00106: an unknown project_id is a 404 and the previous selection
+// stays put.
+func TestHandleSetCurrentProject_UnknownProjectKeepsSelection(t *testing.T) {
+	s, repo := newBareTestServer(t)
+	a, _ := repo.CreateProject("Project A", "")
+	setCurrent(t, s, a.ID)
+
+	rec := doJSON(t, s, http.MethodPut, "/api/current-project", map[string]any{"project_id": "proj-missing"})
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if apiErr := decodeError(t, rec); apiErr.Code != domain.ErrCodeProjectNotFound {
+		t.Errorf("expected %s, got %s", domain.ErrCodeProjectNotFound, apiErr.Code)
+	}
+	if got := currentProjectIDOnDisk(t, s); got == nil || *got != a.ID {
+		t.Errorf("currentProjectId = %v, want it unchanged at %q", got, a.ID)
+	}
+}
+
+// DFLT-00106: two environments (two graph-config.json files) on ONE data
+// source keep their own current project -- the completion criterion that
+// this whole ticket exists for. Both servers share repo; only their
+// WorkDir/HomeDir differ, exactly as two teammates on one MySQL do.
+func TestCurrentProject_IsolatedBetweenEnvironments(t *testing.T) {
+	envA, repo := newBareTestServer(t)
+	envB := New(repo, engine.New(repo), Config{ArtifactsDir: t.TempDir(), WorkDir: t.TempDir(), HomeDir: t.TempDir()})
+
+	alpha, _ := repo.CreateProject("Alpha", "")
+	beta, _ := repo.CreateProject("Beta", "")
+	gamma, _ := repo.CreateProject("Gamma", "")
+	alphaTicket, _ := repo.CreateTicket(alpha.ID, domain.Ticket{Title: "A-1", Status: domain.TicketTODO})
+	if _, err := repo.CreateTicket(gamma.ID, domain.Ticket{Title: "G-1", Status: domain.TicketTODO}); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	setCurrent(t, envA, alpha.ID)
+	setCurrent(t, envB, beta.ID)
+
+	// Environment B switches to Gamma.
+	if rec := doJSON(t, envB, http.MethodPut, "/api/current-project", map[string]any{"project_id": gamma.ID}); rec.Code != http.StatusOK {
+		t.Fatalf("env B PUT: %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Environment A still sees Alpha, in the header and in the list.
+	rec := doJSON(t, envA, http.MethodGet, "/api/current-project", nil)
+	cur, _ := decodeProject(t, rec.Body.Bytes())
+	if cur.ID != alpha.ID {
+		t.Errorf("env A current project = %q, want %q", cur.ID, alpha.ID)
+	}
+	rec = doJSON(t, envA, http.MethodGet, listTicketsPath(cur.ID), nil)
 	var list []domain.Ticket
-	json.Unmarshal(rec.Body.Bytes(), &list)
-	if len(list) != 1 || list[0].ID != ta.ID {
-		t.Fatalf("expected only ticket %q for current project A, got %+v", ta.ID, list)
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != alphaTicket.ID {
+		t.Errorf("env A list = %+v, want only %q", list, alphaTicket.ID)
 	}
 
-	repo.SetCurrentProjectID(b.ID)
-	rec = doJSON(t, s, http.MethodGet, "/api/tickets", nil)
-	json.Unmarshal(rec.Body.Bytes(), &list)
-	if len(list) != 1 || list[0].ID != tb.ID {
-		t.Fatalf("expected only ticket %q for current project B, got %+v", tb.ID, list)
+	// And a ticket created in A without an explicit project still goes to
+	// Alpha, not to whatever B selected.
+	rec = doJSON(t, envA, http.MethodPost, "/api/tickets", map[string]any{"title": "t"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("env A POST: %d: %s", rec.Code, rec.Body.String())
+	}
+	var created domain.Ticket
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if created.ProjectID != alpha.ID {
+		t.Errorf("env A created the ticket in %q, want %q", created.ProjectID, alpha.ID)
+	}
+}
+
+// DFLT-00106: an environment with no currentProjectId inherits the data
+// source's app_state value exactly once, then stops reading it. Serving the
+// GET is what triggers the inheritance, which is accepted (see the Gherkin
+// spec); what must not happen is the DB value winning again afterwards.
+func TestCurrentProject_InheritsDBValueOnce(t *testing.T) {
+	s, repo := newBareTestServer(t)
+	alpha, _ := repo.CreateProject("Alpha", "")
+	beta, _ := repo.CreateProject("Beta", "")
+	if err := repo.SetCurrentProjectID(alpha.ID); err != nil {
+		t.Fatalf("SetCurrentProjectID: %v", err)
+	}
+	if got := currentProjectIDOnDisk(t, s); got != nil {
+		t.Fatalf("precondition: currentProjectId should be absent, got %v", got)
 	}
 
-	rec = doJSON(t, s, http.MethodGet, "/api/tickets?all=true", nil)
-	json.Unmarshal(rec.Body.Bytes(), &list)
-	if len(list) != 2 {
-		t.Fatalf("expected 2 tickets with ?all=true, got %d", len(list))
+	rec := doJSON(t, s, http.MethodGet, "/api/current-project", nil)
+	cur, _ := decodeProject(t, rec.Body.Bytes())
+	if cur.ID != alpha.ID {
+		t.Fatalf("expected the inherited project %q, got %q", alpha.ID, cur.ID)
+	}
+	if got := currentProjectIDOnDisk(t, s); got == nil || *got != alpha.ID {
+		t.Fatalf("expected the inherited id to be saved, got %v", got)
+	}
+
+	// Somebody else moves the shared row. This environment must not follow.
+	if err := repo.SetCurrentProjectID(beta.ID); err != nil {
+		t.Fatalf("SetCurrentProjectID: %v", err)
+	}
+	rec = doJSON(t, s, http.MethodGet, "/api/current-project", nil)
+	cur, _ = decodeProject(t, rec.Body.Bytes())
+	if cur.ID != alpha.ID {
+		t.Errorf("expected %q after the shared row moved, got %q", alpha.ID, cur.ID)
+	}
+}
+
+// DFLT-00106: nothing to inherit means nothing is written -- a fresh install
+// must not get a graph-config.json just because a page loaded.
+func TestCurrentProject_EmptyDBValueCreatesNoConfigFile(t *testing.T) {
+	s, _ := newBareTestServer(t)
+
+	rec := doJSON(t, s, http.MethodGet, "/api/current-project", nil)
+	if rec.Code != http.StatusOK || rec.Body.String() != "null\n" {
+		t.Fatalf("expected 200 null, got %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, path := range runtimeconfig.CandidatePaths(s.cfg.WorkDir, s.cfg.HomeDir) {
+		if _, err := os.Stat(path); err == nil {
+			t.Errorf("no graph-config.json should have been created, but %s exists", path)
+		}
+	}
+}
+
+// DFLT-00106: an environment that deliberately deselected its project ("")
+// must not inherit the stale shared value again on the next read.
+func TestCurrentProject_ExplicitlyEmptyDoesNotReInherit(t *testing.T) {
+	s, repo := newBareTestServer(t)
+	alpha, _ := repo.CreateProject("Alpha", "")
+	if err := repo.SetCurrentProjectID(alpha.ID); err != nil {
+		t.Fatalf("SetCurrentProjectID: %v", err)
+	}
+	if err := currentproject.Clear(s.cfg.WorkDir, s.cfg.HomeDir); err != nil {
+		t.Fatalf("currentproject.Clear: %v", err)
+	}
+
+	rec := doJSON(t, s, http.MethodGet, "/api/current-project", nil)
+	if rec.Code != http.StatusOK || rec.Body.String() != "null\n" {
+		t.Fatalf("expected 200 null, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := currentProjectIDOnDisk(t, s); got == nil || *got != "" {
+		t.Errorf("currentProjectId = %v, want it to stay an explicit \"\"", got)
+	}
+}
+
+// DFLT-00106: a currentProjectId left dangling by a project somebody else
+// deleted reads as "no project selected" (GET) but fails loudly on a write
+// (POST), naming the missing id. The two sides deliberately differ: the UI
+// needs a "nothing selected" state, while a ticket must never quietly land
+// in another project.
+func TestCurrentProject_DanglingIDReadsNullButFailsWrites(t *testing.T) {
+	s, repo := newBareTestServer(t)
+	other, _ := repo.CreateProject("Other", "")
+	setCurrent(t, s, "proj-gone")
+
+	rec := doJSON(t, s, http.MethodGet, "/api/current-project", nil)
+	if rec.Code != http.StatusOK || rec.Body.String() != "null\n" {
+		t.Fatalf("expected 200 null, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := currentProjectIDOnDisk(t, s); got == nil || *got != "proj-gone" {
+		t.Errorf("a GET must not rewrite currentProjectId, got %v", got)
+	}
+
+	rec = doJSON(t, s, http.MethodPost, "/api/tickets", map[string]any{"title": "t"})
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+	apiErr := decodeError(t, rec)
+	if apiErr.Code != domain.ErrCodeProjectNotFound {
+		t.Errorf("expected %s, got %s", domain.ErrCodeProjectNotFound, apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, "proj-gone") {
+		t.Errorf("expected the dangling id in %q", apiErr.Message)
+	}
+	if tickets, err := repo.ListTicketsByProject(other.ID); err != nil || len(tickets) != 0 {
+		t.Errorf("no ticket may have been created anywhere, got %+v (err=%v)", tickets, err)
+	}
+}
+
+// DFLT-00106: deleting the current project clears currentProjectId in the
+// environment that ran the delete -- including when there is no projectPaths
+// entry to remove, which is the case the old "nothing to clean" shortcut
+// would have skipped.
+func TestHandleDeleteProject_ClearsCurrentProject(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		localPath string
+	}{{"with a local path", "/work/alpha"}, {"without a local path", ""}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, repo := newBareTestServer(t)
+			alpha, _ := repo.CreateProject("Alpha", "")
+			if tc.localPath != "" {
+				setLocalPath(t, s, alpha.ID, tc.localPath)
+			}
+			setCurrent(t, s, alpha.ID)
+
+			if rec := doJSON(t, s, http.MethodDelete, "/api/projects/"+alpha.ID, nil); rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if got := currentProjectIDOnDisk(t, s); got == nil || *got != "" {
+				t.Errorf("currentProjectId = %v, want an explicit \"\"", got)
+			}
+			if _, ok := projectPathsOnDisk(t, s)[alpha.ID]; ok {
+				t.Error("the deleted project's projectPaths entry should be gone")
+			}
+			rec := doJSON(t, s, http.MethodGet, "/api/current-project", nil)
+			if rec.Body.String() != "null\n" {
+				t.Errorf("expected null after deleting the current project, got %q", rec.Body.String())
+			}
+		})
+	}
+}
+
+// DFLT-00106: deleting some OTHER project must leave currentProjectId alone
+// -- the condition guarding the cleanup looks at both projectPaths and the
+// current project, and getting it wrong in this direction would deselect a
+// project that is still there.
+func TestHandleDeleteProject_KeepsUnrelatedCurrentProject(t *testing.T) {
+	s, repo := newBareTestServer(t)
+	alpha, _ := repo.CreateProject("Alpha", "")
+	beta, _ := repo.CreateProject("Beta", "")
+	setLocalPath(t, s, beta.ID, "/work/beta")
+	setCurrent(t, s, alpha.ID)
+
+	if rec := doJSON(t, s, http.MethodDelete, "/api/projects/"+beta.ID, nil); rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := currentProjectIDOnDisk(t, s); got == nil || *got != alpha.ID {
+		t.Errorf("currentProjectId = %v, want it unchanged at %q", got, alpha.ID)
+	}
+	if _, ok := projectPathsOnDisk(t, s)[beta.ID]; ok {
+		t.Error("the deleted project's projectPaths entry should still be gone")
 	}
 }
 
@@ -592,9 +891,7 @@ func TestHandleCreateTicket_IgnoresServerCwdUsesCurrentProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateProject(current): %v", err)
 	}
-	if err := repo.SetCurrentProjectID(current.ID); err != nil {
-		t.Fatalf("SetCurrentProjectID: %v", err)
-	}
+	setCurrent(t, s, current.ID)
 
 	rec := doJSON(t, s, http.MethodPost, "/api/tickets", map[string]any{"title": "t"})
 	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
@@ -641,7 +938,7 @@ func TestHandleCreateTicket_ProjectsButNoCurrentProjectFails(t *testing.T) {
 func TestHandleCreateTicket_IDFormatAndIncrement(t *testing.T) {
 	s, repo := newBareTestServer(t)
 	proj, _ := repo.CreateProject("P", "ABCDE")
-	repo.SetCurrentProjectID(proj.ID)
+	setCurrent(t, s, proj.ID)
 
 	rec := doJSON(t, s, http.MethodPost, "/api/tickets", map[string]any{"title": "t1"})
 	var t1 domain.Ticket
