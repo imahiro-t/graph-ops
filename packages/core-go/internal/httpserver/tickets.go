@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/graph-ops/core-go/internal/config"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
+	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
 )
 
@@ -149,6 +151,15 @@ func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		var err error
 		projectID, err = s.currentProjectID()
 		if err != nil {
+			// Logged rather than only returned, for the same reason as in
+			// handleGetCurrentProject: since DFLT-00106 this reads a local
+			// graph-config.json, and a caller that only sees the 500 (the
+			// CLI, a script) leaves no trace in the `graph-engine ui`
+			// terminal to diagnose from.
+			s.logger.Warn("failed to read this environment's current project from graph-config.json; the ticket was not created",
+				slog.String("event", "current_project_read_failed"),
+				slog.String("config_path", runtimeconfig.ResolvePath(s.cfg.WorkDir, s.cfg.HomeDir)),
+				slog.String("error", err.Error()))
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}

@@ -123,6 +123,154 @@ describe('App project scoping', () => {
       await waitFor(() => expect(ticketListRequests().length).toBeGreaterThan(before));
       expect(ticketListRequests().slice(before)).toEqual([`/api/tickets?project_id=${alpha.id}`]);
     });
+
+    // The refetch that follows ticket creation goes through the same
+    // refreshTickets callback, so it is scoped like every other one -- it is
+    // asserted here rather than assumed because it is the one refetch that
+    // is triggered from outside the component (useClaudeLaunch's onDone).
+    it('scopes the refetch that follows ticket creation', async () => {
+      const user = userEvent.setup();
+      render(<App />);
+      await screen.findByText('ALP-00001');
+      const before = ticketListRequests().length;
+
+      await user.click(screen.getByRole('button', { name: i18n.t('header.newTicket') }));
+      await user.type(screen.getByLabelText(i18n.t('createModal.requestLabel')), 'ログイン画面を直したい');
+      await user.click(screen.getByRole('button', { name: i18n.t('createModal.submit') }));
+
+      await waitFor(() => expect(ticketListRequests().length).toBeGreaterThan(before));
+      expect(ticketListRequests().slice(before)).toEqual([`/api/tickets?project_id=${alpha.id}`]);
+    });
+  });
+
+  // Scoping every request to the header's project is not by itself enough to
+  // keep the header and the list in step: a request issued for the previous
+  // project is still in flight when the user switches, and it still comes
+  // back. Before DFLT-00106's fix, that late response repainted the list --
+  // header Beta, list Alpha -- and the screen stayed that way until the next
+  // 15s poll, which is the very symptom this ticket set out to remove.
+  describe('a response that arrives after the user has switched away', () => {
+    beforeEach(() => seed());
+
+    it('never replaces the list of the project the header now shows', async () => {
+      const user = userEvent.setup();
+
+      // Hold Alpha's list response open, so it can be released after Beta's
+      // has already been rendered.
+      let releaseAlpha!: () => void;
+      const held = new Promise<void>(resolve => {
+        releaseAlpha = resolve;
+      });
+      const realFetch = backend.fetch.bind(backend);
+      let heldOnce = false;
+      backend.fetch = async (input, init) => {
+        if (String(input) === `/api/tickets?project_id=${alpha.id}` && !heldOnce) {
+          heldOnce = true;
+          await held;
+        }
+        return realFetch(input, init);
+      };
+
+      render(<App />);
+      await screen.findByRole('button', { name: /Alpha/ });
+      expect(screen.queryByText('ALP-00001')).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: /Alpha/ }));
+      await user.click(screen.getByRole('button', { name: /Beta/ }));
+      await screen.findByText('BETA-00001');
+
+      releaseAlpha();
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(screen.getByRole('button', { name: /Beta/ })).toBeInTheDocument();
+      expect(screen.getByText('BETA-00001')).toBeInTheDocument();
+      expect(screen.queryByText('ALP-00001')).not.toBeInTheDocument();
+    });
+
+    // The same guard covers the spinner: a stale run finishing must not
+    // report the current run's fetch as done.
+    it('does not clear the loading state the current project put up', async () => {
+      const user = userEvent.setup();
+
+      let releaseAlpha!: () => void;
+      const heldAlpha = new Promise<void>(resolve => {
+        releaseAlpha = resolve;
+      });
+      let releaseBeta!: () => void;
+      const heldBeta = new Promise<void>(resolve => {
+        releaseBeta = resolve;
+      });
+      const realFetch = backend.fetch.bind(backend);
+      backend.fetch = async (input, init) => {
+        if (String(input) === `/api/tickets?project_id=${alpha.id}`) await heldAlpha;
+        if (String(input) === `/api/tickets?project_id=${beta.id}`) await heldBeta;
+        return realFetch(input, init);
+      };
+
+      render(<App />);
+      await screen.findByRole('button', { name: /Alpha/ });
+      await user.click(screen.getByRole('button', { name: /Alpha/ }));
+      await user.click(screen.getByRole('button', { name: /Beta/ }));
+
+      // Alpha answers while Beta is still loading.
+      releaseAlpha();
+      await new Promise(r => setTimeout(r, 50));
+      expect(screen.getByTitle(i18n.t('toolbar.refreshTitle'))).toBeDisabled();
+
+      releaseBeta();
+      await screen.findByText('BETA-00001');
+      await waitFor(() => expect(screen.getByTitle(i18n.t('toolbar.refreshTitle'))).toBeEnabled());
+    });
+  });
+
+  // GET /api/current-project reads this environment's graph-config.json
+  // (DFLT-00106), a local file that can be unreadable on its own while
+  // everything else works. "Could not read it" is not "you have no project":
+  // showing the create-a-project screen to somebody who does have one is how
+  // a shared data source ends up with duplicate projects.
+  describe('when the current project cannot be read', () => {
+    // Flipped to false by the retry test to let the read succeed again.
+    let readFails = true;
+
+    beforeEach(() => {
+      seed();
+      readFails = true;
+      const realFetch = backend.fetch.bind(backend);
+      backend.fetch = async (input, init) => {
+        if (readFails && String(input) === '/api/current-project' && (init?.method ?? 'GET') === 'GET') {
+          return new Response(JSON.stringify({ error: { code: 'CONFIG_READ_FAILED', message: 'boom' } }), {
+            status: 500
+          });
+        }
+        return realFetch(input, init);
+      };
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    it('reports the failure instead of offering to create a project', async () => {
+      render(<App />);
+
+      await screen.findByText(i18n.t('projectSwitcher.loadFailed'));
+      expect(screen.queryByText(i18n.t('projectSwitcher.noProjectYet'))).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: i18n.t('projectSwitcher.createNew') })).not.toBeInTheDocument();
+      expect(screen.queryByText(i18n.t('emptyState.loadingTickets'))).not.toBeInTheDocument();
+      // No project is known, so nothing is fetched under one.
+      expect(ticketListRequests()).toEqual([]);
+    });
+
+    it('offers a retry that recovers once the read succeeds', async () => {
+      const user = userEvent.setup();
+      render(<App />);
+      await screen.findByText(i18n.t('projectSwitcher.loadFailed'));
+
+      // The file becomes readable again.
+      readFails = false;
+      await user.click(screen.getByRole('button', { name: i18n.t('projectSwitcher.retry') }));
+
+      await screen.findByText('ALP-00001');
+      expect(screen.queryByText(i18n.t('projectSwitcher.loadFailed'))).not.toBeInTheDocument();
+      expect(ticketListRequests()).toEqual([`/api/tickets?project_id=${alpha.id}`]);
+    });
   });
 
   // The completion criterion names three things that a teammate's switch must

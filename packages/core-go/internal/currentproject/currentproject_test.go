@@ -269,6 +269,57 @@ func TestGet_InheritanceSaveFailureWarnsAndStillAnswers(t *testing.T) {
 	}
 }
 
+// The one-way migration is the kind of thing an operator needs to be able to
+// confirm happened without opening every environment's graph-config.json, so
+// a successful inheritance leaves an Info line naming the project and the
+// file it was written to (DFLT-00106, NFR-3). It is emitted exactly once per
+// environment: the second call reads the saved value and never reaches the
+// inheritance path, which is what keeps this Info line free of log noise.
+func TestGet_SuccessfulInheritanceLogsOnceAtInfo(t *testing.T) {
+	e := newEnv(t)
+	var logged bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	repo := &stubRepo{id: "proj-alpha"}
+
+	if _, err := Get(e.cwd, e.home, repo, logger); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	first := logged.String()
+	if !strings.Contains(first, "current_project_inherited") {
+		t.Errorf("expected an info line about the inheritance, got: %s", first)
+	}
+	if !strings.Contains(first, "proj-alpha") {
+		t.Errorf("the inheritance log must name the project, got: %s", first)
+	}
+	if path := runtimeconfig.ResolvePath(e.cwd, e.home); !strings.Contains(first, path) {
+		t.Errorf("the inheritance log must name the config file %q, got: %s", path, first)
+	}
+
+	logged.Reset()
+	if _, err := Get(e.cwd, e.home, repo, logger); err != nil {
+		t.Fatalf("second Get: %v", err)
+	}
+	if strings.Contains(logged.String(), "current_project_inherited") {
+		t.Errorf("the inheritance must be logged only the once it happens, got: %s", logged.String())
+	}
+}
+
+// "Nothing to inherit" is not an inheritance: an environment whose data
+// source has no current project either must not claim in the log that it
+// migrated something.
+func TestGet_NothingToInheritIsNotLogged(t *testing.T) {
+	e := newEnv(t)
+	var logged bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	if _, err := Get(e.cwd, e.home, &stubRepo{id: ""}, logger); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if strings.Contains(logged.String(), "current_project_inherited") {
+		t.Errorf("expected no inheritance log, got: %s", logged.String())
+	}
+}
+
 // A nil logger must not panic -- cmd/graph-engine has no logger to hand in.
 func TestGet_NilLoggerIsAccepted(t *testing.T) {
 	e := newEnv(t)

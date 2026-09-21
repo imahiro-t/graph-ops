@@ -257,7 +257,11 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}); err != nil && !errors.Is(err, errNothingToClean) {
-		s.logger.Warn("failed to clean up the deleted project's entries in graph-config.json",
+		// The event name says "local_path" but the cleanup also clears
+		// currentProjectId (DFLT-00106). It is kept as-is on purpose: event
+		// names are what an operator greps for, and renaming one silently
+		// breaks their saved searches. The message above names both.
+		s.logger.Warn("failed to clean up the deleted project's entries in graph-config.json (its local path and, if it was selected, this environment's current project)",
 			slog.String("event", "project_local_path_cleanup_failed"),
 			slog.String("project_id", id),
 			slog.String("error", err.Error()))
@@ -292,9 +296,36 @@ func (s *Server) currentProjectID() (string, error) {
 // rewritten by a GET. Note that the write side does NOT match: POST
 // /api/tickets and create-ticket fail loudly on the same dangling ID instead
 // of quietly writing somewhere else (DFLT-00106).
+//
+// A GET WITH A WRITE SIDE EFFECT (SEC-1). This handler can write
+// graph-config.json: on an environment that predates DFLT-00106,
+// currentproject.Get inherits app_state.current_project_id from the data
+// source and saves it here (see that function's doc comment), and since the
+// Web UI issues this GET on every page load, this is in practice the
+// request that performs that one-time write. v0.7.0 deliberately removed
+// the state-changing GETs, because a GET is reachable without the
+// CSRF-protection header, so this is a knowing exception rather than an
+// oversight. It is acceptable because the written value is never
+// attacker-controlled -- it is read from the data source, and nothing in
+// the request can influence it -- the write is idempotent and happens at
+// most once per environment, and its only effect is to preserve the project
+// the user had already selected. A forged cross-site GET therefore achieves
+// nothing that the next ordinary page load would not do anyway. Any FUTURE
+// state change added to this handler does not inherit that reasoning and
+// belongs behind the CSRF-protected PUT instead.
+//
+// A failure to read graph-config.json is a 500 and is logged here: the
+// current project moved out of the DB and into a per-environment file with
+// DFLT-00106, so it is now a local, independently-breakable dependency, and
+// without this line the only trace of the failure would be the browser's
+// console.
 func (s *Server) handleGetCurrentProject(w http.ResponseWriter, r *http.Request) {
 	id, err := s.currentProjectID()
 	if err != nil {
+		s.logger.Warn("failed to read this environment's current project from graph-config.json",
+			slog.String("event", "current_project_read_failed"),
+			slog.String("config_path", runtimeconfig.ResolvePath(s.cfg.WorkDir, s.cfg.HomeDir)),
+			slog.String("error", err.Error()))
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

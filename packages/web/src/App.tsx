@@ -76,16 +76,36 @@ export const App: React.FC = () => {
   // project_id returns an empty list now). The server used to filter by a
   // "current project" shared by everyone on the same data source, so a
   // teammate switching projects replaced this list's contents on the next
-  // 15s poll while the header still named the old project. Tying the fetch
-  // to the very id the header renders makes that mismatch unrepresentable.
+  // 15s poll while the header still named the old project.
   //
-  // currentProject is null in two different situations, which the UI must
-  // not conflate: before the initial GET /api/current-project resolves, and
-  // on an install with no project selected. isCurrentProjectResolved tells
-  // them apart -- the first is "loading", the second is "create a project".
+  // "The header and the list always agree" rests on two different things,
+  // and it is worth keeping them apart, because only one of them is free:
+  //
+  //   - Structural: every request is issued for the id the header is
+  //     rendering. refreshTickets reads it from currentProjectIdRef and the
+  //     ticket-list effect below keys on it, so no call site can ask for
+  //     anything else, and switching projects tears the old poll down.
+  //   - Guarded: that is not sufficient on its own. A request that was
+  //     already in flight when the user switched still comes back, and its
+  //     response would otherwise be painted under the new header (a real
+  //     "header Beta / list Alpha" screen, reproduced in
+  //     App.project.test.tsx). fetchAllTickets therefore drops any response
+  //     whose project is no longer the current one, exactly as
+  //     refreshProjectLabels does for the label options.
+  //
+  // currentProject is null in three different situations, which the UI must
+  // not conflate: before the initial GET /api/current-project resolves, on
+  // an install with no project selected, and when that GET failed.
+  // isCurrentProjectResolved and hasCurrentProjectFailed tell them apart --
+  // "loading", "create a project", and "the setting could not be read". The
+  // third one matters since DFLT-00106 moved the setting into a local
+  // graph-config.json, which can now be unreadable on its own: offering
+  // "create a project" to somebody who already has one is how a shared data
+  // source acquires duplicate projects.
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [isCurrentProjectResolved, setIsCurrentProjectResolved] = useState(false);
+  const [hasCurrentProjectFailed, setHasCurrentProjectFailed] = useState(false);
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
   // The header's project switcher button: where ProjectSetupModal returns
@@ -220,11 +240,24 @@ export const App: React.FC = () => {
   // nothing at all rather than to ask the server for its idea of a default
   // -- it no longer has one. Showing another project's tickets under this
   // project's header is precisely the bug this replaces.
+  //
+  // Every write below is guarded on projectId still being the current one.
+  // Tearing down the poll on a switch stops future *timers*, but it cannot
+  // recall a request that already left: this function awaits the list and
+  // then one GET /api/tickets/<id> per ticket, so its in-flight window grows
+  // with the list, and the old project's response routinely lands after the
+  // new one's. Without the guard that late response repaints the list under
+  // a header naming the other project -- the exact symptom this ticket is
+  // about, arrived at from the other direction. setLastFetchedAt is guarded
+  // too because it drives the label refresh and the "last updated" stamp,
+  // and setLoading(false) because a stale run finishing must not clear the
+  // spinner the current run put up.
   const fetchAllTickets = useCallback(async (projectId: string) => {
     if (!projectId) {
       setTickets([]);
       return;
     }
+    const isStale = () => projectId !== currentProjectIdRef.current;
     setLoading(true);
     try {
       const res = await fetch(`/api/tickets?project_id=${encodeURIComponent(projectId)}`);
@@ -241,14 +274,15 @@ export const App: React.FC = () => {
         })
       );
 
+      if (isStale()) return;
       setTickets(details);
       setLastFetchedAt(new Date());
     } catch (e) {
       console.error('Failed to load tickets', e);
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
-  }, []);
+  }, [currentProjectIdRef]);
 
   // refreshTickets re-fetches whichever project the header is currently
   // showing. It is what every "something changed, reload the list" callback
@@ -277,18 +311,29 @@ export const App: React.FC = () => {
   // This is only ever used to *restore* state on load -- it must never
   // trigger a Claude Code terminal launch (see switchToProject, which is the
   // only path that does), or every page refresh would pop open a terminal.
-  // A failure resolves to "no project selected" as well: the alternative is
-  // staying in the loading state forever. Either way the attempt is over,
-  // which is what isCurrentProjectResolved records.
+  //
+  // A failure is its own outcome, NOT "no project selected". Both end up
+  // with currentProject === null, but the two must not render the same way:
+  // the failure path used to fall through to "no project has been created
+  // yet" plus a create button, which is the screen this component
+  // deliberately withholds while the answer is unknown, for the same reason
+  // -- somebody who does have a project is being invited to create a
+  // duplicate, and on a shared data source that duplicate is everybody's.
+  // The read is now a local graph-config.json (DFLT-00106), which can fail
+  // on its own while the rest of the app is fine, so this is a path users
+  // can actually reach. isCurrentProjectResolved still just records that the
+  // attempt is over; hasCurrentProjectFailed records how it ended.
   const fetchCurrentProject = async () => {
     try {
       const res = await fetch('/api/current-project');
       if (!res.ok) throw new Error(`GET /api/current-project: ${res.status}`);
       const data = await res.json();
       setCurrentProject(data ?? null);
+      setHasCurrentProjectFailed(false);
     } catch (e) {
       console.error('Failed to load current project', e);
       setCurrentProject(null);
+      setHasCurrentProjectFailed(true);
     } finally {
       setIsCurrentProjectResolved(true);
     }
@@ -301,6 +346,18 @@ export const App: React.FC = () => {
   // immediately, not just after a manual page reload.
   const refreshProjects = async () => {
     await Promise.all([fetchProjects(), fetchCurrentProject()]);
+  };
+
+  // The retry offered on the failure screen. It goes back to the unresolved
+  // state first, so the user sees the loading placeholder rather than the
+  // error sitting there unchanged while the request is on its way -- and so
+  // a second failure reads as a second attempt. The project list is
+  // re-fetched with it: a failure there is silent (fetchProjects empties the
+  // switcher), so the retry would otherwise leave the menu empty.
+  const retryCurrentProject = () => {
+    setIsCurrentProjectResolved(false);
+    setHasCurrentProjectFailed(false);
+    void refreshProjects();
   };
 
   // Fetches the "全体設定" app-settings this component needs: how many
@@ -337,10 +394,16 @@ export const App: React.FC = () => {
   // react to). With no project resolved yet, nothing is fetched at all.
   //
   // Having the poll live in an effect that *depends on* currentProject.id is
-  // what makes "the header and the list always agree" structural rather than
-  // something each call site has to remember: switching projects tears the
-  // old interval down (cleanup) and starts one for the new id, so no request
-  // for the previous project can still be in flight on a timer.
+  // what keeps every request pointed at the header's project without each
+  // call site having to remember: switching tears the old interval down
+  // (cleanup) and starts one for the new id, so after a switch no timer can
+  // ever fire for the previous project again.
+  //
+  // That is the whole of what the effect guarantees, and it is only half of
+  // "the header and the list always agree": a request the old timer (or the
+  // switch itself) already started is still on its way and will still come
+  // back. Discarding that response is fetchAllTickets' job, not this
+  // cleanup's -- see the guard there.
   useEffect(() => {
     const projectId = currentProject?.id ?? '';
     fetchAllTickets(projectId);
@@ -759,17 +822,34 @@ export const App: React.FC = () => {
 
         {/* Tickets Accordion List */}
         <div>
-          {/* Three states, not two (DFLT-00106): until GET
-              /api/current-project has answered, the list is *unknown*, not
-              empty -- showing "no project has been created yet" plus a
-              create button to somebody who does have one, for as long as
-              that request takes, would invite them to create a duplicate. */}
+          {/* Four states, not two (DFLT-00106). "No project has been
+              created yet" plus a create button is only ever right when the
+              answer is known to be "none": shown to somebody who does have
+              a project it invites them to create a duplicate, and on a
+              shared data source that duplicate is everybody's. So the two
+              cases where the answer is NOT known get their own branch --
+              the request is still running (loading), or it failed (the
+              error below, which offers a retry and no create button). */}
           {!isCurrentProjectResolved ? (
             <div
               className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm"
               aria-busy="true"
             >
               {t('emptyState.loadingTickets')}
+            </div>
+          ) : hasCurrentProjectFailed ? (
+            <div
+              className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm space-y-3"
+              role="alert"
+            >
+              <p>{t('projectSwitcher.loadFailed')}</p>
+              <button
+                onClick={retryCurrentProject}
+                className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold inline-flex items-center gap-1.5 transition"
+              >
+                <RotateCw className="w-4 h-4" />
+                {t('projectSwitcher.retry')}
+              </button>
             </div>
           ) : !currentProject ? (
             <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm space-y-3">

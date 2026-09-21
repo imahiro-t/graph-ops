@@ -62,7 +62,9 @@
     "empty": "No projects yet",
     "createNew": "New project...",
     "selectFirst": "Create or select a project first",
-    "noProjectYet": "No project has been created yet. Create one to start managing tickets."
+    "noProjectYet": "No project has been created yet. Create one to start managing tickets.",
+    "loadFailed": "Could not load the current project setting. Check this environment's settings file (graph-config.json) and try again.",
+    "retry": "Retry"
   },
   "createProjectModal": {
     "title": "Create New Project",

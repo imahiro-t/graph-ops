@@ -757,6 +757,67 @@ func TestHandleCreateTicket_ExplicitlyEmptyCurrentProjectFails(t *testing.T) {
 	}
 }
 
+// DFLT-00106 (NFR-2): reading the current project used to be a DB read --
+// if that broke, everything else broke with it and nobody had to be told
+// twice. It is now a read of one per-environment graph-config.json, which
+// can be unreadable all by itself while the rest of the app works, so both
+// readers log the failure with the path of the file that could not be read.
+// Without it the only trace is the browser console (or, for the CLI, a bare
+// 500), and the Web UI's "could not load the settings" screen has nothing to
+// point the user at.
+func TestCurrentProjectReadFailure_IsLoggedWithTheConfigPath(t *testing.T) {
+	repo, err := store.NewSQLiteRepository(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	if err := repo.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	workDir := t.TempDir()
+	configPath := filepath.Join(workDir, "graph-config.json")
+	if err := os.WriteFile(configPath, []byte("{ not json"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	var logged bytes.Buffer
+	s := New(repo, engine.New(repo), Config{
+		ArtifactsDir: t.TempDir(), WorkDir: workDir, HomeDir: t.TempDir(),
+		Logger: slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	})
+
+	cases := []struct {
+		name, method, path string
+		body               map[string]any
+	}{
+		{"GET /api/current-project", http.MethodGet, "/api/current-project", nil},
+		{"POST /api/tickets without project_id", http.MethodPost, "/api/tickets", map[string]any{"title": "t"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			logged.Reset()
+			rec := doJSON(t, s, tc.method, tc.path, tc.body)
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500: %s", rec.Code, rec.Body.String())
+			}
+			out := logged.String()
+			if !strings.Contains(out, "current_project_read_failed") {
+				t.Errorf("expected a current_project_read_failed event, got: %s", out)
+			}
+			if !strings.Contains(out, configPath) {
+				t.Errorf("the log must name the config file %q, got: %s", configPath, out)
+			}
+		})
+	}
+
+	// The failed POST must not have created anything.
+	tickets, err := repo.ListTickets()
+	if err != nil {
+		t.Fatalf("ListTickets: %v", err)
+	}
+	if len(tickets) != 0 {
+		t.Errorf("no ticket may have been created, got %+v", tickets)
+	}
+}
+
 // DFLT-00106: an environment with no currentProjectId inherits the data
 // source's app_state value exactly once, then stops reading it. Serving the
 // GET is what triggers the inheritance, which is accepted (see the Gherkin

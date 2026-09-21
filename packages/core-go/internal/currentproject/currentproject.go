@@ -54,8 +54,24 @@ var errAlreadyInherited = errors.New("currentProjectId was set by another writer
 //
 // A failure to write the inherited value is logged and otherwise ignored:
 // the caller asked what the current project is, and the answer is known.
-// The inheritance is simply retried on the next call. logger may be nil,
-// in which case slog.Default() is used.
+// The inheritance is simply retried on the next call. A successful
+// inheritance is logged at Info (event=current_project_inherited): it is a
+// one-way, once-per-environment migration, so the log volume is negligible
+// and it is the only way to tell whether an environment has already been
+// migrated without opening its graph-config.json by hand. logger may be
+// nil, in which case slog.Default() is used.
+//
+// BEWARE: THIS READ CAN WRITE (SEC-1). The inheritance above makes Get --
+// and therefore the CSRF-header-free GET /api/current-project that the Web
+// UI issues on every page load -- a writer of graph-config.json. v0.7.0
+// deliberately removed the state-changing GETs, so this is a documented
+// exception, not an oversight: the value written comes from the data source
+// and can never be influenced by the request, the write is idempotent and
+// happens at most once per environment, and its only effect is to preserve
+// the project the user had already selected, which the next page load would
+// do anyway. Do not extend this function with any state change that lacks
+// all three of those properties -- that belongs behind Set, which is only
+// reachable through the CSRF-protected PUT /api/current-project.
 func Get(cwd, home string, repo store.GraphRepository, logger *slog.Logger) (string, error) {
 	cfg, _, err := runtimeconfig.Load(cwd, home)
 	if err != nil {
@@ -89,6 +105,11 @@ func Get(cwd, home string, repo store.GraphRepository, logger *slog.Logger) (str
 			slog.String("project_id", inherited),
 			slog.String("config_path", path),
 			slog.String("error", err.Error()))
+	default:
+		log(logger).Info("inherited the current project from the data source into graph-config.json; the data source's value is not consulted again",
+			slog.String("event", "current_project_inherited"),
+			slog.String("project_id", inherited),
+			slog.String("config_path", path))
 	}
 	return inherited, nil
 }

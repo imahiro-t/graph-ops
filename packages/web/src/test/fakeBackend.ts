@@ -147,6 +147,10 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
         }
       }
       if (url.startsWith('/api/settings/node-types')) return respond(200, { types: [] });
+      // The create-ticket flow launches an external terminal and returns
+      // immediately; nothing is created here. It is answered so a test can
+      // drive that flow and watch the refetch it triggers afterwards.
+      if (url === '/api/claude/launch' && method === 'POST') return respond(200, { success: true });
       return respond(404, { error: { code: 'NOT_FOUND', message: url } });
     }
   };
