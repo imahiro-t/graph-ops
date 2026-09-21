@@ -25,7 +25,16 @@ export default tseslint.config(
       'react-hooks': reactHooks
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
+      // Only the two classic hook rules. eslint-plugin-react-hooks 7 folded
+      // the React Compiler's diagnostics (set-state-in-effect, immutability,
+      // preserve-manual-memoization, ...) into `recommended`. This app does
+      // not use the React Compiler, and those rules flag deliberate,
+      // documented patterns here -- resetting a modal's state when it
+      // reopens, reading a URL query once on mount, moving focus after a
+      // render -- so taking them on would mean rewriting working effects for
+      // an optimizer that isn't in the build.
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
       // ignoreRestSiblings: destructuring out a key to exclude it from the
       // rest object (see ReviewGatesEditor.tsx's `const { id, isOverridden,
       // ...rest } = g`) is an intentional idiom, not an unused binding.
