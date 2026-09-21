@@ -393,31 +393,93 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8787/protocol
 
 ### 3. Point graph-engine at it -- without touching your real data
 
-Do this with environment variables, not with a config file. graph-engine reads
-settings from `$HOME/.graph-ops/config.json` alone, whichever directory you run
-it in, so writing a `graph-config.json` into a scratch directory and working
-there does **not** isolate anything: the file is never read, and every command
-you run would quietly go to your real database instead. Environment variables
-are the one channel that is deliberate -- they are set by whoever starts the
-process, for that process, and they take precedence over the file -- which is
-exactly what a verification run needs:
+There are two things to keep away from your real setup, and each needs its own
+switch: the **data source**, which you redirect with environment variables, and
+the **home config**, which you redirect with a temporary `HOME`.
+
+Environment variables, not a config file, are what point graph-engine at your
+plugin. graph-engine reads settings from `$HOME/.graph-ops/config.json` alone,
+whichever directory you run it in, so writing a `graph-config.json` into a
+scratch directory and working there does **not** isolate anything: the file is
+never read, and every command you run would quietly go to your real database
+instead. Environment variables are the one channel that is deliberate -- they
+are set by whoever starts the process, for that process, and they take
+precedence over the file -- which is exactly what a verification run needs.
+
+They only move the data source, though. The current project
+(`currentProjectId`) and the local project paths (`projectPaths`) are always
+written to `$HOME/.graph-ops/config.json`, whatever the backend:
+`create-project` adds a `projectPaths` entry (for the directory you run it in,
+unless you pass `--workdir`), `use-project` sets `currentProjectId` (so does
+switching projects in the Web UI header), and on a home config that has no
+`currentProjectId` yet, the first read of the current project -- by
+`create-ticket` without `--project`, or by the Web UI -- copies the data
+source's selection into it once. With only the variables set, all of that
+lands in your real home config: when you go back to your real data, your
+current project is one that does not exist there. So also point `HOME` at an
+empty temporary directory, in the same shell and in this order:
 
 ```sh
+# 1. Get graph-engine ready while HOME is still your real one (Go keeps its
+#    caches there). To build it, from the root of this repository:
+(cd packages/core-go && go build -o graph-engine ./cmd/graph-engine)
+export PATH="$PWD/packages/core-go:$PATH"   # `graph-engine` below is this build
+#    Using the plugin's graph-engine instead? See the notes below.
+
+# 2. Give this shell an empty home of its own.
+export HOME="$(mktemp -d)"
+echo "temporary HOME: $HOME"
+
+# 3. Point graph-engine at your plugin.
 export GRAPH_DB_BACKEND=http
 export GRAPH_HTTP_DATASOURCE_URL=http://127.0.0.1:8787
 export GRAPH_HTTP_DATASOURCE_TOKEN="$GRAPHOPS_DATASOURCE_TOKEN"
 ```
 
-Set them in one shell and use only that shell for the steps below; a shell
-without them keeps reading your normal configuration, so your real tickets are
-never touched. Your `$HOME/.graph-ops/config.json` stays exactly as it is --
-there is nothing to edit and nothing to put back afterwards. To check which
-settings a command will actually use, unset the variables again and compare
-(`graph-engine list-projects` against your real data, with them set against the
-plugin).
+Use that shell for the steps below and for nothing else. Inside it, everything
+graph-engine writes to the home config -- `create-project`, `use-project`, the
+one-time inheritance, and the Web UI started with `serve` -- goes to
+`.graph-ops/config.json` under the temporary directory, so your real
+`$HOME/.graph-ops/config.json` stays exactly as it is and there is nothing to
+put back afterwards. Any other shell keeps your real `HOME` and none of the
+variables, so it keeps reading your normal configuration and your real tickets
+are never touched. To compare against your real data, run
+`graph-engine list-projects` in such a separate shell -- not by unsetting the
+variables in this one, which would read the empty temporary home and a new
+SQLite database under it rather than your real data.
 
-Use the `graph-engine` installed with the plugin, or build one from this
-repository (`cd packages/core-go && go build -o graph-engine ./cmd/graph-engine`).
+A few things follow from the temporary `HOME`:
+
+- **Build before you switch.** Go's build and module caches live under `HOME`,
+  so a `go build` after step 2 starts from empty caches and downloads every
+  dependency again.
+- **The plugin's `graph-engine`.** If you use the one installed with the plugin
+  rather than a build, `HOME` matters only when it runs from its engine cache
+  (`${XDG_CACHE_HOME:-$HOME/.cache}/graph-ops/engine`) rather than from the
+  plugin's own `libexec` directory: with `HOME` changed, it no longer finds the
+  cached binary and tries to download it again. To avoid that, pin the cache by
+  its absolute path before step 2 --
+  `export GRAPH_OPS_ENGINE_DIR="$HOME/.cache/graph-ops/engine"`, or
+  `"$XDG_CACHE_HOME/graph-ops/engine"` if you set `XDG_CACHE_HOME`.
+- **Your personal settings are not there.** The temporary home has no
+  `.graph-ops/config.json`, so settings such as `userExtensionsDir` and
+  `teamExtensionsDir` are unset, and nothing of your user tier under
+  `$HOME/.graph-ops` is loaded either -- no `extensions/`, no `config.yaml`
+  (and so no `language`). If the check needs them, name the directories
+  explicitly with `GRAPH_USER_EXTENSIONS_DIR` and `GRAPH_TEAM_EXTENSIONS_DIR`. Other tools'
+  per-user settings (git, ssh and so on) are not read in that shell either,
+  which is one more reason to use it for this check only.
+- **Everything else graph-engine writes stays there too**: artifact files and
+  the UI server's `ui-serve.log` go under the temporary directory.
+- **Cleaning up.** Close the shell when you are done; the next shell has your
+  real `HOME` again. The temporary directory is safe to delete -- by the path
+  step 2 printed, rather than with `rm -rf "$HOME"`, which run in the wrong
+  shell deletes your real home directory.
+- **On Windows**, graph-engine finds the home directory through `USERPROFILE`,
+  not `HOME`, so change `USERPROFILE` instead -- in Git Bash too. In
+  PowerShell:
+  `$env:USERPROFILE = (New-Item -ItemType Directory -Path (Join-Path $env:TEMP ([guid]::NewGuid()))).FullName`
+
 Then exercise the operations the way GraphOps uses them:
 
 ```sh
@@ -433,8 +495,8 @@ graph-engine get-ticket <ticket id>              # nodes, edges and artifacts re
 ```
 
 Run `graph-engine` without arguments for the full command list. Then start
-the Web UI from that same shell -- so it inherits the three variables -- and
-check the ticket list, the execution graph and artifact previews:
+the Web UI from that same shell -- so it inherits the temporary `HOME` and the
+three variables -- and check the ticket list, the execution graph and artifact previews:
 
 ```sh
 graph-engine serve --host 127.0.0.1 --port 49180
