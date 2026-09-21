@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect, useRef } from 'react';
+import React, { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Search,
@@ -51,6 +51,28 @@ const THEME_ICON: Record<ThemePreference, React.FC<{ className?: string }>> = {
   system: MonitorCog
 };
 
+// Where the answer to "which project is current?" stands. One value rather
+// than a project plus two flags: with separate flags, every path that sets a
+// project had to remember to clear "failed" as well, and the ones that
+// didn't (switching or linking from the failure screen) left an error
+// under a header that already named the new project (DFLT-00106).
+type CurrentProjectState =
+  | { kind: 'loading' }
+  | { kind: 'failed' }
+  | { kind: 'resolved'; project: Project | null };
+
+// Data fetched for one project, tagged with that project's id. What is
+// rendered is only ever the value whose id matches the header's project;
+// anything else -- the previous project's list during a switch, a response
+// for a project the user has since left -- renders as "not loaded yet".
+interface ProjectScoped<T> {
+  projectId: string;
+  value: T;
+}
+
+const NO_LABELS: Label[] = [];
+const NO_TICKETS: TicketDetail[] = [];
+
 // How often the dashboard re-reads the ticket list. Unchanged by DFLT-00112
 // (that ticket cut the number of requests per round, not their frequency);
 // named here so the polling tests can advance exactly one round.
@@ -77,7 +99,10 @@ export const App: React.FC = () => {
   // re-run the startup effect that calls it).
   const tRef = useLatest(t);
   const { preference: themePreference, setPreference: setThemePreference } = useTheme();
-  const [tickets, setTickets] = useState<TicketDetail[]>([]);
+  // The last ticket list fetched, tagged with the project it belongs to.
+  // Read it through `tickets` (derived below, next to currentProject), which
+  // is empty unless the tag matches the header's project.
+  const [ticketList, setTicketList] = useState<ProjectScoped<TicketDetail[]> | null>(null);
   const [loading, setLoading] = useState(false);
   const [expandedTicketIds, setExpandedTicketIds] = useState<Set<string>>(new Set());
 
@@ -87,15 +112,76 @@ export const App: React.FC = () => {
   // those buttons.
   const [myName, setMyName] = useState('');
 
-  // Project scoping (GET/POST /api/projects, GET/PUT /api/current-project):
-  // the ticket list the server returns is always scoped to whichever
-  // project is "current" (see fetchAllTickets's plain `/api/tickets` call --
-  // project filtering is the server's default behavior, not something the
-  // client requests explicitly). currentProject is null both before the
-  // initial GET /api/current-project resolves and, permanently, on an
-  // install that has never created a project yet.
+  // Project scoping (GET/POST /api/projects, GET/PUT /api/current-project).
+  //
+  // Since DFLT-00106 the client, not the server, decides which project the
+  // ticket list shows: every fetch goes to
+  // `/api/tickets?project_id=<currentProject.id>` (GET /api/tickets with no
+  // project_id returns an empty list now). The server used to filter by a
+  // "current project" shared by everyone on the same data source, so a
+  // teammate switching projects replaced this list's contents on the next
+  // 15s poll while the header still named the old project.
+  //
+  // What keeps the header and the body describing the same project, from
+  // the broadest guarantee to the narrowest:
+  //
+  //   1. Rendering. Everything project-scoped that reaches the screen -- the
+  //      ticket list, the summary counts, the assignee and label options,
+  //      the labels drawn on tickets -- is derived from a value tagged with
+  //      the project it was fetched for (ProjectScoped), and only when that
+  //      tag equals the header's project. Until it does, the list area says
+  //      "loading", never the previous project's tickets. This holds on
+  //      every path that moves the header (startup, switch, link, create,
+  //      delete/rename via the settings modal, retry) whatever state the
+  //      fetches are in, so none of those paths has to clean up after the
+  //      previous project by hand.
+  //   2. Requests. Every request is issued for the id the header is
+  //      rendering: refreshTickets reads it from currentProjectIdRef and the
+  //      ticket-list effect below keys on it, so no call site can ask for
+  //      anything else, and switching projects tears the old poll down.
+  //   3. Writes. A request already in flight when the header moves still
+  //      comes back. fetchAllTickets drops it (a newer run, or a different
+  //      current project, supersedes it), as refreshProjectLabels does for
+  //      labels. (1) already stops such a response from being *shown*; (3)
+  //      stops it from knocking the current project's loaded list back to
+  //      "loading" until the next poll. An expanded ticket's detail
+  //      response (DFLT-00112) only ever replaces a ticket with the same id
+  //      inside the loaded list, so one for a project the user has left
+  //      matches nothing (see fetchTicketDetail).
+  //
+  // What is NOT promised: that the header follows a switch made in another
+  // tab of the same environment. It shows this window's own choice until a
+  // reload (out of scope for DFLT-00106), and the list follows the header.
+  //
+  // "Which project is current" has four outcomes, not two, and the UI must
+  // not conflate them: still loading, known to be none, known to be one,
+  // and "the setting could not be read". The last matters since DFLT-00106
+  // moved the setting into the local home config file, which can now be
+  // unreadable on its own: offering "create a project" to somebody who
+  // already has one is how a shared data source acquires duplicate
+  // projects. All four live in one CurrentProjectState, so choosing a
+  // project (switch, link, create) leaves "failed" behind by construction.
   const [projects, setProjects] = useState<Project[]>([]);
-  const [currentProject, setCurrentProject] = useState<Project | null>(null);
+  const [currentProjectState, setCurrentProjectState] = useState<CurrentProjectState>({ kind: 'loading' });
+  const currentProject = currentProjectState.kind === 'resolved' ? currentProjectState.project : null;
+  const isCurrentProjectResolved = currentProjectState.kind !== 'loading';
+  const hasCurrentProjectFailed = currentProjectState.kind === 'failed';
+  // Bumped whenever the user picks a project (switch, create, link). A
+  // GET /api/current-project issued before the pick -- the startup read, a
+  // retry, a refresh after a settings edit -- may have been answered with
+  // the old setting, and must not put the old project back over the
+  // user's choice (fetchCurrentProject drops it).
+  const projectChoiceSeqRef = useRef(0);
+  const chooseProject = (project: Project) => {
+    projectChoiceSeqRef.current += 1;
+    setCurrentProjectState({ kind: 'resolved', project });
+  };
+  // Only ever the header's project's tickets; see ProjectScoped.
+  const tickets =
+    currentProject && ticketList?.projectId === currentProject.id ? ticketList.value : NO_TICKETS;
+  // A project is selected but its list has not arrived yet (first load, or
+  // just after a switch): the list area says "loading", not "no tickets".
+  const isTicketListPending = !!currentProject && ticketList?.projectId !== currentProject.id;
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
   // The header's project switcher button: where ProjectSetupModal returns
@@ -166,18 +252,27 @@ export const App: React.FC = () => {
   // ticket label picker's choices. Re-fetched on project switch, on every
   // ticket (re)fetch -- so a teammate's label edits show up with the regular
   // poll -- and after any change in the settings modal's labels tab.
-  const [projectLabels, setProjectLabels] = useState<Label[]>([]);
-  const currentProjectIdRef = useLatest(currentProject?.id ?? '');
+  //
+  // Tagged like ticketList, so the previous project's labels are never
+  // offered (or drawn on tickets) under the new project's header while the
+  // new ones load.
+  const [labelList, setLabelList] = useState<ProjectScoped<Label[]> | null>(null);
+  const currentProjectId = currentProject?.id ?? '';
+  const projectLabels = useMemo(
+    () => (currentProjectId && labelList?.projectId === currentProjectId ? labelList.value : NO_LABELS),
+    [currentProjectId, labelList]
+  );
+  const currentProjectIdRef = useLatest(currentProjectId);
   const refreshProjectLabels = useCallback(
     async (projectId: string = currentProjectIdRef.current) => {
       if (!projectId) {
-        setProjectLabels([]);
+        setLabelList(null);
         return;
       }
       try {
         const labels = await fetchLabels(tRef.current, projectId);
         // Ignore a response for a project that is no longer current.
-        if (projectId === currentProjectIdRef.current) setProjectLabels(labels);
+        if (projectId === currentProjectIdRef.current) setLabelList({ projectId, value: labels });
       } catch (e) {
         // Keep the previous list: clearing it would also clear the filter.
         console.error('Failed to load labels', e);
@@ -240,12 +335,22 @@ export const App: React.FC = () => {
   // for the tickets the user has actually expanded, since they are the only
   // ones whose panel reads ticket.artifacts (see TicketItem.tsx: every use
   // sits inside its `isExpanded &&` block).
+  //
+  // The replacement is by ticket id inside whatever list is loaded when the
+  // response lands, and leaves that list's project tag alone. A detail that
+  // comes back after the user switched projects therefore matches nothing
+  // in the new project's list and changes nothing: it cannot bring a ticket
+  // of the previous project back under the new header (DFLT-00106).
   const fetchTicketDetail = useCallback(async (id: string) => {
     try {
       const res = await fetch(`/api/tickets/${encodeURIComponent(id)}`);
       if (!res.ok) throw new Error(`GET /api/tickets/${id}: ${res.status}`);
       const detail: TicketDetail = await res.json();
-      setTickets(prev => prev.map(t => (t.id === detail.id ? detail : t)));
+      setTicketList(prev =>
+        prev && prev.value.some(t => t.id === detail.id)
+          ? { ...prev, value: prev.value.map(t => (t.id === detail.id ? detail : t)) }
+          : prev
+      );
     } catch (e) {
       // Keep whatever the list response gave us for this ticket rather than
       // dropping it: a failed detail fetch must not make a card disappear.
@@ -253,7 +358,8 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // Fetch the ticket list, plus the detail of whichever tickets are expanded.
+  // Fetch one project's ticket list, plus the detail of whichever of its
+  // tickets are expanded.
   //
   // DFLT-00112: one round is a single GET /api/tickets (which now carries
   // every ticket's nodes/edges) plus at most one detail request per expanded
@@ -261,28 +367,106 @@ export const App: React.FC = () => {
   // tickets meant 101 requests every 15s, each re-sending the full text of
   // every stored plan and review verdict.
   //
+  // projectId is mandatory (DFLT-00106): an empty one means "the current
+  // project isn't known yet", and the right answer to that is to fetch
+  // nothing at all rather than to ask the server for its idea of a default
+  // -- it no longer has one. Showing another project's tickets under this
+  // project's header is precisely the bug this replaces.
+  //
+  // Only the most recently started run writes the list, and only while its
+  // project is still the current one. Tearing down the poll on a switch
+  // stops future *timers*, but it cannot recall a request that already
+  // left, and an older run can land after a newer one. The result is tagged
+  // with its project, so a late run for another project could not be shown
+  // anyway; the guard is what stops it from knocking the current project's
+  // loaded list back to "loading" -- and, for two runs of the same project
+  // (a poll and the refresh after an edit), from replacing the newer result
+  // with the older. setLastFetchedAt is guarded too because it drives the
+  // label refresh and the "last updated" stamp, and setLoading(false)
+  // because a superseded run finishing must not clear the spinner the
+  // newest run put up; the newest run clears it itself. A superseded run
+  // also skips its detail requests: they would be for a list that is not
+  // the one on screen.
+  //
+  // The flip side of "only the newest run writes" is that a run must be
+  // allowed to finish before another one takes its place, or nothing is
+  // ever written at all. The poll therefore does not start a run while one
+  // for the same project is still in flight (see the list effect below).
+  // DFLT-00112 made a run much cheaper for the browser -- one list request
+  // instead of one per ticket -- but not necessarily faster: the per-ticket
+  // fan-out moved to the server, and against an HTTP data source without a
+  // bulk read GET /api/tickets costs one sequential remote call per ticket
+  // (see ticketGraphs in internal/httpserver/tickets.go, which puts the
+  // crossover with the 15s interval at about 75 tickets at a 200ms RTT).
+  // Past that point each poll used to supersede the run before it, and the
+  // list stayed on "loading" with the spinner going for good.
+  // ticketFetchesInFlightRef counts the runs per project id for that check;
+  // it is per project so that a run left over from the project the user
+  // just switched away from never holds back the new one. A run counts as
+  // in flight until its expanded tickets' details are back too.
+  //
   // expandedTicketIds is read through a ref because this callback is held by
   // the polling interval: reading the state directly would freeze whichever
   // set was expanded when the interval was set up.
   const expandedTicketIdsRef = useLatest(expandedTicketIds);
-  const fetchAllTickets = useCallback(async () => {
+  const ticketFetchSeqRef = useRef(0);
+  const ticketFetchesInFlightRef = useRef(new Map<string, number>());
+  const fetchAllTickets = useCallback(async (projectId: string) => {
+    const seq = ++ticketFetchSeqRef.current;
+    if (!projectId) {
+      setTicketList(null);
+      // This run supersedes any still in flight (for a project that was
+      // just deleted from the settings modal, say), and those skip their
+      // own setLoading(false). Nothing else would clear the spinner.
+      setLoading(false);
+      return;
+    }
+    const isSuperseded = () => seq !== ticketFetchSeqRef.current || projectId !== currentProjectIdRef.current;
+    const inFlight = ticketFetchesInFlightRef.current;
+    inFlight.set(projectId, (inFlight.get(projectId) ?? 0) + 1);
     setLoading(true);
     try {
-      const res = await fetch('/api/tickets');
+      const res = await fetch(`/api/tickets?project_id=${encodeURIComponent(projectId)}`);
       if (!res.ok) throw new Error(`GET /api/tickets: ${res.status}`);
       const summaries: TicketGraph[] = await res.json();
 
-      setTickets(prev => mergeTicketSummaries(prev, summaries));
+      if (isSuperseded()) return;
+      // Artifacts are carried over only from this same project's list; a
+      // list tagged with another project has nothing to contribute.
+      setTicketList(prev => ({
+        projectId,
+        value: mergeTicketSummaries(prev?.projectId === projectId ? prev.value : NO_TICKETS, summaries)
+      }));
       setLastFetchedAt(new Date());
 
       const expanded = summaries.filter(t => expandedTicketIdsRef.current.has(t.id));
       await Promise.all(expanded.map(t => fetchTicketDetail(t.id)));
     } catch (e) {
       console.error('Failed to load tickets', e);
+      // A failed refresh keeps the list it already had for this project. A
+      // failed *first* load for it settles on an empty list rather than
+      // "loading" forever -- the screen a failed first load always gave --
+      // and the next poll tries again.
+      if (!isSuperseded()) {
+        setTicketList(prev => (prev?.projectId === projectId ? prev : { projectId, value: [] }));
+      }
     } finally {
-      setLoading(false);
+      const remaining = (inFlight.get(projectId) ?? 1) - 1;
+      if (remaining > 0) inFlight.set(projectId, remaining);
+      else inFlight.delete(projectId);
+      if (!isSuperseded()) setLoading(false);
     }
-  }, [expandedTicketIdsRef, fetchTicketDetail]);
+  }, [currentProjectIdRef, expandedTicketIdsRef, fetchTicketDetail]);
+
+  // refreshTickets re-fetches whichever project the header is currently
+  // showing. It is what every "something changed, reload the list" callback
+  // uses (the toolbar's refresh button, a ticket edit, the create-ticket
+  // launch, a label change), so none of them has to thread the project id
+  // through by hand -- and none of them can accidentally fetch unscoped.
+  const refreshTickets = useCallback(
+    () => fetchAllTickets(currentProjectIdRef.current),
+    [fetchAllTickets, currentProjectIdRef]
+  );
 
   // Fetches the full project list (for the project switcher menu).
   const fetchProjects = async () => {
@@ -301,16 +485,34 @@ export const App: React.FC = () => {
   // This is only ever used to *restore* state on load -- it must never
   // trigger a Claude Code terminal launch (see switchToProject, which is the
   // only path that does), or every page refresh would pop open a terminal.
+  //
+  // A failure is its own outcome, NOT "no project selected". Both end up
+  // with currentProject === null, but the two must not render the same way:
+  // the failure path used to fall through to "no project has been created
+  // yet" plus a create button, which is the screen this component
+  // deliberately withholds while the answer is unknown, for the same reason
+  // -- somebody who does have a project is being invited to create a
+  // duplicate, and on a shared data source that duplicate is everybody's.
+  // The read is now the local home config file (DFLT-00106), which can fail
+  // on its own while the rest of the app is fine, so this is a path users
+  // can actually reach.
+  //
+  // An answer that arrives after the user has picked a project themselves
+  // is dropped (see projectChoiceSeqRef): it describes the setting as it
+  // was before the pick.
   const fetchCurrentProject = async () => {
+    const seq = projectChoiceSeqRef.current;
+    let next: CurrentProjectState;
     try {
       const res = await fetch('/api/current-project');
       if (!res.ok) throw new Error(`GET /api/current-project: ${res.status}`);
       const data = await res.json();
-      setCurrentProject(data ?? null);
+      next = { kind: 'resolved', project: data ?? null };
     } catch (e) {
       console.error('Failed to load current project', e);
-      setCurrentProject(null);
+      next = { kind: 'failed' };
     }
+    if (seq === projectChoiceSeqRef.current) setCurrentProjectState(next);
   };
 
   // Refreshes both the project list and whichever project is currently
@@ -320,6 +522,17 @@ export const App: React.FC = () => {
   // immediately, not just after a manual page reload.
   const refreshProjects = async () => {
     await Promise.all([fetchProjects(), fetchCurrentProject()]);
+  };
+
+  // The retry offered on the failure screen. It goes back to the unresolved
+  // state first, so the user sees the loading placeholder rather than the
+  // error sitting there unchanged while the request is on its way -- and so
+  // a second failure reads as a second attempt. The project list is
+  // re-fetched with it: a failure there is silent (fetchProjects empties the
+  // switcher), so the retry would otherwise leave the menu empty.
+  const retryCurrentProject = () => {
+    setCurrentProjectState({ kind: 'loading' });
+    void refreshProjects();
   };
 
   // Fetches the "アプリ設定" app-settings this component needs: how many
@@ -341,50 +554,80 @@ export const App: React.FC = () => {
     }
   }, [tRef]);
 
+  // Startup. Deliberately does NOT fetch tickets: which project's tickets
+  // those would be isn't known until fetchCurrentProject resolves, and the
+  // effect below is the only thing that fetches them (DFLT-00106).
   useEffect(() => {
-    fetchAllTickets();
     fetchProjects();
     fetchCurrentProject();
     fetchTicketsPerPage();
-    // The recurring poll lives in its own effect below, so it can be
-    // suspended and resumed without re-running this startup load. Both
-    // dependencies are useCallbacks over refs/stable callbacks, so this
-    // really does run once -- listing fetchAllTickets here is honest
-    // bookkeeping, not a second load.
-  }, [fetchAllTickets, fetchTicketsPerPage]);
+  }, [fetchTicketsPerPage]);
 
-  // Ticket/graph changes happen in an external terminal the app can't see
-  // directly (no more SSE stream to react to), so poll periodically to keep
-  // the dashboard reasonably live.
+  // The ticket list, keyed on the project the header is showing: fetched
+  // immediately and then polled every POLL_INTERVAL_MS, since ticket/graph
+  // changes happen in an external terminal the app can't see directly (no
+  // more SSE stream to react to). With no project resolved yet, nothing is
+  // fetched at all.
+  //
+  // This effect is layer 2 ("requests") of the project-scoping comment at
+  // the state declarations. Having the poll live in an effect that *depends
+  // on* currentProject.id keeps every request pointed at the header's
+  // project without each call site having to remember: switching tears the
+  // old interval down (cleanup) and starts one for the new id, so after a
+  // switch no timer can ever fire for the previous project again.
+  //
+  // It does not decide what is shown -- the tag check at render (layer 1)
+  // does -- and it cannot recall a request the old timer (or the switch
+  // itself) already started. Dropping that response when it comes back is
+  // fetchAllTickets' guard (layer 3).
   //
   // While the tab is in the background nothing is polled at all
   // (DFLT-00112): a forgotten open tab used to keep hitting the DB -- every
   // 15s, per tab, for every viewer of a shared backend -- for a dashboard
   // nobody was looking at. Coming back to the foreground fetches once
   // immediately (so the view is never up to 15s stale at the moment it
-  // becomes visible again) and restarts the interval from that fetch.
+  // becomes visible again) and restarts the interval from that fetch. The
+  // visibility listener belongs to this effect for the same reason the
+  // interval does: after a switch, becoming visible again must fetch the
+  // new project, not the one the listener was registered for. The one live
+  // timer is a variable of this effect run, so a switch's cleanup and a
+  // hidden tab stop exactly that timer; two intervals would double the
+  // request rate for the rest of the session.
   //
-  // The timer id is kept in a ref so start/stop always act on the one live
-  // timer; two intervals would double the request rate for the rest of the
-  // session.
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // The fetch made on entering the effect (first load, or a switch) always
+  // runs, visible or not -- it is what the switch (or the page load) asked
+  // for. A poll tick and the fetch on becoming visible again are skipped
+  // while a run for this same project is still in flight: otherwise a fetch
+  // slower than the interval would be superseded by the next tick every
+  // time and never be shown (see ticketFetchesInFlightRef). The skipped
+  // fetch costs nothing -- the run in flight is already fetching the same
+  // thing, and its result is what the tab will show.
   useEffect(() => {
+    const projectId = currentProject?.id ?? '';
+    void fetchAllTickets(projectId);
+    if (!projectId) return;
+
+    const pollOnce = () => {
+      if (ticketFetchesInFlightRef.current.has(projectId)) return;
+      void fetchAllTickets(projectId);
+    };
+    let timer: ReturnType<typeof setInterval> | null = null;
     const stopPolling = () => {
-      if (pollTimerRef.current !== null) {
-        clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
       }
     };
     const startPolling = () => {
       stopPolling();
-      pollTimerRef.current = setInterval(() => void fetchAllTickets(), POLL_INTERVAL_MS);
+      timer = setInterval(pollOnce, POLL_INTERVAL_MS);
     };
     const onVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         stopPolling();
         return;
       }
-      void fetchAllTickets();
+      pollOnce();
       startPolling();
     };
 
@@ -394,7 +637,7 @@ export const App: React.FC = () => {
       stopPolling();
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [fetchAllTickets]);
+  }, [currentProject?.id, fetchAllTickets]);
 
   // Consumes the `?newProject=1&workDir=<dir>` query the `graph-engine ui`
   // CLI command (the `/ui` slash command's backend) appends to the root URL
@@ -442,12 +685,16 @@ export const App: React.FC = () => {
       console.error('Failed to switch current project', e);
       return;
     }
-    setCurrentProject(project);
+    // Also leaves a failed or still-running read behind: the answer is now
+    // the user's own choice.
+    chooseProject(project);
     // Label ids are per project, so the previous project's selection can't
     // apply to the new one.
     setFilterLabelIds([]);
     setPage(1);
-    fetchAllTickets();
+    // No explicit fetch: the ticket-list effect keys on currentProject.id,
+    // so chooseProject above already re-points it at the new project, and
+    // until that fetch lands the list area says "loading" (ProjectScoped).
   };
 
   // ProjectSetupModal's "create new" path: the POST already happened there.
@@ -464,11 +711,11 @@ export const App: React.FC = () => {
   const handleProjectLinked = async (project: Project) => {
     setIsCreateProjectOpen(false);
     setProjectSetupDirectory('');
-    setCurrentProject(project);
+    chooseProject(project);
     setFilterLabelIds([]);
     setPage(1);
     await fetchProjects();
-    fetchAllTickets();
+    // The ticket-list effect follows chooseProject; see switchToProject.
   };
 
   const handleToggleExpand = (id: string) => {
@@ -492,7 +739,7 @@ export const App: React.FC = () => {
   // form-to-REST path - that decides what a "created ticket" looks like.
   // It also deliberately does NOT trigger refine/graph-building afterward:
   // those are separate, later steps in the ticket lifecycle now.
-  const { isLaunching: isCreating, lastMessage: createStatus, launch: runCreateTicket, reset: resetCreateStatus } = useClaudeLaunch(fetchAllTickets);
+  const { isLaunching: isCreating, lastMessage: createStatus, launch: runCreateTicket, reset: resetCreateStatus } = useClaudeLaunch(refreshTickets);
 
   // Empty/whitespace-only requests never reach here: CreateTicketModal guards
   // both the button and the Cmd/Ctrl+Enter path. Returns whether the launch
@@ -758,7 +1005,7 @@ export const App: React.FC = () => {
 
           <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400 text-xs">
             <button
-              onClick={fetchAllTickets}
+              onClick={refreshTickets}
               disabled={loading}
               className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition"
               title={t('toolbar.refreshTitle')}
@@ -811,7 +1058,40 @@ export const App: React.FC = () => {
 
         {/* Tickets Accordion List */}
         <div>
-          {!currentProject ? (
+          {/* Four states, not two (DFLT-00106). "No project has been
+              created yet" plus a create button is only ever right when the
+              answer is known to be "none": shown to somebody who does have
+              a project it invites them to create a duplicate, and on a
+              shared data source that duplicate is everybody's. So the two
+              cases where the answer is NOT known get their own branch --
+              the request is still running (loading), or it failed (the
+              error below, which offers a retry and no create button). The
+              flags all come from one CurrentProjectState, so "failed" and
+              "a project is selected" cannot both hold. Once a project is
+              selected, its list not having arrived yet is "loading" too --
+              not the empty state, and never the previous project's list. */}
+          {!isCurrentProjectResolved ? (
+            <div
+              className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm"
+              aria-busy="true"
+            >
+              {t('emptyState.loadingTickets')}
+            </div>
+          ) : hasCurrentProjectFailed ? (
+            <div
+              className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm space-y-3"
+              role="alert"
+            >
+              <p>{t('projectSwitcher.loadFailed')}</p>
+              <button
+                onClick={retryCurrentProject}
+                className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold inline-flex items-center gap-1.5 transition"
+              >
+                <RotateCw className="w-4 h-4" />
+                {t('projectSwitcher.retry')}
+              </button>
+            </div>
+          ) : !currentProject ? (
             <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm space-y-3">
               <p>{t('projectSwitcher.noProjectYet')}</p>
               <button
@@ -825,6 +1105,13 @@ export const App: React.FC = () => {
                 {t('projectSwitcher.createNew')}
               </button>
             </div>
+          ) : isTicketListPending ? (
+            <div
+              className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm"
+              aria-busy="true"
+            >
+              {t('emptyState.loadingTickets')}
+            </div>
           ) : filteredTickets.length === 0 ? (
             <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm">
               {t('emptyState.noTicketsMatch')}
@@ -837,7 +1124,7 @@ export const App: React.FC = () => {
                   ticket={ticket}
                   isExpanded={expandedTicketIds.has(ticket.id)}
                   onToggleExpand={() => handleToggleExpand(ticket.id)}
-                  onRefresh={fetchAllTickets}
+                  onRefresh={refreshTickets}
                   myName={myName}
                   projectLabels={projectLabels}
                 />
@@ -910,7 +1197,7 @@ export const App: React.FC = () => {
         onLabelsChanged={() => {
           // A rename/recolor/delete shows on tickets, so re-fetch both.
           refreshProjectLabels();
-          fetchAllTickets();
+          refreshTickets();
         }}
       />
 

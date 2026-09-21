@@ -113,7 +113,7 @@ func TestDescriptionErrors_SameWordingForCreateAndRefine(t *testing.T) {
 			var createErr, refineErr error
 			withStdin(t, c.stdin)
 			captureStdout(t, func() {
-				createErr = cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"T", c.arg, "--project", projectID})
+				createErr = cmdCreateTicket(eng, repo, sandboxRC(t), []string{"T", c.arg, "--project", projectID})
 			})
 			withStdin(t, c.stdin)
 			captureStdout(t, func() {

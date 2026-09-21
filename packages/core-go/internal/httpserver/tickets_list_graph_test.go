@@ -114,7 +114,7 @@ func TestHandleListTickets_IncludesGraphExcludesArtifacts(t *testing.T) {
 	a := seedGraphTicket(t, repo, projectID, "A", 3, secret)
 	b := seedGraphTicket(t, repo, projectID, "B", 2, secret)
 
-	rec := doJSON(t, s, "GET", "/api/tickets", nil)
+	rec := doJSON(t, s, "GET", listTicketsPath(projectID), nil)
 	body := rec.Body.String()
 	list := decodeTicketList(t, rec)
 
@@ -160,7 +160,7 @@ func TestHandleListTickets_EmptyGraphIsArrayNotNull(t *testing.T) {
 	s, repo, projectID := newTestServer(t)
 	ticket := seedGraphTicket(t, repo, projectID, "no nodes yet", 0, "")
 
-	list := decodeTicketList(t, doJSON(t, s, "GET", "/api/tickets", nil))
+	list := decodeTicketList(t, doJSON(t, s, "GET", listTicketsPath(projectID), nil))
 	item, ok := list[ticket.ID]
 	if !ok {
 		t.Fatalf("ticket %s missing from the list response", ticket.ID)
@@ -174,7 +174,7 @@ func TestHandleListTickets_EmptyGraphIsArrayNotNull(t *testing.T) {
 }
 
 // ?all=true (the cross-project escape hatch) goes through the same
-// post-processing as the project-scoped default, so it returns the same
+// post-processing as a ?project_id= listing, so it returns the same
 // shape -- including the tickets of a project that is not the current one.
 func TestHandleListTickets_AllTrueHasSameShape(t *testing.T) {
 	s, repo, projectID := newTestServer(t)
@@ -190,7 +190,7 @@ func TestHandleListTickets_AllTrueHasSameShape(t *testing.T) {
 	}
 	theirs := seedGraphTicket(t, repo, other.ID, "other project", 3, secret)
 
-	scoped := decodeTicketList(t, doJSON(t, s, "GET", "/api/tickets", nil))
+	scoped := decodeTicketList(t, doJSON(t, s, "GET", listTicketsPath(projectID), nil))
 	if _, present := scoped[theirs.ID]; present {
 		t.Fatalf("the project-scoped listing leaked another project's ticket")
 	}
@@ -265,7 +265,7 @@ func TestHandleListTickets_FallsBackWhenRepoHasNoBulkRead(t *testing.T) {
 	}
 	s.repo = fallback
 
-	list := decodeTicketList(t, doJSON(t, s, "GET", "/api/tickets", nil))
+	list := decodeTicketList(t, doJSON(t, s, "GET", listTicketsPath(projectID), nil))
 	if got := len(jsonArray(t, list[a.ID], "nodes")); got != 3 {
 		t.Errorf("ticket %s: got %d nodes, want 3", a.ID, got)
 	}
@@ -319,7 +319,7 @@ func TestHandleListTickets_FallbackTolerationOfVanishedTicket(t *testing.T) {
 	fallback := &repoWithoutBulkGraphs{GraphRepository: repo, detailNotFound: true}
 	s.repo = fallback
 
-	list := decodeTicketList(t, doJSON(t, s, "GET", "/api/tickets", nil))
+	list := decodeTicketList(t, doJSON(t, s, "GET", listTicketsPath(projectID), nil))
 	item, ok := list[a.ID]
 	if !ok {
 		t.Fatalf("ticket %s missing from the list response", a.ID)

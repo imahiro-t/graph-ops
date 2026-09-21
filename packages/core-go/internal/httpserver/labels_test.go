@@ -264,7 +264,7 @@ func TestTicketsAPI_LabelIDs(t *testing.T) {
 	id := created.ID
 
 	// No labels -> [] in list and detail.
-	listRec := doJSON(t, s, http.MethodGet, "/api/tickets", nil)
+	listRec := doJSON(t, s, http.MethodGet, listTicketsPath(projectID), nil)
 	if !strings.Contains(listRec.Body.String(), `"labels":[]`) {
 		t.Errorf("list must carry labels: []: %s", listRec.Body.String())
 	}
@@ -367,7 +367,7 @@ func TestTicketsAPI_LabelIDs(t *testing.T) {
 			t.Errorf("%s: rename not reflected: %+v", tid, tk.Labels)
 		}
 	}
-	listRec = doJSON(t, s, http.MethodGet, "/api/tickets", nil)
+	listRec = doJSON(t, s, http.MethodGet, listTicketsPath(projectID), nil)
 	var listed []apiTicket
 	_ = json.Unmarshal(listRec.Body.Bytes(), &listed)
 	for _, tk := range listed {

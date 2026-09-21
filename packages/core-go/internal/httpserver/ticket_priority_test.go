@@ -247,7 +247,7 @@ func TestListAndGetTicket_PriorityAlwaysPresent(t *testing.T) {
 		ids[title] = tk.ID
 	}
 
-	list := doJSON(t, s, http.MethodGet, "/api/tickets", nil)
+	list := doJSON(t, s, http.MethodGet, listTicketsPath(projectID), nil)
 	if list.Code != http.StatusOK {
 		t.Fatalf("GET /api/tickets expected 200, got %d", list.Code)
 	}

@@ -159,11 +159,19 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined;
       let m: RegExpMatchArray | null;
 
-      if (url === '/api/tickets' && method === 'GET') {
-        return respond(
-          200,
-          backend.tickets.filter(tk => tk.project_id === backend.currentProjectId).map(ticketListJSON)
-        );
+      // GET /api/tickets is scoped by the CALLER's query, never by the
+      // backend's current project (DFLT-00106): ?project_id=<id> filters,
+      // ?all=true returns everything and wins over project_id, and neither
+      // returns an empty list. Filtering by backend.currentProjectId here --
+      // which is what this used to do -- would hide the very bug the app's
+      // tests now guard against, since an unscoped request would still come
+      // back with the right project's tickets.
+      if (url.split('?')[0] === '/api/tickets' && method === 'GET') {
+        const query = new URLSearchParams(url.split('?')[1] ?? '');
+        if (query.get('all') === 'true') return respond(200, backend.tickets.map(ticketListJSON));
+        const projectId = query.get('project_id') ?? '';
+        if (!projectId) return respond(200, []);
+        return respond(200, backend.tickets.filter(tk => tk.project_id === projectId).map(ticketListJSON));
       }
       if ((m = url.match(/^\/api\/tickets\/([^/?]+)$/)) && method === 'GET') {
         const id = decodeURIComponent(m[1]);
@@ -213,6 +221,10 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
         }
       }
       if (url.startsWith('/api/settings/node-types')) return respond(200, { types: [] });
+      // The create-ticket flow launches an external terminal and returns
+      // immediately; nothing is created here. It is answered so a test can
+      // drive that flow and watch the refetch it triggers afterwards.
+      if (url === '/api/claude/launch' && method === 'POST') return respond(200, { success: true });
       return respond(404, { error: { code: 'NOT_FOUND', message: url } });
     }
   };

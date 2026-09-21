@@ -31,9 +31,6 @@ func newSettingsTestServer(t *testing.T) (*Server, store.GraphRepository, string
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	if err := repo.SetCurrentProjectID(proj.ID); err != nil {
-		t.Fatalf("SetCurrentProjectID: %v", err)
-	}
 	eng := engine.New(repo)
 	cfg := Config{ArtifactsDir: t.TempDir(), UserExtensionsDir: t.TempDir(), HomeDir: t.TempDir()}
 	return New(repo, eng, cfg), repo, proj.ID

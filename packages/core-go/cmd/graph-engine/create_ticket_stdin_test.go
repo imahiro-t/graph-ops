@@ -68,7 +68,7 @@ func TestCmdCreateTicket_StdinDescriptionSavedByteForByte(t *testing.T) {
 
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"stdin ticket", "-", "--project", projectID})
+		runErr = cmdCreateTicket(eng, repo, sandboxRC(t), []string{"stdin ticket", "-", "--project", projectID})
 	})
 	if runErr != nil {
 		t.Fatalf("cmdCreateTicket: %v", runErr)
@@ -110,7 +110,7 @@ func TestCmdCreateTicket_StdinWithFlagsInAnyOrder(t *testing.T) {
 			}
 			var runErr error
 			out := captureStdout(t, func() {
-				runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, resolved)
+				runErr = cmdCreateTicket(eng, repo, sandboxRC(t), resolved)
 			})
 			if runErr != nil {
 				t.Fatalf("cmdCreateTicket: %v", runErr)
@@ -136,7 +136,7 @@ func TestCmdCreateTicket_EmptyStdinIsAnError(t *testing.T) {
 
 			var runErr error
 			out := captureStdout(t, func() {
-				runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"T", "-", "--project", projectID})
+				runErr = cmdCreateTicket(eng, repo, sandboxRC(t), []string{"T", "-", "--project", projectID})
 			})
 			if runErr == nil {
 				t.Fatal("expected an error for empty stdin")
@@ -164,7 +164,7 @@ func TestCmdCreateTicket_StdinReadFailureIsAnError(t *testing.T) {
 
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"T", "-", "--project", projectID})
+		runErr = cmdCreateTicket(eng, repo, sandboxRC(t), []string{"T", "-", "--project", projectID})
 	})
 	if runErr == nil || !strings.Contains(runErr.Error(), "reading description from stdin") {
 		t.Fatalf("expected a stdin read error, got %v", runErr)
@@ -199,7 +199,7 @@ func TestCmdCreateTicket_DescriptionArgumentStillLiteral(t *testing.T) {
 			withStdin(t, "from stdin\n")
 			var runErr error
 			out := captureStdout(t, func() {
-				runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, append(c.args, "--project", projectID))
+				runErr = cmdCreateTicket(eng, repo, sandboxRC(t), append(c.args, "--project", projectID))
 			})
 			if runErr != nil {
 				t.Fatalf("cmdCreateTicket: %v", runErr)
@@ -219,7 +219,7 @@ func TestCmdCreateTicket_StdinWithUnknownLabelCreatesNothing(t *testing.T) {
 	run := func(args []string) (error, string) {
 		var runErr error
 		out := captureStdout(t, func() {
-			runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, args)
+			runErr = cmdCreateTicket(eng, repo, sandboxRC(t), args)
 		})
 		return runErr, out
 	}
@@ -255,7 +255,7 @@ func TestCmdCreateTicket_InvalidPriorityCheckedBeforeStdin(t *testing.T) {
 
 	var runErr error
 	captureStdout(t, func() {
-		runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"T", "-", "--priority", "URGENT", "--project", projectID})
+		runErr = cmdCreateTicket(eng, repo, sandboxRC(t), []string{"T", "-", "--priority", "URGENT", "--project", projectID})
 	})
 	if runErr == nil || !strings.Contains(runErr.Error(), "URGENT") || strings.Contains(runErr.Error(), "stdin") {
 		t.Fatalf("expected the priority error (not a stdin one), got %v", runErr)
@@ -294,7 +294,7 @@ func TestCmdCreateTicket_WhitespaceOnlyArgumentIsAnError(t *testing.T) {
 			args := append([]string{"T", c.arg, "--project", projectID}, c.flags...)
 			var runErr error
 			out := captureStdout(t, func() {
-				runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, args)
+				runErr = cmdCreateTicket(eng, repo, sandboxRC(t), args)
 			})
 			if runErr == nil {
 				t.Fatal("expected an error for a whitespace-only description")
@@ -327,7 +327,7 @@ func TestCmdCreateTicket_EmptyStringArgumentCreatesWithoutDescription(t *testing
 
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, []string{"T", "", "--project", projectID})
+		runErr = cmdCreateTicket(eng, repo, sandboxRC(t), []string{"T", "", "--project", projectID})
 	})
 	if runErr != nil {
 		t.Fatalf("cmdCreateTicket: %v", runErr)

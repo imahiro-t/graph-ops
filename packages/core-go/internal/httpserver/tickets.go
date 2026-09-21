@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/graph-ops/core-go/internal/config"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
+	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
 )
 
@@ -52,17 +54,29 @@ func (n *nullableString) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// handleListTickets defaults to the currently-selected project (completion
-// criterion: "switching projects shows only that project's ticket list"):
-// pass ?project_id=<id> to list a specific project's tickets
-// explicitly, or ?all=true to bypass project scoping entirely and list
-// every ticket across every project.
+// handleListTickets requires the caller to say which project it wants:
+// ?project_id=<id> lists that project's tickets, ?all=true lists every
+// ticket across every project (and wins over project_id), and omitting both
+// returns an empty list. A project_id naming no project is an empty list
+// too, not an error, for the same reason -- filtering simply matches
+// nothing.
+//
+// Until DFLT-00106 an omitted project_id fell back to "the" current project,
+// which came from a single app_state row shared by everyone on the same data
+// source. Since the current project is now per-environment, and a shared
+// one was what let a teammate's switch silently repopulate somebody else's
+// list with another project's tickets while the header still named the old
+// one, there is no server-side default left to fall back to: the client
+// names the project it is displaying, on every request, or gets nothing.
+// This is a breaking change for any other caller of GET /api/tickets --
+// ?all=true is the replacement for "just give me everything".
 //
 // Every element carries that ticket's nodes and edges but not its artifacts
 // (domain.TicketGraph, DFLT-00112), so the Web UI's 15s poll is a single
 // request whose size no longer grows with the artifact bodies stored on the
-// listed tickets. Both paths above go through the same post-processing, so
-// ?all=true returns the same shape as the project-scoped default.
+// listed tickets. Both listing paths go through the same post-processing, so
+// ?all=true returns the same shape as a project_id listing (and the empty
+// list for neither is still a JSON array).
 func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 	var tickets []domain.Ticket
 	var err error
@@ -71,13 +85,6 @@ func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 		tickets, err = s.repo.ListTickets()
 	default:
 		projectID := r.URL.Query().Get("project_id")
-		if projectID == "" {
-			projectID, err = s.repo.GetCurrentProjectID()
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err)
-				return
-			}
-		}
 		if projectID == "" {
 			tickets = []domain.Ticket{}
 		} else {
@@ -112,8 +119,9 @@ func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 // (N+1).
 //
 // Mind what that N+1 is measured over: a whole poll, not this endpoint. This
-// endpoint by itself got more expensive -- 2 remote calls before
-// (GetCurrentProjectID plus the listing), N+2 now. What keeps the poll even
+// endpoint by itself got more expensive -- 1 remote call before (the
+// listing; since DFLT-00106 the Web UI names the project, so no
+// GetCurrentProjectID read is involved), N+1 now. What keeps the poll even
 // is the per-ticket detail fetch the browser no longer sends; the fan-out
 // moved from the browser to here rather than disappearing.
 //
@@ -124,9 +132,14 @@ func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 // therefore takes longer in wall-clock terms than it did before this
 // endpoint carried graphs. Nothing caps the total: the 30s timeout in
 // store/http.go is per call, not per handler. Once N x RTT exceeds the Web
-// UI's 15s poll interval (about 75 tickets at a 200ms RTT) polls begin to
-// overlap. A data source expected to serve that many tickets should
-// implement a bulk read instead of leaning on this path.
+// UI's 15s poll interval (about 75 tickets at a 200ms RTT) a fetch outlasts
+// the interval. One tab does not stack requests up over that: it skips a
+// poll tick while its previous fetch of the same project is still in flight
+// (DFLT-00106, App.tsx's ticketFetchesInFlightRef), so the list simply
+// refreshes as often as a fetch completes -- but every other open tab and
+// every other viewer still adds its own. A data source expected to serve
+// that many tickets should implement a bulk read instead of leaning on this
+// path.
 //
 // The other price of GetTicketDetail is that the detail response also carries
 // that ticket's artifacts, whose bodies travel from the data source to this
@@ -191,10 +204,20 @@ func (s *Server) ticketGraphs(tickets []domain.Ticket) ([]domain.TicketGraph, er
 	return out, nil
 }
 
-// handleCreateTicket defaults to the currently-selected project when
+// handleCreateTicket defaults to this environment's current project
+// (currentProjectId in the home config file, see internal/currentproject) when
 // project_id is omitted from the body; if there is neither an explicit
 // project_id nor a current project, the request fails with
 // ErrCodeNoCurrentProject rather than silently picking one.
+//
+// Unlike handleListTickets, this one keeps its fallback (DFLT-00106): the
+// value it falls back to is now this machine's own, so it can no longer be
+// moved by somebody else on the same data source -- which is what made the
+// old shared fallback a way to write a ticket into a stranger's project.
+// A currentProjectId left dangling by a project somebody else deleted is a
+// 404 PROJECT_NOT_FOUND from the store, naming the missing ID, and no
+// ticket is created; falling through to some other project would be exactly
+// the misrouting this is about.
 //
 // There is no assignee field here: a new ticket is always created unassigned
 // (see engine.CreateTicket), regardless of whether a caller's body includes
@@ -239,8 +262,17 @@ func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 	projectID := body.ProjectID
 	if projectID == "" {
 		var err error
-		projectID, err = s.repo.GetCurrentProjectID()
+		projectID, err = s.currentProjectID()
 		if err != nil {
+			// Logged rather than only returned, for the same reason as in
+			// handleGetCurrentProject: since DFLT-00106 this reads the local
+			// home config file, and a caller that only sees the 500 (the
+			// CLI, a script) leaves no trace in the `graph-engine ui`
+			// terminal to diagnose from.
+			s.logger.Warn("failed to read this environment's current project from the home config file; the ticket was not created",
+				slog.String("event", "current_project_read_failed"),
+				slog.String("config_path", runtimeconfig.HomeConfigPath(s.cfg.HomeDir)),
+				slog.String("error", err.Error()))
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}

@@ -211,7 +211,24 @@ in lowerCamelCase.
 | Artifacts | `POST/GET /tickets/{ticketId}/artifacts`, `GET /artifacts/{artifactId}`, `GET /nodes/{nodeId}/artifacts` |
 | Projects | `POST/GET /projects`, `GET/PATCH/DELETE /projects/{projectId}` |
 | Labels | `POST/GET /projects/{projectId}/labels`, `GET/PATCH/DELETE /labels/{labelId}` |
-| Current project | `GET/PUT /current-project` |
+| Current project | `GET/PUT /current-project` (**deprecated**) |
+
+`/current-project` is deprecated: the current project is a per-user choice, so
+graph-engine now keeps it in each user's home config file
+(`$HOME/.graph-ops/config.json`) rather than in the data source. Keep implementing `GET` -- it is not a one-off migration call
+that can be removed once an upgrade is done. graph-engine calls `GET` only
+while that home config file has no `currentProjectId` of its
+own: once on an environment upgrading with a selection to inherit (a non-empty
+answer is written there, which carries that selection over, and `GET` is not
+called again in that environment), and on each read until a project is
+selected on one that has none (an answer of `""` is not written, so the next
+read calls `GET` again -- the Web UI reads the current project on every page
+load). For as long as it is called, an error from `GET` is an error from
+graph-engine's own current-project read, which makes graph-engine answer
+`500`, so answer it, with `""` when nothing is stored. `PUT` is no longer
+called at all. Nothing else changes for a plugin: `GET /tickets`
+still returns every ticket, and narrowing by project is still
+`GET /projects/{projectId}/tickets`.
 
 Path parameters are percent-encoded by graph-engine (an ID may contain `/` or
 spaces); decode them before use.

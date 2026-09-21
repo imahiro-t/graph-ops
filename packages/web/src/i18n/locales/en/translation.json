@@ -50,7 +50,8 @@
     "nodeProgress": "Node Progress"
   },
   "emptyState": {
-    "noTicketsMatch": "No tickets match the current filters"
+    "noTicketsMatch": "No tickets match the current filters",
+    "loadingTickets": "Loading tickets..."
   },
   "pagination": {
     "range": "Showing {{from}}-{{to}} of {{total}}",
@@ -61,7 +62,9 @@
     "empty": "No projects yet",
     "createNew": "New project...",
     "selectFirst": "Create or select a project first",
-    "noProjectYet": "No project has been created yet. Create one to start managing tickets."
+    "noProjectYet": "No project has been created yet. Create one to start managing tickets.",
+    "loadFailed": "Could not load the current project setting. Check your home config file (~/.graph-ops/config.json) and try again.",
+    "retry": "Retry"
   },
   "createProjectModal": {
     "title": "Create New Project",

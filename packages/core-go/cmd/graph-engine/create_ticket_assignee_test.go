@@ -42,7 +42,7 @@ func TestCmdCreateTicket_TitleAndDescriptionOnly(t *testing.T) {
 
 			var runErr error
 			out := captureStdout(t, func() {
-				runErr = cmdCreateTicket(eng, repo, runtimeConfig{}, tc.args(projectID))
+				runErr = cmdCreateTicket(eng, repo, sandboxRC(t), tc.args(projectID))
 			})
 			if runErr != nil {
 				t.Fatalf("cmdCreateTicket: %v", runErr)
@@ -73,7 +73,7 @@ func TestCmdCreateTicket_ExtraPositionalIsUsageError(t *testing.T) {
 			repo, projectID := newTestRepoWithProject(t)
 			eng := engine.New(repo)
 
-			err := cmdCreateTicket(eng, repo, runtimeConfig{}, args(projectID))
+			err := cmdCreateTicket(eng, repo, sandboxRC(t), args(projectID))
 			if err == nil || !strings.Contains(err.Error(), createTicketUsage) {
 				t.Fatalf("expected the create-ticket usage error, got %v", err)
 			}
@@ -86,7 +86,7 @@ func TestCmdCreateTicket_ExtraPositionalIsUsageError(t *testing.T) {
 
 func TestCmdCreateTicket_NoPositionalIsUsageError(t *testing.T) {
 	repo, projectID := newTestRepoWithProject(t)
-	err := cmdCreateTicket(engine.New(repo), repo, runtimeConfig{}, []string{"--project", projectID})
+	err := cmdCreateTicket(engine.New(repo), repo, sandboxRC(t), []string{"--project", projectID})
 	if err == nil || !strings.Contains(err.Error(), createTicketUsage) {
 		t.Fatalf("expected the create-ticket usage error, got %v", err)
 	}

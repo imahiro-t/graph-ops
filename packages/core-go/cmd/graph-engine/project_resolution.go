@@ -27,10 +27,17 @@ const (
 //     the home config file's per-environment project ID -> path map, see
 //     DFLT-00080), that project wins -- the deepest such path when several
 //     nest (see findProjectForDir).
-//  2. Otherwise, the globally-selected current project
-//     (app_state.current_project_id, set by use-project and by the Web UI's
-//     project switcher).
+//  2. Otherwise, this environment's current project (the home config file's
+//     currentProjectId, set by use-project and by the Web UI's project
+//     switcher -- see internal/currentproject), supplied by the caller as
+//     currentProjectID so this function stays independent of where that
+//     value is stored.
 //  3. Otherwise, the long-standing "no current project selected" error.
+//
+// The order is unchanged by DFLT-00106; only step 2's source moved, from the
+// DB's single shared app_state.current_project_id to this user's own home
+// config file. That is what stops a colleague's `use-project` on a shared
+// MySQL from redirecting tickets created here.
 //
 // home is os.UserHomeDir()'s result (runtimeConfig.HomeDir), used only to
 // name the file the step-3 error tells the user to edit -- see
@@ -45,10 +52,11 @@ const (
 // A ListProjects failure is returned as-is instead of falling through to
 // step 2: quietly ignoring it and creating the ticket in whatever project
 // the UI last selected is exactly the misrouting this resolution exists to
-// prevent. Likewise a current_project_id that no longer names a project is
-// an error (with the dangling id in the message) rather than something to
-// guess around.
-func resolveCreateTicketProject(repo store.GraphRepository, cwd, home string, projectPaths map[string]string) (*domain.Project, projectResolutionSource, error) {
+// prevent. Likewise a currentProjectId that no longer names a project --
+// which is what a project deleted from the shared DB leaves behind in every
+// other environment's home config file -- is an error (with the dangling id
+// in the message) rather than something to guess around.
+func resolveCreateTicketProject(repo store.GraphRepository, cwd, home string, projectPaths map[string]string, currentProjectID func() (string, error)) (*domain.Project, projectResolutionSource, error) {
 	if cwd != "" {
 		projects, err := repo.ListProjects()
 		if err != nil {
@@ -59,7 +67,7 @@ func resolveCreateTicketProject(repo store.GraphRepository, cwd, home string, pr
 		}
 	}
 
-	pid, err := repo.GetCurrentProjectID()
+	pid, err := currentProjectID()
 	if err != nil {
 		return nil, "", err
 	}

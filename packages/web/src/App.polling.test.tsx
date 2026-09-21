@@ -31,6 +31,9 @@ const project: Project = {
 };
 
 const LABELS_URL = `/api/projects/${project.id}/labels`;
+// Since DFLT-00106 the list request always names the header's project; a
+// bare GET /api/tickets returns an empty list.
+const LIST_URL = `/api/tickets?project_id=${project.id}`;
 
 // A ticket with a three-node graph (one of them done) and two artifacts,
 // i.e. everything a collapsed card and an expanded panel each read.
@@ -158,7 +161,7 @@ describe('polling cost', () => {
     const urls = urlsSince(mark);
 
     expect(urls).toHaveLength(2);
-    expect(countOf(urls, '/api/tickets')).toBe(1);
+    expect(countOf(urls, LIST_URL)).toBe(1);
     expect(countOf(urls, LABELS_URL)).toBe(1);
     expect(detailRequests(urls)).toEqual([]);
   });
@@ -177,7 +180,7 @@ describe('polling cost', () => {
     const urls = urlsSince(mark);
 
     expect(urls).toHaveLength(3);
-    expect(countOf(urls, '/api/tickets')).toBe(1);
+    expect(countOf(urls, LIST_URL)).toBe(1);
     expect(countOf(urls, LABELS_URL)).toBe(1);
     expect(detailRequests(urls)).toEqual(['/api/tickets/DFLT-00002']);
   });
@@ -220,9 +223,12 @@ describe('artifacts', () => {
     expect(artifactsTab()).toBeInTheDocument();
 
     // The list response itself never carried them: the round's ticket
-    // request must not have returned any artifact body.
-    const listResponse = await backend.fetch('/api/tickets');
-    expect(await listResponse.text()).not.toContain('実装メモの本文');
+    // request must not have returned any artifact body. (It must have
+    // returned the tickets, though, or this would pass on an empty list.)
+    const listResponse = await backend.fetch(LIST_URL);
+    const listBody = await listResponse.text();
+    expect(listBody).toContain('DFLT-00001');
+    expect(listBody).not.toContain('実装メモの本文');
   });
 
   it('mergeTicketSummaries carries artifacts over by id and drops unlisted tickets', () => {
@@ -272,12 +278,12 @@ describe('background tabs', () => {
     const mark = fetchMock.mock.calls.length;
     await setVisibility('visible');
     await flush();
-    expect(countOf(urlsSince(mark), '/api/tickets')).toBe(1);
+    expect(countOf(urlsSince(mark), LIST_URL)).toBe(1);
     expect(countOf(urlsSince(mark), LABELS_URL)).toBe(1);
 
     const resumeMark = fetchMock.mock.calls.length;
     await advanceOneRound();
-    expect(countOf(urlsSince(resumeMark), '/api/tickets')).toBe(1);
+    expect(countOf(urlsSince(resumeMark), LIST_URL)).toBe(1);
   });
 });
 

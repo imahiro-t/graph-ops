@@ -664,7 +664,36 @@ paths:
     get:
       operationId: getCurrentProjectID
       tags: [current-project]
-      summary: Get the currently selected project (one value for the whole data source).
+      summary: "DEPRECATED: get the currently selected project (one value for the whole data source)."
+      deprecated: true
+      description: |
+        Deprecated: graph-engine no longer calls this in normal operation.
+
+        The current project is a per-user, per-environment choice, so it has
+        moved out of the data source and into each user's home config file
+        ($HOME/.graph-ops/config.json, "currentProjectId"). Keeping it here made one
+        person's switch change what everyone sharing this data source saw.
+
+        Both operations stay in the protocol for compatibility, and GET must
+        still be implemented -- it is not a one-off migration call that can be
+        dropped once an upgrade is done. graph-engine calls GET only while a
+        user's home config file has no currentProjectId of its own:
+        once on an environment upgrading with a selection to inherit (a
+        non-empty answer is written there, which carries that selection over,
+        and GET is not called again in that environment), and on each read
+        until a project is selected on one that has none (an answer of "" is
+        not written, so the next read calls GET again -- the Web UI reads the
+        current project on every page load). For as long as it is called, an
+        error from GET is an error from graph-engine's own current-project
+        read (graph-engine then fails the request that needed it), so keep
+        answering it -- with "" if the plugin has nothing stored.
+
+        PUT is no longer called at all. A plugin may keep storing what it is
+        given, but nothing sends it.
+
+        This does not change how tickets are listed: GET /tickets still
+        returns every ticket, and narrowing by project is still
+        GET /projects/{projectId}/tickets.
       responses:
         "200":
           description: The current project ID, or "" when none has ever been selected.
@@ -675,7 +704,12 @@ paths:
     put:
       operationId: setCurrentProjectID
       tags: [current-project]
-      summary: Select the current project.
+      summary: "DEPRECATED: select the current project."
+      deprecated: true
+      description: |
+        Deprecated: graph-engine never calls this. The current project is
+        saved in each user's home config file ("currentProjectId").
+        See GET /current-project for why, and for the one remaining read.
       requestBody:
         required: true
         content:

@@ -189,6 +189,22 @@ type GraphRepository interface {
 
 	// GetCurrentProjectID returns "" (not an error) when no project has
 	// ever been selected.
+	//
+	// DEPRECATED as the source of truth. "Which project am I looking at" is
+	// a per-person, per-machine state, and this pair keeps it in the data
+	// source -- one app_state row for everyone sharing a MySQL or HTTP data
+	// source, so one member switching projects moved everyone else's ticket
+	// list and `create-ticket` target. Since DFLT-00106 the answer lives in
+	// each user's home config file instead; read and write it
+	// through internal/currentproject.
+	//
+	// The pair stays on the interface, and app_state stays in the schema,
+	// for exactly two reasons: currentproject.Get reads (never writes) the
+	// DB value once, to inherit it into an environment upgrading from before
+	// DFLT-00106, and the HTTP data source contract still specifies
+	// GET/PUT /current-project, which a plugin may keep implementing.
+	// Nothing else in the engine calls either of them -- do not reintroduce
+	// a caller.
 	GetCurrentProjectID() (string, error)
 	SetCurrentProjectID(projectID string) error
 }
