@@ -1,0 +1,76 @@
+# Dependency updates. Without this, dependencies moved only when somebody
+# remembered to look -- which is how SEC-01 (a vulnerable Go toolchain) and
+# SEC-13 (a vulnerable vitest) both reached the default branch unnoticed.
+#
+# This works with ci.yml's `security` job rather than replacing it: that job
+# blocks a PR that introduces a known vulnerability, and the PRs Dependabot
+# opens here are how the fix arrives. `npm audit --omit=dev` covers only the
+# production tree, so a dev-only advisory (vitest, SEC-13) surfaces only as a
+# Dependabot PR.
+#
+# The github-actions ecosystem below is also what keeps release.yml's
+# SHA-pinned `uses:` current: Dependabot rewrites both the SHA and the
+# version comment next to it.
+#
+# On PR volume, decided rather than left at the default: every PR opened here
+# runs the full CI matrix, including the `mysql` job with its service
+# container, so open PRs are not free. The defaults would allow 5 per
+# ecosystem across 4 entries -- up to 20 at once. Instead, patch and minor
+# updates are grouped into one PR per ecosystem and the per-ecosystem limit
+# is lowered, which caps the steady state at roughly 4 grouped PRs plus the
+# occasional major. Majors stay ungrouped on purpose: they need their own
+# review (vitest 3 -> 4, SEC-13, is exactly that case).
+version: 2
+updates:
+  # The Go module every released binary is built from.
+  - package-ecosystem: gomod
+    directory: /packages/core-go
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      go-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # The Jira data source sample (DFLT-00088) is its own Go module, not part
+  # of the workspace above, so it needs its own entry. ci.yml's `security`
+  # job scans it separately for the same reason.
+  - package-ecosystem: gomod
+    directory: /examples/jira-datasource
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      go-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # The npm workspace root. packages/plugin and packages/web are workspaces
+  # of it and share the root package-lock.json, so one entry covers all
+  # three.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Both workflows under .github/workflows/. One grouped PR: these are all
+  # actions/* and there is no reason to review a checkout bump apart from a
+  # setup-go bump.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      github-actions:
+        patterns:
+          - '*'

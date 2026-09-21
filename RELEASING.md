@@ -76,10 +76,22 @@ matches all 5 locations checked in step 1 (e.g. `v0.1.0` for version
 `0.1.0`). This is a hard constraint stated at the top of
 `.github/workflows/release.yml`: `packages/plugin/scripts/install-binary.js`
 downloads release assets from the tag named `v<plugin.json's version>`, so
-the plugin version and its release tag must always be bumped together. A
-mismatched tag name will not be caught by `check:versions` (which only
-compares the 5 in-repo locations to each other, not to the tag), so double
-check the tag string itself before pushing it.
+the plugin version and its release tag must always be bumped together.
+
+`check:versions` cannot catch a mismatched tag name: it only compares the 5
+in-repo locations to each other, never to the tag string. `release.yml` does
+catch it -- its `web` job reads
+`packages/plugin/.claude-plugin/plugin.json`'s `version` and fails unless the
+tag is exactly `v` followed by it (the step compares `"$TAG"` against
+`"v$version"`). That check runs before anything is installed or built, and
+every `build` job needs `web`, so a mismatched tag produces no binary and no
+Release at all; recover by deleting the tag, fixing the version, and tagging
+again.
+
+A tag that does not begin with `v` at all is a different, quieter failure:
+`release.yml` triggers `on: push: tags: 'v*'`, so such a tag does not fail
+the check -- it never starts the workflow, and no Release appears. If you
+push a tag and nothing happens, check the tag name first.
 
 Pushing the tag is what triggers the release workflow below
 (`.github/workflows/release.yml` triggers `on: push: tags: 'v*'`) -- once
@@ -89,8 +101,13 @@ pushed, a real GitHub Release build starts automatically.
 
 Pushing a `v*` tag runs four jobs in sequence:
 
-1. **`web`** -- checks out the repo, installs dependencies with
-   `npm ci --ignore-scripts`, and runs `npm run build:web` to build the web
+1. **`web`** -- checks out the repo and, before installing or building
+   anything, checks that the tag matches
+   `packages/plugin/.claude-plugin/plugin.json`'s `version` (this is the
+   check that makes step 2's tag constraint enforced rather than advisory;
+   it fails in seconds and, because every `build` job needs `web`, no binary
+   is produced). It then installs dependencies with
+   `npm ci --ignore-scripts` and runs `npm run build:web` to build the web
    UI. It verifies the build output (`packages/web/dist/index.html` and a
    non-empty `assets/` directory) exists, then uploads two build artifacts:
    - `webdist` -- the built web UI, to be embedded into each binary.
