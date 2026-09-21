@@ -52,6 +52,10 @@ Update from the `/plugin` menu, or run the following in a terminal:
 claude plugin update graph-ops@graph-ops
 ```
 Each release points the marketplace entry at the new release tag, so updating fetches that release. The first run after the update downloads the matching `graph-engine` binary and removes the other versions' binaries from the cache. You don't need to uninstall or reinstall.
+
+The one thing the update cannot do for you is restart a UI server that is already running. `/graph-ops:ui` reuses whatever server answers on its port without checking its version, and the server keeps running until it is stopped, so a server started before the update keeps serving the old version. After updating:
+- **Stop the UI server if one started before the update is still running**: on macOS / Linux, `kill $(lsof -ti tcp:49173 -sTCP:LISTEN)` stops one on the default port (use your own port number instead if you changed `port` / `PORT`). On other operating systems, stop the process listening on the default port 49173 (or the port you configured).
+- **Then, in a Claude Code session started after the update, run `/graph-ops:ui`** to start the new version's server. A session that was already open when you updated may still run the previous version's `graph-engine`, which would start the old server again, so first restart every Claude Code session that was open when you updated (or start a new one) -- whether you updated from the `/plugin` menu or from a terminal. Some releases need the UI server restart to work correctly; see the [0.7.0 release notes](docs/release-notes/v0.7.0.md#upgrade-notes) for what happens if the old server keeps running there.
 - **If you installed version 0.4.0 or earlier**: those versions were fetched by a `node` one-liner that kept a clone of the repository per release under `~/.cache/graph-ops/` (for example `~/.cache/graph-ops/v0.4.0`). The plugin no longer uses those clones, so you can delete the `v*` directories there. Leave `~/.cache/graph-ops/engine/`, which holds the downloaded binaries.
 
 ### Commands
@@ -206,6 +210,10 @@ Claude Code 内で次を実行します。
 claude plugin update graph-ops@graph-ops
 ```
 リリースのたびにマーケットプレイスの登録内容が新しいリリースタグを指すので、更新するとそのリリースが取得されます。更新後の初回実行時に、対応する `graph-engine` バイナリがダウンロードされ、ほかのバージョンのバイナリはキャッシュから削除されます。アンインストールや再インストールは不要です。
+
+ただし、すでに起動している UI サーバーの再起動だけは、更新では行われません。`/graph-ops:ui` は、ポートで応答するサーバーがあればバージョンを確かめずにそのまま使い、サーバーは停止するまで動き続けるので、更新前に起動したサーバーが旧版のまま使われ続けます。更新後は次のようにしてください。
+- **更新前に起動した UI サーバーが動いていれば停止する**: macOS／Linux では、既定のポートなら `kill $(lsof -ti tcp:49173 -sTCP:LISTEN)` で停止できます（`port`／`PORT` を変えている場合は、その番号に置き換えてください）。ほかの OS では、既定のポート 49173（または設定したポート）で待ち受けているプロセスを停止してください。
+- **そのあと、更新後に起動した Claude Code のセッションで `/graph-ops:ui` を実行して**、新しい版のサーバーを起動します。更新時にすでに開いていたセッションは旧版の `graph-engine` を実行し続けることがあり、その場合は旧版のサーバーがまた起動してしまうので、先に、更新時に開いていた Claude Code のセッションをすべて再起動する（または新しいセッションを開始する）ようにしてください。`/plugin` メニューから更新した場合も、ターミナルから更新した場合も同じです。リリースによっては、UI サーバーを再起動しないと正しく動きません。旧版のサーバーが動いたままだと何が起きるかは、[0.7.0 のリリースノート](docs/release-notes/v0.7.0.md#upgrade-notes)（英語）を参照してください。
 - **バージョン 0.4.0 以前をインストールしていた場合**: これらのバージョンは `node` のワンライナーで取得され、リリースごとにリポジトリのクローンを `~/.cache/graph-ops/` の下（例: `~/.cache/graph-ops/v0.4.0`）に残していました。現在のプラグインはこれらを使わないので、そこにある `v*` ディレクトリは削除してかまいません。ダウンロード済みのバイナリが入っている `~/.cache/graph-ops/engine/` は残してください。
 
 ### コマンド一覧
