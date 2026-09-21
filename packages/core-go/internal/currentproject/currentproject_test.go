@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
@@ -172,6 +173,61 @@ func TestGet_InheritsDataSourceValueExactlyOnce(t *testing.T) {
 	}
 	if repo.calls != 1 {
 		t.Errorf("the data source must not be read again, got %d calls", repo.calls)
+	}
+}
+
+// Once inherited, a later read must not touch graph-config.json at all --
+// not even to rewrite the same bytes. The file's mtime is pinned to a known
+// past instant before the second read, so any write (even an identical one)
+// shows up as a changed mtime.
+func TestGet_SecondReadAfterInheritanceWritesNothing(t *testing.T) {
+	e := newEnv(t)
+	repo := &stubRepo{id: "proj-alpha"}
+
+	if got := mustGet(t, e, repo); got != "proj-alpha" {
+		t.Fatalf("Get = %q, want the inherited proj-alpha", got)
+	}
+
+	pinned := time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC)
+	before := map[string][]byte{}
+	for _, p := range runtimeconfig.CandidatePaths(e.cwd, e.home) {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		before[p] = data
+		if err := os.Chtimes(p, pinned, pinned); err != nil {
+			t.Fatalf("Chtimes(%s): %v", p, err)
+		}
+	}
+	if len(before) == 0 {
+		t.Fatal("precondition: the inheritance should have written graph-config.json")
+	}
+
+	if got := mustGet(t, e, repo); got != "proj-alpha" {
+		t.Fatalf("second Get = %q, want proj-alpha", got)
+	}
+	if repo.calls != 1 {
+		t.Errorf("the data source must not be read again, got %d calls", repo.calls)
+	}
+	for _, p := range runtimeconfig.CandidatePaths(e.cwd, e.home) {
+		info, err := os.Stat(p)
+		prev, existed := before[p]
+		if !existed {
+			if err == nil {
+				t.Errorf("second read created %s", p)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("Stat(%s): %v", p, err)
+		}
+		if !info.ModTime().Equal(pinned) {
+			t.Errorf("second read rewrote %s (mtime %v, want %v)", p, info.ModTime(), pinned)
+		}
+		if data, _ := os.ReadFile(p); !bytes.Equal(data, prev) {
+			t.Errorf("second read changed the contents of %s", p)
+		}
 	}
 }
 
