@@ -75,7 +75,7 @@ func TestLoad_DefaultOnlyProducesFullCatalog(t *testing.T) {
 	// Empty user/team roots keep this assertion on the plugin defaults alone;
 	// Load would resolve the user tier to $HOME/.graph-ops and merge whatever
 	// the developer has configured there.
-	cat, err := LoadWithRoots(t.TempDir(), t.TempDir(), t.TempDir(), "")
+	cat, err := LoadWithRoots(t.TempDir(), t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("LoadWithRoots: %v", err)
 	}

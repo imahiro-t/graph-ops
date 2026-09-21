@@ -10,7 +10,8 @@ info:
     graph-engine (the GraphOps CLI and Web UI server) can store tickets,
     execution graphs, artifacts, projects and labels in it instead of SQLite or
     MySQL. Select it with `dbBackend: "http"` and `httpDataSourceUrl` in
-    graph-config.json.
+    $HOME/.graph-ops/config.json, the one file graph-engine reads settings
+    from, or with the matching environment variables.
 
     Every operation of graph-engine's storage interface (`GraphRepository`,
     32 methods) maps to exactly one request below. The `operationId` of each

@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
@@ -16,10 +15,10 @@ import (
 // runtimeConfig is the server/CLI's own operational settings (db path, port,
 // claude binary, artifacts dir) -- distinct from internal/config's workflow
 // catalog (node/review-gate definitions). Precedence: env vars > a
-// graph-config.json found in cwd or $HOME/.graph-ops/ > defaults.
-// The file itself (shape, search path) is internal/runtimeconfig's job, so
-// the web settings UI can read/write the exact same file this merges on top
-// of -- see that package's doc comment.
+// $HOME/.graph-ops/config.json > built-in defaults.
+// The file itself (its shape, and the fact that there is exactly one of it)
+// is internal/runtimeconfig's job, so the web settings UI can read/write the
+// exact same file this merges on top of -- see that package's doc comment.
 type runtimeConfig struct {
 	// DBBackend is "sqlite", "mysql" or "http" -- always normalized to one of
 	// these (never ""), see loadRuntimeConfig.
@@ -58,33 +57,35 @@ type runtimeConfig struct {
 	// reference, and both have passed store.ValidateHTTPDataSourceSettings.
 	HTTPDataSourceURL   string
 	HTTPDataSourceToken string
-	// UserExtensionsDir/TeamExtensionsDir override the default roots
-	// internal/config.ResolveRoots would otherwise pick ($HOME/.graph-ops
-	// and the nearest ancestor .graph-ops directory other than
-	// $HOME/.graph-ops, respectively). Empty means "use the default for that
-	// tier" -- see config.ResolveRoots, which also drops a team root that is
-	// the same directory as the user root.
+	// UserExtensionsDir/TeamExtensionsDir name the two extension roots
+	// internal/config.ResolveRoots works from. An empty UserExtensionsDir
+	// falls back to $HOME/.graph-ops; an empty TeamExtensionsDir means there
+	// is no team tier at all -- the team root has no default, and in
+	// particular is never derived from the process's working directory or
+	// its ancestors (DFLT-00124). See config.ResolveRoots, which also drops
+	// a team root that is the same directory as the user root.
 	UserExtensionsDir string
 	TeamExtensionsDir string
-	// ProjectPaths is graph-config.json's projectPaths as loaded at startup:
+	// ProjectPaths is the home config file's projectPaths as loaded at startup:
 	// project ID -> this environment's local path for that project
 	// (DFLT-00080). It is nil when nothing is set. Writes go through
-	// runtimeconfig.SetProjectPath(WorkDir, HomeDir, ...), not this copy.
+	// runtimeconfig.SetProjectPath(HomeDir, ...), which updates that same
+	// file, not this copy.
 	ProjectPaths map[string]string
 	// PaginationPageSize is how many tickets the web UI's ticket list shows
 	// per page. Unlike every other field here, it has no env var override --
-	// it's only ever set via graph-config.json (by hand, or through the web
-	// settings UI's "全体設定" tab).
+	// it's only ever set via the home config file (by hand, or through the web
+	// settings UI's App Settings tab).
 	PaginationPageSize int
 	// HomeDir is the resolved os.UserHomeDir() value (or "" if it couldn't
 	// be resolved), threaded through to httpserver.Config so the app-settings
-	// API resolves graph-config.json's path the exact same way this method
+	// API resolves the home config file's path the exact same way this method
 	// just did, without independently re-calling os.UserHomeDir() itself.
 	HomeDir string
 }
 
 // defaultDataDir is the directory the DB file and the artifacts directory
-// default into when neither an env var nor graph-config.json names them:
+// default into when neither an env var nor the home config file names them:
 // $HOME/.graph-ops, the same directory that already holds config.json and
 // the user-tier extensions (see config.ResolveRoots). Keeping all four in
 // one place means a user's GraphOps state no longer depends on which
@@ -97,17 +98,17 @@ type runtimeConfig struct {
 // <cwd>/graph.db is not preferred over the new default, because "use the
 // old DB if one happens to be lying around" makes the effective path depend
 // on invocation directory again, which is the exact problem being removed.
-// Keeping such a DB is an explicit act: GRAPH_DB_PATH, or dbPath in
-// graph-config.json.
+// Keeping such a DB is an explicit act: GRAPH_DB_PATH, or dbPath in the home
+// config file.
 //
 // home is os.UserHomeDir()'s result, which is "" when it could not be
 // resolved (some CI images and minimal containers). That case falls back to
 // cwd -- the pre-change behaviour -- rather than failing. Note that this is a
 // different axis from the paragraph above: it is an unconditional fallback
 // that turns on when the home directory cannot be resolved at all, never the
-// result of noticing an old DB lying in cwd. loadRuntimeConfig
-// and runtimeconfig.CandidatePaths both already treat an unresolvable home
-// as a normal condition to route around, and hard-failing here would turn
+// result of noticing an old DB lying in cwd. loadRuntimeConfig and
+// runtimeconfig.HomeConfigPath both already treat an unresolvable home as a
+// normal condition to route around, and hard-failing here would turn
 // environments that start fine today into ones that cannot start at all.
 func defaultDataDir(cwd, home string) string {
 	if home == "" {
@@ -125,38 +126,37 @@ func defaultDataDir(cwd, home string) string {
 // `list`), and a warning that landed in stdout would corrupt their output.
 var configWarnWriter io.Writer = os.Stderr
 
-// formatConfigWarnings renders what LoadEffective dropped as the lines to
-// print, keys in runtimeconfig.HomeOnlyKeys order. It returns nothing at all
-// in the ordinary case -- a config with none of those keys in it must stay
-// silent, or every single subcommand invocation would grow a line of noise
-// (completion criterion 2 of DFLT-00104).
+// formatConfigWarnings renders the at most two things worth telling the user
+// about where settings came from. It returns nothing at all in the ordinary
+// case -- a working setup must stay silent, or every single subcommand
+// invocation would grow a line of noise (completion criterion 2 of
+// DFLT-00104).
 //
-// The wording names the file the keys were ignored in AND the file they are
-// read from instead, because that pair is the whole actionable content: it
-// tells the user both where to delete the key to silence this and where to
-// move it if they meant it.
+// Both lines are one line each, and neither lists key names. That is what
+// keeps the output bounded: a leftover config file with 22 keys in it
+// produces exactly as much text as one with a single key, and the user is
+// told what to do rather than what was in the file (DFLT-00124, completion
+// criterion 3).
 func formatConfigWarnings(eff runtimeconfig.Effective) []string {
 	var lines []string
-	// "the home config file" rather than a path when home could not be
-	// resolved at all: naming a path we do not have would be a lie, and
-	// there is nothing there for the user to edit.
-	source := "the home config file"
-	if eff.HomeConfigPath != "" {
-		source = eff.HomeConfigPath
-	}
-	if len(eff.IgnoredKeys) > 0 {
+	source := eff.HomeConfigPathForMessage()
+	if eff.StaleWorkDirConfigPath != "" {
+		// The file is never opened, so this says nothing about what is in it
+		// -- a broken one produces this very same line, and that is the
+		// point: whether a file we no longer read parses is not the user's
+		// problem to solve.
 		lines = append(lines, fmt.Sprintf(
-			"graph-ops: warning: ignoring %s in %s; these settings are read only from %s or the environment.",
-			strings.Join(eff.IgnoredKeys, ", "), eff.Path, source))
+			"graph-ops: warning: %s is no longer read; settings come from %s or environment variables. Delete it to silence this.",
+			eff.StaleWorkDirConfigPath, source))
 	}
 	if eff.HomeConfigErr != nil {
-		// Not fatal -- see LoadEffective. The error names the file itself
-		// (runtimeconfig.HomeConfigReadError); what this adds is which keys
-		// the failure costs, since a file that cannot be read is otherwise
-		// indistinguishable from one that simply sets none of them.
+		// Not fatal -- see runtimeconfig.LoadEffective. The error names the
+		// file itself (runtimeconfig.HomeConfigReadError); what this adds is
+		// what the failure costs, since a file that cannot be read is
+		// otherwise indistinguishable from one that sets nothing.
 		lines = append(lines, fmt.Sprintf(
-			"graph-ops: warning: %v; %s fall back to environment variables or built-in defaults.",
-			eff.HomeConfigErr, runtimeconfig.HomeOnlyKeyList()))
+			"graph-ops: warning: %v; every setting falls back to environment variables or built-in defaults.",
+			eff.HomeConfigErr))
 	}
 	return lines
 }
@@ -168,16 +168,13 @@ func loadRuntimeConfig() (runtimeConfig, error) {
 	}
 	home, _ := os.UserHomeDir()
 
-	// LoadEffective, not Load: terminalCommand, claudeBinary, host and
-	// artifactsDir must not come from the graph-config.json of whatever
-	// directory this process happens to have been started in (see
-	// runtimeconfig's homeOnlyKeys). The firstNonEmpty chains below are
+	// Nothing in this file may come from the directory this process happens
+	// to have been started in: LoadEffective reads the home config and only
+	// the home config, and uses cwd solely to spot a leftover
+	// stale graph-config.json to warn about. The firstNonEmpty chains below are
 	// untouched, so an environment variable still wins over everything --
 	// including the home config.
-	eff, err := runtimeconfig.LoadEffective(cwd, home)
-	if err != nil {
-		return runtimeConfig{}, err
-	}
+	eff := runtimeconfig.LoadEffective(cwd, home)
 	fileCfg := eff.Config
 	for _, line := range formatConfigWarnings(eff) {
 		fmt.Fprintln(configWarnWriter, line)
@@ -307,9 +304,10 @@ func loadRuntimeConfig() (runtimeConfig, error) {
 	// holding every project's tickets and artifacts. It would also win over
 	// the deliberate 0o700 in ui.go's uiServerLogPath, because MkdirAll
 	// never re-modes a directory that already exists and this runs first.
-	// The same 0o700 is used by store.NewSQLiteRepository and
-	// runtimeconfig.Save; all three have to agree, since in a fresh
-	// environment whichever runs first is the one that fixes the mode.
+	// The same 0o700 is used by store.NewSQLiteRepository and by
+	// runtimeconfig when it writes the home config file (UpdateHome); all
+	// three have to agree, since in a fresh environment whichever runs first
+	// is the one that fixes the mode.
 	//
 	// A user-named artifactsDir gets 0o700 as well: this is a single-user
 	// local tool, nothing it writes is meant to be read by other accounts on

@@ -259,32 +259,9 @@ func TestReviewTemplateTierText_ReflectsOnlyThatTier(t *testing.T) {
 func TestResolveRoots_ExplicitOverridesWinOverDefaults(t *testing.T) {
 	userOverride := t.TempDir()
 	teamOverride := t.TempDir()
-	roots, err := ResolveRoots(t.TempDir(), userOverride, teamOverride)
-	if err != nil {
-		t.Fatalf("ResolveRoots: %v", err)
-	}
+	roots := ResolveRoots(userOverride, teamOverride)
 	if roots.UserDir != userOverride || roots.TeamDir != teamOverride {
 		t.Errorf("got %+v, want overrides to win", roots)
-	}
-}
-
-func TestResolveRoots_TeamDirDiscoveredByWalkingUp(t *testing.T) {
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, configDirName), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	nested := filepath.Join(root, "a", "b", "c")
-	if err := os.MkdirAll(nested, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	roots, err := ResolveRoots(nested, "", "")
-	if err != nil {
-		t.Fatalf("ResolveRoots: %v", err)
-	}
-	want := filepath.Join(root, configDirName)
-	if roots.TeamDir != want {
-		t.Errorf("TeamDir = %q, want %q", roots.TeamDir, want)
 	}
 }
 
@@ -317,7 +294,7 @@ workflow:
 		t.Fatalf("write: %v", err)
 	}
 
-	cat, err := LoadWithRoots(t.TempDir(), "", teamDir, "")
+	cat, err := LoadWithRoots("", teamDir, "")
 	if err != nil {
 		t.Fatalf("LoadWithRoots: %v", err)
 	}

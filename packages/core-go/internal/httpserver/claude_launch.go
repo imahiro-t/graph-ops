@@ -19,7 +19,7 @@ import (
 // The working directory is resolved with the following priority (completion
 // criterion: "selecting a project auto-launches a Claude Code terminal
 // session targeting that project's linked working folder"):
-//  1. the local path (graph-config.json's projectPaths, DFLT-00080) of an
+//  1. the local path (the home config's projectPaths, DFLT-00080) of an
 //     explicit project_id in the body;
 //  2. the local path of the project the given ticketId belongs to;
 //  3. the server's global TerminalWorkDir fallback (unchanged behavior for

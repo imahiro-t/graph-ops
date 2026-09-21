@@ -12,7 +12,7 @@ import (
 // $HOME, making every assertion on node counts environment-dependent).
 func baseCatalog(t *testing.T) config.Catalog {
 	t.Helper()
-	cat, err := config.LoadWithRoots(t.TempDir(), t.TempDir(), t.TempDir(), "")
+	cat, err := config.LoadWithRoots(t.TempDir(), t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("config.LoadWithRoots: %v", err)
 	}

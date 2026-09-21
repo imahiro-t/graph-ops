@@ -23,9 +23,9 @@ import (
 // no-project-yet state (creating the first project, POST /api/tickets
 // failing with NO_CURRENT_PROJECT, etc).
 //
-// WorkDir and HomeDir are sandboxed temp dirs, so the graph-config.json the
-// project API reads/writes (projectPaths, DFLT-00080) never touches the
-// developer's real one or the package directory.
+// HomeDir is a sandboxed temp dir, so the home config file the project API
+// reads/writes (projectPaths, DFLT-00080) never touches the developer's real
+// one.
 func newBareTestServer(t *testing.T) (*Server, store.GraphRepository) {
 	t.Helper()
 	repo, err := store.NewSQLiteRepository(filepath.Join(t.TempDir(), "test.db"))
@@ -40,19 +40,19 @@ func newBareTestServer(t *testing.T) (*Server, store.GraphRepository) {
 	return New(repo, eng, cfg), repo
 }
 
-// projectPathsOnDisk loads s's graph-config.json projectPaths.
+// projectPathsOnDisk loads s's home config file's projectPaths.
 func projectPathsOnDisk(t *testing.T, s *Server) map[string]string {
 	t.Helper()
-	cfg, _, err := runtimeconfig.Load(s.cfg.WorkDir, s.cfg.HomeDir)
+	cfg, err := runtimeconfig.LoadHomeConfig(s.cfg.HomeDir)
 	if err != nil {
-		t.Fatalf("runtimeconfig.Load: %v", err)
+		t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 	}
 	return cfg.ProjectPaths
 }
 
 func setLocalPath(t *testing.T, s *Server, projectID, path string) {
 	t.Helper()
-	if _, err := runtimeconfig.SetProjectPath(s.cfg.WorkDir, s.cfg.HomeDir, projectID, path); err != nil {
+	if _, err := runtimeconfig.SetProjectPath(s.cfg.HomeDir, projectID, path); err != nil {
 		t.Fatalf("SetProjectPath: %v", err)
 	}
 }
@@ -71,7 +71,7 @@ func decodeProject(t *testing.T, body []byte) (projectResponse, map[string]any) 
 }
 
 // Scenario: a project can be created by specifying a name, prefix, and
-// local path -- the path goes to graph-config.json, not the DB.
+// local path -- the path goes to the home config file, not the DB.
 func TestHandleCreateProject_ExplicitPrefixAndLocalPath(t *testing.T) {
 	s, repo := newBareTestServer(t)
 
@@ -137,7 +137,7 @@ func TestHandleCreateProject_LocalPathSaveFailureIs500AndSaysCreated(t *testing.
 	var logBuf bytes.Buffer
 	var mu sync.Mutex
 	s.logger = slog.New(slog.NewTextHandler(&lockedWriter{w: &logBuf, mu: &mu}, nil))
-	// No graph-config.json exists, so Save would create $HOME/.graph-ops;
+	// No the home config file exists, so Save would create $HOME/.graph-ops;
 	// a read-only HomeDir makes that fail.
 	if err := os.Chmod(s.cfg.HomeDir, 0o500); err != nil {
 		t.Fatal(err)
@@ -353,7 +353,7 @@ func TestHandleDeleteProject_CleanupFailureStillSucceedsAndLogs(t *testing.T) {
 	setLocalPath(t, s, beta.ID, "/work/beta")
 	// Saves go through a temp file + rename in the config file's directory,
 	// so making that directory read-only is what makes the cleanup fail.
-	dir := filepath.Dir(runtimeconfig.ResolvePath(s.cfg.WorkDir, s.cfg.HomeDir))
+	dir := filepath.Dir(runtimeconfig.HomeConfigPath(s.cfg.HomeDir))
 	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
@@ -373,16 +373,17 @@ func TestHandleDeleteProject_CleanupFailureStillSucceedsAndLogs(t *testing.T) {
 	}
 }
 
-// A graph-config.json that cannot be parsed makes projectLocalPath fall back
+// A home config file that cannot be parsed makes projectLocalPath fall back
 // to "not set" (Claude launch / catalog loading keep working), but the reason
-// is logged instead of being swallowed.
+// is logged instead of being swallowed. This is decision D-6's read side:
+// reading tolerates a broken file, writing refuses it.
 func TestProjectLocalPath_UnreadableConfigFallsBackAndLogs(t *testing.T) {
 	s, repo := newBareTestServer(t)
 	var logBuf bytes.Buffer
 	var mu sync.Mutex
 	s.logger = slog.New(slog.NewTextHandler(&lockedWriter{w: &logBuf, mu: &mu}, nil))
 	beta, _ := repo.CreateProject("Beta", "")
-	path := runtimeconfig.ResolvePath(s.cfg.WorkDir, s.cfg.HomeDir)
+	path := runtimeconfig.HomeConfigPath(s.cfg.HomeDir)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +396,7 @@ func TestProjectLocalPath_UnreadableConfigFallsBackAndLogs(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if !strings.Contains(logBuf.String(), "project_local_path_load_failed") || !strings.Contains(logBuf.String(), beta.ID) {
+	if !strings.Contains(logBuf.String(), "project_paths_load_failed") {
 		t.Errorf("expected a load-failure log line, got %q", logBuf.String())
 	}
 }
@@ -481,11 +482,11 @@ func TestCurrentProjectGetAndSwitch(t *testing.T) {
 
 // Plan review condition 2: PATCH /api/projects/{id} (projectPaths) and PUT
 // /api/settings/app (paginationPageSize) hitting the server at the same time
-// must never lose each other's update in graph-config.json.
+// must never lose each other's update in the home config file.
 func TestConcurrentLocalPathAndAppSettingsWritesDoNotLoseUpdates(t *testing.T) {
 	s, repo := newBareTestServer(t)
 	proj, _ := repo.CreateProject("AAA", "")
-	if _, err := runtimeconfig.Save(s.cfg.WorkDir, s.cfg.HomeDir, runtimeconfig.FileConfig{PaginationPageSize: 20}); err != nil {
+	if _, err := seedHomeConfig(s.cfg.HomeDir, runtimeconfig.FileConfig{PaginationPageSize: 20}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -515,7 +516,7 @@ func TestConcurrentLocalPathAndAppSettingsWritesDoNotLoseUpdates(t *testing.T) {
 		t.Error(e)
 	}
 
-	cfg, _, err := runtimeconfig.Load(s.cfg.WorkDir, s.cfg.HomeDir)
+	cfg, err := runtimeconfig.LoadHomeConfig(s.cfg.HomeDir)
 	if err != nil {
 		t.Fatal(err)
 	}

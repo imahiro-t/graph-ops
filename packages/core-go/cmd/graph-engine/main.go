@@ -6,7 +6,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -126,7 +125,7 @@ func run(cmd string, args []string) error {
 	case "wait-node":
 		return cmdWaitNode(repo, args)
 	case "get-language-settings":
-		return cmdGetLanguageSettings(repo, rc, args)
+		return cmdGetLanguageSettings(rc, args)
 	case "ui":
 		return cmdUI(rc, args)
 	default:
@@ -152,7 +151,7 @@ func run(cmd string, args []string) error {
 func openStore(rc runtimeConfig) (store.GraphRepository, error) {
 	repo, err := store.Open(storeConfigFromRuntimeConfig(rc))
 	if err != nil && rc.DBBackend == "mysql" {
-		configPath := runtimeconfig.ResolvePath(rc.WorkDir, rc.HomeDir)
+		configPath := runtimeconfig.HomeConfigPathForMessage(rc.HomeDir)
 		return nil, fmt.Errorf(
 			"%w\n\nThis MySQL connection could not be established with its configured TLS settings "+
 				"(mysqlTls %q). There is no plaintext fallback -- see this ticket's (DFLT-00037) README "+
@@ -199,7 +198,7 @@ Commands:
   create-project <name> [--prefix P] [--workdir path]
                                           (--prefix omitted -> derived from name and de-duplicated;
                                            --workdir is the project's local path in this environment,
-                                           saved to graph-config.json's projectPaths (not the DB);
+                                           saved to the home config's projectPaths (not the DB);
                                            omitted -> cwd, relative -> resolved against the cwd.
                                            Does not switch the current project; follow up with use-project)
   list-projects                           (each project with this environment's "local_path", "" if unset)
@@ -216,7 +215,7 @@ Commands:
                                            is an error too; "" or no description creates the ticket
                                            without one.
                                            --project omitted -> the project whose local path (projectPaths in
-                                           graph-config.json) is the cwd or contains it (deepest nested
+                                           $HOME/.graph-ops/config.json) is the cwd or contains it (deepest nested
                                            local path wins), else the current
                                            project, else an error. Paths are compared as written, so a
                                            symlinked or case-differing cwd does not match and falls back.
@@ -348,7 +347,7 @@ Commands:
                                            must match the fixed report template's structural markers;
                                            for html/image, a contentOrPath that names a real file is read
                                            into the DB. The file must resolve inside the configured
-                                           artifacts directory (graph-config.json's artifactsDir /
+                                           artifacts directory (the home config's artifactsDir /
                                            $GRAPH_ARTIFACTS_DIR) unless --allow-outside-artifacts-dir is
                                            passed explicitly; image content must also start with a
                                            recognized image file signature.
@@ -371,7 +370,7 @@ Commands:
                                            waiting starts. process-ticket runs this in the background at an
                                            approval_gate so a Web UI approve/reject resumes the session.)
   ui                                      (opens the local Web UI, in the default browser, on the project
-                                           whose local path (projectPaths in graph-config.json) is the current
+                                           whose local path (projectPaths in the home config) is the current
                                            directory or contains it (deepest wins) -- auto-starting the UI
                                            server first if it isn't already running. If no project matches,
                                            opens the Web UI's project-setup dialog for the current directory
@@ -390,25 +389,25 @@ Commands:
                                            review_gate node types: team -> user -> plugin default)
   get-extension-roots                    ({"userDir","teamDir"} resolved paths, for a skill that needs to
                                            write into that tree directly, e.g. onboarding's language setup)
-  get-language-settings [--project <id>] ({"resolved","source":"team"|"user"|"none","supported_locales"} --
+  get-language-settings                  ({"resolved","source":"team"|"user"|"none","supported_locales"} --
                                            whether a persistent language setting exists (team tier, else user
                                            tier) and what it resolves to, so onboarding/process-ticket can
                                            tell that apart from "nothing set yet, decide one for this
-                                           session" without parsing prose. --project resolves the team tier
-                                           from that project's local path, same as get-executable/
-                                           expand-graph's ticket-based resolution; omitted, or no local
-                                           path set, falls back to this process's own team root)
+                                           session" without parsing prose)
   serve [--port N] [--host ADDR]
-                                          (--host omitted -> GRAPH_HOST / graph-config.json's "host" /
+                                          (--host omitted -> GRAPH_HOST / the home config's "host" /
                                            127.0.0.1. This API has no authentication, so it listens on
                                            loopback only unless you deliberately widen it, e.g.
                                            --host 0.0.0.0 on a network you trust.)
 
-User/team extension directories:
+User/team extension directories (settings are read from $HOME/.graph-ops/config.json
+and environment variables only -- never from the current directory):
   GRAPH_USER_EXTENSIONS_DIR / userExtensionsDir   (default: $HOME/.graph-ops)
-  GRAPH_TEAM_EXTENSIONS_DIR / teamExtensionsDir   (default: nearest ancestor .graph-ops/,
-                                                   excluding $HOME/.graph-ops; a team root that is
-                                                   the same directory as the user root is ignored)
+  GRAPH_TEAM_EXTENSIONS_DIR / teamExtensionsDir   (no default: with neither set there is no
+                                                   team tier at all. Point it at a shared
+                                                   directory to share settings with a team; a
+                                                   team root that is the same directory as the
+                                                   user root is ignored)
 
 Help:
   graph-engine help | --help | -h         (prints this list)
@@ -585,7 +584,7 @@ func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc run
 		return printJSON(ticket)
 	}
 
-	project, source, err := resolveCreateTicketProject(repo, rc.WorkDir, rc.ProjectPaths)
+	project, source, err := resolveCreateTicketProject(repo, rc.WorkDir, rc.HomeDir, rc.ProjectPaths)
 	if err != nil {
 		return err
 	}
@@ -609,9 +608,9 @@ func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc run
 //
 // --workdir (default: the cwd) is the project's local path in this
 // environment. Since DFLT-00080 it is not stored in the DB -- which may be
-// shared by a whole team -- but in graph-config.json's projectPaths, through
-// runtimeconfig.SetProjectPath (the same file loadRuntimeConfig read). A
-// relative --workdir is resolved against rc.WorkDir (the cwd).
+// shared by a whole team -- but in the home config file's projectPaths,
+// through runtimeconfig.SetProjectPath (the same file loadRuntimeConfig
+// read). A relative --workdir is resolved against rc.WorkDir (the cwd).
 func cmdCreateProject(repo store.GraphRepository, rc runtimeConfig, args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf(`usage: graph-engine create-project <name> [--prefix P] [--workdir path]`)
@@ -652,8 +651,9 @@ func cmdCreateProject(repo store.GraphRepository, rc runtimeConfig, args []strin
 	if err != nil {
 		return err
 	}
-	if _, err := runtimeconfig.SetProjectPath(rc.WorkDir, rc.HomeDir, project.ID, localPath); err != nil {
-		return fmt.Errorf("project %s (%s) was created, but saving its local path to graph-config.json failed: %w", project.Name, project.ID, err)
+	if _, err := runtimeconfig.SetProjectPath(rc.HomeDir, project.ID, localPath); err != nil {
+		return fmt.Errorf("project %s (%s) was created, but saving its local path to %s failed: %w",
+			project.Name, project.ID, runtimeconfig.HomeConfigPathForMessage(rc.HomeDir), err)
 	}
 	return printJSON(cliProject{Project: project, LocalPath: localPath})
 }
@@ -1037,7 +1037,7 @@ func cmdGetExecutable(eng *engine.GraphEngine, repo store.GraphRepository, rc ru
 		return fmt.Errorf("%s: unrecognized argument %q", usage, args[i])
 	}
 
-	catalog, err := catalogForTicket(repo, rc, ticketID, language)
+	catalog, err := config.LoadWithRoots(rc.UserExtensionsDir, rc.TeamExtensionsDir, language)
 	if err != nil {
 		return err
 	}
@@ -1081,7 +1081,7 @@ func cmdExpandGraph(eng *engine.GraphEngine, repo store.GraphRepository, rc runt
 		}
 	}
 
-	catalog, err := catalogForTicket(repo, rc, ticketID, language)
+	catalog, err := config.LoadWithRoots(rc.UserExtensionsDir, rc.TeamExtensionsDir, language)
 	if err != nil {
 		return err
 	}
@@ -1473,7 +1473,7 @@ func cmdGetWorkflowCatalog(rc runtimeConfig, args []string) error {
 		}
 		return fmt.Errorf("%s: unrecognized argument %q", usage, args[i])
 	}
-	catalog, err := config.LoadWithRoots(rc.WorkDir, rc.UserExtensionsDir, rc.TeamExtensionsDir, language)
+	catalog, err := config.LoadWithRoots(rc.UserExtensionsDir, rc.TeamExtensionsDir, language)
 	if err != nil {
 		return err
 	}
@@ -1500,101 +1500,35 @@ func cmdGetWorkflowCatalog(rc runtimeConfig, args []string) error {
 	})
 }
 
-// catalogForTicket is config.LoadWithRoots(rc.WorkDir, ...), except that --
-// when ticketID resolves to a ticket whose project has a local path in this
-// environment (rc.ProjectPaths, DFLT-00080), and no explicit
-// rc.TeamExtensionsDir override is configured -- the team tier is resolved
-// from that local path instead of this process's own cwd (rc.WorkDir). This
-// is the CLI counterpart of httpserver's Server.loadCatalogForTicket (see
-// its doc comment for the full rationale): without it, a project-scoped
-// settings edit (always written under that project's local path) would only
-// affect `get-executable`/`expand-graph` when this CLI process happens to be
-// invoked with the project's directory as its cwd, which does not hold for a
-// shared/remote-DB multi-project deployment. An unresolvable ticket
-// (including a not-yet-created one), or one belonging to a project with no
-// local path in this environment, falls back to the plain rc.WorkDir-based
-// resolution unchanged.
-//
-// language is passed straight through to config.LoadWithRoots as its
-// languageOverride (see that function and ResolveLanguage) -- "" reproduces
-// the pre-DFLT-00051 behavior of resolving the language solely from
-// persistent user/team settings.
-func catalogForTicket(repo store.GraphRepository, rc runtimeConfig, ticketID, language string) (config.Catalog, error) {
-	if rc.TeamExtensionsDir == "" {
-		if ticket, err := repo.GetTicket(ticketID); err == nil && ticket != nil {
-			localPath := runtimeconfig.FileConfig{ProjectPaths: rc.ProjectPaths}.ProjectPath(ticket.ProjectID)
-			if localPath != "" {
-				return config.LoadWithRoots(localPath, rc.UserExtensionsDir, "", language)
-			}
-		}
-	}
-	return config.LoadWithRoots(rc.WorkDir, rc.UserExtensionsDir, rc.TeamExtensionsDir, language)
-}
-
 // cmdGetLanguageSettings reports whether a persistent language setting
 // exists (team tier, else user tier) and, if so, which code it resolves to
 // -- so a skill (onboarding, process-ticket) can tell "there's already a
 // persistent choice" from "nothing is set yet, decide one for this session"
 // without parsing prose out of another command's output (see the execution
-// plan's section 1.5). --project <id>, like catalogForTicket, resolves the
-// team tier from that project's local path (rc.ProjectPaths) instead of this
-// process's own cwd -- a project with no local path keeps rc's own team root,
-// never an error -- so the answer matches what get-executable/expand-graph would
-// actually use for tickets under that project; omitting it falls back to
-// rc's own team root (rc.TeamExtensionsDir / the nearest ancestor
-// .graph-ops other than $HOME/.graph-ops), matching get-workflow-catalog.
-// A project whose local path is $HOME itself (config.ErrTeamRootIsUserRoot)
-// has no team tier, and a team root that is the same directory as the user
-// root is dropped, so the user tier's config.yaml is never also read as the
-// team tier (DFLT-00068).
+// plan's section 1.5).
+//
+// It takes no arguments. It used to accept --project <id>, which resolved the
+// team tier from that project's local path; per-project settings are gone
+// (DFLT-00124, completion criterion 7) and the flag is not accepted-and-
+// ignored but rejected, so nobody is left passing an id that silently does
+// nothing. The tiers are rc's own: the user root, and the team root only
+// where teamExtensionsDir / GRAPH_TEAM_EXTENSIONS_DIR names one. A team root
+// that is the same directory as the user root is dropped, so the user tier's
+// config.yaml is never also read as the team tier (DFLT-00068).
 //
 // The returned "resolved" value never reflects a call-scoped --language
 // override (there is none here -- this command exists precisely to answer
 // "what, if anything, is persisted"), only the two persistent tiers.
-func cmdGetLanguageSettings(repo store.GraphRepository, rc runtimeConfig, args []string) error {
-	const usage = `usage: graph-engine get-language-settings [--project <id>]`
-	var projectID string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--project" && i+1 < len(args) {
-			projectID = args[i+1]
-			i++
-			continue
-		}
-		return fmt.Errorf("%s: unrecognized argument %q", usage, args[i])
+func cmdGetLanguageSettings(rc runtimeConfig, args []string) error {
+	const usage = `usage: graph-engine get-language-settings`
+	if len(args) > 0 {
+		return fmt.Errorf("%s: unrecognized argument %q", usage, args[0])
 	}
 
-	roots, err := extensionRoots(rc)
-	if err != nil {
-		return err
-	}
-	if projectID != "" && rc.TeamExtensionsDir == "" {
-		project, err := repo.GetProject(projectID)
-		if err != nil {
-			return err
-		}
-		if project == nil {
-			return fmt.Errorf("project not found: %s", projectID)
-		}
-		if localPath := (runtimeconfig.FileConfig{ProjectPaths: rc.ProjectPaths}).ProjectPath(project.ID); localPath != "" {
-			teamRoot, err := config.ProjectTeamRoot(localPath)
-			switch {
-			case errors.Is(err, config.ErrTeamRootIsUserRoot):
-				// The local path is $HOME itself: no team tier of its own.
-				teamRoot = ""
-			case err != nil:
-				return err
-			}
-			roots.TeamDir = teamRoot
-		}
-		// ProjectTeamRoot only knows the default user root; with a user-root
-		// override the project's team root could still be the user root, and
-		// ResolveRoots never reads one directory as both tiers.
-		if config.SameDir(roots.UserDir, roots.TeamDir) {
-			roots.TeamDir = ""
-		}
-	}
+	roots := extensionRoots(rc)
 
 	var userDoc, teamDoc config.Document
+	var err error
 	if roots.UserDir != "" {
 		userDoc, err = config.LoadDocumentAt(config.UserDocumentPath(roots.UserDir))
 		if err != nil {
@@ -1624,12 +1558,11 @@ func cmdGetLanguageSettings(repo store.GraphRepository, rc runtimeConfig, args [
 }
 
 // extensionRoots resolves rc's user-/team-extensions directories (env vars /
-// graph-config.json overrides, falling back to $HOME/.graph-ops and
-// the nearest ancestor .graph-ops directory other than $HOME/.graph-ops
-// respectively -- see
+// home config overrides, with the user root falling back to $HOME/.graph-ops
+// and the team root having no fallback at all -- see
 // internal/config.ResolveRoots).
-func extensionRoots(rc runtimeConfig) (config.Roots, error) {
-	return config.ResolveRoots(rc.WorkDir, rc.UserExtensionsDir, rc.TeamExtensionsDir)
+func extensionRoots(rc runtimeConfig) config.Roots {
+	return config.ResolveRoots(rc.UserExtensionsDir, rc.TeamExtensionsDir)
 }
 
 // cmdGetExtensionRoots surfaces the resolved user-/team-tier extension root
@@ -1637,14 +1570,11 @@ func extensionRoots(rc runtimeConfig) (config.Roots, error) {
 // into that tree directly -- e.g. the onboarding skill persisting a language
 // preference into <userDir>/config.yaml and <userDir>/extensions/... -- can
 // find the right path without hardcoding $HOME/.graph-ops or
-// re-implementing the GRAPH_USER_EXTENSIONS_DIR/graph-config.json precedence
-// itself. Either field may be "" (no team root found/configured, or no
-// resolvable $HOME).
+// re-implementing the GRAPH_USER_EXTENSIONS_DIR / home config precedence
+// itself. Either field may be "" (no team root configured, or no resolvable
+// $HOME).
 func cmdGetExtensionRoots(rc runtimeConfig) error {
-	roots, err := extensionRoots(rc)
-	if err != nil {
-		return err
-	}
+	roots := extensionRoots(rc)
 	return printJSON(map[string]string{"userDir": roots.UserDir, "teamDir": roots.TeamDir})
 }
 
@@ -1656,10 +1586,7 @@ func cmdGetSkillContext(rc runtimeConfig, args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: graph-engine get-skill-context <skill-name>")
 	}
-	roots, err := extensionRoots(rc)
-	if err != nil {
-		return err
-	}
+	roots := extensionRoots(rc)
 	content := config.ResolveSkillContext(roots, args[0])
 	return printJSON(map[string]string{"skill": args[0], "content": content})
 }
@@ -1672,10 +1599,7 @@ func cmdGetNodeTypeContext(rc runtimeConfig, args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: graph-engine get-node-type-context <node-type>")
 	}
-	roots, err := extensionRoots(rc)
-	if err != nil {
-		return err
-	}
+	roots := extensionRoots(rc)
 	content := config.ResolveNodeTypeContext(roots, args[0])
 	return printJSON(map[string]string{"type": args[0], "content": content})
 }
@@ -1684,10 +1608,7 @@ func cmdGetNodeTypeContext(rc runtimeConfig, args []string) error {
 // (team override -> user override -> plugin default) directly to stdout, so
 // it can be redirected straight to a file for a report subagent to fill in.
 func cmdGetReportTemplate(rc runtimeConfig) error {
-	roots, err := extensionRoots(rc)
-	if err != nil {
-		return err
-	}
+	roots := extensionRoots(rc)
 	fmt.Println(config.ResolveReportTemplate(roots))
 	return nil
 }
@@ -1696,10 +1617,7 @@ func cmdGetReportTemplate(rc runtimeConfig) error {
 // override -> user override -> plugin default) directly to stdout, mirroring
 // cmdGetReportTemplate. The language setting does not select a template.
 func cmdGetPlanTemplate(rc runtimeConfig) error {
-	roots, err := extensionRoots(rc)
-	if err != nil {
-		return err
-	}
+	roots := extensionRoots(rc)
 	fmt.Println(config.ResolvePlanTemplate(roots))
 	return nil
 }
@@ -1709,10 +1627,7 @@ func cmdGetPlanTemplate(rc runtimeConfig) error {
 // "review" and "review_gate" node types, directly to stdout, mirroring
 // cmdGetReportTemplate. The language setting does not select a template.
 func cmdGetReviewTemplate(rc runtimeConfig) error {
-	roots, err := extensionRoots(rc)
-	if err != nil {
-		return err
-	}
+	roots := extensionRoots(rc)
 	fmt.Println(config.ResolveReviewTemplate(roots))
 	return nil
 }

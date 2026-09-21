@@ -7,7 +7,6 @@
 // marker validation stay exactly as they were.
 import React, { useCallback, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { SettingsScope } from '../../types';
 import {
   fetchSettingsPlanTemplate,
   fetchSettingsReviewTemplate,
@@ -48,13 +47,10 @@ const MARKDOWN_TEMPLATES: Record<Exclude<TemplateKey, 'report'>, MarkdownTemplat
 };
 
 interface Props {
-  scope: SettingsScope;
-  projectId: string;
-  canEdit: boolean;
   onDirtyChange: (dirty: boolean) => void;
 }
 
-export const TemplatesEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDirtyChange }) => {
+export const TemplatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const { t } = useTranslation();
   const listTitleId = useId();
   const [selected, setSelected] = useState<TemplateKey>('plan');
@@ -79,7 +75,7 @@ export const TemplatesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
     setSelected(next);
   };
 
-  const editorProps = { scope, projectId, canEdit, onDirtyChange: handleDirtyChange };
+  const editorProps = { onDirtyChange: handleDirtyChange };
 
   return (
     <div className="flex h-full min-h-0 gap-4">

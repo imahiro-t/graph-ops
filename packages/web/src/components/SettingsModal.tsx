@@ -1,19 +1,23 @@
-// Top-level "設定" modal: lets the user switch between "全体設定" (global,
-// user tier) and "プロジェクト単位設定" (project, team tier resolved from
-// the selected project's local path in this environment -- see
-// Project.local_path) and, within a scope, edit node-type instructions /
-// review-gate configuration / skill instructions / the plan, review and
-// report templates / labels / app settings -- one tab each, see `tabs`
-// below. (There is no workflow-graph tab: the skeleton is fixed by the
-// plugin default and only review gates are overridable -- see
-// internal/config.Merge's WORKFLOW_NODES_LOCKED.) See the
-// execution plan (art-2aaa5d92 on DFLT-00010-00001) for the scope/tab
-// design rationale and packages/core-go/internal/httpserver/settings.go for
-// the backing API.
+// Top-level "設定" modal: edit node-type instructions / review-gate
+// configuration / skill instructions / the plan, review and report templates
+// / labels / app settings -- one tab each, see `tabs` below. (There is no
+// workflow-graph tab: the skeleton is fixed by the plugin default and only
+// review gates are overridable -- see internal/config.Merge's
+// WORKFLOW_NODES_LOCKED.) See
+// packages/core-go/internal/httpserver/settings.go for the backing API.
+//
+// There is no scope switcher. Every tab here edits the one user tier
+// ($HOME/.graph-ops, or userExtensionsDir); per-project settings were
+// removed in DFLT-00124, and a team shares settings by pointing
+// teamExtensionsDir at a shared directory -- a directory this screen
+// deliberately does not edit, since it is shared state curated outside the
+// app. Labels are the exception, and the reason the modal still takes the
+// project list: they are per-project DB rows, so that tab carries a project
+// selector of its own.
 import React, { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Settings, X, FolderCog, Globe } from 'lucide-react';
-import { Project, SettingsScope } from '../types';
+import { Settings, X } from 'lucide-react';
+import { Project } from '../types';
 import { useModalDialog } from '../hooks/useModalDialog';
 import { NodeTypesEditor } from './settings/NodeTypesEditor';
 import { ReviewGatesEditor } from './settings/ReviewGatesEditor';
@@ -52,21 +56,6 @@ export const SettingsModal: React.FC<Props> = ({
   onLabelsChanged
 }) => {
   const { t } = useTranslation();
-  const [scope, setScope] = useState<SettingsScope>('global');
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(currentProject?.id || '');
-  // App.tsx keeps this modal mounted and only toggles isOpen, so the
-  // useState initializer above runs once -- usually while App's
-  // currentProject is still null. Re-sync the project selection to the
-  // header's current project every time the modal opens (DFLT-00077),
-  // adjusting state during render rather than in an effect so the very
-  // first open render already has the right project (no flash of the
-  // "no project selected" warning, no fetch with an empty project id).
-  // scope and tab intentionally keep their previous values across opens.
-  const [wasOpen, setWasOpen] = useState(false);
-  if (isOpen !== wasOpen) {
-    setWasOpen(isOpen);
-    if (isOpen) setSelectedProjectId(currentProject?.id ?? '');
-  }
   const [tab, setTab] = useState<Tab>('nodeTypes');
   // Each tab's editor reports its own dirty state up here so switching tabs
   // or closing the modal while an unsaved edit exists can warn first (see
@@ -74,7 +63,6 @@ export const SettingsModal: React.FC<Props> = ({
   // とすると確認ダイアログが出る").
   const [dirty, setDirty] = useState(false);
   const titleId = useId();
-  const projectSelectId = useId();
 
   // Defined before the early return below so the dialog hook can take
   // handleClose: Escape goes through the same unsaved-changes confirmation
@@ -104,27 +92,6 @@ export const SettingsModal: React.FC<Props> = ({
     setDirty(false);
     setTab(next);
   };
-
-  const changeScope = (next: SettingsScope) => {
-    if (next === scope) return;
-    if (!confirmDiscardIfDirty()) return;
-    setDirty(false);
-    setScope(next);
-  };
-
-  const changeProject = (id: string) => {
-    if (id === selectedProjectId) return;
-    if (!confirmDiscardIfDirty()) return;
-    setDirty(false);
-    setSelectedProjectId(id);
-  };
-
-  const selectedProject = projects.find(p => p.id === selectedProjectId) ?? null;
-
-  // Editing is disabled entirely when scope=project and no project is
-  // selected -- see the Gherkin scenario "プロジェクトが選択されていない状態
-  // ではプロジェクト単位設定タブが無効化される".
-  const canEdit = scope === 'global' || !!selectedProjectId;
 
   const tabs: { key: Tab; labelKey: string }[] = [
     { key: 'nodeTypes', labelKey: 'settings.tabs.nodeTypes' },
@@ -161,65 +128,6 @@ export const SettingsModal: React.FC<Props> = ({
           </button>
         </div>
 
-        {/* Scope switcher */}
-        <div className="flex items-center gap-3 px-6 py-3 border-b border-slate-200 dark:border-slate-800 shrink-0 flex-wrap">
-          <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">{t('settings.scope.label')}</span>
-          <div className="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden text-xs font-medium">
-            <button
-              onClick={() => changeScope('global')}
-              className={`px-3 py-1.5 flex items-center gap-1.5 transition ${
-                scope === 'global' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
-              }`}
-            >
-              <Globe className="w-3.5 h-3.5" /> {t('settings.scope.global')}
-            </button>
-            <button
-              onClick={() => changeScope('project')}
-              className={`px-3 py-1.5 flex items-center gap-1.5 border-l border-slate-300 dark:border-slate-700 transition ${
-                scope === 'project' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
-              }`}
-            >
-              <FolderCog className="w-3.5 h-3.5" /> {t('settings.scope.project')}
-            </button>
-          </div>
-
-          {scope === 'project' && (
-            <div className="flex items-center gap-2">
-              <label htmlFor={projectSelectId} className="text-xs font-semibold text-slate-600 dark:text-slate-400">
-                {t('settings.scope.projectLabel')}
-              </label>
-              <select
-                id={projectSelectId}
-                value={selectedProjectId}
-                onChange={e => changeProject(e.target.value)}
-                className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300"
-              >
-                <option value="">{t('settings.scope.projectPlaceholder')}</option>
-                {projects.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-
-        {scope === 'project' && !selectedProjectId && (
-          <div className="mx-6 mt-3 p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[11px] rounded-lg border border-amber-200 dark:border-amber-800 shrink-0">
-            {t('settings.scope.noProjectSelected')}
-          </div>
-        )}
-
-        {/* DFLT-00080: a project with no local path in this environment has no
-            team tier to edit (the API answers PROJECT_LOCAL_PATH_NOT_SET).
-            Only the project-scoped editors are affected -- the modal, the
-            global scope and the App Settings tab (where the path is set)
-            keep working. */}
-        {scope === 'project' && selectedProject && !selectedProject.local_path && tab !== 'labels' && (
-          <div role="status" className="mx-6 mt-3 p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[11px] rounded-lg border border-amber-200 dark:border-amber-800 shrink-0">
-            {t('settings.scope.localPathNotSet')}
-          </div>
-        )}
-
         {/* Tabs */}
         <div className="flex items-center gap-1 px-6 pt-3 border-b border-slate-200 dark:border-slate-800 shrink-0">
           {tabs.map(tb => (
@@ -239,27 +147,23 @@ export const SettingsModal: React.FC<Props> = ({
 
         {/* Tab content */}
         <div className="flex-1 min-h-0 overflow-hidden p-6">
-          {tab === 'nodeTypes' && (
-            <NodeTypesEditor scope={scope} projectId={selectedProjectId} canEdit={canEdit} onDirtyChange={setDirty} />
-          )}
-          {tab === 'reviewGates' && (
-            <ReviewGatesEditor scope={scope} projectId={selectedProjectId} canEdit={canEdit} onDirtyChange={setDirty} />
-          )}
-          {tab === 'skills' && (
-            <SkillsEditor scope={scope} projectId={selectedProjectId} canEdit={canEdit} onDirtyChange={setDirty} />
-          )}
-          {tab === 'templates' && (
-            <TemplatesEditor scope={scope} projectId={selectedProjectId} canEdit={canEdit} onDirtyChange={setDirty} />
-          )}
-          {/* Labels (DFLT-00084) live in the DB, not in team-tier files, so
-              they need only a selected project -- no local path -- and only
-              make sense under the project scope. */}
+          {tab === 'nodeTypes' && <NodeTypesEditor onDirtyChange={setDirty} />}
+          {tab === 'reviewGates' && <ReviewGatesEditor onDirtyChange={setDirty} />}
+          {tab === 'skills' && <SkillsEditor onDirtyChange={setDirty} />}
+          {tab === 'templates' && <TemplatesEditor onDirtyChange={setDirty} />}
+          {/* Labels (DFLT-00084) are per-project DB rows rather than files in
+              a settings tier, so this tab picks its own project (DFLT-00124,
+              completion criterion 9) -- starting from the one the app has
+              selected. */}
           {tab === 'labels' && (
-            <LabelsEditor projectId={scope === 'project' ? selectedProjectId : ''} onLabelsChanged={onLabelsChanged} />
+            <LabelsEditor
+              projects={projects}
+              initialProjectId={currentProject?.id ?? ''}
+              onLabelsChanged={onLabelsChanged}
+            />
           )}
           {tab === 'appSettings' && (
             <AppSettingsEditor
-              scope={scope}
               projects={projects}
               onDirtyChange={setDirty}
               onProjectsChanged={onProjectsChanged}

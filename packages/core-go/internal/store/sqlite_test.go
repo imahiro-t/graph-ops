@@ -385,7 +385,7 @@ func TestCreateProjectExplicitPrefix(t *testing.T) {
 
 // TestSQLiteInit_NewDBHasNoWorkDirColumn: a fresh schema never had
 // projects.work_dir (DFLT-00080) -- a project's local path lives in each
-// environment's graph-config.json, not the DB.
+// environment's home config file, not the DB.
 func TestSQLiteInit_NewDBHasNoWorkDirColumn(t *testing.T) {
 	repo := newTestRepo(t)
 	if sqliteColumnNames(t, repo.db, "projects")["work_dir"] {

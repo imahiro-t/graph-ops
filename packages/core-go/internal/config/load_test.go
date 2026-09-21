@@ -39,7 +39,7 @@ func implNodeName(t *testing.T, cat Catalog) string {
 // anywhere, LoadWithRoots' output must be byte-for-byte the same node
 // names/Language as before this ticket's changes.
 func TestLoadWithRoots_UnsetLanguageMatchesEnglishDefault(t *testing.T) {
-	cat, err := LoadWithRoots(t.TempDir(), t.TempDir(), t.TempDir(), "")
+	cat, err := LoadWithRoots(t.TempDir(), t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("LoadWithRoots: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestLoadWithRoots_LanguagePriority(t *testing.T) {
 	t.Run("user only", func(t *testing.T) {
 		userDir := t.TempDir()
 		writeLoadTestDocument(t, userDir, userConfigFile, "ja")
-		cat, err := LoadWithRoots(t.TempDir(), userDir, t.TempDir(), "")
+		cat, err := LoadWithRoots(userDir, t.TempDir(), "")
 		if err != nil {
 			t.Fatalf("LoadWithRoots: %v", err)
 		}
@@ -78,7 +78,7 @@ func TestLoadWithRoots_LanguagePriority(t *testing.T) {
 		// unrecognized code (see LocalizedDefault), so the node name falls
 		// back to English even though team, not user, decided the language.
 		writeLoadTestDocument(t, teamDir, teamConfigFile, "xx-unsupported")
-		cat, err := LoadWithRoots(t.TempDir(), userDir, teamDir, "")
+		cat, err := LoadWithRoots(userDir, teamDir, "")
 		if err != nil {
 			t.Fatalf("LoadWithRoots: %v", err)
 		}
@@ -95,7 +95,7 @@ func TestLoadWithRoots_LanguagePriority(t *testing.T) {
 		teamDir := t.TempDir()
 		writeLoadTestDocument(t, userDir, userConfigFile, "ja")
 		writeLoadTestDocument(t, teamDir, teamConfigFile, "ja")
-		cat, err := LoadWithRoots(t.TempDir(), userDir, teamDir, "")
+		cat, err := LoadWithRoots(userDir, teamDir, "")
 		if err != nil {
 			t.Fatalf("LoadWithRoots: %v", err)
 		}
@@ -112,7 +112,7 @@ func TestLoadWithRoots_LanguagePriority(t *testing.T) {
 		// comment) is unaffected by languageOverride, since the override is
 		// never written into any Document; it only steers which locale
 		// LocalizedDefault applies before Merge runs.
-		catOverride, err := LoadWithRoots(t.TempDir(), userDir, teamDir, "xx-unsupported")
+		catOverride, err := LoadWithRoots(userDir, teamDir, "xx-unsupported")
 		if err != nil {
 			t.Fatalf("LoadWithRoots: %v", err)
 		}
@@ -146,7 +146,7 @@ review_gates:
 		t.Fatalf("write config.yaml: %v", err)
 	}
 
-	cat, err := LoadWithRoots(t.TempDir(), userDir, t.TempDir(), "")
+	cat, err := LoadWithRoots(userDir, t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("LoadWithRoots: %v", err)
 	}

@@ -1,20 +1,30 @@
 // Settings modal "ラベル" tab (DFLT-00084): create, rename, recolor and delete
 // the selected project's labels. Labels are DB rows shared by everyone using
-// the same backend -- not team-tier files -- so, unlike the other
-// project-scoped editors, this tab needs no local path, and every change is
-// saved immediately (there is no dirty/unsaved state to protect).
+// the same backend -- not files in a settings tier -- so this tab needs no
+// local path, and every change is saved immediately (there is no
+// dirty/unsaved state to protect).
+//
+// It carries its own project selector. Labels stayed per-project when the
+// settings modal's global/project scope switcher was removed (DFLT-00124,
+// completion criterion 9), so "which project?" is this tab's own question to
+// ask -- and asking it here means any project's labels can be edited, not
+// just the one the app currently has open.
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Pencil, Plus, Tag, Trash2 } from 'lucide-react';
-import { LabelColor, LabelUsage, LABEL_COLORS, LABEL_NAME_MAX_LENGTH } from '../../types';
+import { LabelColor, LabelUsage, LABEL_COLORS, LABEL_NAME_MAX_LENGTH, Project } from '../../types';
 import { getLabelColorMeta } from '../../labelMeta';
 import { createLabel, deleteLabel, fetchLabels, updateLabel } from '../../lib/labelsApi';
 import { errorMessage } from '../../lib/apiError';
 import { LabelChip } from '../LabelChip';
 
 interface Props {
-  // The project whose labels are edited; '' disables the whole tab.
-  projectId: string;
+  // Every project that can be picked. An empty list disables the tab: there
+  // is nothing to attach a label to.
+  projects: Project[];
+  // Which project to start on -- the one the app has open. The user can
+  // switch to any other from the selector below.
+  initialProjectId: string;
   // Called after every successful create/rename/recolor/delete, so the app
   // can re-fetch its label list and tickets (a rename shows on every ticket).
   onLabelsChanged?: () => void;
@@ -89,10 +99,18 @@ export const LabelColorPalette: React.FC<PaletteProps> = ({ value, onChange, dis
   );
 };
 
-export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) => {
+export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLabelsChanged }) => {
   const { t } = useTranslation();
+  // Start on the app's current project, but fall back to the first one that
+  // exists: an app with no project selected yet would otherwise open this
+  // tab disabled even though there are projects whose labels could be
+  // edited.
+  const [projectId, setProjectId] = useState<string>(
+    () => initialProjectId || projects[0]?.id || ''
+  );
   const canEdit = projectId !== '';
   const nameInputId = useId();
+  const projectSelectId = useId();
   const errorId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -128,19 +146,40 @@ export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) =>
     // re-enable the target; they are listed so the effect re-runs on them.
   }, [pendingFocus, labels, renamingId, busyId, creating]);
 
+  // The project whose response may still be applied. Switching the selector
+  // starts a new fetch without cancelling the previous one, so a slow backend
+  // (MySQL, or the HTTP data source) can resolve project A's request after
+  // B's; applying it would leave A's labels on screen under B's selection,
+  // and rename/delete go by label id, so the next action would edit A's
+  // labels while the user is looking at B (DFLT-00124, non-functional review
+  // condition NF-1). App.tsx's refreshProjectLabels guards the same way.
+  const requestedProjectIdRef = useRef(projectId);
+
   const load = useCallback(async () => {
+    requestedProjectIdRef.current = projectId;
+    // Not just `labels`: an error from the project being left, and the
+    // aria-invalid/role="alert" state that goes with it, must not survive
+    // into a selection where the form it describes is disabled
+    // (accessibility review condition A-2).
+    setError('');
+    setCreateFailed(false);
     if (!projectId) {
       setLabels([]);
+      setLoading(false);
       return;
     }
     setLoading(true);
-    setError('');
     try {
-      setLabels(sortLabels(await fetchLabels(t, projectId)));
+      const fetched = sortLabels(await fetchLabels(t, projectId));
+      if (requestedProjectIdRef.current !== projectId) return;
+      setLabels(fetched);
     } catch (e) {
+      if (requestedProjectIdRef.current !== projectId) return;
       setError(errorMessage(e, t('errors.UNKNOWN')));
     } finally {
-      setLoading(false);
+      // loading too: a late response must not clear the spinner belonging to
+      // the request that is still in flight.
+      if (requestedProjectIdRef.current === projectId) setLoading(false);
     }
     // t is deliberately left out: a language switch must not re-fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -231,6 +270,10 @@ export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) =>
         setPendingFocus(deleteButtonKey(label.id));
         return;
       }
+      // Same late-response rule as load(): if the selector moved on while
+      // this re-read was in flight, this list belongs to a project the user
+      // is no longer looking at (NF-1).
+      if (requestedProjectIdRef.current !== projectId) return;
       setLabels(fresh);
       const current = fresh.find(l => l.id === label.id);
       if (!current) {
@@ -275,12 +318,30 @@ export const LabelsEditor: React.FC<Props> = ({ projectId, onLabelsChanged }) =>
         <p className="mt-1 text-slate-500 dark:text-slate-400">{t('settings.labels.description')}</p>
       </div>
 
+      <div className="flex items-center gap-2">
+        <label htmlFor={projectSelectId} className="font-semibold text-slate-600 dark:text-slate-400">
+          {t('settings.labels.projectLabel')}
+        </label>
+        <select
+          id={projectSelectId}
+          value={projectId}
+          onChange={e => setProjectId(e.target.value)}
+          disabled={projects.length === 0}
+          className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 disabled:opacity-50"
+        >
+          <option value="">{t('settings.labels.projectPlaceholder')}</option>
+          {projects.map(p => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+
       {!canEdit && (
         <div
           role="status"
           className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 rounded-lg border border-amber-200 dark:border-amber-800"
         >
-          {t('settings.labels.selectProject')}
+          {t(projects.length === 0 ? 'settings.labels.noProjects' : 'settings.labels.selectProject')}
         </div>
       )}
 

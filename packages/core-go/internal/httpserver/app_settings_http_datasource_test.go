@@ -13,10 +13,10 @@ import (
 
 func seedStoredHTTPDataSource(t *testing.T, workDir, homeDir, url, token string) {
 	t.Helper()
-	if _, err := runtimeconfig.Save(workDir, homeDir, runtimeconfig.FileConfig{
+	if _, err := seedHomeConfig(homeDir, runtimeconfig.FileConfig{
 		DBBackend: "http", HTTPDataSourceURL: url, HTTPDataSourceToken: token,
 	}); err != nil {
-		t.Fatalf("seeding graph-config.json: %v", err)
+		t.Fatalf("seeding the home config: %v", err)
 	}
 }
 
@@ -96,7 +96,7 @@ func TestAppSettings_PutKeepsStoredHTTPTokenForTheSameURL(t *testing.T) {
 			if rec.Code != http.StatusOK {
 				t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
 			}
-			onDisk, _, _ := runtimeconfig.Load(workDir, homeDir)
+			onDisk, _ := runtimeconfig.LoadHomeConfig(homeDir)
 			if onDisk.HTTPDataSourceToken != "plain-token" {
 				t.Fatalf("stored token = %q, want plain-token", onDisk.HTTPDataSourceToken)
 			}
@@ -126,7 +126,7 @@ func TestAppSettings_PutRequiresHTTPTokenRetypeForAChangedURL(t *testing.T) {
 			if got := decodeError(t, rec).Code; got != "HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED" {
 				t.Fatalf("code = %q, want HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED", got)
 			}
-			onDisk, _, _ := runtimeconfig.Load(workDir, homeDir)
+			onDisk, _ := runtimeconfig.LoadHomeConfig(homeDir)
 			if onDisk.HTTPDataSourceURL != "https://a.example.com" || onDisk.HTTPDataSourceToken != tc.stored {
 				t.Fatalf("settings changed despite the rejection: %+v", onDisk)
 			}
@@ -149,7 +149,7 @@ func TestAppSettings_PutAcceptsANewHTTPTokenForANewURL(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
 	}
-	onDisk, _, _ := runtimeconfig.Load(workDir, homeDir)
+	onDisk, _ := runtimeconfig.LoadHomeConfig(homeDir)
 	if onDisk.HTTPDataSourceURL != "https://b.example.com" || onDisk.HTTPDataSourceToken != "new-token" {
 		t.Fatalf("stored = %+v", onDisk)
 	}
@@ -164,12 +164,12 @@ func TestAppSettings_PutRejectsInvalidHTTPDataSourceSettings(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.url+"|"+tc.token, func(t *testing.T) {
-			s, workDir, homeDir := newAppSettingsTestServer(t)
+			s, _, homeDir := newAppSettingsTestServer(t)
 			rec := doJSON(t, s, http.MethodPut, "/api/settings/app", httpDataSourcePutBody(tc.url, tc.token))
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
 			}
-			onDisk, _, _ := runtimeconfig.Load(workDir, homeDir)
+			onDisk, _ := runtimeconfig.LoadHomeConfig(homeDir)
 			if onDisk.DBBackend != "" || onDisk.HTTPDataSourceURL != "" {
 				t.Fatalf("settings were saved despite the 400: %+v", onDisk)
 			}
@@ -178,12 +178,12 @@ func TestAppSettings_PutRejectsInvalidHTTPDataSourceSettings(t *testing.T) {
 }
 
 func TestAppSettings_PutKeepsUnresolvedEnvVarRefToken(t *testing.T) {
-	s, workDir, homeDir := newAppSettingsTestServer(t)
+	s, _, homeDir := newAppSettingsTestServer(t)
 	rec := doJSON(t, s, http.MethodPut, "/api/settings/app", httpDataSourcePutBody("https://example.com", "${UNSET_AT_SAVE_DFLT_00088}"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
 	}
-	onDisk, _, _ := runtimeconfig.Load(workDir, homeDir)
+	onDisk, _ := runtimeconfig.LoadHomeConfig(homeDir)
 	if onDisk.HTTPDataSourceToken != "${UNSET_AT_SAVE_DFLT_00088}" {
 		t.Fatalf("stored token = %q, want the unresolved reference", onDisk.HTTPDataSourceToken)
 	}

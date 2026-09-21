@@ -15,7 +15,6 @@ import {
   SettingsNodeTypeInfo,
   SettingsNodeTypeTextResponse,
   SettingsReportTemplateResponse,
-  SettingsScope,
   SettingsSkillInfo,
   SettingsSkillTextResponse,
   SettingsTemplateTextResponse,
@@ -51,30 +50,23 @@ function jsonBody(method: 'PUT' | 'POST', payload: unknown): RequestInit {
   };
 }
 
-function scopeQuery(scope: SettingsScope, projectId: string): string {
-  const params = new URLSearchParams({ scope });
-  if (scope === 'project' && projectId) params.set('project_id', projectId);
-  return params.toString();
-}
-
-export async function fetchSettingsCatalog(
-  t: TFunction,
-  scope: SettingsScope,
-  projectId: string
-): Promise<SettingsCatalogResponse> {
-  return requestJSON(t, `/api/settings/catalog?${scopeQuery(scope, projectId)}`);
+// Every endpoint below addresses one tier -- the user tier -- so none of
+// them takes a scope or a project id. Per-project settings were removed in
+// DFLT-00124: the server no longer reads `scope`/`project_id` from a query
+// string or a request body, so sending either would be a parameter nothing
+// acts on.
+export async function fetchSettingsCatalog(t: TFunction): Promise<SettingsCatalogResponse> {
+  return requestJSON(t, '/api/settings/catalog');
 }
 
 export async function saveSettingsCatalog(
   t: TFunction,
-  scope: SettingsScope,
-  projectId: string,
   document: SettingsDocument
 ): Promise<{ merged_catalog: SettingsCatalogResponse['merged_catalog'] }> {
-  return requestJSON(t, '/api/settings/catalog', jsonBody('PUT', { scope, project_id: projectId, document }));
+  return requestJSON(t, '/api/settings/catalog', jsonBody('PUT', { document }));
 }
 
-// GET/PUT /api/settings/app -- the "全体設定" app-settings tab (DB path,
+// GET/PUT /api/settings/app -- the "アプリ設定" app-settings tab (DB path,
 // artifacts dir, node/workflow config directory override, ticket-list
 // pagination page size). See internal/httpserver/app_settings.go.
 export async function fetchAppSettings(t: TFunction): Promise<AppSettingsResponse> {
@@ -87,7 +79,7 @@ export async function saveAppSettings(t: TFunction, file: AppSettingsFile): Prom
 
 // POST /api/settings/app/test-mysql-connection -- the "接続テスト" button.
 // Takes the form's current (possibly unsaved) MySQL fields directly rather
-// than reading graph-config.json, so it can be used before saving.
+// than reading the saved config, so it can be used before saving.
 export async function testMySQLConnection(
   t: TFunction,
   mysql: Pick<AppSettingsFile, 'mysqlHost' | 'mysqlPort' | 'mysqlDatabase' | 'mysqlUser' | 'mysqlPassword' | 'mysqlTls' | 'mysqlTlsCa'>
@@ -95,143 +87,92 @@ export async function testMySQLConnection(
   return requestJSON(t, '/api/settings/app/test-mysql-connection', jsonBody('POST', mysql));
 }
 
-export async function fetchSettingsNodeTypes(
-  t: TFunction,
-  projectId: string
-): Promise<SettingsNodeTypeInfo[]> {
-  const params = new URLSearchParams();
-  if (projectId) params.set('project_id', projectId);
-  const data = await requestJSON<{ types?: SettingsNodeTypeInfo[] }>(
-    t,
-    `/api/settings/node-types?${params.toString()}`
-  );
+export async function fetchSettingsNodeTypes(t: TFunction): Promise<SettingsNodeTypeInfo[]> {
+  const data = await requestJSON<{ types?: SettingsNodeTypeInfo[] }>(t, '/api/settings/node-types');
   return data.types || [];
 }
 
 export async function fetchSettingsNodeType(
   t: TFunction,
-  scope: SettingsScope,
-  projectId: string,
   nodeType: string
 ): Promise<SettingsNodeTypeTextResponse> {
-  return requestJSON(
-    t,
-    `/api/settings/node-types/${encodeURIComponent(nodeType)}?${scopeQuery(scope, projectId)}`
-  );
+  return requestJSON(t, `/api/settings/node-types/${encodeURIComponent(nodeType)}`);
 }
 
 export async function saveSettingsNodeType(
   t: TFunction,
-  scope: SettingsScope,
-  projectId: string,
   nodeType: string,
   text: string
 ): Promise<SettingsNodeTypeTextResponse> {
   return requestJSON(
     t,
     `/api/settings/node-types/${encodeURIComponent(nodeType)}`,
-    jsonBody('PUT', { scope, project_id: projectId, text })
+    jsonBody('PUT', { text })
   );
 }
 
-export async function fetchSettingsSkills(
-  t: TFunction,
-  projectId: string
-): Promise<SettingsSkillInfo[]> {
-  const params = new URLSearchParams();
-  if (projectId) params.set('project_id', projectId);
-  const data = await requestJSON<{ skills?: SettingsSkillInfo[] }>(
-    t,
-    `/api/settings/skills?${params.toString()}`
-  );
+export async function fetchSettingsSkills(t: TFunction): Promise<SettingsSkillInfo[]> {
+  const data = await requestJSON<{ skills?: SettingsSkillInfo[] }>(t, '/api/settings/skills');
   return data.skills || [];
 }
 
 export async function fetchSettingsSkill(
   t: TFunction,
-  scope: SettingsScope,
-  projectId: string,
   name: string
 ): Promise<SettingsSkillTextResponse> {
-  return requestJSON(t, `/api/settings/skills/${encodeURIComponent(name)}?${scopeQuery(scope, projectId)}`);
+  return requestJSON(t, `/api/settings/skills/${encodeURIComponent(name)}`);
 }
 
 export async function saveSettingsSkill(
   t: TFunction,
-  scope: SettingsScope,
-  projectId: string,
   name: string,
   text: string
 ): Promise<SettingsSkillTextResponse> {
   return requestJSON(
     t,
     `/api/settings/skills/${encodeURIComponent(name)}`,
-    jsonBody('PUT', { scope, project_id: projectId, text })
+    jsonBody('PUT', { text })
   );
 }
 
 export async function fetchSettingsReportTemplate(
-  t: TFunction,
-  scope: SettingsScope,
-  projectId: string
+  t: TFunction
 ): Promise<SettingsReportTemplateResponse> {
-  return requestJSON(t, `/api/settings/report-template?${scopeQuery(scope, projectId)}`);
+  return requestJSON(t, '/api/settings/report-template');
 }
 
 export async function saveSettingsReportTemplate(
   t: TFunction,
-  scope: SettingsScope,
-  projectId: string,
   html: string
 ): Promise<SettingsReportTemplateResponse> {
-  return requestJSON(
-    t,
-    '/api/settings/report-template',
-    jsonBody('PUT', { scope, project_id: projectId, html })
-  );
+  return requestJSON(t, '/api/settings/report-template', jsonBody('PUT', { html }));
 }
 
 // GET/PUT /api/settings/plan-template and /api/settings/review-template --
 // the テンプレート tab's 実行計画 / レビュー entries. Unlike the report
 // template, the PUT body field is `text` and the content is not validated.
 export async function fetchSettingsPlanTemplate(
-  t: TFunction,
-  scope: SettingsScope,
-  projectId: string
+  t: TFunction
 ): Promise<SettingsTemplateTextResponse> {
-  return requestJSON(t, `/api/settings/plan-template?${scopeQuery(scope, projectId)}`);
+  return requestJSON(t, '/api/settings/plan-template');
 }
 
 export async function saveSettingsPlanTemplate(
   t: TFunction,
-  scope: SettingsScope,
-  projectId: string,
   text: string
 ): Promise<SettingsTemplateTextResponse> {
-  return requestJSON(
-    t,
-    '/api/settings/plan-template',
-    jsonBody('PUT', { scope, project_id: projectId, text })
-  );
+  return requestJSON(t, '/api/settings/plan-template', jsonBody('PUT', { text }));
 }
 
 export async function fetchSettingsReviewTemplate(
-  t: TFunction,
-  scope: SettingsScope,
-  projectId: string
+  t: TFunction
 ): Promise<SettingsTemplateTextResponse> {
-  return requestJSON(t, `/api/settings/review-template?${scopeQuery(scope, projectId)}`);
+  return requestJSON(t, '/api/settings/review-template');
 }
 
 export async function saveSettingsReviewTemplate(
   t: TFunction,
-  scope: SettingsScope,
-  projectId: string,
   text: string
 ): Promise<SettingsTemplateTextResponse> {
-  return requestJSON(
-    t,
-    '/api/settings/review-template',
-    jsonBody('PUT', { scope, project_id: projectId, text })
-  );
+  return requestJSON(t, '/api/settings/review-template', jsonBody('PUT', { text }));
 }

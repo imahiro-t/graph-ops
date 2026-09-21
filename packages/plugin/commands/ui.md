@@ -12,7 +12,7 @@ graph-engine ui
 
 This single command handles all three cases on its own -- there is nothing else for you to figure out or ask the user about beforehand:
 
-- If the current directory is (or is under) a project's local path -- this environment's `projectPaths` in `graph-config.json`; the deepest match wins -- it switches the Web UI to that project and opens its page in the default browser.
+- If the current directory is (or is under) a project's local path -- this environment's `projectPaths` in `$HOME/.graph-ops/config.json`; the deepest match wins -- it switches the Web UI to that project and opens its page in the default browser.
 - If no project's local path covers the current directory, it opens the Web UI with the project setup dialog already showing for the current directory, where the user either creates a new project or chooses an existing one from the DB; either way the directory is saved as that project's local path.
 - If the local Web UI server isn't running yet, it starts it in the background first, then does one of the above.
 

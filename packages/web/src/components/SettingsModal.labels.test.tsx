@@ -1,7 +1,8 @@
 // DFLT-00084: the settings modal's labels tab. Labels are DB rows, so the tab
-// only needs a project selected under the project scope -- not a local path
-// -- and is disabled under the global scope. fetch is routed by URL so the
-// real labelsApi helpers run.
+// needs a project selected -- not a local path. Since DFLT-00124 it picks
+// that project itself, from a selector of its own, rather than inheriting one
+// from a scope switcher. fetch is routed by URL so the real labelsApi helpers
+// run.
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -62,17 +63,16 @@ describe('SettingsModal labels tab', () => {
     vi.unstubAllGlobals();
   });
 
-  it('is disabled with guidance under the global scope', async () => {
+  it('opens on the app\'s current project, with its own selector', async () => {
     const user = userEvent.setup();
     renderModal();
 
     await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.labels') }));
 
-    expect(screen.getByText(i18n.t('settings.labels.selectProject'))).toBeInTheDocument();
-    const form = within(screen.getByTestId('label-create-form'));
-    expect(form.getByRole('textbox')).toBeDisabled();
-    expect(form.getByRole('button', { name: i18n.t('settings.labels.create') })).toBeDisabled();
-    expect(recorded.some(c => c.url.includes('/labels'))).toBe(false);
+    const select = screen.getByLabelText(i18n.t('settings.labels.projectLabel'));
+    expect(select).toHaveValue(alpha.id);
+    expect(screen.queryByText(i18n.t('settings.labels.selectProject'))).not.toBeInTheDocument();
+    expect(await screen.findByTestId('label-row-label-bug')).toBeInTheDocument();
   });
 
   it('lists and creates labels for the selected project even without a local path', async () => {
@@ -80,12 +80,10 @@ describe('SettingsModal labels tab', () => {
     const user = userEvent.setup();
     renderModal(onLabelsChanged);
 
-    await user.click(screen.getByRole('button', { name: i18n.t('settings.scope.project') }));
     await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.labels') }));
 
     expect(await screen.findByTestId('label-row-label-bug')).toBeInTheDocument();
     expect(screen.getByTestId('label-row-label-feat')).toBeInTheDocument();
-    expect(screen.queryByText(i18n.t('settings.scope.localPathNotSet'))).not.toBeInTheDocument();
 
     const form = within(screen.getByTestId('label-create-form'));
     expect(form.getByRole('textbox')).toBeEnabled();

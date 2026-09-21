@@ -24,13 +24,18 @@ const (
 //
 //  1. If cwd (the CLI's current directory, runtimeConfig.WorkDir) is non-empty and
 //     equals or lies under some project's local path (projectPaths, i.e.
-//     graph-config.json's per-environment project ID -> path map, see
+//     the home config file's per-environment project ID -> path map, see
 //     DFLT-00080), that project wins -- the deepest such path when several
 //     nest (see findProjectForDir).
 //  2. Otherwise, the globally-selected current project
 //     (app_state.current_project_id, set by use-project and by the Web UI's
 //     project switcher).
 //  3. Otherwise, the long-standing "no current project selected" error.
+//
+// home is os.UserHomeDir()'s result (runtimeConfig.HomeDir), used only to
+// name the file the step-3 error tells the user to edit -- see
+// runtimeconfig.HomeConfigPathForMessage, which also words the case where
+// there is no such file.
 //
 // An empty cwd skips step 1 entirely rather than falling back to
 // os.Getwd()/filepath.Abs("") -- the caller didn't supply a cwd, and
@@ -43,7 +48,7 @@ const (
 // prevent. Likewise a current_project_id that no longer names a project is
 // an error (with the dangling id in the message) rather than something to
 // guess around.
-func resolveCreateTicketProject(repo store.GraphRepository, cwd string, projectPaths map[string]string) (*domain.Project, projectResolutionSource, error) {
+func resolveCreateTicketProject(repo store.GraphRepository, cwd, home string, projectPaths map[string]string) (*domain.Project, projectResolutionSource, error) {
 	if cwd != "" {
 		projects, err := repo.ListProjects()
 		if err != nil {
@@ -59,7 +64,7 @@ func resolveCreateTicketProject(repo store.GraphRepository, cwd string, projectP
 		return nil, "", err
 	}
 	if pid == "" {
-		return nil, "", fmt.Errorf("no current project selected, and the current directory matches no project's local path (projectPaths in graph-config.json); set the project's local path in the Web UI settings (or via `graph-engine create-project --workdir`), run `graph-engine use-project <id>`, or pass --project <id>")
+		return nil, "", fmt.Errorf("no current project selected, and the current directory matches no project's local path (projectPaths in %s); set the project's local path in the Web UI settings (or via `graph-engine create-project --workdir`), run `graph-engine use-project <id>`, or pass --project <id>", runtimeconfig.HomeConfigPathForMessage(home))
 	}
 	project, err := repo.GetProject(pid)
 	if err != nil {

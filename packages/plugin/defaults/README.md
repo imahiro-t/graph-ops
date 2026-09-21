@@ -20,10 +20,15 @@ Canonical default content for the GraphOps plugin.
   that language is chosen.
 
 A user or team never edits these files. They customize by adding files under
-their own extension directory instead (`~/.graph-ops/extensions/...`
-or `<project>/.graph-ops/extensions/...`), which the engine resolves
-on top of this content at runtime -- see `README.md` at the repo root
-("Extension context for skills/agents/reports") for the full merge model,
+their own extension directory instead -- the user tier
+(`~/.graph-ops/extensions/...`, or wherever `userExtensionsDir` /
+`GRAPH_USER_EXTENSIONS_DIR` points) and the team tier, which is the shared
+directory `teamExtensionsDir` / `GRAPH_TEAM_EXTENSIONS_DIR` names
+(`<teamExtensionsDir>/extensions/...`). The team tier has no default: it
+exists only when that setting points somewhere, and a `.graph-ops/` directory
+inside a repository is never read. Those files are what the engine resolves
+on top of this content at runtime -- see the "Settings" section of
+`README.md` at the repo root ("Where these settings live") for the tiers,
 and `graph-engine get-node-type-context <type>` /
 `get-skill-context <skill>` / `get-report-template` / `get-plan-template` /
 `get-review-template` to see the merged result for a given install.

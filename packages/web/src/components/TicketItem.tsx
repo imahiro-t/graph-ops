@@ -42,7 +42,7 @@ interface Props {
   isExpanded: boolean;
   onToggleExpand: () => void;
   onRefresh: () => void | Promise<void>;
-  // The viewer's own display name (from "全体設定", GET /api/settings/app's
+  // The viewer's own display name (from "アプリ設定", GET /api/settings/app's
   // "myName"). Powers the "assign to me"/"unassign" action buttons below; an
   // empty string hides only those actions (there is no "me" to act as), not
   // the read-only assignee chip -- that chip must stay visible to every
@@ -646,7 +646,7 @@ export const TicketItem: React.FC<Props> = ({
         <div className="flex items-center gap-4 text-xs shrink-0">
           {/* Assignee chip. The read-only "someone else has this" chip must
               stay visible regardless of whether the viewer has configured a
-              "全体設定" myName -- it conveys who has the ticket, which has
+              "アプリ設定" myName -- it conveys who has the ticket, which has
               nothing to do with the viewer's own identity (completion
               criterion 5: any viewer must be able to tell who a ticket's
               assignee is, not only ones who've set myName). Only the

@@ -47,14 +47,13 @@ function makeResponse(overrides: Partial<AppSettingsResponse['file']> = {}): App
       userExtensionsDir: '/tmp/extensions',
       paginationPageSize: 10
     },
-    config_path: '/tmp/graph-config.json'
+    config_path: '/home/me/.graph-ops/config.json'
   };
 }
 
 function renderEditor() {
   return render(
     <AppSettingsEditor
-      scope="global"
       projects={[]}
       onDirtyChange={vi.fn()}
       onProjectsChanged={vi.fn()}
@@ -251,7 +250,6 @@ describe('AppSettingsEditor', () => {
     ];
     render(
       <AppSettingsEditor
-        scope="global"
         projects={projects}
         onDirtyChange={vi.fn()}
         onProjectsChanged={vi.fn()}
@@ -288,7 +286,7 @@ describe('AppSettingsEditor', () => {
 });
 
 // DFLT-00080: project management edits this environment's local path
-// (Project.local_path, stored in graph-config.json's projectPaths).
+// (Project.local_path, stored in the home config's projectPaths).
 describe('AppSettingsEditor project local paths', () => {
   const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALPHA', local_path: '/work/alpha', created_at: '', updated_at: '' };
   const beta: Project = { id: 'p-beta', name: 'Beta', prefix: 'BETA', local_path: '', created_at: '', updated_at: '' };
@@ -296,7 +294,6 @@ describe('AppSettingsEditor project local paths', () => {
   function renderWithProjects(projects: Project[], onProjectsChanged = vi.fn()) {
     const utils = render(
       <AppSettingsEditor
-        scope="global"
         projects={projects}
         onDirtyChange={vi.fn()}
         onProjectsChanged={onProjectsChanged}
@@ -307,7 +304,6 @@ describe('AppSettingsEditor project local paths', () => {
     const rerenderWith = (next: Project[]) =>
       utils.rerender(
         <AppSettingsEditor
-          scope="global"
           projects={next}
           onDirtyChange={vi.fn()}
           onProjectsChanged={onProjectsChanged}

@@ -7,16 +7,13 @@
 import React, { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Save, CheckCircle2 } from 'lucide-react';
-import { SettingsSkillInfo, SettingsScope } from '../../types';
+import { SettingsSkillInfo } from '../../types';
 import { fetchSettingsSkill, fetchSettingsSkills, saveSettingsSkill } from '../../lib/settingsApi';
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 
 interface Props {
-  scope: SettingsScope;
-  projectId: string;
-  canEdit: boolean;
   onDirtyChange: (dirty: boolean) => void;
 }
 
@@ -29,7 +26,7 @@ const skillNameKeys: Record<string, string> = {
   onboarding: 'settings.skills.names.onboarding'
 };
 
-export const SkillsEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDirtyChange }) => {
+export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const { t } = useTranslation();
   // See src/hooks/useLatest.ts -- keeps loadSkills/loadSelected below
   // insensitive to language changes (F-1).
@@ -45,12 +42,12 @@ export const SkillsEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDir
   const [error, setError] = useState('');
   const { savedFlash, showSavedFlash } = useSavedFlash();
 
-  const isDirty = canEdit && tierText !== savedTierText;
+  const isDirty = tierText !== savedTierText;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
 
   const loadSkills = useCallback(async () => {
     try {
-      const list = await fetchSettingsSkills(tRef.current, scope === 'project' ? projectId : '');
+      const list = await fetchSettingsSkills(tRef.current);
       setSkills(list);
       // Functional updater (reads `selected` via `prev`) so this callback
       // doesn't need `selected` in its own dependency array -- otherwise
@@ -61,14 +58,14 @@ export const SkillsEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDir
     } catch (e) {
       setError(errorMessage(e, tRef.current('errors.UNKNOWN')));
     }
-  }, [scope, projectId, tRef]);
+  }, [tRef]);
 
   const loadSelected = useCallback(async (name: string) => {
     if (!name) return;
     setLoading(true);
     setError('');
     try {
-      const res = await fetchSettingsSkill(tRef.current, scope, projectId, name);
+      const res = await fetchSettingsSkill(tRef.current, name);
       setTierText(res.tier_text);
       setSavedTierText(res.tier_text);
       setMergedText(res.merged_text);
@@ -77,7 +74,7 @@ export const SkillsEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDir
     } finally {
       setLoading(false);
     }
-  }, [scope, projectId, tRef]);
+  }, [tRef]);
 
   useEffect(() => { loadSkills(); }, [loadSkills]);
   useEffect(() => { if (selected) loadSelected(selected); }, [selected, loadSelected]);
@@ -86,7 +83,7 @@ export const SkillsEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDir
     setSaving(true);
     setError('');
     try {
-      const res = await saveSettingsSkill(t, scope, projectId, selected, tierText);
+      const res = await saveSettingsSkill(t, selected, tierText);
       setTierText(res.tier_text);
       setSavedTierText(res.tier_text);
       setMergedText(res.merged_text);
@@ -112,7 +109,7 @@ export const SkillsEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDir
           // `as any` to typecheck (DFLT-00023 M-1), and that cast disabled
           // the one check that would flag a renamed or removed flag on
           // SettingsSkillInfo -- the exact breakage it was silencing.
-          const hasOverride = scope === 'global' ? info.has_user_override : info.has_team_override;
+          const hasOverride = info.has_user_override;
           const labelKey = skillNameKeys[info.name];
           return (
             <button
@@ -152,7 +149,6 @@ export const SkillsEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDir
                 id={tierTextId}
                 value={tierText}
                 onChange={e => setTierText(e.target.value)}
-                disabled={!canEdit}
                 placeholder={t('settings.skills.tierTextPlaceholder')}
                 className="flex-1 min-h-[10rem] w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
               />
@@ -166,7 +162,7 @@ export const SkillsEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDir
               )}
               <button
                 onClick={handleSave}
-                disabled={!canEdit || saving || !isDirty}
+                disabled={saving || !isDirty}
                 className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
               >
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}

@@ -185,7 +185,7 @@ func TestHandleListTickets_AllTrueHasSameShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	if _, err := runtimeconfig.SetProjectPath("", s.cfg.HomeDir, other.ID, t.TempDir()); err != nil {
+	if _, err := runtimeconfig.SetProjectPath(s.cfg.HomeDir, other.ID, t.TempDir()); err != nil {
 		t.Fatalf("SetProjectPath: %v", err)
 	}
 	theirs := seedGraphTicket(t, repo, other.ID, "other project", 3, secret)

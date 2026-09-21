@@ -1,7 +1,11 @@
 // Covers the settings modal's tab list after DFLT-00071: a single
 // テンプレート tab replaces the old standalone レポートテンプレート tab, and an
-// unsaved edit inside it is still protected by the modal's own tab/scope
-// switch confirmation.
+// unsaved edit inside it is still protected by the modal's own tab-switch
+// confirmation.
+//
+// There is no scope switcher to protect any more (DFLT-00124): every tab
+// edits the one user tier, and the labels tab -- the only per-project one
+// left -- carries its own project selector.
 import { useState } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -88,7 +92,7 @@ describe('SettingsModal', () => {
     expect(plan).toHaveAttribute('aria-current', 'true');
     expect(screen.getByRole('button', { name: 'レビュー' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'レポート' })).toBeInTheDocument();
-    await waitFor(() => expect(fetchSettingsPlanTemplate).toHaveBeenCalledWith(expect.anything(), 'global', ''));
+    await waitFor(() => expect(fetchSettingsPlanTemplate).toHaveBeenCalledWith(expect.anything()));
     expect(await screen.findByDisplayValue('plan-tier')).toBeInTheDocument();
   });
 
@@ -108,7 +112,7 @@ describe('SettingsModal', () => {
     await screen.findByDisplayValue('plan-tier');
   });
 
-  it('asks before leaving the Templates tab or switching scope with an unsaved edit', async () => {
+  it('asks before leaving the Templates tab with an unsaved edit', async () => {
     const user = userEvent.setup();
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     renderModal();
@@ -123,9 +127,27 @@ describe('SettingsModal', () => {
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'レビュー' })).toHaveAttribute('aria-current', 'true');
     expect(textarea).toHaveValue('# 編集途中');
+  });
 
-    await user.click(screen.getByRole('button', { name: i18n.t('settings.scope.project') }));
-    expect(confirm).toHaveBeenCalledTimes(2);
+  // DFLT-00124, completion criterion 8: the "全体設定 / プロジェクト単位設定"
+  // switcher and the project selector that belonged to it are gone, along
+  // with the two notices that only appeared under the project scope.
+  it('has no scope switcher and no scope-level project selector', async () => {
+    renderModal();
+
+    for (const key of [
+      'settings.scope.label',
+      'settings.scope.global',
+      'settings.scope.project',
+      'settings.scope.projectLabel',
+      'settings.scope.noProjectSelected',
+      'settings.scope.localPathNotSet'
+    ]) {
+      // i18n.t returns the key itself once the key is gone, so this asserts
+      // both that nothing renders the string and that the key is unused.
+      expect(i18n.t(key)).toBe(key);
+      expect(screen.queryByText(key)).not.toBeInTheDocument();
+    }
   });
 
   it('does not ask when switching to another tab after discarding a template edit', async () => {
@@ -274,20 +296,15 @@ describe('SettingsModal', () => {
       expect(screen.getByRole('button', { name: 'open-settings' })).toHaveFocus();
     });
 
-    it('labels the project select shown for the project scope', async () => {
-      const user = userEvent.setup();
-      renderModal();
-
-      await user.click(screen.getByRole('button', { name: i18n.t('settings.scope.project') }));
-      const select = screen.getByLabelText(i18n.t('settings.scope.projectLabel'));
-      expect(select.tagName).toBe('SELECT');
-    });
   });
 
-  // DFLT-00077: App.tsx keeps the modal mounted and resolves its current
-  // project asynchronously, so the modal must pick up the header's project
-  // each time it opens rather than only on its first mount.
-  describe('project selection carried over from the header', () => {
+  // DFLT-00077, carried over to the labels tab (DFLT-00124): App.tsx keeps
+  // the modal mounted and resolves its current project asynchronously, so
+  // the tab must pick up the header's project each time it opens rather than
+  // only on its first mount. Labels are the one per-project thing left in
+  // this modal, so this is now that tab's selector rather than a scope-level
+  // one.
+  describe('the labels tab picks its own project', () => {
     const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALPHA', local_path: '/work/alpha', created_at: '', updated_at: '' };
     const beta: Project = { id: 'p-beta', name: 'Beta', prefix: 'BETA', local_path: '/work/beta', created_at: '', updated_at: '' };
 
@@ -302,64 +319,69 @@ describe('SettingsModal', () => {
         onMyNameChanged={vi.fn()}
       />
     );
-    const projectSelect = () => screen.getByLabelText(i18n.t('settings.scope.projectLabel'));
-    const switchToProjectScope = (user: ReturnType<typeof userEvent.setup>) =>
-      user.click(screen.getByRole('button', { name: i18n.t('settings.scope.project') }));
+    const projectSelect = () => screen.getByLabelText(i18n.t('settings.labels.projectLabel'));
+    const openLabelsTab = (user: ReturnType<typeof userEvent.setup>) =>
+      user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.labels') }));
 
-    it('selects the header project when opened after being mounted closed with no project', async () => {
+    beforeEach(() => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([]), { status: 200 })));
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('starts on the header project when opened after being mounted closed with no project', async () => {
       const user = userEvent.setup();
       const { rerender } = render(modal(false, null));
       rerender(modal(false, alpha));
       rerender(modal(true, alpha));
       await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
-      (fetchSettingsNodeTypes as unknown as Mock).mockClear();
 
-      await switchToProjectScope(user);
+      await openLabelsTab(user);
 
       expect(projectSelect()).toHaveValue(alpha.id);
-      expect(screen.queryByText(i18n.t('settings.scope.noProjectSelected'))).not.toBeInTheDocument();
-      await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalledWith(expect.anything(), alpha.id));
-      expect(fetchSettingsNodeTypes).not.toHaveBeenCalledWith(expect.anything(), '');
+      expect(screen.queryByText(i18n.t('settings.labels.selectProject'))).not.toBeInTheDocument();
     });
 
-    it('goes back to the header project on reopen after another project was picked inside the modal', async () => {
+    it('goes back to the header project on reopen after another project was picked inside the tab', async () => {
       const user = userEvent.setup();
       const { rerender } = render(modal(true, alpha));
 
-      await switchToProjectScope(user);
+      await openLabelsTab(user);
       await user.selectOptions(projectSelect(), beta.id);
       expect(projectSelect()).toHaveValue(beta.id);
 
       rerender(modal(false, alpha));
       rerender(modal(true, alpha));
+      await openLabelsTab(user);
 
       expect(projectSelect()).toHaveValue(alpha.id);
-      await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenLastCalledWith(expect.anything(), alpha.id));
     });
 
     it('follows a header project change made while the modal was closed', async () => {
       const user = userEvent.setup();
       const { rerender } = render(modal(true, alpha));
-      await switchToProjectScope(user);
+      await openLabelsTab(user);
       expect(projectSelect()).toHaveValue(alpha.id);
 
       rerender(modal(false, alpha));
       rerender(modal(false, beta));
       rerender(modal(true, beta));
+      await openLabelsTab(user);
 
       expect(projectSelect()).toHaveValue(beta.id);
-      await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenLastCalledWith(expect.anything(), beta.id));
     });
 
-    it('still warns when no project is selected in the header', async () => {
+    // With nothing selected in the header the tab still has projects to
+    // offer, so it falls back to the first rather than opening disabled.
+    it('falls back to the first project when the header has none selected', async () => {
       const user = userEvent.setup();
       const { rerender } = render(modal(false, null));
       rerender(modal(true, null));
+      await openLabelsTab(user);
 
-      await switchToProjectScope(user);
-
-      expect(projectSelect()).toHaveValue('');
-      expect(screen.getByText(i18n.t('settings.scope.noProjectSelected'))).toBeInTheDocument();
+      expect(projectSelect()).toHaveValue(alpha.id);
     });
   });
 });

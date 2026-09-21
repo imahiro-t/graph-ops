@@ -36,7 +36,7 @@ const (
 //
 //  1. Resolve the current working directory and look it up against every
 //     project's local path as the running server reports it (GET
-//     /api/projects' local_path, i.e. the server's graph-config.json
+//     /api/projects' local_path, i.e. the server's home config file
 //     projectPaths -- DFLT-00080), deepest containing path first.
 //  2. Health-check the UI server (GET /api/health); if it doesn't respond,
 //     start it in the background (this same binary, `serve`, detached) and

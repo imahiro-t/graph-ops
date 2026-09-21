@@ -59,7 +59,7 @@ type Config struct {
 // pre-quoted by whoever sets it.
 //
 // The value reaches here only from the CLAUDE_BIN environment variable or
-// graph-config.json's "claudeBinary" -- both local, both outside the HTTP
+// the home config file's "claudeBinary" -- both local, both outside the HTTP
 // API's editable surface (the app-settings tab does not expose it) -- so
 // this is a configuration contract, not an injection sink. Anyone who can
 // write those already runs code as this user.
@@ -168,7 +168,7 @@ func buildLaunchArgv(cfg Config, workDir, claudeBin, prompt string) (string, []s
 	}
 
 	return "", nil, fmt.Errorf(
-		"no terminal launch method available on %s: set \"terminalCommand\" in graph-config.json "+
+		"no terminal launch method available on %s: set \"terminalCommand\" in $HOME/.graph-ops/config.json "+
 			"(a shell template using {cwd} and {command}, e.g. for iTerm/wezterm/Windows Terminal/VS Code/cmux)",
 		goos,
 	)

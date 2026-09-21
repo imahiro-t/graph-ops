@@ -157,9 +157,9 @@ func TestValidateReportArtifactIfNeeded_DoesNotEnforceForNonReportNodes(t *testi
 
 // TestLoadRuntimeConfig_ExtensionsDirs mirrors the existing
 // TestLoadRuntimeConfig_TerminalWorkDir precedence-table pattern for the two
-// new extension-directory settings: env var > graph-config.json > default
-// (empty, meaning "let internal/config.ResolveRoots pick the default for
-// that tier").
+// new extension-directory settings: env var > the home config file > default
+// (empty, which for the user tier means $HOME/.graph-ops and for the team
+// tier means no team tier at all -- see internal/config.ResolveRoots).
 func TestLoadRuntimeConfig_ExtensionsDirs(t *testing.T) {
 	// stubHome is mandatory for every loadRuntimeConfig test, including the
 	// ones that only care about unrelated settings: the call unconditionally
@@ -167,12 +167,12 @@ func TestLoadRuntimeConfig_ExtensionsDirs(t *testing.T) {
 	// so without a stubbed home `go test` silently creates that directory in
 	// the developer's real home and leaves it behind. See stubHome's doc
 	// comment in runtime_config_test.go.
-	stubHome(t)
-	resolvedDir := tempCwd(t)
+	home := stubHome(t)
+	tempCwd(t)
 
 	t.Setenv("GRAPH_USER_EXTENSIONS_DIR", "/tmp/env-user-ext")
 	t.Setenv("GRAPH_TEAM_EXTENSIONS_DIR", "")
-	writeGraphConfig(t, resolvedDir, runtimeconfig.FileConfig{
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		UserExtensionsDir: "/tmp/json-user-ext",
 		TeamExtensionsDir: "/tmp/json-team-ext",
 	})
@@ -185,6 +185,6 @@ func TestLoadRuntimeConfig_ExtensionsDirs(t *testing.T) {
 		t.Errorf("UserExtensionsDir = %q, want env var to win", rc.UserExtensionsDir)
 	}
 	if rc.TeamExtensionsDir != "/tmp/json-team-ext" {
-		t.Errorf("TeamExtensionsDir = %q, want graph-config.json value since env is unset", rc.TeamExtensionsDir)
+		t.Errorf("TeamExtensionsDir = %q, want the home config's value since env is unset", rc.TeamExtensionsDir)
 	}
 }

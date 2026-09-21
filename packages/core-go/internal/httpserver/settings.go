@@ -2,7 +2,6 @@ package httpserver
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -11,202 +10,88 @@ import (
 	"github.com/graph-ops/core-go/internal/engine"
 )
 
-// settingsScope is the resolved (validated) user-/team-tier roots one
-// settings API request operates against, plus which tier ("global" or
-// "project") the request's document/text edits actually target.
+// settingsScope is the one tier the settings API reads and writes: the user
+// tier's root ($HOME/.graph-ops, or whatever userExtensionsDir /
+// GRAPH_USER_EXTENSIONS_DIR names).
 //
-//   - scope "global" edits the user tier ($HOME/.graph-ops, or
-//     GRAPH_USER_EXTENSIONS_DIR) -- team is still resolved (so mergedCatalog
-//     previews can include it when a project happens to be given) but
-//     writes never touch it.
-//   - scope "project" edits the team tier resolved from the given project's
-//     local path in this environment (graph-config.json's projectPaths,
-//     DFLT-00080) -- see internal/config.ProjectTeamRoot: this is
-//     deliberately NOT the server process's own cwd, so the settings UI's
-//     "project-scoped" tier tracks whichever DB Project is selected in the
-//     UI, not wherever the server binary happens to be running. A project
-//     with no local path is a PROJECT_LOCAL_PATH_NOT_SET error (400) rather
-//     than a silent fallback to that cwd.
+// It used to carry a scope ("global" | "project"), a team root and a project
+// id, because a request could ask to edit a per-project team tier resolved
+// from that project's local path (DFLT-00080). That whole mechanism is gone
+// (DFLT-00124, completion criterion 7): settings live in one place per user,
+// and a team shares them by pointing teamExtensionsDir at a shared directory
+// -- a directory this API deliberately does not edit, since it is shared
+// state that belongs to whoever curates it, not to whoever happens to open
+// the settings screen.
+//
+// The type survives the collapse to one field because it is still what says,
+// at every call site, WHICH root a read or a write is aimed at; a bare string
+// passed around the eight handler pairs would not.
 type settingsScope struct {
-	Scope     string // "global" | "project"
-	UserRoot  string
-	TeamRoot  string // "" if not resolvable (no project selected / no $HOME)
-	ProjectID string
+	UserRoot string
 }
 
-// resolveSettingsScope validates scope/project_id query (or body) values and
-// resolves the corresponding roots. teamDirOverride (GRAPH_TEAM_EXTENSIONS_DIR
-// / graph-config.json) always wins over a project's local path, mirroring
-// ResolveRoots' own precedence, so an operator's explicit configuration is
-// never silently bypassed by picking a different project in the UI.
+// settingsUserScope resolves the user-tier root this request operates on.
 //
-// A scope=project request whose team root would be the same directory as
-// the user root (the project's local path is $HOME itself, or the team-root
-// override names the user root) is a PROJECT_TEAM_ROOT_IS_USER_ROOT error
-// (400): ResolveRoots never treats one directory as both tiers, and writing
-// "project" settings there would silently overwrite the global ones
-// (DFLT-00068).
-func (s *Server) resolveSettingsScope(scope, projectID string) (settingsScope, error) {
-	if scope != "global" && scope != "project" {
-		return settingsScope{}, domain.NewAPIError(domain.ErrCodeInvalidScope, "scope must be \"global\" or \"project\", got %q", scope)
-	}
-
-	baseRoots, err := s.resolveRoots()
-	if err != nil {
-		return settingsScope{}, err
-	}
-	out := settingsScope{Scope: scope, UserRoot: baseRoots.UserDir, ProjectID: projectID}
-
-	if scope == "project" {
-		if projectID == "" {
-			return settingsScope{}, domain.NewAPIError(domain.ErrCodeInvalidScope, "project_id is required for scope=project")
-		}
-		if s.cfg.TeamExtensionsDir != "" {
-			out.TeamRoot = s.cfg.TeamExtensionsDir
-		} else {
-			project, err := s.repo.GetProject(projectID)
-			if err != nil {
-				return settingsScope{}, err
-			}
-			if project == nil {
-				return settingsScope{}, domain.NewAPIError(domain.ErrCodeProjectNotFound, "project not found: %s", projectID)
-			}
-			fileCfg, err := s.loadProjectPaths()
-			if err != nil {
-				return settingsScope{}, err
-			}
-			localPath := fileCfg.ProjectPath(project.ID)
-			if localPath == "" {
-				// config.ProjectTeamRoot("") would resolve against the server's
-				// own cwd and quietly read/write settings there instead.
-				return settingsScope{}, domain.NewAPIError(domain.ErrCodeProjectLocalPathNotSet,
-					"project %s has no local path in this environment; set it under Settings > Projects", project.ID)
-			}
-			teamRoot, err := config.ProjectTeamRoot(localPath)
-			if errors.Is(err, config.ErrTeamRootIsUserRoot) {
-				return settingsScope{}, teamRootIsUserRootError(project.ID)
-			}
-			if err != nil {
-				return settingsScope{}, err
-			}
-			out.TeamRoot = teamRoot
-		}
-		// ProjectTeamRoot only knows the default user root, and the override
-		// branch above isn't checked at all, so compare against the user root
-		// actually in effect here too.
-		if config.SameDir(out.TeamRoot, out.UserRoot) {
-			return settingsScope{}, teamRootIsUserRootError(projectID)
-		}
-	}
-
-	return out, nil
+// It cannot fail: config.ResolveRoots is pure string handling over the two
+// configured overrides (DFLT-00124), so there is no error for the handlers
+// to turn into a 500 -- and hence no ok/error dance at the top of each of
+// them.
+func (s *Server) settingsUserScope() settingsScope {
+	return settingsScope{UserRoot: s.resolveRoots().UserDir}
 }
 
-// teamRootIsUserRootError is resolveSettingsScope's
-// PROJECT_TEAM_ROOT_IS_USER_ROOT error for projectID.
-func teamRootIsUserRootError(projectID string) error {
-	return domain.NewAPIError(domain.ErrCodeProjectTeamRootIsUserRoot,
-		"project %s's team settings directory would be the user settings directory (its local path is the home directory, or the team root override names the user root); it has no project-scoped settings of its own", projectID)
-}
-
-// mergedDocuments returns def plus every tier up to and including this
-// scope: user only for "global", user+team for "project". This is the
-// settings UI's "継承後のプレビュー" -- what an agent would actually see if
-// this scope's document/text were exactly what's currently on disk.
+// mergedDocuments returns def plus the user tier -- the settings UI's
+// "継承後のプレビュー".
+//
+// It shows the plugin default merged with the user tier, and nothing else.
+// A team tier configured through teamExtensionsDir does take effect for
+// agents, but it is not previewed here: this screen edits the user tier, and
+// a preview that silently folded in a shared directory would show edits the
+// user cannot make from this screen. See handleGetSettingsCatalog.
 //
 // def is supplied by the caller (already resolved/localized via
 // config.ResolveLanguage + config.LocalizedDefault against exactly the
-// Document set this scope can see -- see handleGetSettingsCatalog) rather
+// Document set this preview covers -- see handleGetSettingsCatalog) rather
 // than fetched in here as a bare config.DefaultDocument(): unlike
 // LoadWithRoots' callers, this package doesn't go through LoadWithRoots at
 // all, so language resolution has to be done explicitly at each call site
 // (execution plan, section 1.3/1.6).
-func (sc settingsScope) mergedDocuments(def, userDoc, teamDoc config.Document) []config.Document {
-	docs := []config.Document{def, userDoc}
-	if sc.Scope == "project" {
-		docs = append(docs, teamDoc)
-	}
-	return docs
+func mergedDocuments(def, userDoc config.Document) []config.Document {
+	return []config.Document{def, userDoc}
 }
 
 // tierDocumentPath returns the path this scope's own Document file (the one
 // GET returns as tier_document / PUT overwrites) lives at.
 func (sc settingsScope) tierDocumentPath() string {
-	if sc.Scope == "global" {
-		return config.UserDocumentPath(sc.UserRoot)
-	}
-	return config.TeamDocumentPath(sc.TeamRoot)
+	return config.UserDocumentPath(sc.UserRoot)
 }
 
 // tierExtensionRoot returns the root this scope's extensions/ (node-type
 // overrides, report template override) writes should target.
 func (sc settingsScope) tierExtensionRoot() string {
-	if sc.Scope == "global" {
-		return sc.UserRoot
-	}
-	return sc.TeamRoot
+	return sc.UserRoot
 }
 
 // mergeRoots are the roots every "merged preview" in this file resolves
-// against: this scope's user root, plus its team root only when the scope is
-// "project" (a global-scope preview never depends on any one project's team
-// tier).
+// against: the user root alone. The team root is deliberately left out --
+// see mergedDocuments for why this screen previews only what it can edit.
 func (sc settingsScope) mergeRoots() config.Roots {
-	roots := config.Roots{UserDir: sc.UserRoot}
-	if sc.Scope == "project" {
-		roots.TeamDir = sc.TeamRoot
-	}
-	return roots
+	return config.Roots{UserDir: sc.UserRoot}
 }
 
-func scopeAndProjectFromQuery(r *http.Request) (string, string) {
-	return r.URL.Query().Get("scope"), r.URL.Query().Get("project_id")
-}
-
-// listScopeRoots resolves the roots the two "list everything" endpoints
-// (node types, skills) need: the user root always, plus the team root of an
-// optional project_id query parameter. Unlike the tier-specific endpoints
-// these two take no scope -- an absent project_id simply means "no project
-// context", which yields an empty team root rather than an error. It writes
-// the error response itself and reports ok=false when the caller should stop.
-func (s *Server) listScopeRoots(w http.ResponseWriter, r *http.Request) (userRoot, teamRoot string, ok bool) {
-	if projectID := r.URL.Query().Get("project_id"); projectID != "" {
-		sc, err := s.resolveSettingsScope("project", projectID)
-		switch {
-		case isAPIErrorCode(err, domain.ErrCodeProjectLocalPathNotSet),
-			isAPIErrorCode(err, domain.ErrCodeProjectTeamRootIsUserRoot):
-			// A project with no local path in this environment (DFLT-00080),
-			// or whose team root would be the user root (DFLT-00068), has no
-			// team tier to list, the same as "no project context" -- not an
-			// error that would break the whole settings screen.
-		case err != nil:
-			writeError(w, statusForError(err, http.StatusBadRequest), err)
-			return "", "", false
-		default:
-			teamRoot = sc.TeamRoot
-		}
-	}
-	roots, err := s.resolveRoots()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return "", "", false
-	}
-	return roots.UserDir, teamRoot, true
-}
-
-// handleGetSettingsCatalog returns this scope's own raw Document
-// (tier_document), the fully-merged catalog through this scope
-// (merged_catalog, a preview of what an agent actually sees), and the
-// catalog merged through every tier BELOW this scope (inherited_catalog, so
-// the UI can show "what you'd fall back to if you cleared this scope's
-// override").
+// handleGetSettingsCatalog returns the user tier's own raw Document
+// (tier_document), that tier merged onto the plugin default
+// (merged_catalog), and the plugin default alone (inherited_catalog, so the
+// UI can show "what you'd fall back to if you cleared this override").
+//
+// merged_catalog is a preview of the plugin default plus the user tier -- NOT
+// of everything an agent sees. When teamExtensionsDir is configured, agents
+// additionally get that team tier merged on top (see config.LoadWithRoots),
+// and it is not shown here: this endpoint edits the user tier, and the team
+// tier is a shared directory the settings screen deliberately does not touch
+// (DFLT-00124, plan review condition F-2).
 func (s *Server) handleGetSettingsCatalog(w http.ResponseWriter, r *http.Request) {
-	scopeStr, projectID := scopeAndProjectFromQuery(r)
-	sc, err := s.resolveSettingsScope(scopeStr, projectID)
-	if err != nil {
-		writeError(w, statusForError(err, http.StatusBadRequest), err)
-		return
-	}
+	sc := s.settingsUserScope()
 
 	tierDoc, err := config.LoadDocumentAt(sc.tierDocumentPath())
 	if err != nil {
@@ -219,63 +104,32 @@ func (s *Server) handleGetSettingsCatalog(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	var teamDoc config.Document
-	if sc.TeamRoot != "" {
-		teamDoc, err = config.LoadDocumentAt(config.TeamDocumentPath(sc.TeamRoot))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-	}
-
 	// The language that localizes merged_catalog's fixed skeleton/default
-	// review-gate names must be resolved from exactly the Document set this
-	// scope can see (execution plan, section 1.6's design principle): global
-	// sees only userDoc, project sees userDoc+teamDoc (team winning, same
-	// "later argument wins" convention as config.Merge/ResolveLanguage).
-	var mergedLang string
-	if sc.Scope == "project" {
-		mergedLang = config.ResolveLanguage("", userDoc, teamDoc)
-	} else {
-		mergedLang = config.ResolveLanguage("", userDoc)
-	}
+	// review-gate names is resolved from exactly the Document set this
+	// preview covers (execution plan, section 1.6's design principle): the
+	// user tier.
+	mergedLang := config.ResolveLanguage("", userDoc)
 	mergedDef, err := config.LocalizedDefault(mergedLang)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	merged := config.Merge(sc.mergedDocuments(mergedDef, userDoc, teamDoc)...)
+	merged := config.Merge(mergedDocuments(mergedDef, userDoc)...)
 
-	// Every tier strictly BELOW this scope: the plugin default alone for
-	// "global" (no language resolution -- there is nothing below it to
-	// resolve one from), plus the user tier for "project".
-	var inheritedDocs []config.Document
-	if sc.Scope == "global" {
-		def, err := config.DefaultDocument()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		inheritedDocs = []config.Document{def}
-	} else {
-		inheritedLang := config.ResolveLanguage("", userDoc)
-		inheritedDef, err := config.LocalizedDefault(inheritedLang)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		inheritedDocs = []config.Document{inheritedDef, userDoc}
+	// Everything strictly BELOW the user tier: the plugin default alone (no
+	// language resolution -- there is nothing below it to resolve one from).
+	def, err := config.DefaultDocument()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
-	inherited := config.Merge(inheritedDocs...)
+	inherited := config.Merge(def)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"tier_document":      tierDoc,
-		"merged_catalog":     merged,
-		"inherited_catalog":  inherited,
-		"scope":              sc.Scope,
-		"project_id":         sc.ProjectID,
-		"team_root_resolved": sc.TeamRoot != "",
-		"resolved_language":  mergedLang,
+		"tier_document":     tierDoc,
+		"merged_catalog":    merged,
+		"inherited_catalog": inherited,
+		"resolved_language": mergedLang,
 	})
 }
 
@@ -287,19 +141,13 @@ func (s *Server) handleGetSettingsCatalog(w http.ResponseWriter, r *http.Request
 // write to disk at all.
 func (s *Server) handlePutSettingsCatalog(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Scope     string          `json:"scope"`
-		ProjectID string          `json:"project_id"`
-		Document  config.Document `json:"document"`
+		Document config.Document `json:"document"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	sc, err := s.resolveSettingsScope(body.Scope, body.ProjectID)
-	if err != nil {
-		writeError(w, statusForError(err, http.StatusBadRequest), err)
-		return
-	}
+	sc := s.settingsUserScope()
 	if err := validateMaxIterations(body.Document); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -309,36 +157,18 @@ func (s *Server) handlePutSettingsCatalog(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	userDoc, err := config.LoadDocumentAt(config.UserDocumentPath(sc.UserRoot))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	var teamDoc config.Document
-	if sc.Scope == "project" {
-		teamDoc = body.Document
-	} else if sc.TeamRoot != "" {
-		teamDoc, err = config.LoadDocumentAt(config.TeamDocumentPath(sc.TeamRoot))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-	}
-	if sc.Scope == "global" {
-		userDoc = body.Document
-	}
-
-	// Resolved from userDoc/teamDoc AFTER the scope-appropriate substitution
-	// of body.Document above, so a submitted language change takes effect in
-	// this same response's merged_catalog (execution plan, section 1.6's
-	// handlePutSettingsCatalog row) rather than requiring a follow-up GET.
-	lang := config.ResolveLanguage("", userDoc, teamDoc)
+	// Resolved from the submitted document, so a submitted language change
+	// takes effect in this same response's merged_catalog (execution plan,
+	// section 1.6's handlePutSettingsCatalog row) rather than requiring a
+	// follow-up GET.
+	userDoc := body.Document
+	lang := config.ResolveLanguage("", userDoc)
 	def, err := config.LocalizedDefault(lang)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	candidate := config.Merge(def, userDoc, teamDoc)
+	candidate := config.Merge(def, userDoc)
 	if err := engine.ValidateCatalog(candidate); err != nil {
 		apiErr := classifyCatalogError(err)
 		writeError(w, http.StatusBadRequest, apiErr)
@@ -410,50 +240,35 @@ func classifyCatalogError(err error) *domain.APIError {
 
 // handleListSettingsNodeTypes returns every known node type (built-in plus
 // any custom type appearing in the merged catalog) alongside, for each, the
-// resolved has_default/has_user_override/has_team_override flags -- the
-// left-hand list in the settings UI's ノードタブ. project_id is optional
-// here (unlike the tier-specific endpoints below): when supplied,
-// has_team_override reflects that project's team tier; when omitted,
-// has_team_override is always false (there is no project context to check).
+// resolved has_default/has_user_override flags -- the left-hand list in the
+// settings UI's ノードタブ.
 func (s *Server) handleListSettingsNodeTypes(w http.ResponseWriter, r *http.Request) {
-	userRoot, teamRoot, ok := s.listScopeRoots(w, r)
-	if !ok {
-		return
-	}
+	sc := s.settingsUserScope()
+	userRoot := sc.UserRoot
 
-	// userDoc/teamDoc must be read BEFORE resolving def: unlike the other
-	// three handlers in this file, this one used to read the plugin default
-	// first, which made it impossible to resolve a language from
-	// userDoc/teamDoc before they existed. See the execution plan's section
-	// 1.6/2.2 note on this handler needing a genuine reordering, not just a
-	// drop-in two-line replacement like handleGetSettingsCatalog/
-	// handlePutSettingsCatalog got.
+	// userDoc must be read BEFORE resolving def: unlike the other three
+	// handlers in this file, this one used to read the plugin default first,
+	// which made it impossible to resolve a language from userDoc before it
+	// existed. See the execution plan's section 1.6/2.2 note on this handler
+	// needing a genuine reordering, not just a drop-in two-line replacement
+	// like handleGetSettingsCatalog/handlePutSettingsCatalog got.
 	userDoc, err := config.LoadDocumentAt(config.UserDocumentPath(userRoot))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	var teamDoc config.Document
-	if teamRoot != "" {
-		teamDoc, err = config.LoadDocumentAt(config.TeamDocumentPath(teamRoot))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-	}
-	lang := config.ResolveLanguage("", userDoc, teamDoc)
+	lang := config.ResolveLanguage("", userDoc)
 	def, err := config.LocalizedDefault(lang)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	catalog := config.Merge(def, userDoc, teamDoc)
+	catalog := config.Merge(def, userDoc)
 
 	type typeInfo struct {
 		Type            string `json:"type"`
 		HasDefault      bool   `json:"has_default"`
 		HasUserOverride bool   `json:"has_user_override"`
-		HasTeamOverride bool   `json:"has_team_override"`
 	}
 	types := config.ListKnownNodeTypes(catalog)
 	// Union in any type that has an override file but isn't (yet) referenced
@@ -472,26 +287,13 @@ func (s *Server) handleListSettingsNodeTypes(w http.ResponseWriter, r *http.Requ
 			types = append(types, t)
 		}
 	}
-	if teamRoot != "" {
-		for _, t := range config.ListNodeTypeOverrideNames(teamRoot) {
-			if !seen[t] {
-				seen[t] = true
-				types = append(types, t)
-			}
-		}
-	}
 	out := make([]typeInfo, 0, len(types))
 	for _, t := range types {
 		_, hasUser := config.NodeTypeTierText(userRoot, t)
-		var hasTeam bool
-		if teamRoot != "" {
-			_, hasTeam = config.NodeTypeTierText(teamRoot, t)
-		}
 		out = append(out, typeInfo{
 			Type:            t,
 			HasDefault:      config.ResolveNodeTypeContext(config.Roots{}, t) != "",
 			HasUserOverride: hasUser,
-			HasTeamOverride: hasTeam,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"types": out})
@@ -502,12 +304,7 @@ func (s *Server) handleListSettingsNodeTypes(w http.ResponseWriter, r *http.Requ
 // (merged_text) -- the ノードタブ's right-hand editor pane.
 func (s *Server) handleGetSettingsNodeType(w http.ResponseWriter, r *http.Request) {
 	nodeType := r.PathValue("type")
-	scopeStr, projectID := scopeAndProjectFromQuery(r)
-	sc, err := s.resolveSettingsScope(scopeStr, projectID)
-	if err != nil {
-		writeError(w, statusForError(err, http.StatusBadRequest), err)
-		return
-	}
+	sc := s.settingsUserScope()
 
 	tierText, _ := config.NodeTypeTierText(sc.tierExtensionRoot(), nodeType)
 	mergedText := config.ResolveNodeTypeContext(sc.mergeRoots(), nodeType)
@@ -524,19 +321,13 @@ func (s *Server) handleGetSettingsNodeType(w http.ResponseWriter, r *http.Reques
 func (s *Server) handlePutSettingsNodeType(w http.ResponseWriter, r *http.Request) {
 	nodeType := r.PathValue("type")
 	var body struct {
-		Scope     string `json:"scope"`
-		ProjectID string `json:"project_id"`
-		Text      string `json:"text"`
+		Text string `json:"text"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	sc, err := s.resolveSettingsScope(body.Scope, body.ProjectID)
-	if err != nil {
-		writeError(w, statusForError(err, http.StatusBadRequest), err)
-		return
-	}
+	sc := s.settingsUserScope()
 
 	if err := config.WriteExtensionText(sc.tierExtensionRoot(), config.NodeTypesSubdir, nodeType+".md", body.Text); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -553,34 +344,23 @@ func (s *Server) handlePutSettingsNodeType(w http.ResponseWriter, r *http.Reques
 }
 
 // handleListSettingsSkills returns the fixed set of plugin skills
-// (config.ListKnownSkills) alongside, for each, whether this user/team tier
-// has a supplementary-instruction override set -- the left-hand list in the
-// settings UI's スキル tab. project_id is optional (unlike the tier-specific
-// endpoints below): when supplied, has_team_override reflects that
-// project's team tier; when omitted, has_team_override is always false.
+// (config.ListKnownSkills) alongside, for each, whether the user tier has a
+// supplementary-instruction override set -- the left-hand list in the
+// settings UI's スキル tab.
 func (s *Server) handleListSettingsSkills(w http.ResponseWriter, r *http.Request) {
-	userRoot, teamRoot, ok := s.listScopeRoots(w, r)
-	if !ok {
-		return
-	}
+	sc := s.settingsUserScope()
 
 	type skillInfo struct {
 		Name            string `json:"name"`
 		HasUserOverride bool   `json:"has_user_override"`
-		HasTeamOverride bool   `json:"has_team_override"`
 	}
 	names := config.ListKnownSkills()
 	out := make([]skillInfo, 0, len(names))
 	for _, name := range names {
-		_, hasUser := config.SkillTierText(userRoot, name)
-		var hasTeam bool
-		if teamRoot != "" {
-			_, hasTeam = config.SkillTierText(teamRoot, name)
-		}
+		_, hasUser := config.SkillTierText(sc.UserRoot, name)
 		out = append(out, skillInfo{
 			Name:            name,
 			HasUserOverride: hasUser,
-			HasTeamOverride: hasTeam,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"skills": out})
@@ -591,12 +371,7 @@ func (s *Server) handleListSettingsSkills(w http.ResponseWriter, r *http.Request
 // the スキル tab's right-hand editor pane.
 func (s *Server) handleGetSettingsSkill(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	scopeStr, projectID := scopeAndProjectFromQuery(r)
-	sc, err := s.resolveSettingsScope(scopeStr, projectID)
-	if err != nil {
-		writeError(w, statusForError(err, http.StatusBadRequest), err)
-		return
-	}
+	sc := s.settingsUserScope()
 
 	tierText, _ := config.SkillTierText(sc.tierExtensionRoot(), name)
 	mergedText := config.ResolveSkillContext(sc.mergeRoots(), name)
@@ -614,19 +389,13 @@ func (s *Server) handleGetSettingsSkill(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handlePutSettingsSkill(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	var body struct {
-		Scope     string `json:"scope"`
-		ProjectID string `json:"project_id"`
-		Text      string `json:"text"`
+		Text string `json:"text"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	sc, err := s.resolveSettingsScope(body.Scope, body.ProjectID)
-	if err != nil {
-		writeError(w, statusForError(err, http.StatusBadRequest), err)
-		return
-	}
+	sc := s.settingsUserScope()
 
 	if err := config.WriteExtensionText(sc.tierExtensionRoot(), config.SkillsSubdir, name+".md", body.Text); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -643,17 +412,12 @@ func (s *Server) handlePutSettingsSkill(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleGetSettingsReportTemplate returns this scope's own report-template
-// override HTML (tier_text, "" if unset) plus the merged/resolved template
-// (merged_text -- team override, else user override, else the plugin
-// default; see config.ResolveReportTemplate) -- the editor pane for the
-// テンプレート tab's レポート entry.
+// override HTML (tier_text, "" if unset) plus the resolved template
+// (merged_text -- the user override, else the plugin default; see
+// config.ResolveReportTemplate) -- the editor pane for the テンプレート tab's
+// レポート entry.
 func (s *Server) handleGetSettingsReportTemplate(w http.ResponseWriter, r *http.Request) {
-	scopeStr, projectID := scopeAndProjectFromQuery(r)
-	sc, err := s.resolveSettingsScope(scopeStr, projectID)
-	if err != nil {
-		writeError(w, statusForError(err, http.StatusBadRequest), err)
-		return
-	}
+	sc := s.settingsUserScope()
 
 	tierText, _ := config.ReportTemplateTierText(sc.tierExtensionRoot())
 	mergedText := config.ResolveReportTemplate(sc.mergeRoots())
@@ -673,19 +437,13 @@ func (s *Server) handleGetSettingsReportTemplate(w http.ResponseWriter, r *http.
 // nothing is written to disk.
 func (s *Server) handlePutSettingsReportTemplate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Scope     string `json:"scope"`
-		ProjectID string `json:"project_id"`
-		HTML      string `json:"html"`
+		HTML string `json:"html"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	sc, err := s.resolveSettingsScope(body.Scope, body.ProjectID)
-	if err != nil {
-		writeError(w, statusForError(err, http.StatusBadRequest), err)
-		return
-	}
+	sc := s.settingsUserScope()
 
 	if body.HTML != "" {
 		if err := config.ValidateReportHTML(body.HTML); err != nil {
@@ -738,8 +496,8 @@ var (
 
 // handleGetSettingsPlanTemplate returns this scope's own plan-template
 // override Markdown (tier_text, "" if unset) plus the resolved template
-// (merged_text -- team override, else user override, else the plugin's
-// English default; see config.ResolvePlanTemplate) -- the editor pane for
+// (merged_text -- the user override, else the plugin's English default; see
+// config.ResolvePlanTemplate) -- the editor pane for
 // the テンプレート tab's 実行計画 entry. The same file get-plan-template reads.
 func (s *Server) handleGetSettingsPlanTemplate(w http.ResponseWriter, r *http.Request) {
 	s.getSettingsMarkdownTemplate(w, r, planTemplateTarget)
@@ -765,12 +523,7 @@ func (s *Server) handlePutSettingsReviewTemplate(w http.ResponseWriter, r *http.
 }
 
 func (s *Server) getSettingsMarkdownTemplate(w http.ResponseWriter, r *http.Request, target markdownTemplateTarget) {
-	scopeStr, projectID := scopeAndProjectFromQuery(r)
-	sc, err := s.resolveSettingsScope(scopeStr, projectID)
-	if err != nil {
-		writeError(w, statusForError(err, http.StatusBadRequest), err)
-		return
-	}
+	sc := s.settingsUserScope()
 	s.writeMarkdownTemplateState(w, sc, target)
 }
 
@@ -782,19 +535,13 @@ func (s *Server) getSettingsMarkdownTemplate(w http.ResponseWriter, r *http.Requ
 // The body field is "text", matching the node-type/skill PUTs.
 func (s *Server) putSettingsMarkdownTemplate(w http.ResponseWriter, r *http.Request, target markdownTemplateTarget) {
 	var body struct {
-		Scope     string `json:"scope"`
-		ProjectID string `json:"project_id"`
-		Text      string `json:"text"`
+		Text string `json:"text"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	sc, err := s.resolveSettingsScope(body.Scope, body.ProjectID)
-	if err != nil {
-		writeError(w, statusForError(err, http.StatusBadRequest), err)
-		return
-	}
+	sc := s.settingsUserScope()
 
 	if err := config.WriteExtensionText(sc.tierExtensionRoot(), target.subdir, target.file, body.Text); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -809,11 +556,4 @@ func (s *Server) writeMarkdownTemplateState(w http.ResponseWriter, sc settingsSc
 		"tier_text":   tierText,
 		"merged_text": target.resolve(sc.mergeRoots()),
 	})
-}
-
-// isAPIErrorCode reports whether err is (or wraps) a *domain.APIError with
-// the given code.
-func isAPIErrorCode(err error, code domain.ErrorCode) bool {
-	var apiErr *domain.APIError
-	return errors.As(err, &apiErr) && apiErr.Code == code
 }

@@ -207,7 +207,7 @@ export const App: React.FC = () => {
   //
   // Reset to page 1 whenever a filter changes so the user never
   // lands on a stale, now out-of-range page. The page size itself is a
-  // "全体設定" app-setting (GET /api/settings/app); unlike that endpoint's
+  // "アプリ設定" app-setting (GET /api/settings/app); unlike that endpoint's
   // other fields, it takes effect immediately on save (see
   // onPaginationPageSizeChanged below) since it's pure frontend behavior
   // with nothing to restart.
@@ -322,7 +322,7 @@ export const App: React.FC = () => {
     await Promise.all([fetchProjects(), fetchCurrentProject()]);
   };
 
-  // Fetches the "全体設定" app-settings this component needs: how many
+  // Fetches the "アプリ設定" app-settings this component needs: how many
   // tickets to show per page, and the viewer's own display name (myName).
   // Only read once at startup here -- after that, the settings UI applies a
   // change directly via setTicketsPerPage/setMyName (see
@@ -398,7 +398,7 @@ export const App: React.FC = () => {
 
   // Consumes the `?newProject=1&workDir=<dir>` query the `graph-engine ui`
   // CLI command (the `/ui` slash command's backend) appends to the root URL
-  // when no project's local path (this environment's graph-config.json
+  // when no project's local path (this environment's home config file
   // projectPaths) covers the current directory: auto-open the project setup
   // dialog for that directory, where the user either creates a new project
   // or picks an existing one from the DB (DFLT-00080). Runs once on mount,

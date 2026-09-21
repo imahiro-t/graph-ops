@@ -63,11 +63,6 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-func projectTeamRoot(t *testing.T, s *Server, projectID string) string {
-	t.Helper()
-	return filepath.Join(testProjectLocalPath(t, s, projectID), ".graph-ops")
-}
-
 // Scenario: 上書きがないとき、GET は空の tier_text と英語デフォルトの
 // merged_text を返す.
 func TestSettingsMarkdownTemplate_NoOverrideReturnsEnglishDefault(t *testing.T) {
@@ -75,7 +70,7 @@ func TestSettingsMarkdownTemplate_NoOverrideReturnsEnglishDefault(t *testing.T) 
 		t.Run(tc.kind, func(t *testing.T) {
 			s, _, _ := newSettingsTestServer(t)
 
-			body := getTemplateState(t, s, tc.path+"?scope=global")
+			body := getTemplateState(t, s, tc.path)
 			if body.TierText != "" {
 				t.Errorf("tier_text = %q, want empty", body.TierText)
 			}
@@ -89,18 +84,17 @@ func TestSettingsMarkdownTemplate_NoOverrideReturnsEnglishDefault(t *testing.T) 
 	}
 }
 
-// Scenario: 全体設定のスコープで保存すると、ユーザー層の上書きファイルに
-// 書かれて GET に反映される / 空文字で保存すると上書きファイルが消え、
-// 下の層に戻る. Also checks the CLI-side resolver reads the same file.
-func TestSettingsMarkdownTemplate_GlobalScopeSaveAndClear(t *testing.T) {
+// Scenario: 保存するとユーザー層の上書きファイルに書かれて GET に反映される
+// / 空文字で保存すると上書きファイルが消え、下の層に戻る. Also checks the
+// CLI-side resolver reads the same file.
+func TestSettingsMarkdownTemplate_SaveAndClear(t *testing.T) {
 	for _, tc := range markdownTemplateCases {
 		t.Run(tc.kind, func(t *testing.T) {
-			s, _, projA := newSettingsTestServer(t)
+			s, _, _ := newSettingsTestServer(t)
 			userRoot := s.cfg.UserExtensionsDir
-			teamRoot := projectTeamRoot(t, s, projA)
 			const text = "# ユーザーの見出し\n本文"
 
-			body := putTemplateText(t, s, tc.path, map[string]any{"scope": "global", "text": text})
+			body := putTemplateText(t, s, tc.path, map[string]any{"text": text})
 			if body.TierText != text || body.MergedText != text {
 				t.Errorf("PUT response = %+v, want tier/merged %q", body, text)
 			}
@@ -108,11 +102,8 @@ func TestSettingsMarkdownTemplate_GlobalScopeSaveAndClear(t *testing.T) {
 			if err != nil || string(data) != text {
 				t.Errorf("user override file = (%q, %v), want %q", data, err, text)
 			}
-			if fileExists(overrideFile(teamRoot, tc.kind)) {
-				t.Errorf("team override file should not have been written")
-			}
 
-			body = getTemplateState(t, s, tc.path+"?scope=global")
+			body = getTemplateState(t, s, tc.path)
 			if body.TierText != text || body.MergedText != text {
 				t.Errorf("GET after save = %+v, want tier/merged %q", body, text)
 			}
@@ -122,7 +113,7 @@ func TestSettingsMarkdownTemplate_GlobalScopeSaveAndClear(t *testing.T) {
 				t.Errorf("config resolver = %q, want the saved override", got)
 			}
 
-			body = putTemplateText(t, s, tc.path, map[string]any{"scope": "global", "text": ""})
+			body = putTemplateText(t, s, tc.path, map[string]any{"text": ""})
 			if body.TierText != "" {
 				t.Errorf("tier_text after clear = %q, want empty", body.TierText)
 			}
@@ -131,6 +122,29 @@ func TestSettingsMarkdownTemplate_GlobalScopeSaveAndClear(t *testing.T) {
 			}
 			if fileExists(overrideFile(userRoot, tc.kind)) {
 				t.Errorf("user override file should have been removed by an empty save")
+			}
+		})
+	}
+}
+
+// TestSettingsMarkdownTemplate_NeverWritesTheTeamTier: a configured
+// teamExtensionsDir is a shared directory the settings screen does not edit,
+// so a save goes to the user root and the shared one is left alone
+// (DFLT-00124, plan decision D-8).
+func TestSettingsMarkdownTemplate_NeverWritesTheTeamTier(t *testing.T) {
+	for _, tc := range markdownTemplateCases {
+		t.Run(tc.kind, func(t *testing.T) {
+			s, _, _ := newSettingsTestServer(t)
+			teamRoot := t.TempDir()
+			s.cfg.TeamExtensionsDir = teamRoot
+
+			putTemplateText(t, s, tc.path, map[string]any{"text": "# ユーザーの見出し"})
+
+			if fileExists(overrideFile(teamRoot, tc.kind)) {
+				t.Errorf("the team directory was written")
+			}
+			if !fileExists(overrideFile(s.cfg.UserExtensionsDir, tc.kind)) {
+				t.Errorf("the user root should hold the override")
 			}
 		})
 	}
@@ -147,93 +161,9 @@ func TestSettingsMarkdownTemplate_AcceptsAnyContent(t *testing.T) {
 		for i, text := range contents {
 			t.Run(fmt.Sprintf("%s_%d", tc.kind, i), func(t *testing.T) {
 				s, _, _ := newSettingsTestServer(t)
-				body := putTemplateText(t, s, tc.path, map[string]any{"scope": "global", "text": text})
+				body := putTemplateText(t, s, tc.path, map[string]any{"text": text})
 				if body.TierText != text {
 					t.Errorf("tier_text = %q, want %q", body.TierText, text)
-				}
-			})
-		}
-	}
-}
-
-// Scenario: プロジェクト単位設定のスコープで保存するとチーム層に書かれ、
-// merged_text はユーザー層よりチーム層を優先する / チーム層の上書きを空保存で
-// 解除すると、merged_text はユーザー層の上書きに戻る.
-func TestSettingsMarkdownTemplate_ProjectScopeTeamWinsOverUser(t *testing.T) {
-	for _, tc := range markdownTemplateCases {
-		t.Run(tc.kind, func(t *testing.T) {
-			s, _, projA := newSettingsTestServer(t)
-			userRoot := s.cfg.UserExtensionsDir
-			teamRoot := projectTeamRoot(t, s, projA)
-
-			putTemplateText(t, s, tc.path, map[string]any{"scope": "global", "text": "# ユーザーの見出し"})
-
-			body := putTemplateText(t, s, tc.path, map[string]any{"scope": "project", "project_id": projA, "text": "# チームの見出し"})
-			if body.TierText != "# チームの見出し" || body.MergedText != "# チームの見出し" {
-				t.Errorf("project PUT response = %+v, want team heading for both", body)
-			}
-			data, err := os.ReadFile(overrideFile(teamRoot, tc.kind))
-			if err != nil || string(data) != "# チームの見出し" {
-				t.Errorf("team override file = (%q, %v)", data, err)
-			}
-			data, err = os.ReadFile(overrideFile(userRoot, tc.kind))
-			if err != nil || string(data) != "# ユーザーの見出し" {
-				t.Errorf("user override file changed: (%q, %v)", data, err)
-			}
-			if got := tc.resolve(config.Roots{UserDir: userRoot, TeamDir: teamRoot}); got != "# チームの見出し" {
-				t.Errorf("config resolver = %q, want the team override", got)
-			}
-
-			// A global-scope preview never includes a project's team tier.
-			global := getTemplateState(t, s, tc.path+"?scope=global")
-			if global.TierText != "# ユーザーの見出し" || global.MergedText != "# ユーザーの見出し" {
-				t.Errorf("global GET = %+v, want user heading for both", global)
-			}
-
-			body = putTemplateText(t, s, tc.path, map[string]any{"scope": "project", "project_id": projA, "text": ""})
-			if body.TierText != "" {
-				t.Errorf("tier_text after clearing team override = %q, want empty", body.TierText)
-			}
-			if body.MergedText != "# ユーザーの見出し" {
-				t.Errorf("merged_text after clearing team override = %q, want the user override", body.MergedText)
-			}
-		})
-	}
-}
-
-// Scenario: 不正なスコープやリクエストは 4xx で拒否され、ファイルは書かれない.
-func TestSettingsMarkdownTemplate_InvalidScopeRejected(t *testing.T) {
-	// The spec calls the scope error INVALID_SCOPE; the code every settings
-	// endpoint actually returns for it is domain.ErrCodeInvalidScope, whose
-	// wire value is INVALID_SETTINGS_SCOPE.
-	type req struct {
-		name   string
-		method string
-		query  string
-		body   map[string]any
-		status int
-		code   string
-	}
-	reqs := []req{
-		{name: "get_unknown_scope", method: http.MethodGet, query: "?scope=foo", status: http.StatusBadRequest, code: "INVALID_SETTINGS_SCOPE"},
-		{name: "get_project_without_id", method: http.MethodGet, query: "?scope=project", status: http.StatusBadRequest, code: "INVALID_SETTINGS_SCOPE"},
-		{name: "put_unknown_scope", method: http.MethodPut, body: map[string]any{"scope": "foo", "text": "# x"}, status: http.StatusBadRequest, code: "INVALID_SETTINGS_SCOPE"},
-		{name: "put_project_without_id", method: http.MethodPut, body: map[string]any{"scope": "project", "text": "# x"}, status: http.StatusBadRequest, code: "INVALID_SETTINGS_SCOPE"},
-		{name: "put_unknown_project", method: http.MethodPut, body: map[string]any{"scope": "project", "project_id": "no-such", "text": "# x"}, status: http.StatusNotFound, code: "PROJECT_NOT_FOUND"},
-	}
-	for _, tc := range markdownTemplateCases {
-		for _, rq := range reqs {
-			t.Run(tc.kind+"_"+rq.name, func(t *testing.T) {
-				s, _, projA := newSettingsTestServer(t)
-				rec := doJSON(t, s, rq.method, tc.path+rq.query, rq.body)
-				if rec.Code != rq.status {
-					t.Fatalf("expected %d, got %d: %s", rq.status, rec.Code, rec.Body.String())
-				}
-				if got := string(decodeError(t, rec).Code); got != rq.code {
-					t.Errorf("error code = %q, want %q", got, rq.code)
-				}
-				if fileExists(overrideFile(s.cfg.UserExtensionsDir, tc.kind)) || fileExists(overrideFile(projectTeamRoot(t, s, projA), tc.kind)) {
-					t.Errorf("no override file should have been written")
 				}
 			})
 		}
@@ -245,7 +175,7 @@ func TestSettingsMarkdownTemplate_MalformedJSONRejected(t *testing.T) {
 	for _, tc := range markdownTemplateCases {
 		t.Run(tc.kind, func(t *testing.T) {
 			s, _, _ := newSettingsTestServer(t)
-			req := httptest.NewRequest(http.MethodPut, tc.path, bytes.NewReader([]byte(`{"scope": "global", "text": `)))
+			req := httptest.NewRequest(http.MethodPut, tc.path, bytes.NewReader([]byte(`{"text": `)))
 			req.Host = testHost
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set(csrfHeaderName, "1")
@@ -271,7 +201,7 @@ func TestSettingsMarkdownTemplate_JaLanguageStillReturnsEnglishDefault(t *testin
 				t.Fatalf("SaveDocumentAt: %v", err)
 			}
 
-			body := getTemplateState(t, s, tc.path+"?scope=global")
+			body := getTemplateState(t, s, tc.path)
 			if !strings.HasPrefix(body.MergedText, tc.defaultHeading) {
 				t.Errorf("merged_text should stay the English default starting with %q, got %q", tc.defaultHeading, body.MergedText)
 			}
@@ -292,12 +222,12 @@ func TestSettingsMarkdownTemplate_JaLanguageStillReturnsEnglishDefault(t *testin
 func TestSettingsReportTemplate_TextFieldIsIgnored(t *testing.T) {
 	s, _, _ := newSettingsTestServer(t)
 	rec := doJSON(t, s, http.MethodPut, "/api/settings/report-template", map[string]any{
-		"scope": "global", "text": validReportHTML,
+		"text": validReportHTML,
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 (empty html clears), got %d: %s", rec.Code, rec.Body.String())
 	}
-	body := getTemplateState(t, s, "/api/settings/report-template?scope=global")
+	body := getTemplateState(t, s, "/api/settings/report-template")
 	if body.TierText != "" {
 		t.Errorf("report tier_text = %q, want empty: only the html field may set it", body.TierText)
 	}

@@ -48,14 +48,13 @@ function makeResponse(overrides: Partial<AppSettingsResponse['file']> = {}): App
       userExtensionsDir: '/tmp/extensions',
       paginationPageSize: 10
     },
-    config_path: '/tmp/graph-config.json'
+    config_path: '/home/me/.graph-ops/config.json'
   };
 }
 
 function renderEditor() {
   return render(
     <AppSettingsEditor
-      scope="global"
       projects={[]}
       onDirtyChange={vi.fn()}
       onProjectsChanged={vi.fn()}

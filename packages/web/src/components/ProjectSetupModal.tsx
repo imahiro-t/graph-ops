@@ -5,7 +5,8 @@
 //    dialog offers both "create a new project" and "choose an existing
 //    project" (one a teammate sharing the DB may already have created), and
 //    either way maps <dir> to that project in this environment's
-//    graph-config.json (projectPaths) -- never in the shared DB.
+//    home config file, $HOME/.graph-ops/config.json (projectPaths) --
+//    never in the shared DB.
 //  - The header's "New project..." entry opens it in create-only mode, with
 //    the local path optional.
 //
@@ -15,7 +16,7 @@
 // repeats both calls (sending the same local_path twice is harmless).
 //
 // "Create new" can fail half-way: the project is inserted into the shared DB
-// but saving its local path to graph-config.json fails (500
+// but saving its local path to the home config file fails (500
 // PROJECT_CREATED_LOCAL_PATH_NOT_SAVED). Pressing "create" again would then
 // insert a duplicate project, so instead the dialog re-fetches the project
 // list, says the project already exists, and disables "create". With the

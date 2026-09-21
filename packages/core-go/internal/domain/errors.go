@@ -48,10 +48,6 @@ const (
 	// anything a legitimate client does; see internal/httpserver's
 	// allowedHost.
 	ErrCodeHostNotAllowed ErrorCode = "HOST_NOT_ALLOWED"
-	// ErrCodeInvalidScope: a settings API request's scope parameter wasn't
-	// "global" or "project", or was "project" without a resolvable
-	// project_id. See internal/httpserver/settings.go.
-	ErrCodeInvalidScope ErrorCode = "INVALID_SETTINGS_SCOPE"
 	// ErrCodeCatalogCycleDetected: a settings catalog (workflow) save was
 	// rejected because the candidate merged catalog's depends_on edges
 	// contain a cycle. See internal/engine.ValidateCatalog.
@@ -78,42 +74,32 @@ const (
 	// ErrCodeInvalidPaginationPageSize: the app-settings "pagination page
 	// size" was set to a value less than 1.
 	ErrCodeInvalidPaginationPageSize ErrorCode = "INVALID_PAGINATION_PAGE_SIZE"
-	// ErrCodeProjectLocalPathNotSet: a scope=project settings request named a
-	// project that has no local path in this environment's graph-config.json
-	// (projectPaths), so there is no directory to read the team tier from or
-	// write it to (DFLT-00080). Falling back to the server's own cwd would
-	// silently read/write the wrong place, so this is reported instead.
-	ErrCodeProjectLocalPathNotSet ErrorCode = "PROJECT_LOCAL_PATH_NOT_SET"
-	// ErrCodeProjectTeamRootIsUserRoot: a scope=project settings request
-	// resolved the project's team tier to the same directory as the user
-	// tier -- the project's local path is the home directory itself, or an
-	// explicit team-root override points at the user root (DFLT-00068).
-	// Reading or writing there would edit the global settings under the
-	// project's name, so the project has no team tier to edit.
-	ErrCodeProjectTeamRootIsUserRoot ErrorCode = "PROJECT_TEAM_ROOT_IS_USER_ROOT"
 	// ErrCodeProjectCreatedLocalPathNotSaved: POST /api/projects inserted the
-	// project into the DB but then failed to save its local path to
-	// graph-config.json (DFLT-00080). Returned with a 500. Distinct from
+	// project into the DB but then failed to save its local path to the home
+	// config file (DFLT-00080). Returned with a 500. Distinct from
 	// INTERNAL_ERROR so the Web UI can tell the project already exists
 	// (re-fetch the list, stop offering "create" again) instead of letting
 	// the user retry into a duplicate project in the shared DB.
 	ErrCodeProjectCreatedLocalPathNotSaved ErrorCode = "PROJECT_CREATED_LOCAL_PATH_NOT_SAVED"
-	// ErrCodeAppSettingsArtifactsDirNotSaved: PUT /api/settings/app saved
-	// every setting it owns except artifactsDir, which is a home-only key
-	// and therefore goes to $HOME/.graph-ops/config.json in a second write
-	// (DFLT-00104) -- and that write failed. Returned with a 500. Distinct
-	// from INTERNAL_ERROR because the two say opposite things to the user:
-	// "nothing happened, try again later" would be wrong here, since the
-	// other settings ARE saved and only this one field has to be set again.
-	ErrCodeAppSettingsArtifactsDirNotSaved ErrorCode = "APP_SETTINGS_ARTIFACTS_DIR_NOT_SAVED"
+	// ErrCodeHomeConfigUnavailable: PUT /api/settings/app had nowhere to
+	// save to, because the home directory could not be resolved and the home
+	// config file ($HOME/.graph-ops/config.json) is the only file settings
+	// are ever written to (DFLT-00124, completion criterion 10). Returned
+	// with a 500. It used to be a warning on a 200 response -- "saved, minus
+	// the one field we had nowhere to put" -- which is exactly the shape
+	// this code exists to remove: now that every field goes to that one
+	// file, a response that cannot name a file it wrote must not look like a
+	// successful save.
+	ErrCodeHomeConfigUnavailable ErrorCode = "HOME_CONFIG_UNAVAILABLE"
 	// ErrCodeHomeConfigUnreadable: the home config file
-	// ($HOME/.graph-ops/config.json) exists but could not be read or parsed,
-	// so the home-only keys could not be saved -- and will not be read at
-	// the next startup either (DFLT-00104). Returned with a 500 from PUT
-	// /api/settings/app, and used as a warning code by GET, which still
-	// succeeds. Distinct from ErrCodeAppSettingsArtifactsDirNotSaved because
-	// the cause is a specific file the user has to repair or delete: every
-	// retry fails identically until they do.
+	// ($HOME/.graph-ops/config.json) exists but could not be read or parsed.
+	// Returned with a 500 from PUT /api/settings/app -- a file we could not
+	// parse must not be overwritten, since that would discard whatever the
+	// user has in it -- and used as a warning code by GET, which still
+	// succeeds and shows the settings falling back to environment variables
+	// and built-in defaults. Distinct from INTERNAL_ERROR because the cause
+	// is a specific file the user has to repair or delete: every retry fails
+	// identically until they do.
 	ErrCodeHomeConfigUnreadable ErrorCode = "HOME_CONFIG_UNREADABLE"
 	// ErrCodeWorkflowNodesLocked: a settings catalog save set workflow.nodes
 	// or workflow.seed. The skeleton graph (plan/plan_review/approval gates/

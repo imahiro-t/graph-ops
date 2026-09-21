@@ -37,7 +37,7 @@ Once the title/description are settled, judge the ticket's priority (`HIGH`/`MED
 
 At the same point, ask the user whether they want any labels on the ticket (for example "バグ" / "機能追加"). Labels are optional -- if they want none, create the ticket without `--label`. Keep in mind:
 
-- Only labels already registered for the target project can be used. Labels are registered, renamed and deleted only in the Web UI's settings (設定 → プロジェクト単位設定 → ラベル); there is no CLI command to create, rename, delete or list labels.
+- Only labels already registered for the target project can be used. Labels are registered, renamed and deleted only in the Web UI's settings (設定 → ラベル), whose Labels tab has its own project selector; there is no CLI command to create, rename, delete or list labels.
 - Names are matched ignoring surrounding spaces and letter case.
 - If any given name isn't registered, `create-ticket` fails with `LABEL_NOT_FOUND` and **no ticket is created**. The error message lists the project's registered label names -- pick from those with the user (or have them register the label in the Web UI first) and run the command again.
 
@@ -63,14 +63,14 @@ EOF
 
 Omitting `--priority` creates the ticket with priority `MEDIUM` (the default). Every ticket always has one of `HIGH`/`MEDIUM`/`LOW` -- a priority can never be left empty.
 
-The target project is resolved from the current directory: the project whose local path -- this environment's `projectPaths` entry in `graph-config.json`, not a DB value -- is the current directory or contains it (the deepest nested local path wins). Only if none matches does it fall back to the current project selected via `use-project` / the Web UI, and it errors if neither exists. Stdout is the ticket JSON only; the resolution is reported as one stderr line:
+The target project is resolved from the current directory: the project whose local path -- this environment's `projectPaths` entry in `$HOME/.graph-ops/config.json`, not a DB value -- is the current directory or contains it (the deepest nested local path wins). Only if none matches does it fall back to the current project selected via `use-project` / the Web UI, and it errors if neither exists. Stdout is the ticket JSON only; the resolution is reported as one stderr line:
 
 - `resolved project: <name> (<id>) from current directory` -- matched by the current directory.
 - `resolved project: <name> (<id>) from current project (use-project)` -- no match, so the fallback was used. Check that this is the project the user meant before reporting.
 
 Paths are compared as written, so a current directory reached through a symlink or spelled with different letter case does not match and falls back. If the fallback picked the wrong project, tell the user -- the ticket has already been created there, so don't just run the command again. If the user agrees, remove the misplaced (or an accidentally duplicated) ticket with `graph-engine delete-ticket "<ticketId>" --yes`; this cannot be undone, so only run it after the user has confirmed that exact ticket ID. To target a project explicitly, pass `--project <projectId>` (nothing is printed to stderr in that case).
 
-The ticket is always created unassigned. Assignment is set afterward with the Web UI's per-ticket 「担当する」 ("Assign to me") button, which uses the name configured under the Web UI's Global Settings (全体設定) → App Settings (アプリ設定) → My Profile (自分の情報) (`myName`) and is hidden while that name is blank; there is no CLI command for it, and `create-ticket` takes no assignee argument.
+The ticket is always created unassigned. Assignment is set afterward with the Web UI's per-ticket 「担当する」 ("Assign to me") button, which uses the name configured under the Web UI's App Settings (アプリ設定) → My Profile (自分の情報) (`myName`) and is hidden while that name is blank; there is no CLI command for it, and `create-ticket` takes no assignee argument.
 
 ## 4. Report the created ticket
 
