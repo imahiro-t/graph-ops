@@ -271,6 +271,90 @@ describe('App project scoping', () => {
     });
   });
 
+  // The window the tests above do not look at: after the header has moved
+  // to Beta but before Beta's list has arrived. The previous project's list
+  // used to stay on screen for that whole time -- one list request plus one
+  // detail request per ticket -- under a header naming the new project.
+  describe('while the project the user switched to is still loading', () => {
+    it('shows loading, not the previous project\'s list, under the new header', async () => {
+      seed();
+      const user = userEvent.setup();
+      let releaseBeta!: () => void;
+      const heldBeta = new Promise<void>(resolve => {
+        releaseBeta = resolve;
+      });
+      const realFetch = backend.fetch.bind(backend);
+      backend.fetch = async (input, init) => {
+        if (String(input) === `/api/tickets?project_id=${beta.id}`) await heldBeta;
+        return realFetch(input, init);
+      };
+
+      render(<App />);
+      await screen.findByText('ALP-00001');
+      await user.click(screen.getByRole('button', { name: /Alpha/ }));
+      await user.click(screen.getByRole('button', { name: /Beta/ }));
+      await screen.findByRole('button', { name: /Beta/ });
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(screen.queryByText('ALP-00001')).not.toBeInTheDocument();
+      expect(screen.getByText(i18n.t('emptyState.loadingTickets'))).toBeInTheDocument();
+      expect(screen.queryByText(i18n.t('emptyState.noTicketsMatch'))).not.toBeInTheDocument();
+
+      releaseBeta();
+      await screen.findByText('BETA-00001');
+      expect(screen.queryByText(i18n.t('emptyState.loadingTickets'))).not.toBeInTheDocument();
+    });
+
+    // The label filter's options are the third thing the completion
+    // criterion names, and they have the same window: Alpha's labels must
+    // not be offered under Beta's header while Beta's are on their way.
+    it('does not offer the previous project\'s labels under the new header', async () => {
+      seed({
+        labels: [
+          { id: 'label-alpha', project_id: alpha.id, name: 'Alpha のラベル', color: 'green' },
+          { id: 'label-beta', project_id: beta.id, name: 'Beta のラベル', color: 'red' }
+        ]
+      });
+      const user = userEvent.setup();
+      let releaseBetaLabels!: () => void;
+      const heldBetaLabels = new Promise<void>(resolve => {
+        releaseBetaLabels = resolve;
+      });
+      const realFetch = backend.fetch.bind(backend);
+      backend.fetch = async (input, init) => {
+        if (String(input) === `/api/projects/${beta.id}/labels`) await heldBetaLabels;
+        return realFetch(input, init);
+      };
+
+      render(<App />);
+      await screen.findByText('ALP-00001');
+      const labelButton = () => screen.getByRole('button', { name: /^ラベル: / });
+      await user.click(labelButton());
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole('group', { name: i18n.t('toolbar.labelGroupLabel') }))
+            .getAllByRole('checkbox')
+            .map(c => c.getAttribute('aria-label'))
+        ).toEqual(['Alpha のラベル'])
+      );
+      await user.click(labelButton());
+
+      await user.click(screen.getByRole('button', { name: /Alpha/ }));
+      await user.click(screen.getByRole('button', { name: /Beta/ }));
+      await screen.findByText('BETA-00001');
+
+      await user.click(labelButton());
+      const options = () =>
+        within(screen.getByRole('group', { name: i18n.t('toolbar.labelGroupLabel') }))
+          .queryAllByRole('checkbox')
+          .map(c => c.getAttribute('aria-label'));
+      expect(options()).not.toContain('Alpha のラベル');
+
+      releaseBetaLabels();
+      await waitFor(() => expect(options()).toEqual(['Beta のラベル']));
+    });
+  });
+
   // GET /api/current-project reads this environment's graph-config.json
   // (DFLT-00106), a local file that can be unreadable on its own while
   // everything else works. "Could not read it" is not "you have no project":
@@ -318,6 +402,63 @@ describe('App project scoping', () => {
       await screen.findByText('ALP-00001');
       expect(screen.queryByText(i18n.t('projectSwitcher.loadFailed'))).not.toBeInTheDocument();
       expect(ticketListRequests()).toEqual([`/api/tickets?project_id=${alpha.id}`]);
+    });
+
+    // The failure screen deliberately keeps the header's switcher usable.
+    // Picking a project there answers the question the failed read could
+    // not, so the error has to go with it: before, "failed" was a flag of
+    // its own that only a successful read or the retry button cleared, and
+    // the screen ended up with Beta in the header, the error in the body,
+    // and Beta's tickets fetched but never shown.
+    it('clears the failure once the user switches to a project from the switcher', async () => {
+      const user = userEvent.setup();
+      render(<App />);
+      await screen.findByText(i18n.t('projectSwitcher.loadFailed'));
+
+      await user.click(screen.getByRole('button', { name: i18n.t('projectSwitcher.noProject') }));
+      await user.click(await screen.findByRole('button', { name: /Beta/ }));
+
+      await screen.findByText('BETA-00001');
+      expect(screen.getByRole('button', { name: /Beta/ })).toBeInTheDocument();
+      expect(screen.queryByText(i18n.t('projectSwitcher.loadFailed'))).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: i18n.t('projectSwitcher.retry') })).not.toBeInTheDocument();
+    });
+
+    // The same pick can race the retry: the retry's GET was answered with
+    // the setting as it was (Alpha) before the user chose Beta, and arrives
+    // after. The user's choice is newer and must stay, header and list both.
+    it('does not let a retry answered before the switch undo it', async () => {
+      const user = userEvent.setup();
+      render(<App />);
+      await screen.findByText(i18n.t('projectSwitcher.loadFailed'));
+
+      readFails = false;
+      let releaseRead!: () => void;
+      const heldRead = new Promise<void>(resolve => {
+        releaseRead = resolve;
+      });
+      const failingFetch = backend.fetch.bind(backend);
+      backend.fetch = async (input, init) => {
+        if (String(input) === '/api/current-project' && (init?.method ?? 'GET') === 'GET') {
+          // Answered now (Alpha), delivered later.
+          const res = await failingFetch(input, init);
+          await heldRead;
+          return res;
+        }
+        return failingFetch(input, init);
+      };
+
+      await user.click(screen.getByRole('button', { name: i18n.t('projectSwitcher.retry') }));
+      await user.click(screen.getByRole('button', { name: i18n.t('projectSwitcher.noProject') }));
+      await user.click(await screen.findByRole('button', { name: /Beta/ }));
+      await screen.findByText('BETA-00001');
+
+      releaseRead();
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(screen.getByRole('button', { name: /Beta/ })).toBeInTheDocument();
+      expect(screen.getByText('BETA-00001')).toBeInTheDocument();
+      expect(screen.queryByText('ALP-00001')).not.toBeInTheDocument();
     });
   });
 
