@@ -74,8 +74,10 @@ transitions) and logs one line** such as
 names (the log line lists the reachable ones), or, if you do not want the
 workflow status mirrored at all, set both variables to the empty string.
 
-Then point graph-engine at it. Keep `graph-config.json` free of the token
-itself by referencing the environment variable:
+Then point graph-engine at it. Settings are read from one file,
+`$HOME/.graph-ops/config.json` (never from the directory you start in), so add
+these three fields there -- and keep the token itself out of the file by
+referencing the environment variable:
 
 ```json
 {
@@ -84,6 +86,11 @@ itself by referencing the environment variable:
   "httpDataSourceToken": "${GRAPHOPS_DATASOURCE_TOKEN}"
 }
 ```
+
+The same three can be given as `GRAPH_DB_BACKEND`, `GRAPH_HTTP_DATASOURCE_URL`
+and `GRAPH_HTTP_DATASOURCE_TOKEN` instead, which take precedence over the file
+-- the better choice while you are still trying the plugin out, since it leaves
+your normal configuration untouched.
 
 graph-engine accepts plain `http://` only for loopback addresses. The plugin
 itself serves plain HTTP, so to reach it from another machine put a

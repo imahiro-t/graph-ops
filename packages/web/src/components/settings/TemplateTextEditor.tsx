@@ -12,28 +12,21 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Save, CheckCircle2 } from 'lucide-react';
-import { SettingsScope, SettingsTemplateTextResponse } from '../../types';
+import { SettingsTemplateTextResponse } from '../../types';
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 
 export type TemplateFetcher = (
-  t: TFunction,
-  scope: SettingsScope,
-  projectId: string
+  t: TFunction
 ) => Promise<SettingsTemplateTextResponse>;
 
 export type TemplateSaver = (
   t: TFunction,
-  scope: SettingsScope,
-  projectId: string,
   text: string
 ) => Promise<SettingsTemplateTextResponse>;
 
 interface Props {
-  scope: SettingsScope;
-  projectId: string;
-  canEdit: boolean;
   onDirtyChange: (dirty: boolean) => void;
   fetchTemplate: TemplateFetcher;
   saveTemplate: TemplateSaver;
@@ -44,9 +37,6 @@ interface Props {
 }
 
 export const TemplateTextEditor: React.FC<Props> = ({
-  scope,
-  projectId,
-  canEdit,
   onDirtyChange,
   fetchTemplate,
   saveTemplate,
@@ -69,14 +59,14 @@ export const TemplateTextEditor: React.FC<Props> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveButtonRef = useRef<HTMLButtonElement>(null);
 
-  const isDirty = canEdit && tierText !== savedTierText;
+  const isDirty = tierText !== savedTierText;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const res = await fetchTemplate(tRef.current, scope, projectId);
+      const res = await fetchTemplate(tRef.current);
       setTierText(res.tier_text);
       setSavedTierText(res.tier_text);
       setMergedText(res.merged_text);
@@ -85,7 +75,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
     } finally {
       setLoading(false);
     }
-  }, [scope, projectId, tRef, fetchTemplate]);
+  }, [tRef, fetchTemplate]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -99,7 +89,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
     setSaving(true);
     setError('');
     try {
-      const res = await saveTemplate(t, scope, projectId, tierText);
+      const res = await saveTemplate(t, tierText);
       setTierText(res.tier_text);
       setSavedTierText(res.tier_text);
       setMergedText(res.merged_text);
@@ -157,7 +147,6 @@ export const TemplateTextEditor: React.FC<Props> = ({
               aria-describedby={hintId}
               value={tierText}
               onChange={e => setTierText(e.target.value)}
-              disabled={!canEdit}
               placeholder={t(`${i18nPrefix}.tierTextPlaceholder`)}
               className="flex-1 min-h-[12rem] w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
             />
@@ -173,7 +162,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
               ref={saveButtonRef}
               type="button"
               onClick={handleSave}
-              disabled={!canEdit || saving || !isDirty}
+              disabled={saving || !isDirty}
               className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
             >
               {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}

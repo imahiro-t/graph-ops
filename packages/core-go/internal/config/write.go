@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -192,19 +191,6 @@ func ListNodeTypeOverrideNames(root string) []string {
 	return out
 }
 
-// ResolveRootsForProjectWorkDir is ResolveRoots, but always resolves the
-// team-tier root starting from projectDir (a project's local path)
-// rather than the caller's own process cwd -- see the execution plan's
-// section on why the settings UI's "project-scoped" tier must be tied to the
-// selected DB Project, not wherever the server/CLI process happens to be
-// running. teamDirOverride still takes precedence when non-empty, exactly as
-// in ResolveRoots, so an operator's explicit GRAPH_TEAM_EXTENSIONS_DIR
-// configuration is never silently bypassed by a project-scoped settings
-// edit.
-func ResolveRootsForProjectWorkDir(projectDir, userDirOverride, teamDirOverride string) (Roots, error) {
-	return ResolveRoots(projectDir, userDirOverride, teamDirOverride)
-}
-
 // UserDocumentPath returns the path of the user-tier override Document file
 // (config.yaml) under userRoot (a Roots.UserDir value). It exists so callers
 // outside this package (the settings HTTP API) can build the same path
@@ -215,65 +201,9 @@ func UserDocumentPath(userRoot string) string {
 }
 
 // TeamDocumentPath returns the path of the team-tier override Document file
-// (workflow.yaml) under teamRoot (a Roots.TeamDir value, or
-// ProjectTeamRoot's result) -- the PUT-side counterpart to
-// FindProjectConfigPath/ProjectTeamConfigPath's read-oriented resolution.
+// (workflow.yaml) under teamRoot -- a Roots.TeamDir value, i.e. the
+// directory teamExtensionsDir / GRAPH_TEAM_EXTENSIONS_DIR names. It is the
+// PUT-side counterpart to the read that LoadWithRoots performs.
 func TeamDocumentPath(teamRoot string) string {
 	return filepath.Join(teamRoot, teamConfigFile)
-}
-
-// ProjectTeamRoot returns the directory a project-scoped ("team-tier")
-// settings write should target for projectDir: the nearest existing
-// .graph-ops directory found by walking up from projectDir, or
-// (if none exists yet) a new .graph-ops directly under
-// projectDir. Unlike ResolveRootsForProjectWorkDir's Roots.TeamDir
-// (which is "" when no such directory exists yet, matching the read-only
-// "extension content is always optional" contract), this never returns ""
-// -- the settings UI always needs somewhere to write project-scoped
-// overrides, even for a project that has never had one before.
-//
-// Like findProjectDir, the walk skips $HOME/.graph-ops, so a project under
-// $HOME with no .graph-ops of its own gets <projectDir>/.graph-ops rather
-// than the user tier's root (DFLT-00068). When projectDir is $HOME itself,
-// that new path would be the user tier's default root, so
-// ErrTeamRootIsUserRoot is returned instead. Only the default user root
-// ($HOME/.graph-ops, see DefaultUserRoot) is checked here: this function
-// doesn't know about a GRAPH_USER_EXTENSIONS_DIR/graph-config.json user-root
-// override, so a caller that has one must compare against it itself (see
-// SameDir).
-func ProjectTeamRoot(projectDir string) (string, error) {
-	dir, err := findProjectDir(projectDir)
-	if err != nil {
-		return "", err
-	}
-	if dir != "" {
-		return dir, nil
-	}
-	abs, err := filepath.Abs(projectDir)
-	if err != nil {
-		return "", err
-	}
-	root := filepath.Join(abs, configDirName)
-	if SameDir(root, DefaultUserRoot()) {
-		return "", ErrTeamRootIsUserRoot
-	}
-	return root, nil
-}
-
-// ErrTeamRootIsUserRoot is returned by ProjectTeamRoot (and so
-// ProjectTeamConfigPath) when the project's team root would be the user
-// tier's root -- i.e. the project's local path is the home directory
-// itself. Such a project has no team tier of its own: read-only callers
-// should treat it as "no team root", and writers must refuse rather than
-// silently overwrite the user tier.
-var ErrTeamRootIsUserRoot = errors.New("project team root would be the user tier's root ($HOME/.graph-ops)")
-
-// ProjectTeamConfigPath returns the workflow.yaml path under
-// ProjectTeamRoot(projectDir) -- see its doc comment.
-func ProjectTeamConfigPath(projectDir string) (string, error) {
-	dir, err := ProjectTeamRoot(projectDir)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, teamConfigFile), nil
 }

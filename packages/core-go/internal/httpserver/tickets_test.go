@@ -45,24 +45,24 @@ func newTestServer(t *testing.T) (*Server, store.GraphRepository, string) {
 		t.Fatalf("SetCurrentProjectID: %v", err)
 	}
 	eng := engine.New(repo)
-	// HomeDir is sandboxed so graph-config.json (projectPaths) is written
+	// HomeDir is sandboxed so the home config file (projectPaths) is written
 	// under a temp dir; the project gets its own temp local path, standing in
 	// for the DB work_dir it had before DFLT-00080.
 	cfg := Config{ArtifactsDir: t.TempDir(), HomeDir: t.TempDir()}
 	s := New(repo, eng, cfg)
-	if _, err := runtimeconfig.SetProjectPath(cfg.WorkDir, cfg.HomeDir, proj.ID, t.TempDir()); err != nil {
+	if _, err := runtimeconfig.SetProjectPath(cfg.HomeDir, proj.ID, t.TempDir()); err != nil {
 		t.Fatalf("SetProjectPath: %v", err)
 	}
 	return s, repo, proj.ID
 }
 
-// testProjectLocalPath returns projectID's local path in s's graph-config.json,
+// testProjectLocalPath returns projectID's local path in s's the home config file,
 // failing the test if none is set.
 func testProjectLocalPath(t *testing.T, s *Server, projectID string) string {
 	t.Helper()
 	p := s.projectLocalPath(projectID)
 	if p == "" {
-		t.Fatalf("project %s has no local path in the test server's graph-config.json", projectID)
+		t.Fatalf("project %s has no local path in the test server's the home config file", projectID)
 	}
 	return p
 }

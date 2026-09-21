@@ -43,10 +43,7 @@ const CATALOG_RESPONSE: SettingsCatalogResponse = {
     },
     nodes: []
   },
-  inherited_catalog: { review_gates: {}, nodes: [] },
-  scope: 'global',
-  project_id: '',
-  team_root_resolved: false
+  inherited_catalog: { review_gates: {}, nodes: [] }
 };
 
 describe('ReviewGatesEditor', () => {
@@ -57,7 +54,7 @@ describe('ReviewGatesEditor', () => {
   });
 
   it('disables the name field for a not-yet-overridden default gate and shows the rename-blocked hint', async () => {
-    render(<ReviewGatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
 
     const nameInput = await screen.findByDisplayValue('Code Review');
     expect(nameInput).toBeDisabled();
@@ -66,7 +63,7 @@ describe('ReviewGatesEditor', () => {
 
   it('keeps the name field editable for an already-overridden gate', async () => {
     const user = userEvent.setup();
-    render(<ReviewGatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
 
     const nameInput = await screen.findByDisplayValue('QA Review (overridden)');
     expect(nameInput).not.toBeDisabled();
@@ -78,7 +75,7 @@ describe('ReviewGatesEditor', () => {
 
   // DFLT-00074: every row's fields have visible labels tied to their inputs.
   it('labels the id, name, max iterations and criteria fields of each row', async () => {
-    render(<ReviewGatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
     await screen.findByDisplayValue('Code Review');
 
     const ids = screen.getAllByLabelText(i18n.t('settings.reviewGates.idLabel'));
@@ -94,7 +91,7 @@ describe('ReviewGatesEditor', () => {
 
   it('keeps the name field editable for a newly added gate', async () => {
     const user = userEvent.setup();
-    render(<ReviewGatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
 
     await screen.findByDisplayValue('Code Review');
     const addButton = screen.getByRole('button', { name: i18n.t('settings.reviewGates.addGate') });

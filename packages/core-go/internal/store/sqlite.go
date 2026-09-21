@@ -171,11 +171,11 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 	// else made: an explicit GRAPH_DB_PATH/dbPath naming a fresh directory,
 	// artifacts pointed elsewhere, or another caller of store.Open.
 	//
-	// 0o700 matches loadRuntimeConfig and runtimeconfig.Save; see the former
-	// for why the mode is user-only and why it is applied unconditionally
-	// instead of only for the default path. Whichever of the three runs first
-	// in a fresh environment is the one that fixes the mode, so they have to
-	// agree.
+	// 0o700 matches loadRuntimeConfig and runtimeconfig's home config writer
+	// (UpdateHome); see the former for why the mode is user-only and why it
+	// is applied unconditionally instead of only for the default path.
+	// Whichever of the three runs first in a fresh environment is the one
+	// that fixes the mode, so they have to agree.
 	//
 	// No guard on the result: filepath.Dir always yields a non-empty path
 	// (a bare filename gives "."), and MkdirAll on an existing directory --
@@ -235,7 +235,7 @@ func (r *SQLiteRepository) Init() error {
 // schemaDDL's CREATE TABLE IF NOT EXISTS leaves in place. The column is
 // dropped outright -- its values are deliberately not carried anywhere,
 // since a project's local path is now a per-environment setting
-// (graph-config.json's projectPaths) that each user sets again. Leaving it
+// (the home config's projectPaths) that each user sets again. Leaving it
 // would also break CreateProject, whose INSERT no longer supplies a value
 // for a NOT NULL column. Idempotent: a DB without the column is untouched.
 // ALTER TABLE ... DROP COLUMN needs SQLite 3.35+, which the bundled

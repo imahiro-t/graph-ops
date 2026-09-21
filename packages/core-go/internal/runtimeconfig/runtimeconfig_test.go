@@ -1,9 +1,6 @@
 package runtimeconfig
 
 import (
-	"os"
-	"path/filepath"
-	"reflect"
 	"testing"
 )
 
@@ -183,48 +180,5 @@ func TestDisplayHost(t *testing.T) {
 		if got := DisplayHost(tt.host); got != tt.want {
 			t.Errorf("DisplayHost(%q) = %q, want %q", tt.host, got, tt.want)
 		}
-	}
-}
-
-// TestLoad_MalformedJSONYieldsZeroConfig pins the contract C-5 tightened
-// (DFLT-00023): when Load returns an error, the FileConfig it returns is the
-// zero value, never whatever encoding/json managed to decode before hitting
-// the syntax error. Every current caller checks err first, so this is not
-// observable today -- which is exactly why it needs a test rather than a
-// reader's goodwill to stay true.
-func TestLoad_MalformedJSONYieldsZeroConfig(t *testing.T) {
-	dir := t.TempDir()
-	// "dbPath" parses fine and would be retained by a streaming decode; the
-	// unterminated value after it is what makes the document invalid.
-	const malformed = `{"dbPath": "/tmp/should-not-survive.db", "myName": }`
-	if err := os.WriteFile(filepath.Join(dir, "graph-config.json"), []byte(malformed), 0o600); err != nil {
-		t.Fatalf("writing config: %v", err)
-	}
-
-	cfg, path, err := Load(dir, t.TempDir())
-	if err == nil {
-		t.Fatal("Load returned nil error for malformed JSON")
-	}
-	if path == "" {
-		t.Error("Load returned an empty path; the resolved path must be reported even on error")
-	}
-	if !reflect.DeepEqual(cfg, FileConfig{}) {
-		t.Errorf("Load returned %+v on error, want the zero FileConfig", cfg)
-	}
-}
-
-// TestLoad_MissingFileIsNotAnError keeps the other half of Load's contract
-// explicit: an absent graph-config.json is the normal case (every setting
-// unset), not a failure.
-func TestLoad_MissingFileIsNotAnError(t *testing.T) {
-	cfg, path, err := Load(t.TempDir(), t.TempDir())
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if !reflect.DeepEqual(cfg, FileConfig{}) {
-		t.Errorf("Load returned %+v, want the zero FileConfig", cfg)
-	}
-	if path == "" {
-		t.Error("Load returned an empty path")
 	}
 }

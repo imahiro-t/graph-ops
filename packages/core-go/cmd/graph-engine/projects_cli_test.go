@@ -8,9 +8,8 @@ import (
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 )
 
-// sandboxRC is a runtimeConfig whose graph-config.json lookup (WorkDir, then
-// HomeDir) is confined to fresh temp dirs, for commands that write the local
-// settings file (create-project's projectPaths).
+// sandboxRC is a runtimeConfig whose home config file is confined to a fresh
+// temp dir, for commands that write it (create-project's projectPaths).
 func sandboxRC(t *testing.T) runtimeConfig {
 	t.Helper()
 	return runtimeConfig{WorkDir: t.TempDir(), HomeDir: t.TempDir()}
@@ -18,16 +17,16 @@ func sandboxRC(t *testing.T) runtimeConfig {
 
 func savedProjectPaths(t *testing.T, rc runtimeConfig) map[string]string {
 	t.Helper()
-	cfg, _, err := runtimeconfig.Load(rc.WorkDir, rc.HomeDir)
+	cfg, err := runtimeconfig.LoadHomeConfig(rc.HomeDir)
 	if err != nil {
-		t.Fatalf("runtimeconfig.Load: %v", err)
+		t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 	}
 	return cfg.ProjectPaths
 }
 
 // TestCmdCreateProject_DefaultsWorkdirAndAutoPrefix covers create-project
 // with no --workdir/--prefix: the local path defaults to the cwd
-// (rc.WorkDir) and is saved to graph-config.json's projectPaths, not the DB,
+// (rc.WorkDir) and is saved to the home config's projectPaths, not the DB,
 // and prefix is auto-derived from the name.
 func TestCmdCreateProject_DefaultsWorkdirAndAutoPrefix(t *testing.T) {
 	repo := newTestRepo(t)
@@ -82,7 +81,7 @@ func TestCmdCreateProject_RelativeWorkdirResolvedAgainstCwd(t *testing.T) {
 	skipOnWindows(t)
 	repo := newTestRepo(t)
 	rc := runtimeConfig{WorkDir: "/work", HomeDir: t.TempDir()}
-	// WorkDir "/work" does not exist, so graph-config.json resolves under HomeDir.
+	// WorkDir "/work" does not exist; the config file is under HomeDir either way.
 
 	captureStdout(t, func() {
 		if err := cmdCreateProject(repo, rc, []string{"Eta", "--workdir", "eta/../eta2"}); err != nil {

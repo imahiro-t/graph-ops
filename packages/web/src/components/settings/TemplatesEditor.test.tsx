@@ -64,7 +64,7 @@ describe('TemplatesEditor', () => {
   });
 
   it('lists plan, review and report in order and opens the plan template first', async () => {
-    render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<TemplatesEditor onDirtyChange={vi.fn()} />);
 
     const items = screen.getAllByRole('listitem').map(li => li.textContent);
     expect(items).toEqual([
@@ -75,7 +75,7 @@ describe('TemplatesEditor', () => {
     expect(listButton('plan')).toHaveAttribute('aria-current', 'true');
     expect(listButton('review')).not.toHaveAttribute('aria-current');
 
-    await waitFor(() => expect(fetchPlan).toHaveBeenCalledWith(expect.anything(), 'global', ''));
+    await waitFor(() => expect(fetchPlan).toHaveBeenCalledWith(expect.anything()));
     expect(await previewOf('settings.planTemplate')).toHaveTextContent('plan-merged');
     expect(await textareaOf('settings.planTemplate')).toHaveValue('plan-tier');
     expect(screen.getByText(i18n.t('settings.planTemplate.intro'))).toBeInTheDocument();
@@ -85,18 +85,18 @@ describe('TemplatesEditor', () => {
 
   it('shows the selected template on the right when another list item is chosen', async () => {
     const user = userEvent.setup();
-    render(<TemplatesEditor scope="project" projectId="proj-A" canEdit onDirtyChange={vi.fn()} />);
+    render(<TemplatesEditor onDirtyChange={vi.fn()} />);
     await textareaOf('settings.planTemplate');
 
     await user.click(listButton('review'));
     expect(listButton('review')).toHaveAttribute('aria-current', 'true');
     expect(listButton('plan')).not.toHaveAttribute('aria-current');
-    expect(fetchReview).toHaveBeenCalledWith(expect.anything(), 'project', 'proj-A');
+    expect(fetchReview).toHaveBeenCalledWith(expect.anything());
     expect(await previewOf('settings.reviewTemplate')).toHaveTextContent('review-merged');
     expect(await textareaOf('settings.reviewTemplate')).toHaveValue('review-tier');
 
     await user.click(listButton('report'));
-    expect(fetchReport).toHaveBeenCalledWith(expect.anything(), 'project', 'proj-A');
+    expect(fetchReport).toHaveBeenCalledWith(expect.anything());
     expect(await previewOf('settings.reportTemplate')).toHaveTextContent('report-merged');
     expect(await textareaOf('settings.reportTemplate')).toHaveValue('report-tier');
     expect(screen.getByText(i18n.t('settings.reportTemplate.intro'))).toBeInTheDocument();
@@ -104,7 +104,7 @@ describe('TemplatesEditor', () => {
 
   it('can be operated with the keyboard alone', async () => {
     const user = userEvent.setup();
-    render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<TemplatesEditor onDirtyChange={vi.fn()} />);
     await textareaOf('settings.planTemplate');
 
     listButton('review').focus();
@@ -118,7 +118,7 @@ describe('TemplatesEditor', () => {
     const user = userEvent.setup();
     const onDirtyChange = vi.fn();
     savePlan.mockResolvedValue({ tier_text: '# 目的\n本文', merged_text: '# 目的\n本文' });
-    render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={onDirtyChange} />);
+    render(<TemplatesEditor onDirtyChange={onDirtyChange} />);
 
     const textarea = await textareaOf('settings.planTemplate');
     expect(saveButton()).toBeDisabled();
@@ -129,7 +129,7 @@ describe('TemplatesEditor', () => {
 
     await user.click(saveButton());
 
-    expect(savePlan).toHaveBeenCalledWith(expect.anything(), 'global', '', '# 目的\n本文');
+    expect(savePlan).toHaveBeenCalledWith(expect.anything(), '# 目的\n本文');
     expect(await screen.findByText(i18n.t('settings.common.saveSuccess'))).toBeInTheDocument();
     expect(await previewOf('settings.planTemplate')).toHaveTextContent('# 目的 本文');
     expect(saveButton()).toBeDisabled();
@@ -139,7 +139,7 @@ describe('TemplatesEditor', () => {
   it('clears a review override by saving it empty', async () => {
     const user = userEvent.setup();
     saveReview.mockResolvedValue({ tier_text: '', merged_text: '# Verdict' });
-    render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<TemplatesEditor onDirtyChange={vi.fn()} />);
     await textareaOf('settings.planTemplate');
     await user.click(listButton('review'));
 
@@ -147,7 +147,7 @@ describe('TemplatesEditor', () => {
     await user.clear(textarea);
     await user.click(saveButton());
 
-    expect(saveReview).toHaveBeenCalledWith(expect.anything(), 'global', '', '');
+    expect(saveReview).toHaveBeenCalledWith(expect.anything(), '');
     await waitFor(() => expect(textarea).toHaveValue(''));
     expect(await previewOf('settings.reviewTemplate')).toHaveTextContent('# Verdict');
     expect(screen.getByText(i18n.t('settings.reviewTemplate.emptyOverrideHint'))).toBeInTheDocument();
@@ -156,7 +156,7 @@ describe('TemplatesEditor', () => {
   it('keeps the selection and the unsaved edit when the switch is cancelled', async () => {
     const user = userEvent.setup();
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<TemplatesEditor onDirtyChange={vi.fn()} />);
 
     const textarea = await textareaOf('settings.planTemplate');
     await user.clear(textarea);
@@ -173,7 +173,7 @@ describe('TemplatesEditor', () => {
     const user = userEvent.setup();
     const onDirtyChange = vi.fn();
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={onDirtyChange} />);
+    render(<TemplatesEditor onDirtyChange={onDirtyChange} />);
 
     const textarea = await textareaOf('settings.planTemplate');
     await user.type(textarea, ' edited');
@@ -191,7 +191,7 @@ describe('TemplatesEditor', () => {
   it('does not ask for confirmation when nothing was edited', async () => {
     const user = userEvent.setup();
     const confirm = vi.spyOn(window, 'confirm');
-    render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<TemplatesEditor onDirtyChange={vi.fn()} />);
     await textareaOf('settings.planTemplate');
 
     await user.click(listButton('review'));
@@ -200,24 +200,9 @@ describe('TemplatesEditor', () => {
     expect(listButton('review')).toHaveAttribute('aria-current', 'true');
   });
 
-  it('disables editing for every template when editing is not allowed', async () => {
-    const user = userEvent.setup();
-    render(<TemplatesEditor scope="project" projectId="" canEdit={false} onDirtyChange={vi.fn()} />);
-
-    for (const [key, prefix] of [
-      ['plan', 'settings.planTemplate'],
-      ['review', 'settings.reviewTemplate'],
-      ['report', 'settings.reportTemplate']
-    ] as const) {
-      await user.click(listButton(key));
-      expect(await textareaOf(prefix)).toBeDisabled();
-      expect(saveButton()).toBeDisabled();
-    }
-  });
-
   it('shows the error when loading a template fails', async () => {
     fetchPlan.mockRejectedValue(new Error('load failed'));
-    render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<TemplatesEditor onDirtyChange={vi.fn()} />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('load failed');
   });
@@ -225,7 +210,7 @@ describe('TemplatesEditor', () => {
   it('keeps the input unsaved when saving a review override fails', async () => {
     const user = userEvent.setup();
     saveReview.mockRejectedValue(new Error('save failed'));
-    render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<TemplatesEditor onDirtyChange={vi.fn()} />);
     await textareaOf('settings.planTemplate');
     await user.click(listButton('review'));
 
@@ -241,7 +226,7 @@ describe('TemplatesEditor', () => {
   it('report: saves through the report API and shows INVALID_REPORT_TEMPLATE errors as before', async () => {
     const user = userEvent.setup();
     saveReport.mockRejectedValue(new Error('missing required marker data-report-template'));
-    render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<TemplatesEditor onDirtyChange={vi.fn()} />);
     await textareaOf('settings.planTemplate');
     await user.click(listButton('report'));
 
@@ -250,7 +235,7 @@ describe('TemplatesEditor', () => {
     await user.type(textarea, '<p>no markers</p>');
     await user.click(saveButton());
 
-    expect(saveReport).toHaveBeenCalledWith(expect.anything(), 'global', '', '<p>no markers</p>');
+    expect(saveReport).toHaveBeenCalledWith(expect.anything(), '<p>no markers</p>');
     expect(savePlan).not.toHaveBeenCalled();
     expect(await screen.findByRole('alert')).toHaveTextContent('missing required marker data-report-template');
     expect(await previewOf('settings.reportTemplate')).toHaveTextContent('report-merged');
@@ -270,7 +255,7 @@ describe('TemplatesEditor', () => {
     // emerald-400 on slate-900 well above 4.5:1.
     it('F-1: the loading text uses colours that meet 4.5:1 in light and dark', async () => {
       fetchPlan.mockReturnValue(new Promise(() => {}));
-      render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+      render(<TemplatesEditor onDirtyChange={vi.fn()} />);
 
       const loading = (await screen.findByText(i18n.t('settings.common.loading'))).closest('div');
       expect(loading).toHaveClass('text-slate-500', 'dark:text-slate-400');
@@ -281,7 +266,7 @@ describe('TemplatesEditor', () => {
     it('F-1: the empty-save hint and the saved notice use colours that meet 4.5:1', async () => {
       const user = userEvent.setup();
       savePlan.mockResolvedValue({ tier_text: 'x', merged_text: 'x' });
-      render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+      render(<TemplatesEditor onDirtyChange={vi.fn()} />);
 
       const textarea = await textareaOf('settings.planTemplate');
       const hint = screen.getByText(i18n.t('settings.planTemplate.emptyOverrideHint'));
@@ -303,7 +288,7 @@ describe('TemplatesEditor', () => {
       const user = userEvent.setup();
       const pending = deferred<{ tier_text: string; merged_text: string }>();
       savePlan.mockReturnValue(pending.promise);
-      render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+      render(<TemplatesEditor onDirtyChange={vi.fn()} />);
 
       const textarea = await textareaOf('settings.planTemplate');
       await user.type(textarea, ' edited');
@@ -329,7 +314,7 @@ describe('TemplatesEditor', () => {
     it('F-2: focus also lands on the textarea when a keyboard save fails', async () => {
       const user = userEvent.setup();
       savePlan.mockRejectedValue(new Error('save failed'));
-      render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+      render(<TemplatesEditor onDirtyChange={vi.fn()} />);
 
       const textarea = await textareaOf('settings.planTemplate');
       await user.type(textarea, ' edited');
@@ -344,7 +329,7 @@ describe('TemplatesEditor', () => {
       const user = userEvent.setup();
       const pending = deferred<{ tier_text: string; merged_text: string }>();
       savePlan.mockReturnValue(pending.promise);
-      render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+      render(<TemplatesEditor onDirtyChange={vi.fn()} />);
 
       const textarea = await textareaOf('settings.planTemplate');
       await user.type(textarea, ' edited');
@@ -366,7 +351,7 @@ describe('TemplatesEditor', () => {
 
   it('F-1 non-regression: switching language does not re-fetch or discard an unsaved edit', async () => {
     const user = userEvent.setup();
-    render(<TemplatesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<TemplatesEditor onDirtyChange={vi.fn()} />);
 
     const textarea = await textareaOf('settings.planTemplate');
     await user.clear(textarea);

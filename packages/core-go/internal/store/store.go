@@ -154,7 +154,7 @@ type GraphRepository interface {
 	// and de-duplicating one from name if empty -- see
 	// internal/project.ResolvePrefix) and persists a new Project. A
 	// project's local path is not stored in the DB (DFLT-00080): it is a
-	// per-environment setting in graph-config.json's projectPaths (see
+	// per-environment setting in the home config's projectPaths (see
 	// internal/runtimeconfig).
 	CreateProject(name, prefix string) (domain.Project, error)
 	GetProject(id string) (*domain.Project, error)

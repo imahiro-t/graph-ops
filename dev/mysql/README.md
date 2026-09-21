@@ -77,10 +77,10 @@ docker compose -f dev/mysql/compose.yaml down -v   # stop and delete data and ce
 | User / password | `graphops` / `graphops` |
 | Root password | `root` |
 
-In the Web UI, open Global Settings > App Settings, choose MySQL as the
-storage and enter the values above. For TLS, `disabled` needs nothing else.
-For `verify-ca` or `verify-full`, copy the CA certificate out of the container
-and set its absolute path as the CA file:
+In the Web UI, open Settings (gear button) > App Settings, choose MySQL as
+the storage and enter the values above. For TLS, `disabled` needs nothing
+else. For `verify-ca` or `verify-full`, copy the CA certificate out of the
+container and set its absolute path as the CA file:
 
 ```sh
 docker compose -f dev/mysql/compose.yaml cp mysql:/etc/mysql/certs/ca.pem ~/.graph-ops/dev-mysql-ca.pem

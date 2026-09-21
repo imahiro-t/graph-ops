@@ -14,12 +14,26 @@ import (
 )
 
 // newAppSettingsTestServer is newTestServer, but with cfg.WorkDir and
-// cfg.HomeDir both pinned to fresh temp dirs -- graph-config.json's resolved
-// path is always relative to one of these two (see
-// internal/runtimeconfig.ResolvePath), and leaving either at its zero value
-// ("") would fall through to the *real* $HOME/.graph-ops/config.json,
-// letting these tests read or (worse) overwrite the actual developer's own
-// settings file.
+// cfg.HomeDir both pinned to fresh temp dirs. The home config file's path is
+// derived from cfg.HomeDir alone (see internal/runtimeconfig.HomeConfigPath);
+// leaving it at its zero value ("") would fall through to the *real*
+// $HOME/.graph-ops/config.json, letting these tests read or (worse)
+// overwrite the actual developer's own settings file. cfg.WorkDir is pinned
+// too, even though nothing in the app-settings API reads it any more
+// (DFLT-00124), so that a test can never be affected by the directory `go
+// test` happened to run in.
+// seedHomeConfig writes cfg to $HOME/.graph-ops/config.json wholesale -- the
+// "this is what is already saved" setup most of these tests start from. It
+// goes through UpdateHome because that is the only writer there is; the
+// returned path is the file written.
+func seedHomeConfig(homeDir string, cfg runtimeconfig.FileConfig) (string, error) {
+	_, path, err := runtimeconfig.UpdateHome(homeDir, func(c *runtimeconfig.FileConfig) error {
+		*c = cfg
+		return nil
+	})
+	return path, err
+}
+
 func newAppSettingsTestServer(t *testing.T) (s *Server, workDir string, homeDir string) {
 	t.Helper()
 	repo, err := store.NewSQLiteRepository(filepath.Join(t.TempDir(), "test.db"))
@@ -53,7 +67,7 @@ func TestAppSettings_GetReflectsFileAndEffectiveValues(t *testing.T) {
 	var got appSettingsResponse
 	mustDecode(t, rec, &got)
 
-	// No graph-config.json exists yet -- every File field should be unset.
+	// No the home config file exists yet -- every File field should be unset.
 	if !reflect.DeepEqual(got.File, redactedFileConfig{}) {
 		t.Errorf("expected empty file config before any save, got %+v", got.File)
 	}
@@ -87,12 +101,12 @@ func TestAppSettings_PutSavesThenGetReflectsIt(t *testing.T) {
 	}
 
 	// Persisted for real, not just echoed back -- reload straight from disk.
-	onDisk, _, err := runtimeconfig.Load(workDir, homeDir)
+	onDisk, err := runtimeconfig.LoadHomeConfig(homeDir)
 	if err != nil {
-		t.Fatalf("runtimeconfig.Load: %v", err)
+		t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 	}
 	if onDisk.DBPath != newDBPath || onDisk.PaginationPageSize != 25 {
-		t.Errorf("expected graph-config.json on disk to contain the saved values, got %+v", onDisk)
+		t.Errorf("expected the home config file on disk to contain the saved values, got %+v", onDisk)
 	}
 
 	// Nothing takes effect for the already-running process -- these fields
@@ -137,7 +151,7 @@ func TestAppSettings_GetDefaultsEffectiveDBBackendToSQLite(t *testing.T) {
 // addition -- the TLS mode/CA file fields, which are not secrets and so are
 // never redacted the way mysqlPassword is (see newRedactedFileConfig).
 func TestAppSettings_PutSavesMySQLFields(t *testing.T) {
-	s, workDir, homeDir := newAppSettingsTestServer(t)
+	s, _, homeDir := newAppSettingsTestServer(t)
 
 	rec := doJSON(t, s, http.MethodPut, "/api/settings/app", map[string]any{
 		"dbBackend": "mysql", "mysqlHost": "db.example.com", "mysqlPort": 3307,
@@ -156,13 +170,13 @@ func TestAppSettings_PutSavesMySQLFields(t *testing.T) {
 		t.Errorf("expected mysql fields to round-trip in the response, got %+v", got.File)
 	}
 
-	onDisk, _, err := runtimeconfig.Load(workDir, homeDir)
+	onDisk, err := runtimeconfig.LoadHomeConfig(homeDir)
 	if err != nil {
-		t.Fatalf("runtimeconfig.Load: %v", err)
+		t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 	}
 	if onDisk.DBBackend != "mysql" || onDisk.MySQLHost != "db.example.com" || onDisk.MySQLPassword != "${SOME_ENV_VAR}" ||
 		onDisk.MySQLTLS != "verify-ca" || onDisk.MySQLTLSCA != "/etc/mysql/ca.pem" {
-		t.Errorf("expected mysql fields persisted to graph-config.json, got %+v", onDisk)
+		t.Errorf("expected mysql fields persisted to the home config file, got %+v", onDisk)
 	}
 }
 
@@ -336,10 +350,10 @@ func TestTestMySQLConnection_MissingEnvVarPasswordReportsFailure(t *testing.T) {
 func TestAppSettings_PutPreservesFieldsThisEndpointDoesNotOwn(t *testing.T) {
 	s, workDir, homeDir := newAppSettingsTestServer(t)
 
-	if _, err := runtimeconfig.Save(workDir, homeDir, runtimeconfig.FileConfig{
+	if _, err := seedHomeConfig(homeDir, runtimeconfig.FileConfig{
 		Port: 4001, ClaudeBinary: "my-claude", TerminalCommand: "custom {cwd} {command}",
 	}); err != nil {
-		t.Fatalf("seeding graph-config.json: %v", err)
+		t.Fatalf("seeding the home config: %v", err)
 	}
 
 	rec := doJSON(t, s, http.MethodPut, "/api/settings/app", map[string]any{
@@ -349,9 +363,9 @@ func TestAppSettings_PutPreservesFieldsThisEndpointDoesNotOwn(t *testing.T) {
 		t.Fatalf("PUT expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	onDisk, _, err := runtimeconfig.Load(workDir, homeDir)
+	onDisk, err := runtimeconfig.LoadHomeConfig(homeDir)
 	if err != nil {
-		t.Fatalf("runtimeconfig.Load: %v", err)
+		t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 	}
 	if onDisk.Port != 4001 || onDisk.ClaudeBinary != "my-claude" || onDisk.TerminalCommand != "custom {cwd} {command}" {
 		t.Errorf("expected fields this endpoint doesn't own to survive untouched, got %+v", onDisk)
@@ -367,14 +381,14 @@ func TestAppSettings_PutPreservesFieldsThisEndpointDoesNotOwn(t *testing.T) {
 // world-readable to whoever can reach the port. A stored plaintext MySQL
 // password must therefore come back redacted, never verbatim.
 func TestAppSettings_GetNeverReturnsStoredPlaintextPassword(t *testing.T) {
-	s, workDir, homeDir := newAppSettingsTestServer(t)
+	s, _, homeDir := newAppSettingsTestServer(t)
 	const secret = "super-secret-password"
 
-	if _, err := runtimeconfig.Save(workDir, homeDir, runtimeconfig.FileConfig{
+	if _, err := seedHomeConfig(homeDir, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "db.example.com", MySQLDatabase: "graph_ops",
 		MySQLUser: "app", MySQLPassword: secret,
 	}); err != nil {
-		t.Fatalf("seeding graph-config.json: %v", err)
+		t.Fatalf("seeding the home config: %v", err)
 	}
 
 	rec := doJSON(t, s, http.MethodGet, "/api/settings/app", nil)
@@ -437,14 +451,14 @@ func TestRedactedFileConfig_MarshalsExactlyLikeFileConfig(t *testing.T) {
 // those alongside the placeholder is the S-1 case, covered by
 // TestAppSettings_PutRejectsRedactedPasswordForAChangedConnection below.
 func TestAppSettings_PutWithRedactedPasswordKeepsStoredOne(t *testing.T) {
-	s, workDir, homeDir := newAppSettingsTestServer(t)
+	s, _, homeDir := newAppSettingsTestServer(t)
 	const secret = "super-secret-password"
 
-	if _, err := runtimeconfig.Save(workDir, homeDir, runtimeconfig.FileConfig{
+	if _, err := seedHomeConfig(homeDir, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "db.example.com", MySQLDatabase: "graph_ops",
 		MySQLUser: "app", MySQLPassword: secret,
 	}); err != nil {
-		t.Fatalf("seeding graph-config.json: %v", err)
+		t.Fatalf("seeding the home config: %v", err)
 	}
 
 	rec := doJSON(t, s, http.MethodPut, "/api/settings/app", map[string]any{
@@ -456,9 +470,9 @@ func TestAppSettings_PutWithRedactedPasswordKeepsStoredOne(t *testing.T) {
 		t.Fatalf("PUT expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	onDisk, _, err := runtimeconfig.Load(workDir, homeDir)
+	onDisk, err := runtimeconfig.LoadHomeConfig(homeDir)
 	if err != nil {
-		t.Fatalf("runtimeconfig.Load: %v", err)
+		t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 	}
 	if onDisk.MySQLPassword != secret {
 		t.Errorf("expected the stored password to survive a redacted PUT, got %q", onDisk.MySQLPassword)
@@ -475,11 +489,11 @@ func TestAppSettings_PutWithRedactedPasswordKeepsStoredOne(t *testing.T) {
 // configuration the settings UI produces by default.
 func seedStoredMySQLSecret(t *testing.T, workDir, homeDir, secret string) {
 	t.Helper()
-	if _, err := runtimeconfig.Save(workDir, homeDir, runtimeconfig.FileConfig{
+	if _, err := seedHomeConfig(homeDir, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "db.example.com", MySQLDatabase: "graph_ops",
 		MySQLUser: "app", MySQLPassword: secret,
 	}); err != nil {
-		t.Fatalf("seeding graph-config.json: %v", err)
+		t.Fatalf("seeding the home config: %v", err)
 	}
 }
 
@@ -533,9 +547,9 @@ func TestAppSettings_PutRejectsRedactedPasswordForAChangedConnection(t *testing.
 			// A rejected request must change nothing at all: the point is
 			// that the secret does not end up attached to the new
 			// destination, not merely that the response was a 400.
-			onDisk, _, err := runtimeconfig.Load(workDir, homeDir)
+			onDisk, err := runtimeconfig.LoadHomeConfig(homeDir)
 			if err != nil {
-				t.Fatalf("runtimeconfig.Load: %v", err)
+				t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 			}
 			if onDisk.MySQLPassword != secret || onDisk.MySQLHost != "db.example.com" ||
 				onDisk.MySQLPort != 0 || onDisk.MySQLDatabase != "graph_ops" || onDisk.MySQLUser != "app" {
@@ -577,7 +591,7 @@ func TestTestMySQLConnection_RejectsRedactedPasswordForAChangedConnection(t *tes
 // TestTestMySQLConnection_ResolvesRedactedPasswordForTheSavedConnection is
 // the allow-side of the same rule, and guards the port normalization: the
 // settings UI always sends an explicit mysqlPort (its form defaults to
-// 3306) even when graph-config.json has no port saved at all, so treating
+// 3306) even when the home config file has no port saved at all, so treating
 // those two as different destinations would break the "接続テスト" button
 // for the default MySQL configuration.
 //
@@ -587,12 +601,12 @@ func TestTestMySQLConnection_RejectsRedactedPasswordForAChangedConnection(t *tes
 // below is this same scenario's "${ENV_VAR}" counterpart, submitted as the
 // reference text a redacted GET shows for that kind of stored secret.
 func TestTestMySQLConnection_ResolvesRedactedPasswordForTheSavedConnection(t *testing.T) {
-	s, workDir, homeDir := newAppSettingsTestServer(t)
-	if _, err := runtimeconfig.Save(workDir, homeDir, runtimeconfig.FileConfig{
+	s, _, homeDir := newAppSettingsTestServer(t)
+	if _, err := seedHomeConfig(homeDir, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "127.0.0.1", MySQLDatabase: "graph_ops",
 		MySQLUser: "app", MySQLPassword: "super-secret-password",
 	}); err != nil {
-		t.Fatalf("seeding graph-config.json: %v", err)
+		t.Fatalf("seeding the home config: %v", err)
 	}
 
 	rec := doJSON(t, s, http.MethodPost, "/api/settings/app/test-mysql-connection", map[string]any{
@@ -625,13 +639,13 @@ func TestTestMySQLConnection_ResolvesRedactedPasswordForTheSavedConnection(t *te
 // *any* destination, since the old check only ever recognized
 // RedactedSecretPlaceholder as a resend.
 func TestTestMySQLConnection_ResolvesEnvVarReferenceForTheSavedConnection(t *testing.T) {
-	s, workDir, homeDir := newAppSettingsTestServer(t)
+	s, _, homeDir := newAppSettingsTestServer(t)
 
-	if _, err := runtimeconfig.Save(workDir, homeDir, runtimeconfig.FileConfig{
+	if _, err := seedHomeConfig(homeDir, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "127.0.0.1", MySQLDatabase: "graph_ops",
 		MySQLUser: "app", MySQLPassword: "${GRAPH_TEST_MYSQL_PASSWORD_UNSET}",
 	}); err != nil {
-		t.Fatalf("seeding graph-config.json: %v", err)
+		t.Fatalf("seeding the home config: %v", err)
 	}
 
 	rec := doJSON(t, s, http.MethodPost, "/api/settings/app/test-mysql-connection", map[string]any{
@@ -655,13 +669,13 @@ func TestTestMySQLConnection_ResolvesEnvVarReferenceForTheSavedConnection(t *tes
 // destination at a server they control and have this process deliver the
 // referenced environment variable's value to it.
 func TestTestMySQLConnection_RejectsEnvVarReferenceForAChangedConnection(t *testing.T) {
-	s, workDir, homeDir := newAppSettingsTestServer(t)
+	s, _, homeDir := newAppSettingsTestServer(t)
 
-	if _, err := runtimeconfig.Save(workDir, homeDir, runtimeconfig.FileConfig{
+	if _, err := seedHomeConfig(homeDir, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "db.example.com", MySQLDatabase: "graph_ops",
 		MySQLUser: "app", MySQLPassword: "${GRAPH_MYSQL_PASSWORD_PROD}",
 	}); err != nil {
-		t.Fatalf("seeding graph-config.json: %v", err)
+		t.Fatalf("seeding the home config: %v", err)
 	}
 
 	rec := doJSON(t, s, http.MethodPost, "/api/settings/app/test-mysql-connection", map[string]any{
@@ -684,12 +698,12 @@ func TestTestMySQLConnection_RejectsEnvVarReferenceForAChangedConnection(t *test
 // a resent plaintext-password placeholder already was.
 func TestAppSettings_PutRejectsEnvVarReferenceForAChangedConnection(t *testing.T) {
 	const envRef = "${GRAPH_MYSQL_PASSWORD_PROD}"
-	s, workDir, homeDir := newAppSettingsTestServer(t)
-	if _, err := runtimeconfig.Save(workDir, homeDir, runtimeconfig.FileConfig{
+	s, _, homeDir := newAppSettingsTestServer(t)
+	if _, err := seedHomeConfig(homeDir, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "db.example.com", MySQLDatabase: "graph_ops",
 		MySQLUser: "app", MySQLPassword: envRef,
 	}); err != nil {
-		t.Fatalf("seeding graph-config.json: %v", err)
+		t.Fatalf("seeding the home config: %v", err)
 	}
 
 	rec := doJSON(t, s, http.MethodPut, "/api/settings/app", map[string]any{
@@ -702,9 +716,9 @@ func TestAppSettings_PutRejectsEnvVarReferenceForAChangedConnection(t *testing.T
 	if got := decodeError(t, rec).Code; got != "MYSQL_PASSWORD_RETYPE_REQUIRED" {
 		t.Errorf("expected MYSQL_PASSWORD_RETYPE_REQUIRED, got %q", got)
 	}
-	onDisk, _, err := runtimeconfig.Load(workDir, homeDir)
+	onDisk, err := runtimeconfig.LoadHomeConfig(homeDir)
 	if err != nil {
-		t.Fatalf("runtimeconfig.Load: %v", err)
+		t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 	}
 	if onDisk.MySQLPassword != envRef || onDisk.MySQLHost != "db.example.com" {
 		t.Errorf("expected the stored connection to be left untouched, got %+v", onDisk)
@@ -719,12 +733,12 @@ func TestAppSettings_PutRejectsEnvVarReferenceForAChangedConnection(t *testing.T
 // of the old secret. This is exactly the legitimate "register a new server"
 // operation the plan calls out as something a naive fix must not break.
 func TestAppSettings_PutWithNewEnvVarReferenceForAChangedConnectionSucceeds(t *testing.T) {
-	s, workDir, homeDir := newAppSettingsTestServer(t)
-	if _, err := runtimeconfig.Save(workDir, homeDir, runtimeconfig.FileConfig{
+	s, _, homeDir := newAppSettingsTestServer(t)
+	if _, err := seedHomeConfig(homeDir, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "db.example.com", MySQLDatabase: "graph_ops",
 		MySQLUser: "app", MySQLPassword: "${GRAPH_MYSQL_PASSWORD_PROD}",
 	}); err != nil {
-		t.Fatalf("seeding graph-config.json: %v", err)
+		t.Fatalf("seeding the home config: %v", err)
 	}
 
 	rec := doJSON(t, s, http.MethodPut, "/api/settings/app", map[string]any{
@@ -735,9 +749,9 @@ func TestAppSettings_PutWithNewEnvVarReferenceForAChangedConnectionSucceeds(t *t
 		t.Fatalf("a brand-new ${VAR} reference for a new connection must not be blocked, got %d: %s",
 			rec.Code, rec.Body.String())
 	}
-	onDisk, _, err := runtimeconfig.Load(workDir, homeDir)
+	onDisk, err := runtimeconfig.LoadHomeConfig(homeDir)
 	if err != nil {
-		t.Fatalf("runtimeconfig.Load: %v", err)
+		t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 	}
 	if onDisk.MySQLPassword != "${GRAPH_MYSQL_PASSWORD_NEW}" || onDisk.MySQLHost != "new-server.example.com" {
 		t.Errorf("expected the new connection and reference to be saved, got %+v", onDisk)
@@ -753,12 +767,12 @@ func TestAppSettings_PutWithNewEnvVarReferenceForAChangedConnectionSucceeds(t *t
 // reference and have it accepted.
 func TestAppSettings_EnvVarReferenceReuseAfterConnectionChangeTwoStepWorkaround(t *testing.T) {
 	const envRef = "${GRAPH_MYSQL_PASSWORD_SHARED}"
-	s, workDir, homeDir := newAppSettingsTestServer(t)
-	if _, err := runtimeconfig.Save(workDir, homeDir, runtimeconfig.FileConfig{
+	s, _, homeDir := newAppSettingsTestServer(t)
+	if _, err := seedHomeConfig(homeDir, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "old-server.example.com", MySQLDatabase: "graph_ops",
 		MySQLUser: "app", MySQLPassword: envRef,
 	}); err != nil {
-		t.Fatalf("seeding graph-config.json: %v", err)
+		t.Fatalf("seeding the home config: %v", err)
 	}
 
 	// Step 1: move the connection while clearing the password (an empty
@@ -781,9 +795,9 @@ func TestAppSettings_EnvVarReferenceReuseAfterConnectionChangeTwoStepWorkaround(
 		t.Fatalf("step 2 (re-enter the reference for the now-current connection) expected 200, got %d: %s",
 			rec.Code, rec.Body.String())
 	}
-	onDisk, _, err := runtimeconfig.Load(workDir, homeDir)
+	onDisk, err := runtimeconfig.LoadHomeConfig(homeDir)
 	if err != nil {
-		t.Fatalf("runtimeconfig.Load: %v", err)
+		t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 	}
 	if onDisk.MySQLPassword != envRef || onDisk.MySQLHost != "new-server.example.com" {
 		t.Errorf("expected the reference to be saved against the new connection, got %+v", onDisk)
@@ -794,13 +808,13 @@ func TestAppSettings_EnvVarReferenceReuseAfterConnectionChangeTwoStepWorkaround(
 // case: a value that is not the placeholder is a real edit and must be
 // written through, including "" (clear the password).
 func TestAppSettings_PutWithNewPasswordReplacesStoredOne(t *testing.T) {
-	s, workDir, homeDir := newAppSettingsTestServer(t)
+	s, _, homeDir := newAppSettingsTestServer(t)
 
-	if _, err := runtimeconfig.Save(workDir, homeDir, runtimeconfig.FileConfig{
+	if _, err := seedHomeConfig(homeDir, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "db.example.com", MySQLDatabase: "graph_ops",
 		MySQLUser: "app", MySQLPassword: "old-password",
 	}); err != nil {
-		t.Fatalf("seeding graph-config.json: %v", err)
+		t.Fatalf("seeding the home config: %v", err)
 	}
 
 	for _, tc := range []struct{ name, submitted string }{
@@ -816,9 +830,9 @@ func TestAppSettings_PutWithNewPasswordReplacesStoredOne(t *testing.T) {
 			if rec.Code != http.StatusOK {
 				t.Fatalf("PUT expected 200, got %d: %s", rec.Code, rec.Body.String())
 			}
-			onDisk, _, err := runtimeconfig.Load(workDir, homeDir)
+			onDisk, err := runtimeconfig.LoadHomeConfig(homeDir)
 			if err != nil {
-				t.Fatalf("runtimeconfig.Load: %v", err)
+				t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 			}
 			if onDisk.MySQLPassword != tc.submitted {
 				t.Errorf("expected %q to be written through, got %q", tc.submitted, onDisk.MySQLPassword)

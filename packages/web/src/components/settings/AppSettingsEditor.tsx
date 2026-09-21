@@ -1,14 +1,16 @@
-// "全体設定" の appSettings タブ: graph-config.json 由来のサーバー/CLI設定
-// （DBパス・作業ファイル置き場・ノード/ワークフロー設定用ディレクトリの上書き・
-// チケット一覧のページング行数）と、プロジェクト管理（名前とローカルパスの編集・
-// 削除）をまとめて扱う。ローカルパスは DB ではなくこの環境の graph-config.json
-// （projectPaths）に保存される（DFLT-00080）。node-types/workflow/reviewGates の各タブと違い、
-// スコープに関わらず内容自体は変わらない（プロジェクト単位の版は存在しない）
-// ため、scope !== 'global' のときは編集そのものを無効化し、切り替えを促す
-// メッセージだけを表示する。
+// appSettings タブ: ホーム設定ファイル（$HOME/.graph-ops/config.json）由来の
+// サーバー/CLI設定（DBパス・作業ファイル置き場・ノード/ワークフロー設定用
+// ディレクトリの上書き・チケット一覧のページング行数）と、プロジェクト管理
+// （名前とローカルパスの編集・削除）をまとめて扱う。ローカルパスは DB ではなく
+// この環境のホーム設定ファイル（projectPaths）に保存される（DFLT-00080）。
+//
+// 設定の保存先はこの 1 ファイルだけで、キーごとの例外はない（DFLT-00124）。
+// 以前は artifactsDir だけが別のファイル（ホーム設定）に書かれ、残りは解決
+// された作業ディレクトリ側のファイルに書かれていたため、「保存先」の表示も
+// 2 つ必要だった。
 import React, { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Save, CheckCircle2, XCircle, Trash2, FolderCog, AlertTriangle, PlugZap } from 'lucide-react';
+import { Loader2, Save, CheckCircle2, XCircle, Trash2, FolderCog, PlugZap } from 'lucide-react';
 import {
   AppSettingsFile,
   APP_SETTINGS_WARNINGS,
@@ -16,8 +18,7 @@ import {
   EffectiveAppSettings,
   MySQLTLSMode,
   Project,
-  REDACTED_SECRET_PLACEHOLDER,
-  SettingsScope
+  REDACTED_SECRET_PLACEHOLDER
 } from '../../types';
 import { fetchAppSettings, saveAppSettings, testMySQLConnection } from '../../lib/settingsApi';
 import { apiFetch } from '../../lib/apiFetch';
@@ -28,7 +29,6 @@ import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 
 interface Props {
-  scope: SettingsScope;
   projects: Project[];
   onDirtyChange: (dirty: boolean) => void;
   onProjectsChanged: () => void;
@@ -138,7 +138,6 @@ const passwordFieldState = (value: string): PasswordFieldState => {
 };
 
 export const AppSettingsEditor: React.FC<Props> = ({
-  scope,
   projects,
   onDirtyChange,
   onProjectsChanged,
@@ -154,12 +153,10 @@ export const AppSettingsEditor: React.FC<Props> = ({
   const [form, setForm] = useState<FormState>(emptyForm);
   const [savedForm, setSavedForm] = useState<FormState>(emptyForm);
   const [effective, setEffective] = useState<EffectiveAppSettings | null>(null);
+  // The one file this page reads and writes. '' when the server could not
+  // resolve a home directory: it answers an empty string rather than a path
+  // that does not exist, and the note below says so in words instead.
   const [configPath, setConfigPath] = useState('');
-  // Where artifactsDir actually lands. It differs from configPath exactly
-  // when a working-directory graph-config.json is in play, and that is the
-  // case where a single "saved to <configPath>" note would be telling the
-  // user the wrong file (DFLT-00104, completion criterion 3).
-  const [homeConfigPath, setHomeConfigPath] = useState('');
   // Codes for what the server could not do, from whichever request answered
   // last. A GET raises them too (an unreadable home config is visible before
   // anything is saved), so this is not cleared on load, it is replaced.
@@ -187,15 +184,10 @@ export const AppSettingsEditor: React.FC<Props> = ({
 
   const formDirty = JSON.stringify(form) !== JSON.stringify(savedForm);
   const anyProjectDirty = projects.some(isProjectDirty);
-  const isDirty = scope === 'global' && (formDirty || anyProjectDirty);
+  const isDirty = formDirty || anyProjectDirty;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
 
-  // The `scope !== 'global'` guard lives inside the callback (rather than in
-  // the effect below) so the effect itself only ever reads `load` -- moving
-  // it out here is what lets the effect's dependency array be just [load]
-  // without exhaustive-deps flagging a missing `scope` read.
   const load = useCallback(async () => {
-    if (scope !== 'global') return;
     setLoading(true);
     setError('');
     try {
@@ -204,14 +196,13 @@ export const AppSettingsEditor: React.FC<Props> = ({
       setSavedForm(toForm(data.file));
       setEffective(data.effective);
       setConfigPath(data.config_path);
-      setHomeConfigPath(data.home_config_path ?? '');
       setWarnings(data.warnings ?? []);
     } catch (e) {
       setError(errorMessage(e, tRef.current('errors.UNKNOWN')));
     } finally {
       setLoading(false);
     }
-  }, [scope, tRef]);
+  }, [tRef]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -240,7 +231,6 @@ export const AppSettingsEditor: React.FC<Props> = ({
       setSavedForm(nextForm);
       setEffective(data.effective);
       setConfigPath(data.config_path);
-      setHomeConfigPath(data.home_config_path ?? '');
       setWarnings(data.warnings ?? []);
       // Unlike every other field here, the page size and my-name are pure
       // frontend/display behavior with nothing to restart -- apply them
@@ -421,15 +411,6 @@ export const AppSettingsEditor: React.FC<Props> = ({
     }
   };
 
-  if (scope !== 'global') {
-    return (
-      <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 text-xs bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
-        <AlertTriangle className="w-4 h-4 shrink-0" />
-        {t('settings.appSettings.globalOnly')}
-      </div>
-    );
-  }
-
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 text-xs py-8 justify-center">
@@ -483,28 +464,29 @@ export const AppSettingsEditor: React.FC<Props> = ({
       <StatusLiveRegion message={error} />
       {error && <div aria-hidden="true" className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900 whitespace-pre-wrap">{error}</div>}
 
+      {/* Where a save lands. The server answers '' when it has no home
+          directory to resolve, so name the file in words rather than
+          printing an empty path -- and a save in that state fails with
+          HOME_CONFIG_UNAVAILABLE rather than silently going nowhere. */}
       <div className="p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[11px] rounded-lg border border-slate-200 dark:border-slate-700">
-        {t('settings.appSettings.restartNote', { path: configPath })}
-        {/* Only when the two really are different files: repeating the same
-            path in a second sentence would be noise everywhere else. */}
-        {homeConfigPath && homeConfigPath !== configPath && (
-          <> {t('settings.appSettings.homeOnlyNote', { path: homeConfigPath })}</>
-        )}
+        {configPath
+          ? t('settings.appSettings.restartNote', { path: configPath })
+          : t('settings.appSettings.restartNoteNoPath')}
       </div>
-
-      {warnings.includes(APP_SETTINGS_WARNINGS.homeConfigUnavailable) && (
-        <div className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[11px] rounded-lg border border-amber-200 dark:border-amber-900">
-          {t('settings.appSettings.homeConfigUnavailable')}
-        </div>
-      )}
 
       {/* Raised by the GET as well, so a broken home config is visible when
           the page opens rather than only after a save has failed. The path
           is named because repairing or deleting that one file is the only
-          thing that fixes it. */}
+          thing that fixes it.
+
+          Naming it needs no empty-path branch of its own (unlike the restart
+          note above): the server raises this warning only for a file it
+          found and failed to read, which means the home directory resolved,
+          which is exactly when config_path is non-empty (accessibility
+          review A-3). */}
       {warnings.includes(APP_SETTINGS_WARNINGS.homeConfigUnreadable) && (
         <div className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[11px] rounded-lg border border-amber-200 dark:border-amber-900">
-          {t('settings.appSettings.homeConfigUnreadable', { path: homeConfigPath })}
+          {t('settings.appSettings.homeConfigUnreadable', { path: configPath })}
         </div>
       )}
 

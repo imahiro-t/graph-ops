@@ -25,12 +25,12 @@ const mockedFetchTypes = fetchSettingsNodeTypes as unknown as ReturnType<typeof 
 const mockedFetchType = fetchSettingsNodeType as unknown as ReturnType<typeof vi.fn>;
 
 const TYPES: SettingsNodeTypeInfo[] = [
-  { type: 'implementation', has_default: true, has_user_override: false, has_team_override: false },
-  { type: 'review', has_default: true, has_user_override: false, has_team_override: false }
+  { type: 'implementation', has_default: true, has_user_override: false },
+  { type: 'review', has_default: true, has_user_override: false }
 ];
 
 function stubFetchType() {
-  mockedFetchType.mockImplementation(async (_t, _scope, _projectId, type: string) => ({
+  mockedFetchType.mockImplementation(async (_t, type: string) => ({
     type,
     tier_text: `${type}-tier-text`,
     merged_text: `${type}-merged-text`
@@ -50,15 +50,15 @@ describe('NodeTypesEditor', () => {
   });
 
   it('selects the first type on initial mount and fetches its detail', async () => {
-    render(<NodeTypesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
 
-    await waitFor(() => expect(mockedFetchType).toHaveBeenCalledWith(expect.anything(), 'global', '', 'implementation'));
+    await waitFor(() => expect(mockedFetchType).toHaveBeenCalledWith(expect.anything(), 'implementation'));
     expect(await screen.findByDisplayValue('implementation-tier-text')).toBeInTheDocument();
   });
 
   // DFLT-00074
   it('labels the tier text textarea', async () => {
-    render(<NodeTypesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
 
     const textarea = await screen.findByDisplayValue('implementation-tier-text');
     expect(screen.getByLabelText(i18n.t('settings.nodeTypes.tierTextLabel'))).toBe(textarea);
@@ -66,7 +66,7 @@ describe('NodeTypesEditor', () => {
 
   it('labels the "add node type" input, and handles Escape there with preventDefault to cancel the add', async () => {
     const user = userEvent.setup();
-    render(<NodeTypesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
     await screen.findByDisplayValue('implementation-tier-text');
 
     await user.click(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') }));
@@ -82,7 +82,7 @@ describe('NodeTypesEditor', () => {
 
   it('#3 non-regression: changing the selection does not re-fetch the type list', async () => {
     const user = userEvent.setup();
-    render(<NodeTypesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
 
     await screen.findByDisplayValue('implementation-tier-text');
     expect(mockedFetchTypes).toHaveBeenCalledTimes(1);
@@ -92,12 +92,12 @@ describe('NodeTypesEditor', () => {
 
     await screen.findByDisplayValue('review-tier-text');
     expect(mockedFetchTypes).toHaveBeenCalledTimes(1);
-    expect(mockedFetchType).toHaveBeenCalledWith(expect.anything(), 'global', '', 'review');
+    expect(mockedFetchType).toHaveBeenCalledWith(expect.anything(), 'review');
   });
 
   it('F-1 non-regression: switching language after editing does not re-fetch and does not discard the unsaved edit', async () => {
     const user = userEvent.setup();
-    render(<NodeTypesEditor scope="global" projectId="" canEdit onDirtyChange={vi.fn()} />);
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
 
     const textarea = await screen.findByDisplayValue('implementation-tier-text');
     await user.clear(textarea);

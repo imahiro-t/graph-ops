@@ -233,7 +233,7 @@ type Ticket struct {
 	// Assignee is the ticket's only notion of assignment: nil means
 	// unassigned, otherwise it holds the display name of whoever last
 	// pressed "assign to me" via PATCH /api/tickets/{id}'s "assignee" field --
-	// that name is whatever was configured as their own "全体設定" MyName
+	// that name is whatever was configured as their own "アプリ設定" MyName
 	// (see runtimeconfig.FileConfig's MyName) at the moment they pressed it,
 	// captured server-side so every viewer sees the same value regardless of
 	// their own local MyName setting.
@@ -351,7 +351,7 @@ type LabelUsage struct {
 // Project scopes a set of tickets to one prefix-based ID namespace. Where
 // the project lives on disk is not part of it (DFLT-00080): that local path
 // differs per team member, so it is kept per environment in
-// graph-config.json's projectPaths (internal/runtimeconfig), not in the
+// the home config file's projectPaths (internal/runtimeconfig), not in the
 // shared DB. Prefix is immutable once created (see
 // internal/project.ResolvePrefix): tickets/nodes already minted under it
 // would otherwise disagree with a later rename. TicketSeq/NodeSeq (the

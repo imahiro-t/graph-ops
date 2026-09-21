@@ -78,7 +78,7 @@ export interface Ticket {
   closed_reason?: string;
   // The ticket's only form of assignment: the display name of whoever last
   // pressed "assign to me" (null/absent when unassigned), taken verbatim from
-  // whichever name was configured in "全体設定" (see AppSettingsFile.myName)
+  // whichever name was configured in "アプリ設定" (see AppSettingsFile.myName)
   // at the moment they pressed it -- not necessarily the current viewer's own
   // myName. DFLT-00024 replaced the original free-text assignee with a
   // boolean assigned_to_me flag; DFLT-00047 replaced that flag with this
@@ -214,8 +214,9 @@ export interface TicketDetail extends Ticket {
 //
 // local_path is where the project lives on *this* environment's disk
 // (DFLT-00080). It is not stored in the (possibly team-shared) DB but in the
-// server's own graph-config.json (projectPaths), so each member sees their
-// own value here. '' means it is not set in this environment ("未設定").
+// server's own home config file, $HOME/.graph-ops/config.json (projectPaths),
+// so each member sees their own value here. '' means it is not set in this
+// environment ("未設定").
 export interface Project {
   id: string;
   name: string;
@@ -229,8 +230,6 @@ export interface Project {
 // Mirrors packages/core-go/internal/config's Document/NodeDef/ReviewGateDef/
 // Catalog shapes (see GET/PUT /api/settings/catalog,
 // GET/PUT /api/settings/node-types(/{type})).
-
-export type SettingsScope = 'global' | 'project';
 
 // One review gate definition (a reusable review perspective a review_gate
 // node can reference by id). additional_criteria is appended to (not
@@ -262,18 +261,20 @@ export interface WorkflowDef {
   seed?: string[];
 }
 
-// The shape of one config layer (a scope's own override file -- e.g. what
-// GET /api/settings/catalog's tier_document returns, and what PUT's body
-// submits back).
+// The shape of the user tier's own override file -- what GET
+// /api/settings/catalog's tier_document returns, and what PUT's body submits
+// back.
 export interface SettingsDocument {
   version: number;
   review_gates?: Record<string, ReviewGateDef>;
   workflow?: WorkflowDef;
 }
 
-// The fully-merged, ready-to-use result of every applicable tier -- what an
-// agent actually sees (merged_catalog), or what a scope would fall back to
-// if its own override were cleared (inherited_catalog).
+// A merged, ready-to-use catalog: the plugin default plus the user tier
+// (merged_catalog), or the plugin default alone -- what the settings screen
+// would fall back to if the user tier's override were cleared
+// (inherited_catalog). Neither includes a teamExtensionsDir team tier, which
+// an agent does additionally see; see the server's handleGetSettingsCatalog.
 export interface SettingsCatalog {
   review_gates: Record<string, ReviewGateDef>;
   nodes: NodeDef[];
@@ -284,16 +285,12 @@ export interface SettingsCatalogResponse {
   tier_document: SettingsDocument;
   merged_catalog: SettingsCatalog;
   inherited_catalog: SettingsCatalog;
-  scope: SettingsScope;
-  project_id: string;
-  team_root_resolved: boolean;
 }
 
 export interface SettingsNodeTypeInfo {
   type: string;
   has_default: boolean;
   has_user_override: boolean;
-  has_team_override: boolean;
 }
 
 export interface SettingsNodeTypeTextResponse {
@@ -308,7 +305,6 @@ export interface SettingsNodeTypeTextResponse {
 export interface SettingsSkillInfo {
   name: string;
   has_user_override: boolean;
-  has_team_override: boolean;
 }
 
 // GET/PUT /api/settings/skills/{name} -- mirrors SettingsNodeTypeTextResponse.
@@ -318,11 +314,10 @@ export interface SettingsSkillTextResponse {
   merged_text: string;
 }
 
-// GET/PUT /api/settings/{plan,review,report}-template. tier_text is this
-// scope's own override ("" if unset: Markdown for plan/review, HTML for
-// report); merged_text is the fully-resolved template (team override -> user
-// override -> plugin default -- a full replace, not an append, unlike
-// node-type/skill context).
+// GET/PUT /api/settings/{plan,review,report}-template. tier_text is the user
+// tier's own override ("" if unset: Markdown for plan/review, HTML for
+// report); merged_text is the resolved template (user override -> plugin
+// default -- a full replace, not an append, unlike node-type/skill context).
 export interface SettingsTemplateTextResponse {
   tier_text: string;
   merged_text: string;
@@ -333,15 +328,15 @@ export interface SettingsTemplateTextResponse {
 export type SettingsReportTemplateResponse = SettingsTemplateTextResponse;
 
 // --- App settings (GET/PUT /api/settings/app) ---
-// The server/CLI's own operational settings (graph-config.json), edited from
-// the "全体設定" scope's app-settings tab -- distinct from the
+// The server/CLI's own operational settings ($HOME/.graph-ops/config.json),
+// edited from the app-settings tab -- distinct from the
 // node-type/workflow/review-gate Settings UI above. None of these fields
 // take effect for the already-running server; they're read once at startup,
 // so `effective` (this server's actual current values) will keep showing
 // the pre-edit values until it's restarted.
 
 // AppSettingsFile mirrors packages/core-go/internal/runtimeconfig.FileConfig
-// (graph-config.json's shape) -- only the fields this tab edits are listed
+// (the home config file's shape) -- only the fields this tab edits are listed
 // here; the others (port/claudeBinary/terminalCommand/workDir/
 // teamExtensionsDir/projectPaths) are preserved server-side but never
 // surfaced in this UI (projectPaths is edited through the project API as
@@ -420,14 +415,16 @@ export interface EffectiveAppSettings {
 // the translation catalogues -- a code is never a sentence, so a code with
 // no message would show the user nothing at all.
 export const APP_SETTINGS_WARNINGS = {
-  // The home directory could not be resolved, so artifactsDir alone was not
-  // saved anywhere. Everything else was.
-  homeConfigUnavailable: 'HOME_CONFIG_UNAVAILABLE',
   // $HOME/.graph-ops/config.json exists but could not be read or parsed, so
-  // the home-only settings are coming from nowhere -- not into this response
-  // and not into the next startup either. A save cannot fix it: repairing or
-  // removing that file is the only way out, which is why the same condition
-  // is an error code (not a warning) on a PUT.
+  // every setting on this page is coming from nowhere -- not into this
+  // response and not into the next startup either. A save cannot fix it:
+  // repairing or removing that file is the only way out, which is why the
+  // same condition is an error code (not a warning) on a PUT.
+  //
+  // It is the only warning code left. HOME_CONFIG_UNAVAILABLE used to be
+  // another, meaning "saved, except the one field we had nowhere to put";
+  // with one destination for every field there is no such partial outcome,
+  // so it became an error code instead (DFLT-00124).
   homeConfigUnreadable: 'HOME_CONFIG_UNREADABLE'
 } as const;
 
@@ -436,13 +433,11 @@ export type AppSettingsWarning = (typeof APP_SETTINGS_WARNINGS)[keyof typeof APP
 export interface AppSettingsResponse {
   file: AppSettingsFile;
   effective: EffectiveAppSettings;
+  // The one file this page reads and writes: $HOME/.graph-ops/config.json.
+  // '' when the home directory could not be resolved -- the server answers
+  // an empty string rather than inventing a path that does not exist, and
+  // the form shows its own wording for that case.
   config_path: string;
-  // Where the "home-only" settings are read from and written to instead of
-  // config_path -- of the fields this form edits, only artifactsDir is one
-  // (see packages/core-go/internal/runtimeconfig's HomeOnlyKeys). Equal to
-  // config_path in the common case; '' when the home directory could not be
-  // resolved. Optional so a response from an older server still type-checks.
-  home_config_path?: string;
   // Fixed codes for things the server did not do on a request it still
   // completed -- see AppSettingsWarning for the ones defined so far. A code
   // the client does not know is simply not shown, so this stays string[].

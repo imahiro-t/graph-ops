@@ -1,19 +1,25 @@
-// Package runtimeconfig handles graph-config.json -- the server/CLI's own
-// operational settings file (db backend selection and its connection
-// settings, artifacts dir, port, claude binary, terminal command,
-// extension-directory overrides, ticket-list pagination page size) --
-// distinct from internal/config's workflow catalog (node/review-gate
-// definitions).
+// Package runtimeconfig handles the home config file --
+// $HOME/.graph-ops/config.json, the server/CLI's own operational settings
+// (db backend selection and its connection settings, artifacts dir, port,
+// claude binary, terminal command, extension-directory overrides,
+// ticket-list pagination page size) -- distinct from internal/config's
+// workflow catalog (node/review-gate definitions).
+//
+// Settings are read from that one file and from environment variables, and
+// from nowhere else: there is no search path, no per-directory override and
+// no per-key exception table (ticket DFLT-00124 -- see HomeConfigPath for
+// what used to happen and why it had to stop). Team sharing is done by
+// pointing teamExtensionsDir at a shared directory from that same home file,
+// never by committing settings into a repository.
 //
 // cmd/graph-engine's own runtimeConfig/loadRuntimeConfig reads this (merged
 // with env vars and hardcoded defaults) once at process startup. This
-// package is also the read/write path the web settings UI's "全体設定"
-// app-settings tab uses to edit graph-config.json live (see
-// internal/httpserver/app_settings.go), sharing the exact same FileConfig
-// shape and file-resolution precedence so an edit through the UI always
-// targets whichever file actually governs the server the next time it
-// starts -- there is deliberately only one place that knows this file's
-// shape and search path.
+// package is also the read/write path the web settings UI's app-settings tab
+// uses to edit the file live (see internal/httpserver/app_settings.go),
+// sharing the exact same FileConfig shape and the exact same single location,
+// so an edit through the UI always targets the file that governs the server
+// the next time it starts -- there is deliberately only one place that knows
+// this file's shape and where it lives.
 package runtimeconfig
 
 import (
@@ -25,7 +31,8 @@ import (
 	"strings"
 )
 
-// FileConfig is graph-config.json's shape on disk. Every field is optional
+// FileConfig is the home config file's shape on disk (see HomeConfigPath).
+// Every field is optional
 // (omitempty on write): an absent field just means "fall back to the next
 // thing in the precedence chain" -- an env var, then a hardcoded default --
 // see cmd/graph-engine/runtime_config.go's loadRuntimeConfig, which is the
@@ -52,7 +59,7 @@ type FileConfig struct {
 	TeamExtensionsDir  string `json:"teamExtensionsDir,omitempty"`
 	PaginationPageSize int    `json:"paginationPageSize,omitempty"`
 	// MyName is the Web UI viewer's own display name, set from the
-	// "全体設定" app-settings tab and used by the per-ticket "assign to
+	// "アプリ設定" app-settings tab and used by the per-ticket "assign to
 	// me"/"unassign" buttons (see domain.Ticket.Assignee). Unlike every
 	// other field in this struct, it takes effect immediately in the
 	// browser -- it's read fresh on every GET /api/settings/app rather than
@@ -112,7 +119,7 @@ type FileConfig struct {
 	// setting kept here. Being
 	// a map, a project can have at most one path per environment; a project
 	// with no entry simply has no local path ("未設定"). Read it through
-	// ProjectPath and write it through SetProjectPath / Update.
+	// ProjectPath and write it through SetProjectPath / UpdateHome.
 	ProjectPaths map[string]string `json:"projectPaths,omitempty"`
 }
 
@@ -299,86 +306,13 @@ func ResolveSecret(raw string) (value string, fromEnv bool, envVarName string, e
 	return v, true, name, nil
 }
 
-// CandidatePaths returns graph-config.json's search path, in the same
-// cwd-then-home precedence loadRuntimeConfig applies when the server starts
-// (the first candidate that exists wins). home is the resolved
-// $HOME/os.UserHomeDir() value -- deliberately a parameter rather than this
-// package calling os.UserHomeDir() itself, so a caller (a test, in
-// particular) can supply a sandboxed stand-in instead of ever touching the
-// real home directory; pass "" to omit that candidate entirely (mirroring
-// what callers already do when os.UserHomeDir() itself fails).
-func CandidatePaths(cwd, home string) []string {
-	paths := []string{filepath.Join(cwd, "graph-config.json")}
-	if homePath := HomeConfigPath(home); homePath != "" {
-		paths = append(paths, homePath)
-	}
-	return paths
-}
-
-// ResolvePath returns the first candidate that already exists, or the last
-// candidate (home-based, "the global settings directory") if none exist yet
-// -- or the only candidate, if home is "" -- so a fresh write always lands
-// somewhere that will actually be read on the next server start.
-func ResolvePath(cwd, home string) string {
-	candidates := CandidatePaths(cwd, home)
-	for _, p := range candidates {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return candidates[len(candidates)-1]
-}
-
-// Load reads graph-config.json from its resolved path. A missing file is
-// not an error -- it just yields the zero value (every setting "unset",
-// falling back further down the precedence chain). The resolved path is
-// always returned too, so a caller that's about to Save knows (and can
-// display) exactly which file it's targeting.
-//
-// On error the returned FileConfig is always the zero value, never a
-// partially-populated one (DFLT-00023 C-5). A malformed JSON file used to
-// come back as whatever encoding/json had managed to decode before it hit
-// the syntax error, which the signature made look usable; every caller
-// already checks err first, so nothing observable changes, but the contract
-// is now "cfg is meaningful only when err == nil" rather than something a
-// future caller has to infer from the call sites.
-//
-// Load is deliberately the RAW read of a single file: it does not apply the
-// home-only rule (see homeOnlyKeys), so a terminalCommand or host it returns
-// may be one a working-directory graph-config.json supplied. Use it only
-// where that literal file content is the point -- a read-modify-write that
-// must write back exactly the file it read (Update, UpdateHome and the
-// settings API's save path), or a field the rule does not cover at all
-// (projectPaths). Anywhere a setting is about to be *used*, call
-// LoadEffective instead.
-func Load(cwd, home string) (FileConfig, string, error) {
-	path := ResolvePath(cwd, home)
-	cfg, err := loadFrom(path)
-	return cfg, path, err
-}
-
-// Save writes cfg to graph-config.json at its resolved path, creating the
-// parent directory first if needed (relevant the first time anything writes
-// to the canonical home-based default). Returns the path written to.
-func Save(cwd, home string, cfg FileConfig) (string, error) {
-	// 0o700 (in saveTo): the only directory this call ever actually creates
-	// is $HOME/.graph-ops (the cwd candidate's parent is cwd itself, which
-	// necessarily exists), the same directory cmd/graph-engine's
-	// loadRuntimeConfig and store.NewSQLiteRepository create user-only -- and
-	// the file written is already 0o600 because it can hold a MySQL
-	// password. Whichever of the three runs first in a fresh environment sets
-	// the mode, so they are kept in step.
-	path := ResolvePath(cwd, home)
-	return path, saveTo(path, cfg)
-}
-
 // writeFileAtomic replaces path's contents with raw via a temp file in the
-// same directory plus a rename, so a concurrent Load (which takes no lock --
-// see Update) never observes a truncated, half-written file (DFLT-00080:
-// the server now reads graph-config.json on every project API call while
-// other requests may be saving it). If path is a symlink, the file it points
-// at is replaced rather than the link itself. The result is 0o600, same as
-// before.
+// same directory plus a rename, so a concurrent read (LoadEffective /
+// LoadHomeConfig take no lock -- see UpdateHome) never observes a truncated,
+// half-written file (DFLT-00080: the server reads the config file on every
+// project API call while other requests may be saving it). If path is a
+// symlink, the file it points at is replaced rather than the link itself.
+// The result is 0o600, same as before.
 func writeFileAtomic(path string, raw []byte) error {
 	target := path
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {

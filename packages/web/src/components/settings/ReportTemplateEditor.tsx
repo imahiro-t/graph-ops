@@ -8,14 +8,10 @@
 // settings.reportTemplate.*. The preview is a plain text/`<pre>` dump of the
 // HTML source, not a rendered iframe.
 import React from 'react';
-import { SettingsScope } from '../../types';
 import { fetchSettingsReportTemplate, saveSettingsReportTemplate } from '../../lib/settingsApi';
 import { TemplateTextEditor } from './TemplateTextEditor';
 
 interface Props {
-  scope: SettingsScope;
-  projectId: string;
-  canEdit: boolean;
   onDirtyChange: (dirty: boolean) => void;
 }
 

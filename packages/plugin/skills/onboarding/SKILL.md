@@ -19,7 +19,7 @@ If `content` is non-empty, follow it as additional rules on top of the steps bel
 ```bash
 graph-engine get-extension-roots
 ```
-Returns `{"userDir": "...", "teamDir": "..."}`. Use `userDir` for every write below (create the directory tree with `mkdir -p` as needed -- it may not exist yet on a fresh install). Never guess this path (e.g. `~/.graph-ops`) -- it can be overridden by `GRAPH_USER_EXTENSIONS_DIR` or `graph-config.json`'s `userExtensionsDir`, and this command already resolves that for you.
+Returns `{"userDir": "...", "teamDir": "..."}`. Use `userDir` for every write below (create the directory tree with `mkdir -p` as needed -- it may not exist yet on a fresh install). Never guess this path (e.g. `~/.graph-ops`) -- it can be overridden by `GRAPH_USER_EXTENSIONS_DIR` or by `userExtensionsDir` in `$HOME/.graph-ops/config.json` (the one file settings are read from), and this command already resolves that for you.
 
 ## 2. Ask the user which language to use
 

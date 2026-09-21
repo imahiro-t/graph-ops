@@ -50,7 +50,7 @@ type Config struct {
 	PaginationPageSize int
 	// HomeDir is the resolved os.UserHomeDir() value (or "" if unresolvable)
 	// -- used only by the app-settings API (internal/httpserver/app_settings.go)
-	// to locate graph-config.json the same way cmd/graph-engine's
+	// to locate the home config file the same way cmd/graph-engine's
 	// loadRuntimeConfig does. Deliberately supplied here rather than calling
 	// os.UserHomeDir() directly in that handler, so a test can sandbox it.
 	HomeDir string
@@ -74,7 +74,7 @@ type Server struct {
 	cfg       Config
 	rejectLog *rejectLogger
 	// logger is the same logger rejectLog writes to, for this package's
-	// other operational warnings (e.g. a best-effort graph-config.json
+	// other operational warnings (e.g. a best-effort home config
 	// cleanup that failed -- see handleDeleteProject).
 	logger *slog.Logger
 }
@@ -579,11 +579,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // resolveRoots resolves the same user-/team-tier roots the CLI resolves from
-// the same GRAPH_USER_EXTENSIONS_DIR/GRAPH_TEAM_EXTENSIONS_DIR (or
-// graph-config.json) settings, so the server and CLI never disagree about
-// where user/team extension files live.
-func (s *Server) resolveRoots() (config.Roots, error) {
-	return config.ResolveRoots(s.cfg.WorkDir, s.cfg.UserExtensionsDir, s.cfg.TeamExtensionsDir)
+// the same GRAPH_USER_EXTENSIONS_DIR/GRAPH_TEAM_EXTENSIONS_DIR (or home
+// config) settings, so the server and CLI never disagree about where
+// user/team extension files live. Neither consults the process's working
+// directory any more -- a team tier exists only where it was explicitly
+// pointed at (see config.ResolveRoots).
+func (s *Server) resolveRoots() config.Roots {
+	return config.ResolveRoots(s.cfg.UserExtensionsDir, s.cfg.TeamExtensionsDir)
 }
 
 // statusForError maps an error to an HTTP status: a *domain.APIError whose
@@ -597,9 +599,9 @@ func statusForError(err error, fallback int) int {
 		switch apiErr.Code {
 		case domain.ErrCodeInvalidPrefix, domain.ErrCodePrefixTaken,
 			domain.ErrCodeNoCurrentProject, domain.ErrCodeValidation, domain.ErrCodeTitleRequired,
-			domain.ErrCodeInvalidScope, domain.ErrCodeCatalogCycleDetected, domain.ErrCodeCatalogUnknownReference,
+			domain.ErrCodeCatalogCycleDetected, domain.ErrCodeCatalogUnknownReference,
 			domain.ErrCodeCatalogDuplicateNode, domain.ErrCodeCatalogInvalidDocument, domain.ErrCodeInvalidMaxIterations,
-			domain.ErrCodeInvalidReportTemplate, domain.ErrCodeProjectLocalPathNotSet, domain.ErrCodeProjectTeamRootIsUserRoot,
+			domain.ErrCodeInvalidReportTemplate,
 			domain.ErrCodeInvalidLabelName, domain.ErrCodeInvalidLabelColor, domain.ErrCodeLabelNameTaken:
 			return http.StatusBadRequest
 		case domain.ErrCodeProjectNotFound, domain.ErrCodeTicketNotFound, domain.ErrCodeNodeNotFound, domain.ErrCodeArtifactNotFound,

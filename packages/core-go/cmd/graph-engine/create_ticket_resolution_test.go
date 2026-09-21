@@ -5,7 +5,7 @@ package main
 // test names the Gherkin rule/scenario (art-0a57c869) it covers.
 //
 // Since DFLT-00080 a project's directory is its local path in this
-// environment's graph-config.json (projectPaths), not a DB column, so the
+// environment's home config file (projectPaths), not a DB column, so the
 // tests keep the paths in standardProjects.paths and hand that map to
 // create-ticket as runtimeConfig.ProjectPaths.
 
@@ -376,7 +376,7 @@ func TestCreateTicketResolution_LocalPathIsCleaned(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Rule 4: empty / relative local paths are never candidates. SetProjectPath
 // refuses to persist a relative one, so they are injected straight into the
-// projectPaths map (as a hand-edited graph-config.json would look), with the
+// projectPaths map (as a hand-edited home config would look), with the
 // projects themselves added through a ListProjects stub.
 // ---------------------------------------------------------------------------
 
@@ -709,13 +709,13 @@ func TestCreateTicketResolution_TwoEnvironmentsResolveSameProject(t *testing.T) 
 		paths map[string]string
 		cwd   string
 	}{{"A", envA, "/home/a/shared/src"}, {"B", envB, "/home/b/shared"}} {
-		p, source, err := resolveCreateTicketProject(sp.repo, tc.cwd, tc.paths)
+		p, source, err := resolveCreateTicketProject(sp.repo, tc.cwd, t.TempDir(), tc.paths)
 		if err != nil || p == nil || p.ID != shared.ID || source != resolvedFromCurrentDirectory {
 			t.Errorf("env %s: got %+v via %q (err %v), want Shared from the current directory", tc.name, p, source, err)
 		}
 	}
 	// Env A's path means nothing in env B.
-	if p, source, _ := resolveCreateTicketProject(sp.repo, "/home/a/shared", envB); p == nil || p.ID == shared.ID || source != resolvedFromCurrentProject {
+	if p, source, _ := resolveCreateTicketProject(sp.repo, "/home/a/shared", t.TempDir(), envB); p == nil || p.ID == shared.ID || source != resolvedFromCurrentProject {
 		t.Errorf("env B must not resolve env A's directory to Shared, got %+v via %q", p, source)
 	}
 }

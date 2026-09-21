@@ -27,10 +27,10 @@ func clearHTTPDataSourceEnv(t *testing.T) {
 }
 
 func TestLoadRuntimeConfig_HTTPDataSourceFromFile(t *testing.T) {
-	dir := tempCwd(t)
-	stubHome(t)
+	tempCwd(t)
+	home := stubHome(t)
 	clearHTTPDataSourceEnv(t)
-	writeGraphConfig(t, dir, runtimeconfig.FileConfig{
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		DBBackend: "http", HTTPDataSourceURL: "http://127.0.0.1:8787", HTTPDataSourceToken: "plain-token",
 	})
 
@@ -45,11 +45,11 @@ func TestLoadRuntimeConfig_HTTPDataSourceFromFile(t *testing.T) {
 }
 
 func TestLoadRuntimeConfig_HTTPDataSourceTokenFromEnvVarRef(t *testing.T) {
-	dir := tempCwd(t)
-	stubHome(t)
+	tempCwd(t)
+	home := stubHome(t)
 	clearHTTPDataSourceEnv(t)
 	t.Setenv("GRAPHOPS_DATASOURCE_TOKEN", "resolved-token")
-	writeGraphConfig(t, dir, runtimeconfig.FileConfig{
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		DBBackend: "http", HTTPDataSourceURL: "https://example.com", HTTPDataSourceToken: "${GRAPHOPS_DATASOURCE_TOKEN}",
 	})
 
@@ -63,10 +63,10 @@ func TestLoadRuntimeConfig_HTTPDataSourceTokenFromEnvVarRef(t *testing.T) {
 }
 
 func TestLoadRuntimeConfig_HTTPDataSourceTokenMissingEnvVarFails(t *testing.T) {
-	dir := tempCwd(t)
-	stubHome(t)
+	tempCwd(t)
+	home := stubHome(t)
 	clearHTTPDataSourceEnv(t)
-	writeGraphConfig(t, dir, runtimeconfig.FileConfig{
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		DBBackend: "http", HTTPDataSourceURL: "https://example.com", HTTPDataSourceToken: "${GRAPH_OPS_TEST_UNSET_TOKEN_DFLT_00088}",
 	})
 
@@ -77,10 +77,10 @@ func TestLoadRuntimeConfig_HTTPDataSourceTokenMissingEnvVarFails(t *testing.T) {
 }
 
 func TestLoadRuntimeConfig_HTTPDataSourceEnvOverridesFile(t *testing.T) {
-	dir := tempCwd(t)
-	stubHome(t)
+	tempCwd(t)
+	home := stubHome(t)
 	clearHTTPDataSourceEnv(t)
-	writeGraphConfig(t, dir, runtimeconfig.FileConfig{
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		DBBackend: "http", HTTPDataSourceURL: "http://127.0.0.1:1111", HTTPDataSourceToken: "file-token",
 	})
 	t.Setenv("GRAPH_HTTP_DATASOURCE_URL", "http://127.0.0.1:2222")
@@ -105,10 +105,10 @@ func TestLoadRuntimeConfig_HTTPDataSourceInsecureSettingsFailAtStartup(t *testin
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := tempCwd(t)
-			stubHome(t)
+			tempCwd(t)
+			home := stubHome(t)
 			clearHTTPDataSourceEnv(t)
-			writeGraphConfig(t, dir, runtimeconfig.FileConfig{DBBackend: "http", HTTPDataSourceURL: tc.url, HTTPDataSourceToken: tc.token})
+			writeHomeConfig(t, home, runtimeconfig.FileConfig{DBBackend: "http", HTTPDataSourceURL: tc.url, HTTPDataSourceToken: tc.token})
 			_, err := loadRuntimeConfig()
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want %q", err, tc.want)
@@ -122,10 +122,10 @@ func TestLoadRuntimeConfig_HTTPDataSourceInsecureSettingsFailAtStartup(t *testin
 // subcommand's entry point) fails in loadRuntimeConfig before opening the
 // store.
 func TestRun_HTTPDataSourceInsecureURLStopsAnySubcommand(t *testing.T) {
-	dir := tempCwd(t)
-	stubHome(t)
+	tempCwd(t)
+	home := stubHome(t)
 	clearHTTPDataSourceEnv(t)
-	writeGraphConfig(t, dir, runtimeconfig.FileConfig{DBBackend: "http", HTTPDataSourceURL: "http://example.com", HTTPDataSourceToken: "t"})
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{DBBackend: "http", HTTPDataSourceURL: "http://example.com", HTTPDataSourceToken: "t"})
 	for _, cmd := range []string{"list-projects", "list-tickets", "serve"} {
 		err := run(cmd, nil)
 		if err == nil || !strings.Contains(err.Error(), "plaintext http:// is only allowed for a loopback") {
@@ -135,10 +135,10 @@ func TestRun_HTTPDataSourceInsecureURLStopsAnySubcommand(t *testing.T) {
 }
 
 func TestLoadRuntimeConfig_LeftoverHTTPSettingsIgnoredUnderSQLite(t *testing.T) {
-	dir := tempCwd(t)
-	stubHome(t)
+	tempCwd(t)
+	home := stubHome(t)
 	clearHTTPDataSourceEnv(t)
-	writeGraphConfig(t, dir, runtimeconfig.FileConfig{
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		DBBackend: "sqlite", HTTPDataSourceURL: "http://example.com", HTTPDataSourceToken: "${GRAPH_OPS_TEST_UNSET_TOKEN_DFLT_00088}",
 	})
 	rc, err := loadRuntimeConfig()
@@ -156,8 +156,8 @@ func TestLoadRuntimeConfig_LeftoverHTTPSettingsIgnoredUnderSQLite(t *testing.T) 
 // the same openStore path (exactly as cmdServe builds it) lists that ticket
 // -- every one of those operations reaching the reference plugin.
 func TestCLIAndServe_BothUseTheHTTPBackend(t *testing.T) {
-	dir := tempCwd(t)
-	stubHome(t)
+	tempCwd(t)
+	home := stubHome(t)
 	clearPathEnv(t)
 	clearHTTPDataSourceEnv(t)
 
@@ -165,7 +165,7 @@ func TestCLIAndServe_BothUseTheHTTPBackend(t *testing.T) {
 	srv := httptest.NewServer(plugin)
 	defer srv.Close()
 	t.Setenv("GRAPH_TEST_HTTP_DS_TOKEN", "cli-token")
-	writeGraphConfig(t, dir, runtimeconfig.FileConfig{
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		DBBackend: "http", HTTPDataSourceURL: srv.URL, HTTPDataSourceToken: "${GRAPH_TEST_HTTP_DS_TOKEN}",
 	})
 

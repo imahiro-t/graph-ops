@@ -236,7 +236,7 @@ const (
 	MySQLTLSDisabled = "disabled"
 )
 
-// NormalizeMySQLTLSMode maps mode as read from graph-config.json/
+// NormalizeMySQLTLSMode maps mode as read from the home config file/
 // GRAPH_MYSQL_TLS/the settings API to one of the three MySQLTLS* constants:
 // "" (unset) becomes MySQLTLSVerifyFull -- this ticket's whole point is
 // that an existing or new MySQL configuration gets a verified TLS
