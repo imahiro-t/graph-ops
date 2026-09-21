@@ -210,7 +210,19 @@ in lowerCamelCase.
 | Artifacts | `POST/GET /tickets/{ticketId}/artifacts`, `GET /artifacts/{artifactId}`, `GET /nodes/{nodeId}/artifacts` |
 | Projects | `POST/GET /projects`, `GET/PATCH/DELETE /projects/{projectId}` |
 | Labels | `POST/GET /projects/{projectId}/labels`, `GET/PATCH/DELETE /labels/{labelId}` |
-| Current project | `GET/PUT /current-project` |
+| Current project | `GET/PUT /current-project` (**deprecated**) |
+
+`/current-project` is deprecated: the current project is a per-user choice, so
+graph-engine now keeps it in its own `graph-config.json` rather than in the
+data source. Keep implementing `GET`: graph-engine calls it while an
+environment's `graph-config.json` has no `currentProjectId` of its own, writes
+the first answer there -- which is what carries an existing selection over
+when upgrading -- and never calls it again in that environment. Until that has
+happened, an error from `GET` is an error from graph-engine's own
+current-project read, so answer it, with `""` when nothing is stored. `PUT` is
+no longer called at all. Nothing else changes for a plugin: `GET /tickets`
+still returns every ticket, and narrowing by project is still
+`GET /projects/{projectId}/tickets`.
 
 Path parameters are percent-encoded by graph-engine (an ID may contain `/` or
 spaces); decode them before use.

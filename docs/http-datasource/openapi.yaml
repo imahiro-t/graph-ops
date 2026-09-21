@@ -663,7 +663,31 @@ paths:
     get:
       operationId: getCurrentProjectID
       tags: [current-project]
-      summary: Get the currently selected project (one value for the whole data source).
+      summary: "DEPRECATED: get the currently selected project (one value for the whole data source)."
+      deprecated: true
+      description: |
+        Deprecated: graph-engine no longer calls this in normal operation.
+
+        The current project is a per-user, per-environment choice, so it has
+        moved out of the data source and into graph-engine's own
+        graph-config.json ("currentProjectId"). Keeping it here made one
+        person's switch change what everyone sharing this data source saw.
+
+        Both operations stay in the protocol for compatibility, and GET must
+        still be implemented. graph-engine calls it while an environment's
+        graph-config.json has no currentProjectId of its own: the first answer
+        it gets is written there, which carries an existing selection over
+        when upgrading, and the endpoint is never called again in that
+        environment. Until then, an error from GET is an error from
+        graph-engine's own current-project read, so keep answering it -- with
+        "" if the plugin has nothing stored.
+
+        PUT is no longer called at all. A plugin may keep storing what it is
+        given, but nothing sends it.
+
+        This does not change how tickets are listed: GET /tickets still
+        returns every ticket, and narrowing by project is still
+        GET /projects/{projectId}/tickets.
       responses:
         "200":
           description: The current project ID, or "" when none has ever been selected.
@@ -674,7 +698,12 @@ paths:
     put:
       operationId: setCurrentProjectID
       tags: [current-project]
-      summary: Select the current project.
+      summary: "DEPRECATED: select the current project."
+      deprecated: true
+      description: |
+        Deprecated: graph-engine never calls this. The current project is
+        saved in graph-engine's own graph-config.json ("currentProjectId").
+        See GET /current-project for why, and for the one remaining read.
       requestBody:
         required: true
         content:
