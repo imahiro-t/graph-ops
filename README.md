@@ -55,7 +55,7 @@ Each release points the marketplace entry at the new release tag, so updating fe
 
 The one thing the update cannot do for you is restart a UI server that is already running. `/graph-ops:ui` reuses whatever server answers on its port without checking its version, and the server keeps running until it is stopped, so a server started before the update keeps serving the old version. After updating:
 - **Stop the UI server if one started before the update is still running**: on macOS / Linux, `kill $(lsof -ti tcp:49173 -sTCP:LISTEN)` stops one on the default port (use your own port number instead if you changed `port` / `PORT`). On other operating systems, stop the process listening on the default port 49173 (or the port you configured).
-- **Then run `/graph-ops:ui`** to start the new version's server. Some releases need this restart to work correctly; see the [0.7.0 release notes](docs/release-notes/v0.7.0.md#upgrade-notes) for what happens if the old server keeps running there.
+- **Then, in a Claude Code session started after the update, run `/graph-ops:ui`** to start the new version's server. A session that was already open when you updated may still run the previous version's `graph-engine`, which would start the old server again, so if you updated from inside Claude Code, restart it (or start a new session) first. Some releases need this restart to work correctly; see the [0.7.0 release notes](docs/release-notes/v0.7.0.md#upgrade-notes) for what happens if the old server keeps running there.
 - **If you installed version 0.4.0 or earlier**: those versions were fetched by a `node` one-liner that kept a clone of the repository per release under `~/.cache/graph-ops/` (for example `~/.cache/graph-ops/v0.4.0`). The plugin no longer uses those clones, so you can delete the `v*` directories there. Leave `~/.cache/graph-ops/engine/`, which holds the downloaded binaries.
 
 ### Commands
@@ -213,7 +213,7 @@ claude plugin update graph-ops@graph-ops
 
 ただし、すでに起動している UI サーバーの再起動だけは、更新では行われません。`/graph-ops:ui` は、ポートで応答するサーバーがあればバージョンを確かめずにそのまま使い、サーバーは停止するまで動き続けるので、更新前に起動したサーバーが旧版のまま使われ続けます。更新後は次のようにしてください。
 - **更新前に起動した UI サーバーが動いていれば停止する**: macOS／Linux では、既定のポートなら `kill $(lsof -ti tcp:49173 -sTCP:LISTEN)` で停止できます（`port`／`PORT` を変えている場合は、その番号に置き換えてください）。ほかの OS では、既定のポート 49173（または設定したポート）で待ち受けているプロセスを停止してください。
-- **そのあと `/graph-ops:ui` を実行して**、新しい版のサーバーを起動します。リリースによっては、この再起動をしないと正しく動きません。旧版のサーバーが動いたままだと何が起きるかは、[0.7.0 のリリースノート](docs/release-notes/v0.7.0.md#upgrade-notes)（英語）を参照してください。
+- **そのあと、更新後に起動した Claude Code のセッションで `/graph-ops:ui` を実行して**、新しい版のサーバーを起動します。更新時にすでに開いていたセッションは旧版の `graph-engine` を実行し続けることがあり、その場合は旧版のサーバーがまた起動してしまうので、Claude Code の中から更新した場合は、先に Claude Code を再起動する（または新しいセッションを開始する）ようにしてください。リリースによっては、この再起動をしないと正しく動きません。旧版のサーバーが動いたままだと何が起きるかは、[0.7.0 のリリースノート](docs/release-notes/v0.7.0.md#upgrade-notes)（英語）を参照してください。
 - **バージョン 0.4.0 以前をインストールしていた場合**: これらのバージョンは `node` のワンライナーで取得され、リリースごとにリポジトリのクローンを `~/.cache/graph-ops/` の下（例: `~/.cache/graph-ops/v0.4.0`）に残していました。現在のプラグインはこれらを使わないので、そこにある `v*` ディレクトリは削除してかまいません。ダウンロード済みのバイナリが入っている `~/.cache/graph-ops/engine/` は残してください。
 
 ### コマンド一覧
