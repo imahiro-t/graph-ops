@@ -857,6 +857,61 @@ func TestHandleDeleteProject_KeepsUnrelatedCurrentProject(t *testing.T) {
 	}
 }
 
+// DFLT-00106: the other side of the delete. Only the environment that ran
+// the delete can clean its own graph-config.json -- nothing can reach into a
+// teammate's file -- so an environment that had the same project selected is
+// left holding a dangling id. The guarantee is therefore not "it gets
+// cleaned up" but "the dangling id stays safe": its header reads as nothing
+// selected, the id on disk is not silently rewritten, and a write fails
+// loudly instead of landing in whatever project happens to be left.
+func TestHandleDeleteProject_LeavesOtherEnvironmentDangling(t *testing.T) {
+	envA, repo := newBareTestServer(t)
+	envB := New(repo, engine.New(repo), Config{ArtifactsDir: t.TempDir(), WorkDir: t.TempDir(), HomeDir: t.TempDir()})
+
+	alpha, _ := repo.CreateProject("Alpha", "")
+	beta, _ := repo.CreateProject("Beta", "")
+	setCurrent(t, envA, alpha.ID)
+	setCurrent(t, envB, alpha.ID)
+
+	if rec := doJSON(t, envA, http.MethodDelete, "/api/projects/"+alpha.ID, nil); rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// A deselected itself; B's file cannot have been touched.
+	if got := currentProjectIDOnDisk(t, envA); got == nil || *got != "" {
+		t.Errorf("env A currentProjectId = %v, want an explicit \"\"", got)
+	}
+	if got := currentProjectIDOnDisk(t, envB); got == nil || *got != alpha.ID {
+		t.Fatalf("env B currentProjectId = %v, want it still dangling at %q", got, alpha.ID)
+	}
+
+	// B reads as "no project selected" -- never as Beta -- and the read does
+	// not rewrite the dangling id.
+	rec := doJSON(t, envB, http.MethodGet, "/api/current-project", nil)
+	if rec.Code != http.StatusOK || rec.Body.String() != "null\n" {
+		t.Fatalf("env B GET: expected 200 null, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := currentProjectIDOnDisk(t, envB); got == nil || *got != alpha.ID {
+		t.Errorf("a GET must not rewrite env B's currentProjectId, got %v", got)
+	}
+
+	// And B's writes fail loudly rather than landing in Beta.
+	rec = doJSON(t, envB, http.MethodPost, "/api/tickets", map[string]any{"title": "t"})
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("env B POST: expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+	apiErr := decodeError(t, rec)
+	if apiErr.Code != domain.ErrCodeProjectNotFound {
+		t.Errorf("expected %s, got %s", domain.ErrCodeProjectNotFound, apiErr.Code)
+	}
+	if !strings.Contains(apiErr.Message, alpha.ID) {
+		t.Errorf("expected the dangling id %q in %q", alpha.ID, apiErr.Message)
+	}
+	if tickets, err := repo.ListTicketsByProject(beta.ID); err != nil || len(tickets) != 0 {
+		t.Errorf("no ticket may have landed in Beta, got %+v (err=%v)", tickets, err)
+	}
+}
+
 // Scenario: creating a ticket when no project exists at all is an error.
 func TestHandleCreateTicket_NoCurrentProjectFails(t *testing.T) {
 	s, _ := newBareTestServer(t)

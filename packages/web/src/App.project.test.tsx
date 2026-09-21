@@ -11,7 +11,7 @@
 // fetch is served by test/fakeBackend.ts, which since DFLT-00106 answers
 // /api/tickets purely from the request's own query, so an unscoped request
 // here comes back empty exactly as the real server's does.
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
@@ -122,6 +122,46 @@ describe('App project scoping', () => {
       await user.click(screen.getByTitle(i18n.t('toolbar.refreshTitle')));
       await waitFor(() => expect(ticketListRequests().length).toBeGreaterThan(before));
       expect(ticketListRequests().slice(before)).toEqual([`/api/tickets?project_id=${alpha.id}`]);
+    });
+  });
+
+  // The completion criterion names three things that a teammate's switch must
+  // not move: the header, the ticket list and the LABEL FILTER'S OPTIONS.
+  // The options come from their own request (/api/projects/<id>/labels) driven
+  // by the same current project, so they need their own seeded labels and
+  // their own assertion -- the tests above run with no labels at all and
+  // would pass whether or not the option list followed the shared row.
+  describe('the label filter options', () => {
+    beforeEach(() =>
+      seed({
+        labels: [
+          { id: 'label-alpha', project_id: alpha.id, name: 'Alpha のラベル', color: 'green' },
+          { id: 'label-beta', project_id: beta.id, name: 'Beta のラベル', color: 'red' }
+        ]
+      })
+    );
+
+    it('stay on this environment when another one switches the shared current project', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(<App />);
+      await screen.findByText('ALP-00001');
+      await waitFor(() =>
+        expect(fetchMock.mock.calls.some(c => String(c[0]) === `/api/projects/${alpha.id}/labels`)).toBe(true)
+      );
+
+      backend.currentProjectId = beta.id;
+      await vi.advanceTimersByTimeAsync(15_000);
+      await waitFor(() => expect(ticketListRequests().length).toBeGreaterThan(1));
+
+      // Every poll re-fetches the labels too, so this is the request that
+      // would have followed the shared row had the id not come from the
+      // header's own project.
+      expect(fetchMock.mock.calls.map(c => String(c[0]))).not.toContain(`/api/projects/${beta.id}/labels`);
+
+      await user.click(screen.getByRole('button', { name: /^ラベル: / }));
+      const panel = screen.getByRole('group', { name: i18n.t('toolbar.labelGroupLabel') });
+      expect(within(panel).getAllByRole('checkbox').map(c => c.getAttribute('aria-label'))).toEqual(['Alpha のラベル']);
     });
   });
 
