@@ -154,7 +154,7 @@ type GraphRepository interface {
 	// and de-duplicating one from name if empty -- see
 	// internal/project.ResolvePrefix) and persists a new Project. A
 	// project's local path is not stored in the DB (DFLT-00080): it is a
-	// per-environment setting in graph-config.json's projectPaths (see
+	// per-environment setting in the home config's projectPaths (see
 	// internal/runtimeconfig).
 	CreateProject(name, prefix string) (domain.Project, error)
 	GetProject(id string) (*domain.Project, error)
@@ -195,7 +195,7 @@ type GraphRepository interface {
 	// source -- one app_state row for everyone sharing a MySQL or HTTP data
 	// source, so one member switching projects moved everyone else's ticket
 	// list and `create-ticket` target. Since DFLT-00106 the answer lives in
-	// each environment's graph-config.json instead; read and write it
+	// each user's home config file instead; read and write it
 	// through internal/currentproject.
 	//
 	// The pair stays on the interface, and app_state stays in the schema,
@@ -207,4 +207,31 @@ type GraphRepository interface {
 	// a caller.
 	GetCurrentProjectID() (string, error)
 	SetCurrentProjectID(projectID string) error
+}
+
+// TicketGraphLister is an optional add-on to GraphRepository (DFLT-00112):
+// load the nodes and edges of many tickets at once, grouped by ticket ID,
+// rather than one ListNodesByTicket/ListEdgesByTicket pair per ticket. It is
+// what keeps GET /api/tickets -- which now carries each ticket's graph so
+// the Web UI's poll is a single request -- from turning into an N+1 against
+// the DB.
+//
+// It is deliberately *not* part of GraphRepository. HTTPRepository
+// implements that interface against a remote data source
+// (docs/http-datasource/openapi.yaml, examples/jira-datasource), so a new
+// method there would demand a new endpoint of every existing data-source
+// implementation. Callers type-assert for this interface instead and fall
+// back to one GetTicketDetail per ticket when a backend does not provide it
+// -- not to the ListNodesByTicket/ListEdgesByTicket pair, which would be two
+// calls per ticket instead of one. Against such a backend the browser still
+// makes one request, the server-side fan-out just remains.
+//
+// The argument is a set of ticket IDs rather than a project ID because the
+// caller (handleListTickets) also has a cross-project path, ?all=true.
+//
+// Tickets with no nodes/edges are absent from the returned maps rather than
+// mapped to an empty slice. IDs may repeat; the implementation de-duplicates
+// them. Artifacts are never read.
+type TicketGraphLister interface {
+	ListTicketGraphs(ticketIDs []string) (map[string][]domain.GraphNode, map[string][]domain.GraphEdge, error)
 }

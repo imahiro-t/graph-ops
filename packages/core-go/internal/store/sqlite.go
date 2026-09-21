@@ -171,11 +171,11 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 	// else made: an explicit GRAPH_DB_PATH/dbPath naming a fresh directory,
 	// artifacts pointed elsewhere, or another caller of store.Open.
 	//
-	// 0o700 matches loadRuntimeConfig and runtimeconfig.Save; see the former
-	// for why the mode is user-only and why it is applied unconditionally
-	// instead of only for the default path. Whichever of the three runs first
-	// in a fresh environment is the one that fixes the mode, so they have to
-	// agree.
+	// 0o700 matches loadRuntimeConfig and runtimeconfig's home config writer
+	// (UpdateHome); see the former for why the mode is user-only and why it
+	// is applied unconditionally instead of only for the default path.
+	// Whichever of the three runs first in a fresh environment is the one
+	// that fixes the mode, so they have to agree.
 	//
 	// No guard on the result: filepath.Dir always yields a non-empty path
 	// (a bare filename gives "."), and MkdirAll on an existing directory --
@@ -235,7 +235,7 @@ func (r *SQLiteRepository) Init() error {
 // schemaDDL's CREATE TABLE IF NOT EXISTS leaves in place. The column is
 // dropped outright -- its values are deliberately not carried anywhere,
 // since a project's local path is now a per-environment setting
-// (graph-config.json's projectPaths) that each user sets again. Leaving it
+// (the home config's projectPaths) that each user sets again. Leaving it
 // would also break CreateProject, whose INSERT no longer supplies a value
 // for a NOT NULL column. Idempotent: a DB without the column is untouched.
 // ALTER TABLE ... DROP COLUMN needs SQLite 3.35+, which the bundled
@@ -608,7 +608,7 @@ func (r *SQLiteRepository) CreateEdge(e domain.GraphEdge) (domain.GraphEdge, err
 
 func (r *SQLiteRepository) ListEdgesByTicket(ticketID string) ([]domain.GraphEdge, error) {
 	rows, err := r.db.Query(
-		`SELECT id, ticket_id, from_node_id, to_node_id, condition, created_at FROM edges WHERE ticket_id = ? ORDER BY created_at ASC`,
+		`SELECT `+sqliteEdgeSelectCols+` FROM edges WHERE ticket_id = ? ORDER BY created_at ASC`,
 		ticketID,
 	)
 	if err != nil {
@@ -617,13 +617,19 @@ func (r *SQLiteRepository) ListEdgesByTicket(ticketID string) ([]domain.GraphEdg
 	defer rows.Close()
 	out := []domain.GraphEdge{}
 	for rows.Next() {
-		var e domain.GraphEdge
-		if err := rows.Scan(&e.ID, &e.TicketID, &e.FromNodeID, &e.ToNodeID, &e.Condition, &e.CreatedAt); err != nil {
+		e, err := scanEdge(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// ListTicketGraphs implements TicketGraphLister; see that interface's doc
+// comment for the contract.
+func (r *SQLiteRepository) ListTicketGraphs(ticketIDs []string) (map[string][]domain.GraphNode, map[string][]domain.GraphEdge, error) {
+	return listTicketGraphs(r.db, sqliteEdgeSelectCols, ticketIDs)
 }
 
 func (r *SQLiteRepository) ClearEdgesByTicket(ticketID string) error {

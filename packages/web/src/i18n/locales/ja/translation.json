@@ -63,12 +63,12 @@
     "createNew": "新規プロジェクト...",
     "selectFirst": "先にプロジェクトを作成または選択してください",
     "noProjectYet": "まだプロジェクトが作成されていません。作成するとチケットの管理を始められます。",
-    "loadFailed": "現在のプロジェクトの設定を読み込めませんでした。この環境の設定ファイル（graph-config.json）を確認してから再試行してください。",
+    "loadFailed": "現在のプロジェクトの設定を読み込めませんでした。ホームの設定ファイル（~/.graph-ops/config.json）を確認してから再試行してください。",
     "retry": "再試行"
   },
   "createProjectModal": {
     "title": "新規プロジェクト作成",
-    "description": "プロジェクトごとにチケット一覧とチケット/ノードIDのプレフィックスが分離されます。ローカルパスはDBではなく、この環境の設定ファイル（graph-config.json）にだけ保存されます。",
+    "description": "プロジェクトごとにチケット一覧とチケット/ノードIDのプレフィックスが分離されます。ローカルパスはDBではなく、この環境のホーム設定ファイル（$HOME/.graph-ops/config.json）にだけ保存されます。",
     "nameLabel": "プロジェクト名 *",
     "namePlaceholder": "例: 決済サービス",
     "prefixLabel": "IDプレフィックス（任意、英数字5文字以内）",
@@ -78,7 +78,7 @@
   },
   "projectSetupModal": {
     "title": "このディレクトリのプロジェクトを設定",
-    "description": "ディレクトリ {{dir}} に対応するプロジェクトがこの環境のローカル設定にありません。新しく作成するか、DBにある既存のプロジェクト（他のメンバーが作成したものなど）を選んでください。どちらを選んでも、このディレクトリとの対応がこの環境の graph-config.json に保存されます。",
+    "description": "ディレクトリ {{dir}} に対応するプロジェクトがこの環境のローカル設定にありません。新しく作成するか、DBにある既存のプロジェクト（他のメンバーが作成したものなど）を選んでください。どちらを選んでも、このディレクトリとの対応がこの環境のホーム設定ファイル（$HOME/.graph-ops/config.json）に保存されます。",
     "modeLabel": "設定方法",
     "modeCreate": "新規作成",
     "modeExisting": "既存プロジェクトから選ぶ",
@@ -88,7 +88,7 @@
     "overwriteWarning": "このプロジェクトのローカルパス {{current}} は {{next}} で上書きされます。",
     "confirmExisting": "このプロジェクトを使う",
     "createdButLocalPathNotSavedChooseExisting": "プロジェクト「{{name}}」はDBに作成されましたが、この環境のローカルパスの保存に失敗しました。もう一度作成すると同じプロジェクトが重複するため、下の一覧で「{{name}}」を選んで「このプロジェクトを使う」を押し、ローカルパスを設定してください。",
-    "createdButLocalPathNotSavedUseSettings": "プロジェクト「{{name}}」はDBに作成されましたが、この環境のローカルパスの保存に失敗しました。もう一度作成すると同じプロジェクトが重複するため、作成し直さずに「アプリ設定」タブ（全体設定）のプロジェクト管理でローカルパスを設定してください。"
+    "createdButLocalPathNotSavedUseSettings": "プロジェクト「{{name}}」はDBに作成されましたが、この環境のローカルパスの保存に失敗しました。もう一度作成すると同じプロジェクトが重複するため、作成し直さずに「アプリ設定」タブのプロジェクト管理でローカルパスを設定してください。"
   },
   "createModal": {
     "title": "新規チケット作成",
@@ -261,15 +261,6 @@
   },
   "settings": {
     "modalTitle": "設定",
-    "scope": {
-      "label": "スコープ",
-      "global": "全体設定",
-      "project": "プロジェクト単位設定",
-      "projectLabel": "対象プロジェクト",
-      "projectPlaceholder": "プロジェクトを選択",
-      "noProjectSelected": "アプリ全体でプロジェクトが選択されていません。プロジェクト単位設定を編集するには、先にプロジェクトスイッチャーからプロジェクトを選択してください。",
-      "localPathNotSet": "このプロジェクトはこの環境でローカルパスが未設定のため、プロジェクト単位設定を読み書きできません。「アプリ設定」タブ（全体設定）のプロジェクト管理でローカルパスを設定してください。"
-    },
     "tabs": {
       "nodeTypes": "ノード種別",
       "reviewGates": "レビューゲート",
@@ -294,18 +285,18 @@
     },
     "nodeTypes": {
       "listTitle": "ノード種別一覧",
-      "overrideBadge": "このスコープで上書きあり",
-      "mergedPreviewLabel": "継承後のプレビュー（エージェントが実際に見る内容）",
-      "tierTextLabel": "このスコープでの上書き",
-      "tierTextPlaceholder": "このスコープで継承内容の後に追記される指示文を入力...",
-      "emptyOverrideHint": "空にして保存すると上書きが解除され、下位層の内容にフォールバックします。",
+      "overrideBadge": "上書きあり",
+      "mergedPreviewLabel": "継承後のプレビュー（プラグイン既定＋ユーザー上書き。チーム層は含みません）",
+      "tierTextLabel": "ユーザー上書き",
+      "tierTextPlaceholder": "継承内容の後に追記される指示文を入力...",
+      "emptyOverrideHint": "空にして保存すると上書きが解除され、プラグイン既定に戻ります。",
       "addType": "ノード種別を追加",
       "newTypePlaceholder": "例: custom_lint",
       "newTypeLabel": "新しいノード種別名",
       "invalidTypeName": "「/」「\\」「.」「..」を含まない名前を入力してください。",
       "deleteType": "このノード種別の上書きを削除",
       "defaultBadge": "既定",
-      "defaultBadgeHint": "このスコープでまだ上書きされていない、プラグイン既定のノード種別です。下の欄に入力すると上書きされます。",
+      "defaultBadgeHint": "まだ上書きしていない、プラグイン既定のノード種別です。下の欄に入力すると上書きされます。",
       "cannotDeleteDefaultHint": "プラグイン既定のノード種別のため削除できません（上書き、またはそのままにすることのみ可能です）。"
     },
     "reviewGates": {
@@ -319,11 +310,11 @@
       "enabledLabel": "有効",
       "deleteGate": "削除",
       "defaultBadge": "既定",
-      "defaultBadgeHint": "このスコープでまだ上書きされていない、プラグイン既定のレビューゲートです。いずれかの項目を編集すると上書きされます。",
-      "cannotDeleteDefaultHint": "プラグイン既定であり、このスコープでの上書きではないため削除できません。先にいずれかの項目を編集して上書きしてください。",
+      "defaultBadgeHint": "まだ上書きしていない、プラグイン既定のレビューゲートです。いずれかの項目を編集すると上書きされます。",
+      "cannotDeleteDefaultHint": "プラグイン既定であり、ユーザー上書きではないため削除できません。先にいずれかの項目を編集して上書きしてください。",
       "cannotRenameDefaultHint": "プラグイン既定のレビューゲートのため名前は変更できません。ロケール切り替えで翻訳された名前が表示されるよう、名前は固定されています。",
-      "tableEmpty": "このスコープにはまだレビューゲートが定義されていません。",
-      "mergedPreviewLabel": "継承後のプレビュー（エージェントが実際に見る内容）",
+      "tableEmpty": "レビューゲートはまだ定義されていません。",
+      "mergedPreviewLabel": "継承後のプレビュー（プラグイン既定＋ユーザー上書き。チーム層は含みません）",
       "mergedCriteriaLabel": "合成後の合格基準",
       "mergedMaxIterationsLabel": "合成後の最大イテレーション数",
       "mergedEnabledLabel": "合成後の有効状態",
@@ -331,11 +322,11 @@
     },
     "skills": {
       "listTitle": "スキル一覧",
-      "overrideBadge": "このスコープで上書きあり",
-      "mergedPreviewLabel": "継承後のプレビュー（エージェントが実際に見る内容）",
-      "tierTextLabel": "このスコープでの上書き",
-      "tierTextPlaceholder": "このスコープで継承内容の後に追記される補足指示を入力...",
-      "emptyOverrideHint": "空にして保存すると上書きが解除され、下位層の内容にフォールバックします。",
+      "overrideBadge": "上書きあり",
+      "mergedPreviewLabel": "継承後のプレビュー（プラグイン既定＋ユーザー上書き。チーム層は含みません）",
+      "tierTextLabel": "ユーザー上書き",
+      "tierTextPlaceholder": "継承内容の後に追記される補足指示を入力...",
+      "emptyOverrideHint": "空にして保存すると上書きが解除され、プラグイン既定に戻ります。",
       "emptyMergedHint": "このスキルには既定の補足指示はありません。",
       "names": {
         "createTicket": "create-ticket（チケット作成）",
@@ -345,11 +336,11 @@
       }
     },
     "reportTemplate": {
-      "intro": "レポート成果物に使われる固定HTMLテンプレートです。保存すると内容が丸ごと置き換わります（追記ではありません）。空にして保存すると、下位層（チーム上書き→ユーザー上書き→プラグイン既定）にフォールバックします。",
-      "tierTextLabel": "このスコープでの上書き（HTML全文）",
+      "intro": "レポート成果物に使われる固定HTMLテンプレートです。保存すると内容が丸ごと置き換わります（追記ではありません）。空にして保存すると、プラグイン既定に戻ります。teamExtensionsDir で設定したチーム層はこの画面では編集もプレビューもされず、エージェントにはそちらが優先されます。",
+      "tierTextLabel": "ユーザー上書き（HTML全文）",
       "tierTextPlaceholder": "置き換え後のHTMLテンプレート全文を貼り付け（固定構造については get-report-template を参照）...",
-      "mergedPreviewLabel": "継承後のプレビュー（エージェントが実際に穴埋めするHTMLソース）",
-      "emptyOverrideHint": "空にして保存すると上書きが解除され、下位層の内容にフォールバックします。"
+      "mergedPreviewLabel": "継承後のプレビュー: HTMLソース（プラグイン既定＋ユーザー上書き。チーム層は含みません）",
+      "emptyOverrideHint": "空にして保存すると上書きが解除され、プラグイン既定に戻ります。"
     },
     "templates": {
       "listTitle": "テンプレート",
@@ -360,25 +351,23 @@
       }
     },
     "planTemplate": {
-      "intro": "実行計画（plan）ノードのエージェントが穴埋めする Markdown テンプレートです。エージェントはこのテンプレートの見出しをそのまま使います。保存すると内容が丸ごと置き換わります（追記ではありません）。内容はチェックされないので、Markdown を自由に書けます。空にして保存すると、下位層（チーム上書き→ユーザー上書き→プラグイン既定）にフォールバックします。",
-      "tierTextLabel": "このスコープでの上書き（Markdown全文）",
+      "intro": "実行計画（plan）ノードのエージェントが穴埋めする Markdown テンプレートです。エージェントはこのテンプレートの見出しをそのまま使います。保存すると内容が丸ごと置き換わります（追記ではありません）。内容はチェックされないので、Markdown を自由に書けます。空にして保存すると、プラグイン既定に戻ります。teamExtensionsDir で設定したチーム層はこの画面では編集もプレビューもされず、エージェントにはそちらが優先されます。",
+      "tierTextLabel": "ユーザー上書き（Markdown全文）",
       "tierTextPlaceholder": "置き換え後の実行計画テンプレート全文を書く（いま使われているテンプレートは get-plan-template で確認できます）...",
-      "mergedPreviewLabel": "継承後のプレビュー（エージェントが実際に使う実行計画テンプレート）",
-      "emptyOverrideHint": "空にして保存すると上書きが解除され、下位層の内容にフォールバックします。"
+      "mergedPreviewLabel": "継承後のプレビュー: 実行計画テンプレート（プラグイン既定＋ユーザー上書き。チーム層は含みません）",
+      "emptyOverrideHint": "空にして保存すると上書きが解除され、プラグイン既定に戻ります。"
     },
     "reviewTemplate": {
-      "intro": "レビュー（review / review_gate）ノードのエージェントが判定を書くときに使う Markdown テンプレートです。エージェントはこのテンプレートの見出しと判定語をそのまま使います。保存すると内容が丸ごと置き換わります（追記ではありません）。内容はチェックされないので、Markdown を自由に書けます。空にして保存すると、下位層（チーム上書き→ユーザー上書き→プラグイン既定）にフォールバックします。",
-      "tierTextLabel": "このスコープでの上書き（Markdown全文）",
+      "intro": "レビュー（review / review_gate）ノードのエージェントが判定を書くときに使う Markdown テンプレートです。エージェントはこのテンプレートの見出しと判定語をそのまま使います。保存すると内容が丸ごと置き換わります（追記ではありません）。内容はチェックされないので、Markdown を自由に書けます。空にして保存すると、プラグイン既定に戻ります。teamExtensionsDir で設定したチーム層はこの画面では編集もプレビューもされず、エージェントにはそちらが優先されます。",
+      "tierTextLabel": "ユーザー上書き（Markdown全文）",
       "tierTextPlaceholder": "置き換え後のレビューテンプレート全文を書く（いま使われているテンプレートは get-review-template で確認できます）...",
-      "mergedPreviewLabel": "継承後のプレビュー（エージェントが実際に使うレビューテンプレート）",
-      "emptyOverrideHint": "空にして保存すると上書きが解除され、下位層の内容にフォールバックします。"
+      "mergedPreviewLabel": "継承後のプレビュー: レビューテンプレート（プラグイン既定＋ユーザー上書き。チーム層は含みません）",
+      "emptyOverrideHint": "空にして保存すると上書きが解除され、プラグイン既定に戻ります。"
     },
     "appSettings": {
-      "globalOnly": "この設定は全体設定でのみ編集できます。上のスコープ切り替えで「全体設定」を選択してください。",
       "restartNote": "この項目の変更は、次回サーバー起動時に反映されます（保存先: {{path}}）。",
-      "homeOnlyNote": "ただし「成果物ディレクトリ」は作業ディレクトリの graph-config.json からは読まれないため、保存先は {{path}} です。",
-      "homeConfigUnavailable": "ホームディレクトリを特定できなかったため、「成果物ディレクトリ」だけは保存されていません。他の項目は保存されています。",
-      "homeConfigUnreadable": "{{path}} を読み込めないため、「成果物ディレクトリ」は有効になっておらず、保存もできません。このファイルを直すか削除してください。ここにある他の項目には影響しません。",
+      "restartNoteNoPath": "設定はホームの設定ファイル（$HOME/.graph-ops/config.json）に保存されます。ホームディレクトリを解決できないため保存先がなく、サーバーは環境変数と組み込みの既定値で動作しています。反映には再起動が必要です。",
+      "homeConfigUnreadable": "{{path}} を読み込めないため、この画面のどの項目も有効になっておらず（表示されている値は環境変数と組み込みの既定値です）、直すまで保存もできません。このファイルを直すか削除してください。",
       "currentlyInEffect": "現在有効な値: {{value}}",
       "storage": {
         "title": "データ保存先",
@@ -395,7 +384,7 @@
         "mysqlUserLabel": "ユーザー名",
         "mysqlPasswordLabel": "パスワード",
         "mysqlPasswordFromEnvHint": "環境変数 \"{{envVar}}\" から読み込まれます（平文では保存されません）。",
-        "mysqlPasswordPlaintextHint": "この値はgraph-config.jsonに平文で保存されます。環境変数から読み込むには \"${ENV_VAR_NAME}\" の形式で入力してください。",
+        "mysqlPasswordPlaintextHint": "この値はホーム設定ファイル（$HOME/.graph-ops/config.json）に平文で保存されます。環境変数から読み込むには \"${ENV_VAR_NAME}\" の形式で入力してください。",
         "mysqlPasswordSavedPlaceholder": "（保存済み）",
         "mysqlPasswordSavedHint": "パスワードは保存済みです。サーバーはこの画面に値を返さないため、変更しない場合は空欄のままにしてください。変更する場合のみ新しい値を入力します。",
         "mysqlRequiredFieldsHint": "MySQLを選択する場合、ホスト・DB名・ユーザー名は必須です。TLSモードが「CA証明書のみ検証」の場合はCA証明書のパスも必須です。",
@@ -419,7 +408,7 @@
         "httpUrlLabel": "エンドポイント URL",
         "httpUrlHint": "プラグイン（HTTP サーバー）のベース URL です。平文の http:// はループバック（localhost / 127.0.0.1 / ::1）の場合だけ使えます。それ以外は https:// を指定してください。",
         "httpTokenLabel": "Bearer トークン",
-        "httpTokenPlaintextHint": "この値は graph-config.json に平文で保存されます。環境変数から読み込むには \"${ENV_VAR_NAME}\" の形式で入力してください。",
+        "httpTokenPlaintextHint": "この値はホーム設定ファイル（$HOME/.graph-ops/config.json）に平文で保存されます。環境変数から読み込むには \"${ENV_VAR_NAME}\" の形式で入力してください。",
         "httpTokenFromEnvHint": "環境変数 \"{{envVar}}\" から読み込まれます（平文では保存されません）。",
         "httpTokenSavedHint": "トークンは保存済みです。サーバーはこの画面に値を返さないため、変更しない場合は空欄のままにしてください。変更する場合のみ新しい値を入力します。",
         "httpTokenRetypeHint": "エンドポイント URL を変更したため、保存済みのトークン（または \"${ENV_VAR}\" 参照）は使えません。新しい URL 用のトークンを入力し直してください。",
@@ -441,24 +430,24 @@
       },
       "extensionsDir": {
         "title": "ノード/ワークフロー設定ディレクトリ",
-        "description": "ノード種別・ワークフロー・レビューゲートの「全体設定」を読み書きするディレクトリです。空欄の場合は既定のディレクトリ（全体設定のディレクトリ、~/.graph-ops）が使われます。"
+        "description": "ノード種別・ワークフロー・レビューゲートの設定を読み書きするディレクトリです。空欄の場合は既定の ~/.graph-ops が使われます。"
       },
       "projects": {
         "title": "プロジェクト管理",
-        "description": "各プロジェクトの名前とローカルパス（Claude Codeを起動するフォルダ・プロジェクト単位設定の保存先）の編集、プロジェクトの削除ができます。",
+        "description": "各プロジェクトの名前とローカルパス（Claude Codeを起動するフォルダ）の編集、プロジェクトの削除ができます。",
         "empty": "プロジェクトがまだありません。",
         "delete": "プロジェクトを削除",
         "nameLabel": "プロジェクト名",
         "localPathLabel": "ローカルパス（この環境）",
-        "localPathHint": "ローカルパスはDBには保存されず、この環境の graph-config.json にだけ保存されます。同じDBを使う他のメンバーには影響しません。空にして保存すると未設定に戻ります。",
+        "localPathHint": "ローカルパスはDBには保存されず、この環境のホーム設定ファイル（$HOME/.graph-ops/config.json）にだけ保存されます。同じDBを使う他のメンバーには影響しません。空にして保存すると未設定に戻ります。",
         "notSet": "未設定",
         "confirmDelete": "プロジェクト「{{name}}」（{{id}}）を削除します。このプロジェクトに属するすべてのチケット・ノード・成果物が完全に削除され、この操作は取り消せません。本当に削除しますか？"
       }
     },
     "labels": {
       "title": "ラベル",
-      "description": "チケットに付けるラベルを、選択中のプロジェクト単位で管理します。変更はすぐに保存され、チームで共有されます。",
-      "selectProject": "プロジェクト単位設定でプロジェクトを選択してください。",
+      "description": "選択したプロジェクトのチケットに付けられるラベルを管理します。変更は即座に保存され、チームで共有されます。",
+      "selectProject": "ラベルを編集するプロジェクトを選択してください。",
       "loading": "読み込み中...",
       "empty": "ラベルはまだありません。",
       "name": "名前",
@@ -474,7 +463,10 @@
       "newColorGroup": "新しいラベルの色",
       "usage": "{{count}}件のチケットで使用中",
       "confirmDelete": "ラベル「{{name}}」を削除しますか？",
-      "confirmDeleteInUse": "ラベル「{{name}}」は{{count}}件のチケットで使用中です。削除すると、すべてのチケットからこのラベルが外れます。削除しますか？"
+      "confirmDeleteInUse": "ラベル「{{name}}」は{{count}}件のチケットで使用中です。削除すると、すべてのチケットからこのラベルが外れます。削除しますか？",
+      "projectLabel": "プロジェクト",
+      "projectPlaceholder": "プロジェクトを選択",
+      "noProjects": "プロジェクトがまだありません。先にプロジェクトを作成してください。"
     }
   },
   "errors": {
@@ -491,7 +483,6 @@
     "CSRF_HEADER_REQUIRED": "セキュリティ上の理由によりリクエストがブロックされました。ページを再読み込みしてから再度お試しください。",
     "MYSQL_PASSWORD_RETYPE_REQUIRED": "保存済みのMySQLパスワードは別の接続先には使用できません。ホスト・ポート・DB名・ユーザー名を変更した場合はパスワードを再入力してください。",
     "HOST_NOT_ALLOWED": "サーバーが応答する対象ではないアドレスへのリクエストのため、ブロックされました。サーバー起動時に表示されるアドレス（既定では localhost）でUIを開いてください。",
-    "INVALID_SETTINGS_SCOPE": "有効なスコープ（プロジェクト単位設定の場合はプロジェクトも）を選択してから編集してください。",
     "CATALOG_CYCLE_DETECTED": "この変更を保存するとノード間で循環依存が発生します。depends_on / loop_back_to の関係を見直してください。",
     "CATALOG_UNKNOWN_REFERENCE": "存在しないノードIDまたはレビューゲートIDが参照されています。",
     "CATALOG_DUPLICATE_NODE_ID": "同じIDのノードが複数存在します。ノードIDは一意にしてください。",
@@ -499,11 +490,8 @@
     "INVALID_MAX_ITERATIONS": "最大イテレーション数は1以上の整数で指定してください。",
     "WORKFLOW_NODES_LOCKED": "ワークフローのノード構成（骨格）はプラグイン既定でのみ定義され、上書きできません。レビューゲートの追加・編集はレビューゲートタブから行ってください。",
     "INVALID_REPORT_TEMPLATE": "レポートテンプレートに必要な構造マーカーが含まれていません。",
-    "PROJECT_LOCAL_PATH_NOT_SET": "このプロジェクトはこの環境でローカルパスが未設定です。「アプリ設定」タブ（全体設定）のプロジェクト管理でローカルパスを設定してください。",
-    "PROJECT_TEAM_ROOT_IS_USER_ROOT": "このプロジェクトの設定の保存先が全体設定の保存先と同じになるため（ローカルパスがホームディレクトリそのもの）、プロジェクト単位設定はありません。全体設定を使うか、ローカルパスをプロジェクト自身のディレクトリに設定してください。",
-    "PROJECT_CREATED_LOCAL_PATH_NOT_SAVED": "プロジェクトはDBに作成されましたが、この環境のローカルパスの保存に失敗しました。作成し直さずに、「アプリ設定」タブ（全体設定）のプロジェクト管理でローカルパスを設定してください。",
-    "APP_SETTINGS_ARTIFACTS_DIR_NOT_SAVED": "「成果物ディレクトリ」以外の項目は保存されました。この項目はホームの設定ファイルに保存されますが、そこへの書き込みに失敗したため、値は以前のままです。書き込めるようにしてから設定し直してください。",
-    "HOME_CONFIG_UNREADABLE": "ホームの設定ファイル（$HOME/.graph-ops/config.json）を読み込めなかったため、「成果物ディレクトリ」は保存されていません（次回起動時にも読み込まれません）。他の項目は保存されています。このファイルを直すか削除してから、設定し直してください。",
+    "PROJECT_CREATED_LOCAL_PATH_NOT_SAVED": "プロジェクトはDBに作成されましたが、この環境のローカルパスの保存に失敗しました。作成し直さずに、「アプリ設定」タブのプロジェクト管理でローカルパスを設定してください。",
+    "HOME_CONFIG_UNREADABLE": "ホームの設定ファイル（$HOME/.graph-ops/config.json）を読めないため、何も保存されていません。次回起動時もこれらの設定は読まれません。ファイルを修復または削除してから保存し直してください。",
     "LABEL_NOT_FOUND": "ラベルが見つかりません。削除されたか、別のプロジェクトのラベルです。",
     "LABEL_NAME_TAKEN": "同じ名前のラベルがすでにあります（大文字小文字は区別しません）。",
     "INVALID_LABEL_NAME": "ラベル名は 1〜50 文字で入力してください。",
@@ -512,7 +500,8 @@
     "REQUEST_BODY_TOO_LARGE": "リクエストのサイズがサーバーの上限を超えています。ファイルや内容を小さくしてから再度お試しください。",
     "ROUTE_NOT_FOUND": "このアドレスはこのサーバーでは提供されなくなりました。保存したリンクやブックマークからではなく、Web UI から開き直してください。",
     "UNKNOWN": "予期しないエラーが発生しました。再度お試しください。",
-    "HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED": "保存済みのトークンは別のエンドポイント URL には使用できません。URL を変更した場合はトークンを再入力してください。"
+    "HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED": "保存済みのトークンは別のエンドポイント URL には使用できません。URL を変更した場合はトークンを再入力してください。",
+    "HOME_CONFIG_UNAVAILABLE": "ホームディレクトリを解決できないため、保存先の設定ファイルがなく、何も保存されていません。設定は $HOME/.graph-ops/config.json と環境変数からのみ読まれます。"
   },
   "labels": {
     "colors": {

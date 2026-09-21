@@ -16,7 +16,7 @@ import {
   MonitorCog,
   Languages
 } from 'lucide-react';
-import { Label, Ticket, TicketDetail, TicketStatus, TicketPriority, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
+import { Label, TicketDetail, TicketGraph, TicketStatus, TicketPriority, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
 import { getStatusMeta, matchesStatusFilter } from './statusMeta';
 import { getPriorityMeta, matchesPriorityFilter } from './priorityMeta';
 import { matchesLabelFilter } from './labelMeta';
@@ -73,6 +73,25 @@ interface ProjectScoped<T> {
 const NO_LABELS: Label[] = [];
 const NO_TICKETS: TicketDetail[] = [];
 
+// How often the dashboard re-reads the ticket list. Unchanged by DFLT-00112
+// (that ticket cut the number of requests per round, not their frequency);
+// named here so the polling tests can advance exactly one round.
+export const POLL_INTERVAL_MS = 15000;
+
+// Rebuilds the ticket state from a list response, carrying each ticket's
+// already-fetched artifacts over by id.
+//
+// GET /api/tickets does not return artifacts at all (DFLT-00112), so
+// dropping this merge would blank the Gherkin/HTML/artifact tabs of an
+// expanded ticket on every poll -- the artifacts would reappear only once
+// that ticket's own detail request resolved. A ticket the response no longer
+// lists simply falls out; a newly listed one starts with no artifacts until
+// it is expanded.
+export function mergeTicketSummaries(prev: TicketDetail[], summaries: TicketGraph[]): TicketDetail[] {
+  const artifactsById = new Map(prev.map(t => [t.id, t.artifacts]));
+  return summaries.map(summary => ({ ...summary, artifacts: artifactsById.get(summary.id) ?? [] }));
+}
+
 export const App: React.FC = () => {
   const { t, i18n } = useTranslation();
   // See src/hooks/useLatest.ts -- keeps fetchTicketsPerPage below
@@ -125,7 +144,10 @@ export const App: React.FC = () => {
   //      current project, supersedes it), as refreshProjectLabels does for
   //      labels. (1) already stops such a response from being *shown*; (3)
   //      stops it from knocking the current project's loaded list back to
-  //      "loading" until the next poll.
+  //      "loading" until the next poll. An expanded ticket's detail
+  //      response (DFLT-00112) only ever replaces a ticket with the same id
+  //      inside the loaded list, so one for a project the user has left
+  //      matches nothing (see fetchTicketDetail).
   //
   // What is NOT promised: that the header follows a switch made in another
   // tab of the same environment. It shows this window's own choice until a
@@ -134,7 +156,7 @@ export const App: React.FC = () => {
   // "Which project is current" has four outcomes, not two, and the UI must
   // not conflate them: still loading, known to be none, known to be one,
   // and "the setting could not be read". The last matters since DFLT-00106
-  // moved the setting into a local graph-config.json, which can now be
+  // moved the setting into the local home config file, which can now be
   // unreadable on its own: offering "create a project" to somebody who
   // already has one is how a shared data source acquires duplicate
   // projects. All four live in one CurrentProjectState, so choosing a
@@ -271,12 +293,16 @@ export const App: React.FC = () => {
     });
   }, [projectLabels]);
 
-  // Pagination -- ticket details (nodes/edges/artifacts) are fetched for
-  // every ticket up front (see fetchAllTickets), so this is purely a
+  // Pagination -- every ticket, on whatever page, is loaded up front with
+  // its nodes and edges (see fetchAllTickets), so this is purely a
   // client-side slice of the already-filtered list, not a server-paged
-  // fetch. Reset to page 1 whenever a filter changes so the user never
+  // fetch. That is also why paging is not what decides what gets loaded:
+  // the dashboard totals and the off-page cards' progress bars read the
+  // graphs of tickets the current page doesn't show.
+  //
+  // Reset to page 1 whenever a filter changes so the user never
   // lands on a stale, now out-of-range page. The page size itself is a
-  // "全体設定" app-setting (GET /api/settings/app); unlike that endpoint's
+  // "アプリ設定" app-setting (GET /api/settings/app); unlike that endpoint's
   // other fields, it takes effect immediately on save (see
   // onPaginationPageSizeChanged below) since it's pure frontend behavior
   // with nothing to restart.
@@ -287,6 +313,14 @@ export const App: React.FC = () => {
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
   // Every completed ticket fetch (startup, the 15s poll, manual refresh,
   // after an edit) also re-fetches the current project's labels.
+  //
+  // This is why a polling round is two requests, not one: GET /api/tickets
+  // and GET /api/projects/{id}/labels. That second one is deliberately kept
+  // (DFLT-00112) -- it is a single request regardless of how many tickets
+  // exist, so it does not reintroduce the per-ticket fan-out the ticket set
+  // out to remove, and it is what makes a teammate's label edits show up
+  // with the regular poll. It follows fetchAllTickets, so it stops with the
+  // polling on a hidden tab too.
   useEffect(() => {
     if (lastFetchedAt) refreshProjectLabels();
   }, [lastFetchedAt, refreshProjectLabels]);
@@ -296,7 +330,42 @@ export const App: React.FC = () => {
   const [isClaudeGlobalOpen, setIsClaudeGlobalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Fetch one project's tickets and their details.
+  // Fetches one ticket's detail (GET /api/tickets/{id}) -- the only response
+  // that carries artifacts -- and replaces that ticket in the list. Called
+  // for the tickets the user has actually expanded, since they are the only
+  // ones whose panel reads ticket.artifacts (see TicketItem.tsx: every use
+  // sits inside its `isExpanded &&` block).
+  //
+  // The replacement is by ticket id inside whatever list is loaded when the
+  // response lands, and leaves that list's project tag alone. A detail that
+  // comes back after the user switched projects therefore matches nothing
+  // in the new project's list and changes nothing: it cannot bring a ticket
+  // of the previous project back under the new header (DFLT-00106).
+  const fetchTicketDetail = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/tickets/${encodeURIComponent(id)}`);
+      if (!res.ok) throw new Error(`GET /api/tickets/${id}: ${res.status}`);
+      const detail: TicketDetail = await res.json();
+      setTicketList(prev =>
+        prev && prev.value.some(t => t.id === detail.id)
+          ? { ...prev, value: prev.value.map(t => (t.id === detail.id ? detail : t)) }
+          : prev
+      );
+    } catch (e) {
+      // Keep whatever the list response gave us for this ticket rather than
+      // dropping it: a failed detail fetch must not make a card disappear.
+      console.error('Failed to load ticket detail', e);
+    }
+  }, []);
+
+  // Fetch one project's ticket list, plus the detail of whichever of its
+  // tickets are expanded.
+  //
+  // DFLT-00112: one round is a single GET /api/tickets (which now carries
+  // every ticket's nodes/edges) plus at most one detail request per expanded
+  // ticket -- it used to be one detail request per *listed* ticket, so 100
+  // tickets meant 101 requests every 15s, each re-sending the full text of
+  // every stored plan and review verdict.
   //
   // projectId is mandatory (DFLT-00106): an empty one means "the current
   // project isn't known yet", and the right answer to that is to fetch
@@ -304,31 +373,42 @@ export const App: React.FC = () => {
   // -- it no longer has one. Showing another project's tickets under this
   // project's header is precisely the bug this replaces.
   //
-  // Only the most recently started run writes anything, and only while its
+  // Only the most recently started run writes the list, and only while its
   // project is still the current one. Tearing down the poll on a switch
   // stops future *timers*, but it cannot recall a request that already
-  // left: this function awaits the list and then one GET /api/tickets/<id>
-  // per ticket, so its in-flight window grows with the list, and an older
-  // run routinely lands after a newer one. The result is tagged with its
-  // project, so a late run for another project could not be shown anyway;
-  // the guard is what stops it from knocking the current project's loaded
-  // list back to "loading" -- and, for two runs of the same project (a
-  // poll and the refresh after an edit), from replacing the newer result
+  // left, and an older run can land after a newer one. The result is tagged
+  // with its project, so a late run for another project could not be shown
+  // anyway; the guard is what stops it from knocking the current project's
+  // loaded list back to "loading" -- and, for two runs of the same project
+  // (a poll and the refresh after an edit), from replacing the newer result
   // with the older. setLastFetchedAt is guarded too because it drives the
   // label refresh and the "last updated" stamp, and setLoading(false)
   // because a superseded run finishing must not clear the spinner the
-  // newest run put up; the newest run clears it itself.
+  // newest run put up; the newest run clears it itself. A superseded run
+  // also skips its detail requests: they would be for a list that is not
+  // the one on screen.
   //
   // The flip side of "only the newest run writes" is that a run must be
   // allowed to finish before another one takes its place, or nothing is
-  // ever written at all. The 15s poll therefore does not start a run while
-  // one for the same project is still in flight (see the list effect
-  // below): on a project whose full fetch takes longer than the interval --
-  // many tickets, or a slow HTTP data source -- each poll used to supersede
-  // the run before it, and the list stayed on "loading" with the spinner
-  // going for good. ticketFetchesInFlightRef counts the runs per project id
-  // for that check; it is per project so that a run left over from the
-  // project the user just switched away from never holds back the new one.
+  // ever written at all. The poll therefore does not start a run while one
+  // for the same project is still in flight (see the list effect below).
+  // DFLT-00112 made a run much cheaper for the browser -- one list request
+  // instead of one per ticket -- but not necessarily faster: the per-ticket
+  // fan-out moved to the server, and against an HTTP data source without a
+  // bulk read GET /api/tickets costs one sequential remote call per ticket
+  // (see ticketGraphs in internal/httpserver/tickets.go, which puts the
+  // crossover with the 15s interval at about 75 tickets at a 200ms RTT).
+  // Past that point each poll used to supersede the run before it, and the
+  // list stayed on "loading" with the spinner going for good.
+  // ticketFetchesInFlightRef counts the runs per project id for that check;
+  // it is per project so that a run left over from the project the user
+  // just switched away from never holds back the new one. A run counts as
+  // in flight until its expanded tickets' details are back too.
+  //
+  // expandedTicketIds is read through a ref because this callback is held by
+  // the polling interval: reading the state directly would freeze whichever
+  // set was expanded when the interval was set up.
+  const expandedTicketIdsRef = useLatest(expandedTicketIds);
   const ticketFetchSeqRef = useRef(0);
   const ticketFetchesInFlightRef = useRef(new Map<string, number>());
   const fetchAllTickets = useCallback(async (projectId: string) => {
@@ -347,22 +427,20 @@ export const App: React.FC = () => {
     setLoading(true);
     try {
       const res = await fetch(`/api/tickets?project_id=${encodeURIComponent(projectId)}`);
-      const ticketSummaries: Ticket[] = await res.json();
-
-      const details = await Promise.all(
-        ticketSummaries.map(async t => {
-          try {
-            const dRes = await fetch(`/api/tickets/${t.id}`);
-            return await dRes.json();
-          } catch {
-            return { ...t, nodes: [], edges: [], artifacts: [] };
-          }
-        })
-      );
+      if (!res.ok) throw new Error(`GET /api/tickets: ${res.status}`);
+      const summaries: TicketGraph[] = await res.json();
 
       if (isSuperseded()) return;
-      setTicketList({ projectId, value: details });
+      // Artifacts are carried over only from this same project's list; a
+      // list tagged with another project has nothing to contribute.
+      setTicketList(prev => ({
+        projectId,
+        value: mergeTicketSummaries(prev?.projectId === projectId ? prev.value : NO_TICKETS, summaries)
+      }));
       setLastFetchedAt(new Date());
+
+      const expanded = summaries.filter(t => expandedTicketIdsRef.current.has(t.id));
+      await Promise.all(expanded.map(t => fetchTicketDetail(t.id)));
     } catch (e) {
       console.error('Failed to load tickets', e);
       // A failed refresh keeps the list it already had for this project. A
@@ -378,7 +456,7 @@ export const App: React.FC = () => {
       else inFlight.delete(projectId);
       if (!isSuperseded()) setLoading(false);
     }
-  }, [currentProjectIdRef]);
+  }, [currentProjectIdRef, expandedTicketIdsRef, fetchTicketDetail]);
 
   // refreshTickets re-fetches whichever project the header is currently
   // showing. It is what every "something changed, reload the list" callback
@@ -415,7 +493,7 @@ export const App: React.FC = () => {
   // deliberately withholds while the answer is unknown, for the same reason
   // -- somebody who does have a project is being invited to create a
   // duplicate, and on a shared data source that duplicate is everybody's.
-  // The read is now a local graph-config.json (DFLT-00106), which can fail
+  // The read is now the local home config file (DFLT-00106), which can fail
   // on its own while the rest of the app is fine, so this is a path users
   // can actually reach.
   //
@@ -457,7 +535,7 @@ export const App: React.FC = () => {
     void refreshProjects();
   };
 
-  // Fetches the "全体設定" app-settings this component needs: how many
+  // Fetches the "アプリ設定" app-settings this component needs: how many
   // tickets to show per page, and the viewer's own display name (myName).
   // Only read once at startup here -- after that, the settings UI applies a
   // change directly via setTicketsPerPage/setMyName (see
@@ -486,9 +564,10 @@ export const App: React.FC = () => {
   }, [fetchTicketsPerPage]);
 
   // The ticket list, keyed on the project the header is showing: fetched
-  // immediately and then polled, since ticket/graph changes happen in an
-  // external terminal the app can't see directly (no more SSE stream to
-  // react to). With no project resolved yet, nothing is fetched at all.
+  // immediately and then polled every POLL_INTERVAL_MS, since ticket/graph
+  // changes happen in an external terminal the app can't see directly (no
+  // more SSE stream to react to). With no project resolved yet, nothing is
+  // fetched at all.
   //
   // This effect is layer 2 ("requests") of the project-scoping comment at
   // the state declarations. Having the poll live in an effect that *depends
@@ -502,26 +581,67 @@ export const App: React.FC = () => {
   // itself) already started. Dropping that response when it comes back is
   // fetchAllTickets' guard (layer 3).
   //
+  // While the tab is in the background nothing is polled at all
+  // (DFLT-00112): a forgotten open tab used to keep hitting the DB -- every
+  // 15s, per tab, for every viewer of a shared backend -- for a dashboard
+  // nobody was looking at. Coming back to the foreground fetches once
+  // immediately (so the view is never up to 15s stale at the moment it
+  // becomes visible again) and restarts the interval from that fetch. The
+  // visibility listener belongs to this effect for the same reason the
+  // interval does: after a switch, becoming visible again must fetch the
+  // new project, not the one the listener was registered for. The one live
+  // timer is a variable of this effect run, so a switch's cleanup and a
+  // hidden tab stop exactly that timer; two intervals would double the
+  // request rate for the rest of the session.
+  //
   // The fetch made on entering the effect (first load, or a switch) always
-  // runs. Only a poll tick is skipped, and only while a run for this same
-  // project is still in flight: otherwise a fetch slower than the interval
-  // would be superseded by the next tick every time and never be shown
-  // (see ticketFetchesInFlightRef). The skipped tick costs nothing -- the
-  // run in flight is already fetching the same thing.
+  // runs, visible or not -- it is what the switch (or the page load) asked
+  // for. A poll tick and the fetch on becoming visible again are skipped
+  // while a run for this same project is still in flight: otherwise a fetch
+  // slower than the interval would be superseded by the next tick every
+  // time and never be shown (see ticketFetchesInFlightRef). The skipped
+  // fetch costs nothing -- the run in flight is already fetching the same
+  // thing, and its result is what the tab will show.
   useEffect(() => {
     const projectId = currentProject?.id ?? '';
-    fetchAllTickets(projectId);
+    void fetchAllTickets(projectId);
     if (!projectId) return;
-    const interval = setInterval(() => {
+
+    const pollOnce = () => {
       if (ticketFetchesInFlightRef.current.has(projectId)) return;
-      fetchAllTickets(projectId);
-    }, 15000);
-    return () => clearInterval(interval);
+      void fetchAllTickets(projectId);
+    };
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const stopPolling = () => {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    const startPolling = () => {
+      stopPolling();
+      timer = setInterval(pollOnce, POLL_INTERVAL_MS);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        stopPolling();
+        return;
+      }
+      pollOnce();
+      startPolling();
+    };
+
+    if (document.visibilityState === 'visible') startPolling();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [currentProject?.id, fetchAllTickets]);
 
   // Consumes the `?newProject=1&workDir=<dir>` query the `graph-engine ui`
   // CLI command (the `/ui` slash command's backend) appends to the root URL
-  // when no project's local path (this environment's graph-config.json
+  // when no project's local path (this environment's home config file
   // projectPaths) covers the current directory: auto-open the project setup
   // dialog for that directory, where the user either creates a new project
   // or picks an existing one from the DB (DFLT-00080). Runs once on mount,
@@ -599,12 +719,18 @@ export const App: React.FC = () => {
   };
 
   const handleToggleExpand = (id: string) => {
+    const isExpanding = !expandedTicketIds.has(id);
     setExpandedTicketIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+    // Artifacts only arrive with a ticket's own detail response, which the
+    // poll now fetches for expanded tickets only -- without this immediate
+    // fetch the panel's Gherkin/HTML/artifact tabs would stay empty until
+    // the next round, i.e. for up to 15 seconds after the click.
+    if (isExpanding) void fetchTicketDetail(id);
   };
 
   // Ticket creation goes through the create-ticket skill (opened in an

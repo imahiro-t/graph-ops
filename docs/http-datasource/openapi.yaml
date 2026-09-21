@@ -10,7 +10,8 @@ info:
     graph-engine (the GraphOps CLI and Web UI server) can store tickets,
     execution graphs, artifacts, projects and labels in it instead of SQLite or
     MySQL. Select it with `dbBackend: "http"` and `httpDataSourceUrl` in
-    graph-config.json.
+    $HOME/.graph-ops/config.json, the one file graph-engine reads settings
+    from, or with the matching environment variables.
 
     Every operation of graph-engine's storage interface (`GraphRepository`,
     32 methods) maps to exactly one request below. The `operationId` of each
@@ -669,14 +670,14 @@ paths:
         Deprecated: graph-engine no longer calls this in normal operation.
 
         The current project is a per-user, per-environment choice, so it has
-        moved out of the data source and into graph-engine's own
-        graph-config.json ("currentProjectId"). Keeping it here made one
+        moved out of the data source and into each user's home config file
+        ($HOME/.graph-ops/config.json, "currentProjectId"). Keeping it here made one
         person's switch change what everyone sharing this data source saw.
 
         Both operations stay in the protocol for compatibility, and GET must
         still be implemented -- it is not a one-off migration call that can be
-        dropped once an upgrade is done. graph-engine calls GET only while an
-        environment's graph-config.json has no currentProjectId of its own:
+        dropped once an upgrade is done. graph-engine calls GET only while a
+        user's home config file has no currentProjectId of its own:
         once on an environment upgrading with a selection to inherit (a
         non-empty answer is written there, which carries that selection over,
         and GET is not called again in that environment), and on each read
@@ -707,7 +708,7 @@ paths:
       deprecated: true
       description: |
         Deprecated: graph-engine never calls this. The current project is
-        saved in graph-engine's own graph-config.json ("currentProjectId").
+        saved in each user's home config file ("currentProjectId").
         See GET /current-project for why, and for the one remaining read.
       requestBody:
         required: true

@@ -24,32 +24,39 @@ func readRawConfig(t *testing.T, path string) map[string]any {
 	return m
 }
 
-func TestSetProjectPath_SavesAndLoadsByProjectID(t *testing.T) {
+// TestSetProjectPath_WritesAndReadsBackTheHomeConfig is completion criterion
+// 5: the read side and the write side must name the same file, or a saved
+// local path silently fails to take effect. A leftover graph-config.json in
+// the working directory is present throughout, to show it is neither written
+// nor consulted.
+func TestSetProjectPath_WritesAndReadsBackTheHomeConfig(t *testing.T) {
 	cwd, home := t.TempDir(), t.TempDir()
-	path, err := SetProjectPath(cwd, home, "proj-aaa", "/home/a/alpha")
+	writeWorkDirConfig(t, cwd, `{"projectPaths": {"proj-aaa": "/work/from-the-repo"}}`)
+
+	path, err := SetProjectPath(home, "proj-aaa", "/home/a/alpha")
 	if err != nil {
 		t.Fatalf("SetProjectPath: %v", err)
+	}
+	if want := HomeConfigPath(home); path != want {
+		t.Errorf("wrote %q, want the home config %q", path, want)
 	}
 	m := readRawConfig(t, path)
 	pp, _ := m["projectPaths"].(map[string]any)
 	if pp["proj-aaa"] != "/home/a/alpha" {
 		t.Fatalf("projectPaths on disk = %v, want proj-aaa -> /home/a/alpha", m["projectPaths"])
 	}
-	cfg, _, err := Load(cwd, home)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	cfg := LoadEffective(cwd, home).Config
 	if got := cfg.ProjectPath("proj-aaa"); got != "/home/a/alpha" {
-		t.Errorf("ProjectPath = %q, want /home/a/alpha", got)
+		t.Errorf("read back ProjectPath = %q, want /home/a/alpha", got)
 	}
 }
 
 func TestSetProjectPath_NormalizesPath(t *testing.T) {
 	cwd, home := t.TempDir(), t.TempDir()
-	if _, err := SetProjectPath(cwd, home, "proj-aaa", "/home/a/alpha/../alpha/"); err != nil {
+	if _, err := SetProjectPath(home, "proj-aaa", "/home/a/alpha/../alpha/"); err != nil {
 		t.Fatalf("SetProjectPath: %v", err)
 	}
-	cfg, _, _ := Load(cwd, home)
+	cfg := LoadEffective(cwd, home).Config
 	if got := cfg.ProjectPaths["proj-aaa"]; got != "/home/a/alpha" {
 		t.Errorf("stored %q, want /home/a/alpha", got)
 	}
@@ -57,22 +64,22 @@ func TestSetProjectPath_NormalizesPath(t *testing.T) {
 
 func TestSetProjectPath_OverwritesAndClears(t *testing.T) {
 	cwd, home := t.TempDir(), t.TempDir()
-	if _, err := SetProjectPath(cwd, home, "proj-aaa", "/home/a/alpha"); err != nil {
+	if _, err := SetProjectPath(home, "proj-aaa", "/home/a/alpha"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := SetProjectPath(cwd, home, "proj-aaa", "/home/a/alpha2"); err != nil {
+	if _, err := SetProjectPath(home, "proj-aaa", "/home/a/alpha2"); err != nil {
 		t.Fatal(err)
 	}
-	cfg, _, _ := Load(cwd, home)
+	cfg := LoadEffective(cwd, home).Config
 	if len(cfg.ProjectPaths) != 1 || cfg.ProjectPaths["proj-aaa"] != "/home/a/alpha2" {
 		t.Fatalf("after overwrite projectPaths = %v", cfg.ProjectPaths)
 	}
 
-	path, err := SetProjectPath(cwd, home, "proj-aaa", "")
+	path, err := SetProjectPath(home, "proj-aaa", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, _, _ = Load(cwd, home)
+	cfg = LoadEffective(cwd, home).Config
 	if _, ok := cfg.ProjectPaths["proj-aaa"]; ok {
 		t.Fatalf("entry should be removed, got %v", cfg.ProjectPaths)
 	}
@@ -85,55 +92,40 @@ func TestSetProjectPath_OverwritesAndClears(t *testing.T) {
 }
 
 func TestSetProjectPath_RejectsRelativePathWithoutWriting(t *testing.T) {
-	cwd, home := t.TempDir(), t.TempDir()
-	_, err := SetProjectPath(cwd, home, "proj-aaa", "relative/path")
+	home := t.TempDir()
+	_, err := SetProjectPath(home, "proj-aaa", "relative/path")
 	var apiErr *domain.APIError
 	if !errors.As(err, &apiErr) || apiErr.Code != domain.ErrCodeValidation {
 		t.Fatalf("expected VALIDATION_ERROR, got %v", err)
 	}
-	for _, p := range CandidatePaths(cwd, home) {
-		if _, statErr := os.Stat(p); statErr == nil {
-			t.Errorf("%s should not have been written", p)
-		}
+	if _, statErr := os.Stat(HomeConfigPath(home)); statErr == nil {
+		t.Error("the home config should not have been written")
 	}
 }
 
 func TestSetProjectPath_PreservesOtherFields(t *testing.T) {
 	cwd, home := t.TempDir(), t.TempDir()
 	orig := FileConfig{DBBackend: "mysql", MySQLHost: "db.example", MySQLUser: "u", MySQLPassword: "${PW}", MyName: "me", PaginationPageSize: 30}
-	if _, err := Save(cwd, home, orig); err != nil {
+	if _, _, err := UpdateHome(home, func(cfg *FileConfig) error {
+		*cfg = orig
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := SetProjectPath(cwd, home, "proj-aaa", "/home/a/alpha"); err != nil {
+	if _, err := SetProjectPath(home, "proj-aaa", "/home/a/alpha"); err != nil {
 		t.Fatal(err)
 	}
-	cfg, _, _ := Load(cwd, home)
+	cfg := LoadEffective(cwd, home).Config
 	if cfg.DBBackend != "mysql" || cfg.MySQLHost != "db.example" || cfg.MySQLUser != "u" || cfg.MySQLPassword != "${PW}" || cfg.MyName != "me" || cfg.PaginationPageSize != 30 {
 		t.Errorf("other fields changed: %+v", cfg)
 	}
 }
 
-func TestUpdate_FnErrorWritesNothing(t *testing.T) {
-	cwd, home := t.TempDir(), t.TempDir()
-	sentinel := errors.New("stop")
-	_, _, err := Update(cwd, home, func(cfg *FileConfig) error {
-		cfg.MyName = "should not be saved"
-		return sentinel
-	})
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("Update err = %v, want sentinel", err)
-	}
-	for _, p := range CandidatePaths(cwd, home) {
-		if _, statErr := os.Stat(p); statErr == nil {
-			t.Errorf("%s should not have been written", p)
-		}
-	}
-}
-
-// TestUpdate_ConcurrentWritersDoNotLoseUpdates is the unit-level guarantee
-// behind the plan review's condition 2: many goroutines each editing a
-// different field through Update must all survive.
-func TestUpdate_ConcurrentWritersDoNotLoseUpdates(t *testing.T) {
+// TestUpdateHome_ConcurrentWritersDoNotLoseUpdates is the unit-level
+// guarantee fileMu exists for: many goroutines each adding a different
+// projectPaths entry through SetProjectPath must all survive, since each call
+// is a load, an in-memory edit and a save of the same file.
+func TestUpdateHome_ConcurrentWritersDoNotLoseUpdates(t *testing.T) {
 	cwd, home := t.TempDir(), t.TempDir()
 	const n = 40
 	var wg sync.WaitGroup
@@ -142,16 +134,13 @@ func TestUpdate_ConcurrentWritersDoNotLoseUpdates(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			id := "proj-" + string(rune('a'+i%26)) + string(rune('a'+i/26))
-			if _, err := SetProjectPath(cwd, home, id, filepath.Join("/work", id)); err != nil {
+			if _, err := SetProjectPath(home, id, filepath.Join("/work", id)); err != nil {
 				t.Errorf("SetProjectPath: %v", err)
 			}
 		}(i)
 	}
 	wg.Wait()
-	cfg, _, err := Load(cwd, home)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := LoadEffective(cwd, home).Config
 	if len(cfg.ProjectPaths) != n {
 		t.Errorf("expected %d entries after concurrent writes, got %d", n, len(cfg.ProjectPaths))
 	}

@@ -16,7 +16,7 @@ Everything GraphOps creates stays on your machine, or in a database you choose:
 
 - Tickets, execution graphs, and artifacts: the SQLite file `~/.graph-ops/graph.db` by default. If you configure MySQL instead, they are stored in the database you specify.
 - Working files for artifacts: `~/.graph-ops/artifacts`.
-- Settings: `graph-config.json`, `~/.graph-ops/config.json`, and `~/.graph-ops/config.yaml`.
+- Settings: `~/.graph-ops/config.json` and `~/.graph-ops/config.yaml`. These are the only files GraphOps reads settings from (environment variables aside); nothing is read out of the directory you start it in.
 - The downloaded `graph-engine` binary: `~/.cache/graph-ops/engine/` (or the directory set in `GRAPH_OPS_ENGINE_DIR`).
 
 ### Network access
@@ -54,7 +54,7 @@ GraphOps が作るデータは、すべてお使いのマシン上か、ご自�
 
 - チケット、実行グラフ、成果物: 既定では SQLite ファイル `~/.graph-ops/graph.db`。MySQL を設定した場合は、指定したデータベース。
 - 成果物用の作業ファイル: `~/.graph-ops/artifacts`
-- 設定: `graph-config.json`、`~/.graph-ops/config.json`、`~/.graph-ops/config.yaml`
+- 設定: `~/.graph-ops/config.json`、`~/.graph-ops/config.yaml`（環境変数を除けば、GraphOps が設定を読み込むのはこの 2 ファイルだけです。起動したディレクトリからは何も読み込みません）
 - ダウンロードした `graph-engine` バイナリ: `~/.cache/graph-ops/engine/`（`GRAPH_OPS_ENGINE_DIR` を設定した場合はそのディレクトリ）
 
 ### ネットワーク通信

@@ -5,7 +5,7 @@
 import React, { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Save, CheckCircle2, Plus, Trash2, Check, X } from 'lucide-react';
-import { SettingsNodeTypeInfo, SettingsScope } from '../../types';
+import { SettingsNodeTypeInfo } from '../../types';
 import { fetchSettingsNodeType, fetchSettingsNodeTypes, saveSettingsNodeType } from '../../lib/settingsApi';
 import { getNodeTypeMeta } from '../../nodeTypeMeta';
 import { errorMessage } from '../../lib/apiError';
@@ -20,13 +20,10 @@ function isValidTypeName(name: string): boolean {
 }
 
 interface Props {
-  scope: SettingsScope;
-  projectId: string;
-  canEdit: boolean;
   onDirtyChange: (dirty: boolean) => void;
 }
 
-export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, onDirtyChange }) => {
+export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const { t } = useTranslation();
   // See src/hooks/useLatest.ts -- keeps loadTypes/loadSelected below
   // insensitive to language changes (F-1).
@@ -49,12 +46,12 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
   const newTypeInputId = useId();
   const tierTextId = useId();
 
-  const isDirty = canEdit && tierText !== savedTierText;
+  const isDirty = tierText !== savedTierText;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
 
   const loadTypes = useCallback(async () => {
     try {
-      const list = await fetchSettingsNodeTypes(tRef.current, scope === 'project' ? projectId : '');
+      const list = await fetchSettingsNodeTypes(tRef.current);
       setTypes(list);
       // Re-select a valid entry whenever the currently-selected type is no
       // longer in the refreshed list -- covers both the initial mount
@@ -69,14 +66,14 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
     } catch (e) {
       setError(errorMessage(e, tRef.current('errors.UNKNOWN')));
     }
-  }, [scope, projectId, tRef]);
+  }, [tRef]);
 
   const loadSelected = useCallback(async (type: string) => {
     if (!type) return;
     setLoading(true);
     setError('');
     try {
-      const res = await fetchSettingsNodeType(tRef.current, scope, projectId, type);
+      const res = await fetchSettingsNodeType(tRef.current, type);
       setTierText(res.tier_text);
       setSavedTierText(res.tier_text);
       setMergedText(res.merged_text);
@@ -85,7 +82,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
     } finally {
       setLoading(false);
     }
-  }, [scope, projectId, tRef]);
+  }, [tRef]);
 
   useEffect(() => { loadTypes(); }, [loadTypes]);
   useEffect(() => { if (selected) loadSelected(selected); }, [selected, loadSelected]);
@@ -94,7 +91,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
     setSaving(true);
     setError('');
     try {
-      const res = await saveSettingsNodeType(t, scope, projectId, selected, tierText);
+      const res = await saveSettingsNodeType(t, selected, tierText);
       setTierText(res.tier_text);
       setSavedTierText(res.tier_text);
       setMergedText(res.merged_text);
@@ -120,7 +117,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
     }
     setError('');
     if (!types.some(info => info.type === name)) {
-      setTypes(prev => [...prev, { type: name, has_default: false, has_user_override: false, has_team_override: false }]);
+      setTypes(prev => [...prev, { type: name, has_default: false, has_user_override: false }]);
     }
     setSelected(name);
     setNewTypeName('');
@@ -142,7 +139,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
   const removeType = async (type: string) => {
     setError('');
     try {
-      await saveSettingsNodeType(t, scope, projectId, type, '');
+      await saveSettingsNodeType(t, type, '');
       if (selected === type) {
         setTierText('');
         setSavedTierText('');
@@ -169,11 +166,11 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
           // `as any` to typecheck (DFLT-00023 M-1), and that cast disabled
           // the one check that would flag a renamed or removed flag on
           // SettingsNodeTypeInfo -- the exact breakage it was silencing.
-          const hasOverride = scope === 'global' ? info.has_user_override : info.has_team_override;
+          const hasOverride = info.has_user_override;
           // A plugin-default type (has_default) can never be fully removed
           // -- only overridden or not -- exactly like レビューゲート's
           // default rows; deleting only ever makes sense for a custom type.
-          const canDelete = canEdit && !info.has_default;
+          const canDelete = !info.has_default;
           return (
             <div
               key={info.type}
@@ -251,7 +248,6 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
           ) : (
             <button
               onClick={() => setIsAddingType(true)}
-              disabled={!canEdit}
               className="w-full px-2 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 rounded text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition border border-slate-200 dark:border-slate-700"
             >
               <Plus className="w-3.5 h-3.5" /> {t('settings.nodeTypes.addType')}
@@ -281,7 +277,6 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
                 id={tierTextId}
                 value={tierText}
                 onChange={e => setTierText(e.target.value)}
-                disabled={!canEdit}
                 placeholder={t('settings.nodeTypes.tierTextPlaceholder')}
                 className="flex-1 min-h-[10rem] w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
               />
@@ -295,7 +290,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ scope, projectId, canEdit, on
               )}
               <button
                 onClick={handleSave}
-                disabled={!canEdit || saving || !isDirty}
+                disabled={saving || !isDirty}
                 className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
               >
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}

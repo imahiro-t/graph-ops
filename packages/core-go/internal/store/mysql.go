@@ -236,7 +236,7 @@ const (
 	MySQLTLSDisabled = "disabled"
 )
 
-// NormalizeMySQLTLSMode maps mode as read from graph-config.json/
+// NormalizeMySQLTLSMode maps mode as read from the home config file/
 // GRAPH_MYSQL_TLS/the settings API to one of the three MySQLTLS* constants:
 // "" (unset) becomes MySQLTLSVerifyFull -- this ticket's whole point is
 // that an existing or new MySQL configuration gets a verified TLS
@@ -750,7 +750,7 @@ func (r *MySQLRepository) CreateEdge(e domain.GraphEdge) (domain.GraphEdge, erro
 
 func (r *MySQLRepository) ListEdgesByTicket(ticketID string) ([]domain.GraphEdge, error) {
 	rows, err := r.db.Query(
-		"SELECT id, ticket_id, from_node_id, to_node_id, `condition`, created_at FROM edges WHERE ticket_id = ? ORDER BY created_at ASC",
+		"SELECT "+mysqlEdgeSelectCols+" FROM edges WHERE ticket_id = ? ORDER BY created_at ASC",
 		ticketID,
 	)
 	if err != nil {
@@ -759,13 +759,19 @@ func (r *MySQLRepository) ListEdgesByTicket(ticketID string) ([]domain.GraphEdge
 	defer rows.Close()
 	out := []domain.GraphEdge{}
 	for rows.Next() {
-		var e domain.GraphEdge
-		if err := rows.Scan(&e.ID, &e.TicketID, &e.FromNodeID, &e.ToNodeID, &e.Condition, &e.CreatedAt); err != nil {
+		e, err := scanEdge(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// ListTicketGraphs implements TicketGraphLister; see that interface's doc
+// comment for the contract.
+func (r *MySQLRepository) ListTicketGraphs(ticketIDs []string) (map[string][]domain.GraphNode, map[string][]domain.GraphEdge, error) {
+	return listTicketGraphs(r.db, mysqlEdgeSelectCols, ticketIDs)
 }
 
 func (r *MySQLRepository) ClearEdgesByTicket(ticketID string) error {

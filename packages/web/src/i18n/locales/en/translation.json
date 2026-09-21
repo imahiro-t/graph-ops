@@ -63,12 +63,12 @@
     "createNew": "New project...",
     "selectFirst": "Create or select a project first",
     "noProjectYet": "No project has been created yet. Create one to start managing tickets.",
-    "loadFailed": "Could not load the current project setting. Check this environment's settings file (graph-config.json) and try again.",
+    "loadFailed": "Could not load the current project setting. Check your home config file (~/.graph-ops/config.json) and try again.",
     "retry": "Retry"
   },
   "createProjectModal": {
     "title": "Create New Project",
-    "description": "A project scopes its own ticket list and ticket/node ID prefix. The local path is saved only in this environment's settings file (graph-config.json), not in the DB.",
+    "description": "A project scopes its own ticket list and ticket/node ID prefix. The local path is saved only in this environment's home config file ($HOME/.graph-ops/config.json), not in the DB.",
     "nameLabel": "Name *",
     "namePlaceholder": "e.g. Payments Service",
     "prefixLabel": "ID prefix (optional, up to 5 alphanumeric characters)",
@@ -78,7 +78,7 @@
   },
   "projectSetupModal": {
     "title": "Set Up a Project for This Directory",
-    "description": "No project is mapped to {{dir}} in this environment's local settings. Create a new project, or pick an existing one from the DB (for example, one a teammate already created). Either way, the mapping to this directory is saved to this environment's graph-config.json.",
+    "description": "No project is mapped to {{dir}} in this environment's local settings. Create a new project, or pick an existing one from the DB (for example, one a teammate already created). Either way, the mapping to this directory is saved to this environment's home config file ($HOME/.graph-ops/config.json).",
     "modeLabel": "How to set up",
     "modeCreate": "Create new",
     "modeExisting": "Choose an existing project",
@@ -88,7 +88,7 @@
     "overwriteWarning": "This project's local path {{current}} will be replaced with {{next}}.",
     "confirmExisting": "Use this project",
     "createdButLocalPathNotSavedChooseExisting": "Project \"{{name}}\" was created in the DB, but saving its local path for this environment failed. Creating it again would duplicate the project, so choose \"{{name}}\" in the list below and press \"Use this project\" to set its local path.",
-    "createdButLocalPathNotSavedUseSettings": "Project \"{{name}}\" was created in the DB, but saving its local path for this environment failed. Creating it again would duplicate the project, so instead set its local path under Project Management in the App Settings tab (Global Settings)."
+    "createdButLocalPathNotSavedUseSettings": "Project \"{{name}}\" was created in the DB, but saving its local path for this environment failed. Creating it again would duplicate the project, so instead set its local path under Project Management in the App Settings tab."
   },
   "createModal": {
     "title": "Create New Ticket",
@@ -261,15 +261,6 @@
   },
   "settings": {
     "modalTitle": "Settings",
-    "scope": {
-      "label": "Scope",
-      "global": "Global Settings",
-      "project": "Project Settings",
-      "projectLabel": "Project",
-      "projectPlaceholder": "Select a project",
-      "noProjectSelected": "No project is selected in the app. Select a project from the switcher first to edit project-scoped settings.",
-      "localPathNotSet": "This project has no local path in this environment, so its project settings cannot be read or written. Set its local path under Project Management in the App Settings tab (Global Settings)."
-    },
     "tabs": {
       "nodeTypes": "Node Types",
       "reviewGates": "Review Gates",
@@ -294,18 +285,18 @@
     },
     "nodeTypes": {
       "listTitle": "Node Types",
-      "overrideBadge": "Overridden in this scope",
-      "mergedPreviewLabel": "Merged preview (what an agent actually sees)",
-      "tierTextLabel": "Override in this scope",
-      "tierTextPlaceholder": "Add instructions appended after the inherited content for this scope...",
-      "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the layer below.",
+      "overrideBadge": "Overridden",
+      "mergedPreviewLabel": "Merged preview (plugin default + your override; a team tier is not included)",
+      "tierTextLabel": "Your override",
+      "tierTextPlaceholder": "Add instructions appended after the inherited content...",
+      "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the plugin default.",
       "addType": "Add Node Type",
       "newTypePlaceholder": "e.g. custom_lint",
       "newTypeLabel": "New node type name",
       "invalidTypeName": "Enter a name with no \"/\", \"\\\", \".\" or \"..\".",
       "deleteType": "Delete this node type's override",
       "defaultBadge": "Default",
-      "defaultBadgeHint": "This is a plugin-default node type that hasn't been overridden in this scope. Edit the text below to override it.",
+      "defaultBadgeHint": "This is a plugin-default node type you have not overridden. Edit the text below to override it.",
       "cannotDeleteDefaultHint": "This is a plugin-default node type -- it can't be removed, only overridden (or left as-is)."
     },
     "reviewGates": {
@@ -319,11 +310,11 @@
       "enabledLabel": "Enabled",
       "deleteGate": "Delete",
       "defaultBadge": "Default",
-      "defaultBadgeHint": "This is a plugin-default review gate that hasn't been overridden in this scope. Edit any field to override it.",
-      "cannotDeleteDefaultHint": "This is a plugin default, not an override in this scope -- there's nothing to remove. Edit a field first to override it, then it can be deleted.",
+      "defaultBadgeHint": "This is a plugin-default review gate you have not overridden. Edit any field to override it.",
+      "cannotDeleteDefaultHint": "This is a plugin default, not one of your overrides -- there's nothing to remove. Edit a field first to override it, then it can be deleted.",
       "cannotRenameDefaultHint": "This is a plugin-default review gate -- its name can't be changed. The name stays tied to the locale so translated names keep showing up when the locale is switched.",
-      "tableEmpty": "No review gates defined in this scope yet.",
-      "mergedPreviewLabel": "Merged preview (what an agent actually sees)",
+      "tableEmpty": "No review gates defined yet.",
+      "mergedPreviewLabel": "Merged preview (plugin default + your override; a team tier is not included)",
       "mergedCriteriaLabel": "Merged criteria",
       "mergedMaxIterationsLabel": "Merged max iterations",
       "mergedEnabledLabel": "Merged enabled",
@@ -331,11 +322,11 @@
     },
     "skills": {
       "listTitle": "Skills",
-      "overrideBadge": "Overridden in this scope",
-      "mergedPreviewLabel": "Merged preview (what an agent actually sees)",
-      "tierTextLabel": "Override in this scope",
-      "tierTextPlaceholder": "Add supplementary instructions appended after the inherited content for this scope...",
-      "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the layer below.",
+      "overrideBadge": "Overridden",
+      "mergedPreviewLabel": "Merged preview (plugin default + your override; a team tier is not included)",
+      "tierTextLabel": "Your override",
+      "tierTextPlaceholder": "Add supplementary instructions appended after the inherited content...",
+      "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the plugin default.",
       "emptyMergedHint": "This skill has no supplementary instructions in effect.",
       "names": {
         "createTicket": "create-ticket",
@@ -345,11 +336,11 @@
       }
     },
     "reportTemplate": {
-      "intro": "The fixed HTML template used for report artifacts. Saving replaces the whole template (it does not append). Leaving it empty falls back to the layer below (team override, then user override, then the plugin default).",
-      "tierTextLabel": "Override in this scope (full HTML)",
+      "intro": "The fixed HTML template used for report artifacts. Saving replaces the whole template (it does not append). Leaving it empty falls back to the plugin default. A team tier configured with teamExtensionsDir is neither edited nor previewed on this screen, and it outranks this override for agents.",
+      "tierTextLabel": "Your override (full HTML)",
       "tierTextPlaceholder": "Paste a full replacement HTML template (see `get-report-template` for the fixed structure)...",
-      "mergedPreviewLabel": "Merged preview (the HTML source an agent actually fills in)",
-      "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the layer below."
+      "mergedPreviewLabel": "Merged preview of the HTML source (plugin default + your override; a team tier is not included)",
+      "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the plugin default."
     },
     "templates": {
       "listTitle": "Templates",
@@ -360,25 +351,23 @@
       }
     },
     "planTemplate": {
-      "intro": "The Markdown template the plan node's agent fills in. The agent uses its headings exactly as written. Saving replaces the whole template (it does not append). The content is not checked, so you can write any Markdown. Leaving it empty falls back to the layer below (team override, then user override, then the plugin default).",
-      "tierTextLabel": "Override in this scope (full Markdown)",
+      "intro": "The Markdown template the plan node's agent fills in. The agent uses its headings exactly as written. Saving replaces the whole template (it does not append). The content is not checked, so you can write any Markdown. Leaving it empty falls back to the plugin default. A team tier configured with teamExtensionsDir is neither edited nor previewed on this screen, and it outranks this override for agents.",
+      "tierTextLabel": "Your override (full Markdown)",
       "tierTextPlaceholder": "Write a full replacement plan template (see `get-plan-template` for the template currently in use)...",
-      "mergedPreviewLabel": "Merged preview (the plan template an agent actually uses)",
-      "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the layer below."
+      "mergedPreviewLabel": "Merged preview of the plan template (plugin default + your override; a team tier is not included)",
+      "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the plugin default."
     },
     "reviewTemplate": {
-      "intro": "The Markdown template the review and review_gate nodes' agents use to write their verdicts. The agent uses its headings and verdict words exactly as written. Saving replaces the whole template (it does not append). The content is not checked, so you can write any Markdown. Leaving it empty falls back to the layer below (team override, then user override, then the plugin default).",
-      "tierTextLabel": "Override in this scope (full Markdown)",
+      "intro": "The Markdown template the review and review_gate nodes' agents use to write their verdicts. The agent uses its headings and verdict words exactly as written. Saving replaces the whole template (it does not append). The content is not checked, so you can write any Markdown. Leaving it empty falls back to the plugin default. A team tier configured with teamExtensionsDir is neither edited nor previewed on this screen, and it outranks this override for agents.",
+      "tierTextLabel": "Your override (full Markdown)",
       "tierTextPlaceholder": "Write a full replacement review template (see `get-review-template` for the template currently in use)...",
-      "mergedPreviewLabel": "Merged preview (the review template an agent actually uses)",
-      "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the layer below."
+      "mergedPreviewLabel": "Merged preview of the review template (plugin default + your override; a team tier is not included)",
+      "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the plugin default."
     },
     "appSettings": {
-      "globalOnly": "This setting can only be edited in Global Settings. Switch the scope above to \"Global Settings\".",
       "restartNote": "Changes here take effect the next time the server starts (saved to: {{path}}).",
-      "homeOnlyNote": "\"Artifacts directory\" is never read from the working directory's graph-config.json, so it is saved to {{path}} instead.",
-      "homeConfigUnavailable": "The home directory could not be resolved, so \"Artifacts directory\" alone was not saved. Every other setting was.",
-      "homeConfigUnreadable": "{{path}} could not be read, so \"Artifacts directory\" is not in effect and cannot be saved. Repair or delete that file; every other setting here is unaffected.",
+      "restartNoteNoPath": "Settings are saved to your home config file ($HOME/.graph-ops/config.json). Your home directory could not be resolved, so there is nowhere to save them and the server is running on environment variables and built-in defaults. They take effect after a restart.",
+      "homeConfigUnreadable": "{{path}} could not be read, so none of the settings on this page are in effect -- the values shown come from environment variables and built-in defaults -- and saving here fails until it is fixed. Repair or delete that file.",
       "currentlyInEffect": "Currently in effect: {{value}}",
       "storage": {
         "title": "Data Storage",
@@ -395,7 +384,7 @@
         "mysqlUserLabel": "User",
         "mysqlPasswordLabel": "Password",
         "mysqlPasswordFromEnvHint": "Loaded from the environment variable \"{{envVar}}\" (not stored in plaintext).",
-        "mysqlPasswordPlaintextHint": "This value is stored in plaintext in graph-config.json. To load it from an environment variable instead, enter it as \"${ENV_VAR_NAME}\".",
+        "mysqlPasswordPlaintextHint": "This value is stored in plaintext in your home config file ($HOME/.graph-ops/config.json). To load it from an environment variable instead, enter it as \"${ENV_VAR_NAME}\".",
         "mysqlPasswordSavedPlaceholder": "(saved)",
         "mysqlPasswordSavedHint": "A password is already saved. The server never sends it back to this screen, so leave this field empty to keep it, or type a new value to replace it.",
         "mysqlRequiredFieldsHint": "Host, database name and user are required when MySQL is selected. The CA certificate path is also required when the TLS mode is \"Verify CA only\".",
@@ -419,7 +408,7 @@
         "httpUrlLabel": "Endpoint URL",
         "httpUrlHint": "The base URL of the plugin (an HTTP server). Plaintext http:// is only allowed for a loopback address (localhost / 127.0.0.1 / ::1); use https:// for anything else.",
         "httpTokenLabel": "Bearer token",
-        "httpTokenPlaintextHint": "This value is stored in plaintext in graph-config.json. To load it from an environment variable instead, enter it as \"${ENV_VAR_NAME}\".",
+        "httpTokenPlaintextHint": "This value is stored in plaintext in your home config file ($HOME/.graph-ops/config.json). To load it from an environment variable instead, enter it as \"${ENV_VAR_NAME}\".",
         "httpTokenFromEnvHint": "Loaded from the environment variable \"{{envVar}}\" (not stored in plaintext).",
         "httpTokenSavedHint": "A token is already saved. The server never sends it back to this screen, so leave this field empty to keep it, or type a new value to replace it.",
         "httpTokenRetypeHint": "You have changed the endpoint URL, so the saved token (or \"${ENV_VAR}\" reference) can no longer be used. Enter the token for the new URL.",
@@ -441,24 +430,24 @@
       },
       "extensionsDir": {
         "title": "Node/Workflow Config Directory",
-        "description": "The directory the \"Global Settings\" node types/workflow/review gates are read from and written to. Leave blank to use the default directory (the global settings directory, ~/.graph-ops)."
+        "description": "The directory your node types/workflow/review gates are read from and written to. Leave blank to use the default, ~/.graph-ops."
       },
       "projects": {
         "title": "Project Management",
-        "description": "Edit each project's name and local path (where Claude Code is launched and project settings are stored), or delete a project.",
+        "description": "Edit each project's name and local path (the folder Claude Code is launched in), or delete a project.",
         "empty": "No projects yet.",
         "delete": "Delete project",
         "nameLabel": "Project name",
         "localPathLabel": "Local path (this environment)",
-        "localPathHint": "The local path is not stored in the DB -- only in this environment's graph-config.json -- so it never affects teammates sharing the same DB. Save it empty to unset it.",
+        "localPathHint": "The local path is not stored in the DB -- only in this environment's home config file ($HOME/.graph-ops/config.json) -- so it never affects teammates sharing the same DB. Save it empty to unset it.",
         "notSet": "Not set",
         "confirmDelete": "This will delete project \"{{name}}\" ({{id}}). Every ticket, node, and artifact under this project will be permanently deleted, and this action cannot be undone. Are you sure you want to delete it?"
       }
     },
     "labels": {
       "title": "Labels",
-      "description": "Manage the labels tickets can carry, per selected project. Changes are saved immediately and shared with your team.",
-      "selectProject": "Select a project under Project settings.",
+      "description": "Manage the labels tickets can carry, for the selected project. Changes are saved immediately and shared with your team.",
+      "selectProject": "Select a project to edit its labels.",
       "loading": "Loading...",
       "empty": "No labels yet.",
       "name": "Name",
@@ -474,7 +463,10 @@
       "newColorGroup": "Color of the new label",
       "usage": "Tickets using it: {{count}}",
       "confirmDelete": "Delete the label \"{{name}}\"?",
-      "confirmDeleteInUse": "The label \"{{name}}\" is in use on {{count}} ticket(s). Deleting it removes it from all of them. Delete it?"
+      "confirmDeleteInUse": "The label \"{{name}}\" is in use on {{count}} ticket(s). Deleting it removes it from all of them. Delete it?",
+      "projectLabel": "Project",
+      "projectPlaceholder": "Select a project",
+      "noProjects": "There are no projects yet. Create one before adding labels."
     }
   },
   "errors": {
@@ -491,7 +483,6 @@
     "CSRF_HEADER_REQUIRED": "The request was blocked for security reasons. Please reload the page and try again.",
     "MYSQL_PASSWORD_RETYPE_REQUIRED": "The saved MySQL password cannot be used for a different connection. Enter the password again after changing the host, port, database name or user.",
     "HOST_NOT_ALLOWED": "The request was blocked because this address is not one the server answers to. Open the UI at the address the server prints on startup (localhost by default).",
-    "INVALID_SETTINGS_SCOPE": "Select a valid scope (and project, for project settings) before editing.",
     "CATALOG_CYCLE_DETECTED": "This change would create a circular dependency between nodes. Please fix the depends_on/loop_back_to relationships.",
     "CATALOG_UNKNOWN_REFERENCE": "This change references a node ID or review gate ID that doesn't exist.",
     "CATALOG_DUPLICATE_NODE_ID": "Two nodes have the same ID. Node IDs must be unique.",
@@ -499,11 +490,8 @@
     "INVALID_MAX_ITERATIONS": "Max iterations must be an integer of 1 or greater.",
     "WORKFLOW_NODES_LOCKED": "The workflow's node structure (skeleton) is defined by the plugin default only and can't be overridden. Add or edit review gates from the Review Gates tab instead.",
     "INVALID_REPORT_TEMPLATE": "The report template is missing required structural markers.",
-    "PROJECT_LOCAL_PATH_NOT_SET": "This project has no local path in this environment. Set its local path under Project Management in the App Settings tab (Global Settings).",
-    "PROJECT_TEAM_ROOT_IS_USER_ROOT": "This project's settings directory would be the same as the Global Settings directory (its local path is your home directory), so it has no project settings. Use Global Settings, or set the local path to the project's own directory.",
-    "PROJECT_CREATED_LOCAL_PATH_NOT_SAVED": "The project was created in the DB, but saving its local path for this environment failed. Do not create it again; set its local path under Project Management in the App Settings tab (Global Settings) instead.",
-    "APP_SETTINGS_ARTIFACTS_DIR_NOT_SAVED": "Every setting except \"Artifacts directory\" was saved. That one is kept in your home config file and could not be written there, so it still holds its previous value \u2014 set it again once the file is writable.",
-    "HOME_CONFIG_UNREADABLE": "Your home config file ($HOME/.graph-ops/config.json) could not be read, so \"Artifacts directory\" was not saved and will not be read at the next startup either. Every other setting was saved. Repair or delete that file, then set it again.",
+    "PROJECT_CREATED_LOCAL_PATH_NOT_SAVED": "The project was created in the DB, but saving its local path for this environment failed. Do not create it again; set its local path under Project Management in the App Settings tab instead.",
+    "HOME_CONFIG_UNREADABLE": "Your home config file ($HOME/.graph-ops/config.json) could not be read, so nothing was saved — and none of these settings will be read at the next startup either. Repair or delete that file, then save again.",
     "LABEL_NOT_FOUND": "Label not found. It was deleted or belongs to another project.",
     "LABEL_NAME_TAKEN": "A label with the same name already exists (case-insensitive).",
     "INVALID_LABEL_NAME": "Label names must be 1 to 50 characters.",
@@ -512,7 +500,8 @@
     "REQUEST_BODY_TOO_LARGE": "The request was too large for the server to accept. Try again with a smaller file or less content.",
     "ROUTE_NOT_FOUND": "That address is no longer served by this server. Open what you were looking for from the Web UI rather than from a saved link or bookmark.",
     "UNKNOWN": "An unexpected error occurred. Please try again.",
-    "HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED": "The saved token cannot be used for a different endpoint URL. Enter the token again after changing the URL."
+    "HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED": "The saved token cannot be used for a different endpoint URL. Enter the token again after changing the URL.",
+    "HOME_CONFIG_UNAVAILABLE": "Your home directory could not be resolved, so there is no config file to save to and nothing was saved. Settings are only ever read from $HOME/.graph-ops/config.json and environment variables."
   },
   "labels": {
     "colors": {

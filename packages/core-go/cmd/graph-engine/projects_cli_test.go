@@ -9,9 +9,11 @@ import (
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 )
 
-// sandboxRC is a runtimeConfig whose graph-config.json lookup (WorkDir, then
-// HomeDir) is confined to fresh temp dirs, for commands that write the local
-// settings file (create-project's projectPaths, use-project's currentProjectId).
+// sandboxRC is a runtimeConfig whose home config file is confined to a fresh
+// temp dir, for commands that write it (create-project's projectPaths,
+// use-project's currentProjectId). WorkDir is a temp dir too, so a command
+// that looks at the working directory (create-ticket's project resolution,
+// the leftover graph-config.json warning) never sees the repository.
 func sandboxRC(t *testing.T) runtimeConfig {
 	t.Helper()
 	return runtimeConfig{WorkDir: t.TempDir(), HomeDir: t.TempDir()}
@@ -19,29 +21,29 @@ func sandboxRC(t *testing.T) runtimeConfig {
 
 func savedProjectPaths(t *testing.T, rc runtimeConfig) map[string]string {
 	t.Helper()
-	cfg, _, err := runtimeconfig.Load(rc.WorkDir, rc.HomeDir)
+	cfg, err := runtimeconfig.LoadHomeConfig(rc.HomeDir)
 	if err != nil {
-		t.Fatalf("runtimeconfig.Load: %v", err)
+		t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 	}
 	return cfg.ProjectPaths
 }
 
-// savedCurrentProjectID returns graph-config.json's currentProjectId as
+// savedCurrentProjectID returns the home config file's currentProjectId as
 // stored: nil when the key is absent ("never set here, inherit from the data
 // source once"), otherwise a pointer to the value -- including "", which
 // means "deliberately deselected" (DFLT-00106).
 func savedCurrentProjectID(t *testing.T, rc runtimeConfig) *string {
 	t.Helper()
-	cfg, _, err := runtimeconfig.Load(rc.WorkDir, rc.HomeDir)
+	cfg, err := runtimeconfig.LoadHomeConfig(rc.HomeDir)
 	if err != nil {
-		t.Fatalf("runtimeconfig.Load: %v", err)
+		t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 	}
 	return cfg.CurrentProjectID
 }
 
 // TestCmdCreateProject_DefaultsWorkdirAndAutoPrefix covers create-project
 // with no --workdir/--prefix: the local path defaults to the cwd
-// (rc.WorkDir) and is saved to graph-config.json's projectPaths, not the DB,
+// (rc.WorkDir) and is saved to the home config's projectPaths, not the DB,
 // and prefix is auto-derived from the name.
 func TestCmdCreateProject_DefaultsWorkdirAndAutoPrefix(t *testing.T) {
 	repo := newTestRepo(t)
@@ -96,7 +98,7 @@ func TestCmdCreateProject_RelativeWorkdirResolvedAgainstCwd(t *testing.T) {
 	skipOnWindows(t)
 	repo := newTestRepo(t)
 	rc := runtimeConfig{WorkDir: "/work", HomeDir: t.TempDir()}
-	// WorkDir "/work" does not exist, so graph-config.json resolves under HomeDir.
+	// WorkDir "/work" does not exist; the config file is under HomeDir either way.
 
 	captureStdout(t, func() {
 		if err := cmdCreateProject(repo, rc, []string{"Eta", "--workdir", "eta/../eta2"}); err != nil {
@@ -117,7 +119,7 @@ func TestCmdCreateProject_RelativeWorkdirResolvedAgainstCwd(t *testing.T) {
 // an explicit --project flag.
 //
 // Since DFLT-00106 the selection goes to this environment's
-// graph-config.json rather than the DB's app_state, so the assertion is on
+// home config file rather than the DB's app_state, so the assertion is on
 // the settings file -- and on the DB row NOT moving, which is what keeps a
 // colleague on the same shared data source out of it.
 func TestCmdUseProject_SetsCurrentProject(t *testing.T) {
@@ -139,7 +141,7 @@ func TestCmdUseProject_SetsCurrentProject(t *testing.T) {
 		}
 	})
 	if cur := savedCurrentProjectID(t, rc); cur == nil || *cur != proj.ID {
-		t.Fatalf("expected graph-config.json's currentProjectId to be %q, got %v", proj.ID, cur)
+		t.Fatalf("expected the home config's currentProjectId to be %q, got %v", proj.ID, cur)
 	}
 	if cur, err := repo.GetCurrentProjectID(); err != nil || cur != "" {
 		t.Fatalf("use-project must not write the shared data source, got %q (err=%v)", cur, err)
@@ -163,7 +165,7 @@ func TestCmdUseProject_UnknownProjectKeepsSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	if err := currentproject.Set(rc.WorkDir, rc.HomeDir, proj.ID); err != nil {
+	if err := currentproject.Set(rc.HomeDir, proj.ID); err != nil {
 		t.Fatalf("currentproject.Set: %v", err)
 	}
 
@@ -177,7 +179,7 @@ func TestCmdUseProject_UnknownProjectKeepsSelection(t *testing.T) {
 
 // TestCmdUseProject_DoesNotAffectAnotherEnvironment is DFLT-00106's headline
 // completion criterion at the CLI level: two environments (two
-// graph-config.json files) on ONE data source, one of them running
+// home config files) on ONE data source, one of them running
 // use-project, and the other's `create-ticket` without --project still
 // landing in its own project. Before this, both read the same app_state row.
 func TestCmdUseProject_DoesNotAffectAnotherEnvironment(t *testing.T) {
@@ -193,7 +195,7 @@ func TestCmdUseProject_DoesNotAffectAnotherEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	if err := currentproject.Set(envB.WorkDir, envB.HomeDir, beta.ID); err != nil {
+	if err := currentproject.Set(envB.HomeDir, beta.ID); err != nil {
 		t.Fatalf("currentproject.Set: %v", err)
 	}
 

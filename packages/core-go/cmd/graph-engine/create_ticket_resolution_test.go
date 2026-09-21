@@ -5,7 +5,7 @@ package main
 // test names the Gherkin rule/scenario (art-0a57c869) it covers.
 //
 // Since DFLT-00080 a project's directory is its local path in this
-// environment's graph-config.json (projectPaths), not a DB column, so the
+// environment's home config file (projectPaths), not a DB column, so the
 // tests keep the paths in standardProjects.paths and hand that map to
 // create-ticket as runtimeConfig.ProjectPaths.
 
@@ -29,7 +29,7 @@ import (
 // to produce (ListProjects erroring).
 //
 // Since DFLT-00106 it no longer needs to override GetCurrentProjectID: the
-// current project is this environment's graph-config.json setting, so a
+// current project is this environment's home config setting, so a
 // state the DB refuses to hold (a dangling id) is now simply written to the
 // sandboxed settings file -- see standardProjects.setCurrentID.
 type resolutionStubRepo struct {
@@ -54,7 +54,7 @@ type standardProjects struct {
 	// paths is the environment's projectPaths: real project ID -> local path.
 	paths map[string]string
 	// home is this environment's sandboxed home directory, i.e. where its
-	// graph-config.json (and with it currentProjectId, DFLT-00106) lives.
+	// home config file (and with it currentProjectId, DFLT-00106) lives.
 	// Every runCreateTicket call passes it as rc.HomeDir, so no test can
 	// reach the real one.
 	home string
@@ -81,7 +81,7 @@ func (sp standardProjects) add(t *testing.T, logical, name, localPath string) do
 }
 
 // setCurrent selects a project for this environment the way `use-project`
-// does: in graph-config.json, not in the DB (DFLT-00106).
+// does: in the home config file, not in the DB (DFLT-00106).
 func (sp standardProjects) setCurrent(t *testing.T, logical string) {
 	t.Helper()
 	sp.setCurrentID(t, sp.id(t, logical))
@@ -92,7 +92,7 @@ func (sp standardProjects) setCurrent(t *testing.T, logical string) {
 // somebody else on a shared data source leaves behind here.
 func (sp standardProjects) setCurrentID(t *testing.T, id string) {
 	t.Helper()
-	if err := currentproject.Set(sp.home, sp.home, id); err != nil {
+	if err := currentproject.Set(sp.home, id); err != nil {
 		t.Fatalf("currentproject.Set(%q): %v", id, err)
 	}
 }
@@ -100,7 +100,7 @@ func (sp standardProjects) setCurrentID(t *testing.T, id string) {
 // currentProjectID is what cmdCreateTicket hands resolveCreateTicketProject:
 // this environment's own current project.
 func (sp standardProjects) currentProjectID() func() (string, error) {
-	return func() (string, error) { return currentproject.Get(sp.home, sp.home, sp.repo, nil) }
+	return func() (string, error) { return currentproject.Get(sp.home, sp.repo, nil) }
 }
 
 func (sp standardProjects) ticketCount(t *testing.T, logical string) int {
@@ -145,7 +145,7 @@ type cliResult struct {
 // rc.ProjectPaths = paths and rc.HomeDir = home against repo, capturing
 // stdout and stderr separately. home is always the environment's sandboxed
 // one (standardProjects.home), so the fallback to the current project reads
-// and writes a temp graph-config.json rather than the developer's own.
+// and writes a temp home config file rather than the developer's own.
 func runCreateTicket(t *testing.T, repo store.GraphRepository, paths map[string]string, home, cwd string, args ...string) cliResult {
 	t.Helper()
 	eng := engine.New(repo)
@@ -396,7 +396,7 @@ func TestCreateTicketResolution_LocalPathIsCleaned(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Rule 4: empty / relative local paths are never candidates. SetProjectPath
 // refuses to persist a relative one, so they are injected straight into the
-// projectPaths map (as a hand-edited graph-config.json would look), with the
+// projectPaths map (as a hand-edited home config would look), with the
 // projects themselves added through a ListProjects stub.
 // ---------------------------------------------------------------------------
 
@@ -540,7 +540,7 @@ func TestCreateTicketResolution_ListProjectsErrorDoesNotFallBack(t *testing.T) {
 
 // A dangling currentProjectId is what a project another member deleted from
 // the shared data source leaves behind in this environment's
-// graph-config.json (DFLT-00106) -- nothing stops the file from naming a
+// home config file (DFLT-00106) -- nothing stops the file from naming a
 // project that no longer exists, so it is written directly here.
 func TestCreateTicketResolution_DanglingCurrentProjectFails(t *testing.T) {
 	sp := newStandardResolutionEnv(t)
@@ -731,13 +731,13 @@ func TestCreateTicketResolution_TwoEnvironmentsResolveSameProject(t *testing.T) 
 		paths map[string]string
 		cwd   string
 	}{{"A", envA, "/home/a/shared/src"}, {"B", envB, "/home/b/shared"}} {
-		p, source, err := resolveCreateTicketProject(sp.repo, tc.cwd, tc.paths, sp.currentProjectID())
+		p, source, err := resolveCreateTicketProject(sp.repo, tc.cwd, sp.home, tc.paths, sp.currentProjectID())
 		if err != nil || p == nil || p.ID != shared.ID || source != resolvedFromCurrentDirectory {
 			t.Errorf("env %s: got %+v via %q (err %v), want Shared from the current directory", tc.name, p, source, err)
 		}
 	}
 	// Env A's path means nothing in env B.
-	if p, source, _ := resolveCreateTicketProject(sp.repo, "/home/a/shared", envB, sp.currentProjectID()); p == nil || p.ID == shared.ID || source != resolvedFromCurrentProject {
+	if p, source, _ := resolveCreateTicketProject(sp.repo, "/home/a/shared", sp.home, envB, sp.currentProjectID()); p == nil || p.ID == shared.ID || source != resolvedFromCurrentProject {
 		t.Errorf("env B must not resolve env A's directory to Shared, got %+v via %q", p, source)
 	}
 }

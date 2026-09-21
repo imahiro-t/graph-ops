@@ -8,48 +8,21 @@ import (
 	"github.com/graph-ops/core-go/internal/domain"
 )
 
-// fileMu serializes every in-process read-modify-write of graph-config.json
-// done through Update (DFLT-00080). The HTTP server has more than one
-// writer of the same file -- the project API (PATCH/POST/DELETE
+// fileMu serializes every in-process read-modify-write of the home config
+// file done through UpdateHome (DFLT-00080). The HTTP server has more than
+// one writer of that file -- the project API (PATCH/POST/DELETE
 // /api/projects, which edit projectPaths) and PUT /api/settings/app (which
-// edits the app-settings fields) -- and each one is a Load, an in-memory
-// edit and a Save. Two such requests arriving together would otherwise both
-// load the same old contents and the second Save would silently discard the
-// first one's change. One process-wide mutex is enough: the file is small,
-// writes are rare and user-driven, and every writer in this process goes
-// through Update.
+// edits the app-settings fields) -- and each one is a load, an in-memory edit
+// and a save. Two such requests arriving together would otherwise both load
+// the same old contents and the second save would silently discard the first
+// one's change. One process-wide mutex is enough: the file is small, writes
+// are rare and user-driven, and every writer in this process goes through
+// UpdateHome.
 //
 // It does not (and cannot) protect against a different process -- e.g. the
 // CLI's `create-project` -- writing the same file at the same moment; that
 // is accepted for this local, single-user tool.
 var fileMu sync.Mutex
-
-// Update loads graph-config.json, lets fn edit it in memory, and saves the
-// result -- all while holding fileMu, so concurrent Update calls in this
-// process never lose each other's changes. If fn returns an error nothing
-// is written and that error is returned unchanged (callers use this to
-// reject a request after inspecting the current file). A Load error is
-// returned without calling fn.
-//
-// The returned FileConfig is what was saved (or, on an fn error, the loaded
-// value as fn left it) and the path is the file Load/Save resolved.
-func Update(cwd, home string, fn func(cfg *FileConfig) error) (FileConfig, string, error) {
-	fileMu.Lock()
-	defer fileMu.Unlock()
-
-	cfg, path, err := Load(cwd, home)
-	if err != nil {
-		return FileConfig{}, path, err
-	}
-	if err := fn(&cfg); err != nil {
-		return cfg, path, err
-	}
-	saved, err := Save(cwd, home, cfg)
-	if err != nil {
-		return cfg, saved, err
-	}
-	return cfg, saved, nil
-}
 
 // ProjectPath returns this environment's local path for projectID from
 // ProjectPaths, or "" when none is set (the "未設定" state). A stored value
@@ -78,17 +51,24 @@ func NormalizeProjectPath(path string) (string, error) {
 }
 
 // SetProjectPath stores path as this environment's local path for projectID
-// in graph-config.json's projectPaths (through Update, so every other field
-// in the file is preserved and concurrent in-process writers are
+// in the home config file's projectPaths (through UpdateHome, so every other
+// field in the file is preserved and concurrent in-process writers are
 // serialized). An empty path removes the entry, returning the project to
 // "unset". A non-empty relative path is rejected with a VALIDATION_ERROR
 // before the file is touched. Returns the path of the file written.
-func SetProjectPath(cwd, home, projectID, path string) (string, error) {
+//
+// Writing through UpdateHome is what keeps this in step with the read side:
+// projectPaths is read back out of the same home config file (see
+// LoadEffective), so a save cannot land in a file the next read will not
+// look at -- the "I set the local path and it did not stick" bug that a
+// write aimed at a working-directory file used to produce whenever the two
+// resolved differently (DFLT-00124, completion criterion 5).
+func SetProjectPath(home, projectID, path string) (string, error) {
 	normalized, err := NormalizeProjectPath(path)
 	if err != nil {
-		return ResolvePath(cwd, home), err
+		return HomeConfigPath(home), err
 	}
-	_, written, err := Update(cwd, home, func(cfg *FileConfig) error {
+	_, written, err := UpdateHome(home, func(cfg *FileConfig) error {
 		setProjectPathIn(cfg, projectID, normalized)
 		return nil
 	})
@@ -115,7 +95,7 @@ func setProjectPathIn(cfg *FileConfig, projectID, normalized string) {
 }
 
 // FindProjectIDForDir returns the ID of the project whose local path (from
-// paths, i.e. graph-config.json's projectPaths) is dir itself or an ancestor
+// paths, i.e. the home config file's projectPaths) is dir itself or an ancestor
 // of it, preferring the deepest (longest cleaned) path when several nested
 // ones match. It returns "" when nothing matches. knownIDs is the list of
 // projects that actually exist (in store.ListProjects order); an entry for

@@ -236,7 +236,7 @@ type Ticket struct {
 	// Assignee is the ticket's only notion of assignment: nil means
 	// unassigned, otherwise it holds the display name of whoever last
 	// pressed "assign to me" via PATCH /api/tickets/{id}'s "assignee" field --
-	// that name is whatever was configured as their own "全体設定" MyName
+	// that name is whatever was configured as their own "アプリ設定" MyName
 	// (see runtimeconfig.FileConfig's MyName) at the moment they pressed it,
 	// captured server-side so every viewer sees the same value regardless of
 	// their own local MyName setting.
@@ -354,7 +354,7 @@ type LabelUsage struct {
 // Project scopes a set of tickets to one prefix-based ID namespace. Where
 // the project lives on disk is not part of it (DFLT-00080): that local path
 // differs per team member, so it is kept per environment in
-// graph-config.json's projectPaths (internal/runtimeconfig), not in the
+// the home config file's projectPaths (internal/runtimeconfig), not in the
 // shared DB. Prefix is immutable once created (see
 // internal/project.ResolvePrefix): tickets/nodes already minted under it
 // would otherwise disagree with a later rename. TicketSeq/NodeSeq (the
@@ -429,4 +429,28 @@ type TicketDetail struct {
 	Nodes     []GraphNode `json:"nodes"`
 	Edges     []GraphEdge `json:"edges"`
 	Artifacts []Artifact  `json:"artifacts"`
+}
+
+// TicketGraph is one element of GET /api/tickets (DFLT-00112): a ticket plus
+// its execution graph, and deliberately *without* its artifacts.
+//
+// The Web UI polls that endpoint every 15s. It used to get bare tickets and
+// then fetch TicketDetail for each one, which made a poll "1 + N" requests
+// and re-transferred every text artifact's whole body (plans, review
+// verdicts) even though only an expanded ticket's panel ever reads them.
+// Nodes and edges are narrow rows and the collapsed cards do need them
+// (progress bar, node chips, approval-gate highlight, the dashboard
+// totals), so they moved into the list; artifacts stay behind in
+// GET /api/tickets/{id}, which is now fetched only for expanded tickets.
+//
+// Having no Artifacts field at all -- rather than an empty one -- is what
+// keeps the key out of the JSON entirely, so this response can't quietly
+// start carrying artifact bodies again.
+//
+// Nodes/Edges are always serialized as arrays, never null: the UI reads
+// ticket.nodes.length unconditionally.
+type TicketGraph struct {
+	Ticket
+	Nodes []GraphNode `json:"nodes"`
+	Edges []GraphEdge `json:"edges"`
 }

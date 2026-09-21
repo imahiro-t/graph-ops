@@ -45,22 +45,16 @@ func newTestServer(t *testing.T) (*Server, store.GraphRepository, string) {
 		t.Fatalf("CreateProject: %v", err)
 	}
 	eng := engine.New(repo)
-	// Both WorkDir and HomeDir are sandboxed, so every graph-config.json
-	// candidate path (cwd first, then home -- see
-	// runtimeconfig.CandidatePaths) lands under a temp dir. WorkDir used to
-	// be left empty, which made the cwd candidate the RELATIVE path
-	// "graph-config.json": harmless while only projectPaths was written from
-	// an absolute-HomeDir path, but since DFLT-00106 the handlers write
-	// currentProjectId too, and a test doing so would have created a
-	// graph-config.json inside the repository itself.
-	cfg := Config{ArtifactsDir: t.TempDir(), WorkDir: t.TempDir(), HomeDir: t.TempDir()}
+	// HomeDir is sandboxed so the home config file (projectPaths, and since
+	// DFLT-00106 currentProjectId) is written under a temp dir; the project
+	// gets its own temp local path, standing in for the DB work_dir it had
+	// before DFLT-00080.
+	cfg := Config{ArtifactsDir: t.TempDir(), HomeDir: t.TempDir()}
 	s := New(repo, eng, cfg)
-	// The project gets its own temp local path, standing in for the DB
-	// work_dir it had before DFLT-00080.
-	if _, err := runtimeconfig.SetProjectPath(cfg.WorkDir, cfg.HomeDir, proj.ID, t.TempDir()); err != nil {
+	if _, err := runtimeconfig.SetProjectPath(cfg.HomeDir, proj.ID, t.TempDir()); err != nil {
 		t.Fatalf("SetProjectPath: %v", err)
 	}
-	if err := currentproject.Set(cfg.WorkDir, cfg.HomeDir, proj.ID); err != nil {
+	if err := currentproject.Set(cfg.HomeDir, proj.ID); err != nil {
 		t.Fatalf("currentproject.Set: %v", err)
 	}
 	return s, repo, proj.ID
@@ -74,13 +68,13 @@ func listTicketsPath(projectID string) string {
 	return "/api/tickets?project_id=" + url.QueryEscape(projectID)
 }
 
-// testProjectLocalPath returns projectID's local path in s's graph-config.json,
+// testProjectLocalPath returns projectID's local path in s's home config file,
 // failing the test if none is set.
 func testProjectLocalPath(t *testing.T, s *Server, projectID string) string {
 	t.Helper()
 	p := s.projectLocalPath(projectID)
 	if p == "" {
-		t.Fatalf("project %s has no local path in the test server's graph-config.json", projectID)
+		t.Fatalf("project %s has no local path in the test server's the home config file", projectID)
 	}
 	return p
 }

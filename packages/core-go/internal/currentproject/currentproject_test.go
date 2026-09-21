@@ -1,7 +1,7 @@
 package currentproject
 
 // Tests for DFLT-00106: the current project is a per-environment setting in
-// graph-config.json, inherited once from the data source's app_state row and
+// the home config file ($HOME/.graph-ops/config.json), inherited once from the data source's app_state row and
 // never read from it again.
 
 import (
@@ -35,40 +35,36 @@ func (r *stubRepo) GetCurrentProjectID() (string, error) {
 	return r.id, r.err
 }
 
-// env is one environment's graph-config.json location. Both candidate paths
-// (cwd first, then home) are sandboxed temp dirs, so nothing here can reach
-// the developer's real settings file.
+// env is one environment's home directory. It is a sandboxed temp dir, so
+// nothing here can reach the developer's real settings file.
 type env struct {
-	cwd  string
 	home string
 }
 
 func newEnv(t *testing.T) env {
 	t.Helper()
-	return env{cwd: t.TempDir(), home: t.TempDir()}
+	return env{home: t.TempDir()}
 }
+
+func (e env) path() string { return runtimeconfig.HomeConfigPath(e.home) }
 
 func (e env) stored(t *testing.T) *string {
 	t.Helper()
-	cfg, _, err := runtimeconfig.Load(e.cwd, e.home)
+	cfg, err := runtimeconfig.LoadHomeConfig(e.home)
 	if err != nil {
-		t.Fatalf("runtimeconfig.Load: %v", err)
+		t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 	}
 	return cfg.CurrentProjectID
 }
 
 func (e env) configExists() bool {
-	for _, p := range runtimeconfig.CandidatePaths(e.cwd, e.home) {
-		if _, err := os.Stat(p); err == nil {
-			return true
-		}
-	}
-	return false
+	_, err := os.Stat(e.path())
+	return err == nil
 }
 
 func mustGet(t *testing.T, e env, repo store.GraphRepository) string {
 	t.Helper()
-	id, err := Get(e.cwd, e.home, repo, discardLogger())
+	id, err := Get(e.home, repo, discardLogger())
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -83,7 +79,7 @@ func TestSetAndGet_RoundTrip(t *testing.T) {
 	e := newEnv(t)
 	repo := &stubRepo{id: "proj-from-db"}
 
-	if err := Set(e.cwd, e.home, "proj-alpha"); err != nil {
+	if err := Set(e.home, "proj-alpha"); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 	if got := mustGet(t, e, repo); got != "proj-alpha" {
@@ -94,28 +90,28 @@ func TestSetAndGet_RoundTrip(t *testing.T) {
 	}
 }
 
-// Set must not disturb the rest of graph-config.json -- it goes through
-// runtimeconfig.Update, which is a read-modify-write of the whole file.
+// Set must not disturb the rest of the home config file -- it goes through
+// runtimeconfig.UpdateHome, which is a read-modify-write of the whole file.
 func TestSet_PreservesOtherSettings(t *testing.T) {
 	e := newEnv(t)
-	if _, err := runtimeconfig.SetProjectPath(e.cwd, e.home, "proj-alpha", filepath.Join(t.TempDir(), "alpha")); err != nil {
+	if _, err := runtimeconfig.SetProjectPath(e.home, "proj-alpha", filepath.Join(t.TempDir(), "alpha")); err != nil {
 		t.Fatalf("SetProjectPath: %v", err)
 	}
-	if _, _, err := runtimeconfig.Update(e.cwd, e.home, func(cfg *runtimeconfig.FileConfig) error {
+	if _, _, err := runtimeconfig.UpdateHome(e.home, func(cfg *runtimeconfig.FileConfig) error {
 		cfg.MyName = "山田"
 		cfg.PaginationPageSize = 42
 		return nil
 	}); err != nil {
-		t.Fatalf("Update: %v", err)
+		t.Fatalf("UpdateHome: %v", err)
 	}
 
-	if err := Set(e.cwd, e.home, "proj-beta"); err != nil {
+	if err := Set(e.home, "proj-beta"); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 
-	cfg, _, err := runtimeconfig.Load(e.cwd, e.home)
+	cfg, err := runtimeconfig.LoadHomeConfig(e.home)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("LoadHomeConfig: %v", err)
 	}
 	if cfg.MyName != "山田" || cfg.PaginationPageSize != 42 || len(cfg.ProjectPaths) != 1 {
 		t.Errorf("Set clobbered other settings: %+v", cfg)
@@ -129,10 +125,10 @@ func TestClear_StoresExplicitEmptyRatherThanRemovingTheKey(t *testing.T) {
 	if got := e.stored(t); got != nil {
 		t.Fatalf("precondition: expected no key, got %v", got)
 	}
-	if err := Set(e.cwd, e.home, "proj-alpha"); err != nil {
+	if err := Set(e.home, "proj-alpha"); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	if err := Clear(e.cwd, e.home); err != nil {
+	if err := Clear(e.home); err != nil {
 		t.Fatalf("Clear: %v", err)
 	}
 	got := e.stored(t)
@@ -143,7 +139,7 @@ func TestClear_StoresExplicitEmptyRatherThanRemovingTheKey(t *testing.T) {
 		t.Errorf("stored currentProjectId = %q, want \"\"", *got)
 	}
 	// And it survives a round trip through the JSON file as a present key.
-	raw, err := os.ReadFile(runtimeconfig.ResolvePath(e.cwd, e.home))
+	raw, err := os.ReadFile(e.path())
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -160,7 +156,7 @@ func TestGet_InheritsDataSourceValueExactlyOnce(t *testing.T) {
 		t.Errorf("Get = %q, want the inherited proj-alpha", got)
 	}
 	if got := e.stored(t); got == nil || *got != "proj-alpha" {
-		t.Fatalf("expected the inherited id to be written to graph-config.json, got %v", got)
+		t.Fatalf("expected the inherited id to be written to the home config file, got %v", got)
 	}
 	if repo.calls != 1 {
 		t.Fatalf("expected exactly 1 data source read, got %d", repo.calls)
@@ -176,7 +172,7 @@ func TestGet_InheritsDataSourceValueExactlyOnce(t *testing.T) {
 	}
 }
 
-// Once inherited, a later read must not touch graph-config.json at all --
+// Once inherited, a later read must not touch the home config file at all --
 // not even to rewrite the same bytes. The file's mtime is pinned to a known
 // past instant before the second read, so any write (even an identical one)
 // shows up as a changed mtime.
@@ -189,19 +185,13 @@ func TestGet_SecondReadAfterInheritanceWritesNothing(t *testing.T) {
 	}
 
 	pinned := time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC)
-	before := map[string][]byte{}
-	for _, p := range runtimeconfig.CandidatePaths(e.cwd, e.home) {
-		data, err := os.ReadFile(p)
-		if err != nil {
-			continue
-		}
-		before[p] = data
-		if err := os.Chtimes(p, pinned, pinned); err != nil {
-			t.Fatalf("Chtimes(%s): %v", p, err)
-		}
+	p := e.path()
+	before, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("precondition: the inheritance should have written the home config file: %v", err)
 	}
-	if len(before) == 0 {
-		t.Fatal("precondition: the inheritance should have written graph-config.json")
+	if err := os.Chtimes(p, pinned, pinned); err != nil {
+		t.Fatalf("Chtimes(%s): %v", p, err)
 	}
 
 	if got := mustGet(t, e, repo); got != "proj-alpha" {
@@ -210,24 +200,15 @@ func TestGet_SecondReadAfterInheritanceWritesNothing(t *testing.T) {
 	if repo.calls != 1 {
 		t.Errorf("the data source must not be read again, got %d calls", repo.calls)
 	}
-	for _, p := range runtimeconfig.CandidatePaths(e.cwd, e.home) {
-		info, err := os.Stat(p)
-		prev, existed := before[p]
-		if !existed {
-			if err == nil {
-				t.Errorf("second read created %s", p)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("Stat(%s): %v", p, err)
-		}
-		if !info.ModTime().Equal(pinned) {
-			t.Errorf("second read rewrote %s (mtime %v, want %v)", p, info.ModTime(), pinned)
-		}
-		if data, _ := os.ReadFile(p); !bytes.Equal(data, prev) {
-			t.Errorf("second read changed the contents of %s", p)
-		}
+	info, err := os.Stat(p)
+	if err != nil {
+		t.Fatalf("Stat(%s): %v", p, err)
+	}
+	if !info.ModTime().Equal(pinned) {
+		t.Errorf("second read rewrote %s (mtime %v, want %v)", p, info.ModTime(), pinned)
+	}
+	if data, _ := os.ReadFile(p); !bytes.Equal(data, before) {
+		t.Errorf("second read changed the contents of %s", p)
 	}
 }
 
@@ -241,7 +222,7 @@ func TestGet_EmptyDataSourceValueWritesNothing(t *testing.T) {
 		t.Errorf("Get = %q, want \"\"", got)
 	}
 	if e.configExists() {
-		t.Error("no graph-config.json should have been created")
+		t.Error("no home config file should have been created")
 	}
 	if got := e.stored(t); got != nil {
 		t.Errorf("currentProjectId should still be absent, got %v", got)
@@ -262,7 +243,7 @@ func TestGet_EmptyDataSourceValueWritesNothing(t *testing.T) {
 // stale shared value pushed back onto it.
 func TestGet_ExplicitEmptyBlocksInheritance(t *testing.T) {
 	e := newEnv(t)
-	if err := Clear(e.cwd, e.home); err != nil {
+	if err := Clear(e.home); err != nil {
 		t.Fatalf("Clear: %v", err)
 	}
 	repo := &stubRepo{id: "proj-alpha"}
@@ -282,7 +263,7 @@ func TestGet_DataSourceErrorIsReturned(t *testing.T) {
 	e := newEnv(t)
 	repo := &stubRepo{err: errors.New("boom: app_state unreadable")}
 
-	if _, err := Get(e.cwd, e.home, repo, discardLogger()); err == nil || !strings.Contains(err.Error(), "boom") {
+	if _, err := Get(e.home, repo, discardLogger()); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("expected the data source error to be surfaced, got %v", err)
 	}
 }
@@ -300,7 +281,7 @@ func TestGet_InheritanceSaveFailureWarnsAndStillAnswers(t *testing.T) {
 	e := newEnv(t)
 	// Make the resolved config path unwritable by taking write permission
 	// off the directory it would be created in.
-	dir := filepath.Dir(runtimeconfig.ResolvePath(e.cwd, e.home))
+	dir := filepath.Dir(e.path())
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
@@ -313,7 +294,7 @@ func TestGet_InheritanceSaveFailureWarnsAndStillAnswers(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	repo := &stubRepo{id: "proj-alpha"}
 
-	id, err := Get(e.cwd, e.home, repo, logger)
+	id, err := Get(e.home, repo, logger)
 	if err != nil {
 		t.Fatalf("a failed save must not fail the read: %v", err)
 	}
@@ -326,7 +307,7 @@ func TestGet_InheritanceSaveFailureWarnsAndStillAnswers(t *testing.T) {
 }
 
 // The one-way migration is the kind of thing an operator needs to be able to
-// confirm happened without opening every environment's graph-config.json, so
+// confirm happened without opening every environment's home config file, so
 // a successful inheritance leaves an Info line naming the project and the
 // file it was written to (DFLT-00106, NFR-3). It is emitted exactly once per
 // environment: the second call reads the saved value and never reaches the
@@ -337,7 +318,7 @@ func TestGet_SuccessfulInheritanceLogsOnceAtInfo(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	repo := &stubRepo{id: "proj-alpha"}
 
-	if _, err := Get(e.cwd, e.home, repo, logger); err != nil {
+	if _, err := Get(e.home, repo, logger); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	first := logged.String()
@@ -347,12 +328,12 @@ func TestGet_SuccessfulInheritanceLogsOnceAtInfo(t *testing.T) {
 	if !strings.Contains(first, "proj-alpha") {
 		t.Errorf("the inheritance log must name the project, got: %s", first)
 	}
-	if path := runtimeconfig.ResolvePath(e.cwd, e.home); !strings.Contains(first, path) {
+	if path := e.path(); !strings.Contains(first, path) {
 		t.Errorf("the inheritance log must name the config file %q, got: %s", path, first)
 	}
 
 	logged.Reset()
-	if _, err := Get(e.cwd, e.home, repo, logger); err != nil {
+	if _, err := Get(e.home, repo, logger); err != nil {
 		t.Fatalf("second Get: %v", err)
 	}
 	if strings.Contains(logged.String(), "current_project_inherited") {
@@ -368,7 +349,7 @@ func TestGet_NothingToInheritIsNotLogged(t *testing.T) {
 	var logged bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	if _, err := Get(e.cwd, e.home, &stubRepo{id: ""}, logger); err != nil {
+	if _, err := Get(e.home, &stubRepo{id: ""}, logger); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if strings.Contains(logged.String(), "current_project_inherited") {
@@ -379,7 +360,7 @@ func TestGet_NothingToInheritIsNotLogged(t *testing.T) {
 // A nil logger must not panic -- cmd/graph-engine has no logger to hand in.
 func TestGet_NilLoggerIsAccepted(t *testing.T) {
 	e := newEnv(t)
-	if _, err := Get(e.cwd, e.home, &stubRepo{id: "proj-alpha"}, nil); err != nil {
+	if _, err := Get(e.home, &stubRepo{id: "proj-alpha"}, nil); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 }

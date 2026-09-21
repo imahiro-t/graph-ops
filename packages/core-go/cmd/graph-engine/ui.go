@@ -36,7 +36,7 @@ const (
 //
 //  1. Resolve the current working directory and look it up against every
 //     project's local path as the running server reports it (GET
-//     /api/projects' local_path, i.e. the server's graph-config.json
+//     /api/projects' local_path, i.e. the server's home config file
 //     projectPaths -- DFLT-00080), deepest containing path first.
 //  2. Health-check the UI server (GET /api/health); if it doesn't respond,
 //     start it in the background (this same binary, `serve`, detached) and
@@ -302,10 +302,10 @@ func fetchProjectsViaAPI(baseURL string) ([]uiProject, error) {
 // switchCurrentProjectViaAPI calls the running server's own PUT
 // /api/current-project (rather than writing the selection here), so this
 // write always goes through the one process actually holding the DB
-// connection and the graph-config.json the rest of the running server uses
+// connection and the home config file the rest of the running server uses
 // -- consistent with how the Web UI's own project switcher does it.
 //
-// Since DFLT-00106 the selection is stored in graph-config.json rather than
+// Since DFLT-00106 the selection is stored in the home config file rather than
 // the DB, which makes going through the server more important, not less:
 // this CLI and the `serve` process are two processes writing one file, and
 // runtimeconfig's mutex only serializes writers inside a single process.

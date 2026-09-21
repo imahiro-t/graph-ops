@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -844,15 +845,39 @@ func TestOpen_HTTPRejectsInsecureSettingsBeforeAnyRequest(t *testing.T) {
 	}
 }
 
+// lockedBuffer is an io.Writer a net/http.Server can log into while the test
+// goroutine reads what was written. A bare bytes.Buffer cannot: the server
+// writes from its own connection goroutine, so Write and String race (the
+// race detector reports it, see QA-02/DFLT-00105).
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 func TestOpen_HTTPSVerifiesCertificatesWithoutPlaintextFallback(t *testing.T) {
 	var handlerHits atomic.Int32
-	var serverLog bytes.Buffer
+	serverLog := &lockedBuffer{}
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handlerHits.Add(1)
 		httpdatasourcetest.New("").ServeHTTP(w, r)
 	}))
-	srv.Config.ErrorLog = log.New(&serverLog, "", 0)
+	srv.Config.ErrorLog = log.New(serverLog, "", 0)
 	srv.StartTLS()
+	// httptest.Server.Close is safe to call twice, so this stays as the
+	// unconditional cleanup for the early t.Fatalf paths below; the assertion
+	// on the log calls Close explicitly first.
 	defer srv.Close()
 
 	_, err := Open(Config{Backend: "http", HTTPURL: srv.URL, HTTPToken: "t"})
@@ -862,9 +887,15 @@ func TestOpen_HTTPSVerifiesCertificatesWithoutPlaintextFallback(t *testing.T) {
 	if handlerHits.Load() != 0 {
 		t.Fatalf("the handler was reached %d times; the TLS handshake should have failed first", handlerHits.Load())
 	}
+	// Close before reading the log: it waits for the connection goroutines to
+	// finish, so anything the server was going to log has been logged by now.
+	// Without it the assertion below is timing dependent -- a plaintext retry
+	// still in flight would not have been logged yet, and the check would pass
+	// while having observed nothing.
+	srv.Close()
 	// A plaintext retry against the TLS port would make the server log this.
-	if strings.Contains(serverLog.String(), "HTTP request to an HTTPS server") {
-		t.Fatalf("a plaintext HTTP request was sent after the TLS failure: %s", serverLog.String())
+	if logged := serverLog.String(); strings.Contains(logged, "HTTP request to an HTTPS server") {
+		t.Fatalf("a plaintext HTTP request was sent after the TLS failure: %s", logged)
 	}
 }
 

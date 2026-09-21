@@ -27,9 +27,9 @@ func runInDir(t *testing.T, dir string) {
 	})
 }
 
-// stubHome points os.UserHomeDir() (and therefore both the graph-config.json
-// home candidate and the $HOME/.graph-ops data directory defaults) at a
-// throwaway directory, returning its symlink-resolved path.
+// stubHome points os.UserHomeDir() (and therefore both the home config file
+// and the $HOME/.graph-ops data directory defaults) at a throwaway directory,
+// returning its symlink-resolved path.
 //
 // Every test that calls loadRuntimeConfig must use this. Without it the test
 // reads the developer's real ~/.graph-ops/config.json -- whose dbPath is an
@@ -140,17 +140,32 @@ func skipIfNoUnixPerms(t *testing.T) {
 	}
 }
 
-// writeGraphConfig writes a graph-config.json in dir with the given content,
-// merged with an empty runtimeconfig.FileConfig where fields are omitted if empty.
-func writeGraphConfig(t *testing.T, dir string, cfg runtimeconfig.FileConfig) {
+// writeHomeConfig writes $HOME/.graph-ops/config.json -- the one file
+// loadRuntimeConfig reads -- creating the directory first, since a fresh
+// stubHome has none.
+func writeHomeConfig(t *testing.T, home string, cfg runtimeconfig.FileConfig) string {
 	t.Helper()
-	writeGraphConfigAt(t, filepath.Join(dir, "graph-config.json"), cfg)
+	path := runtimeconfig.HomeConfigPath(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
+	writeGraphConfigAt(t, path, cfg)
+	return path
 }
 
-// writeGraphConfigAt is writeGraphConfig for the home-side candidate, whose
-// file is named config.json and lives in $HOME/.graph-ops rather than being
-// a graph-config.json in a directory (see runtimeconfig.CandidatePaths), so
-// the path has to be given in full.
+// writeStaleWorkDirConfig writes a graph-config.json into dir: the file a
+// cloned repository carries, which nothing reads any more (DFLT-00124). Tests
+// use it to prove exactly that -- either that its contents have no effect, or
+// that its presence produces the one migration warning.
+func writeStaleWorkDirConfig(t *testing.T, dir string, cfg runtimeconfig.FileConfig) string {
+	t.Helper()
+	path := filepath.Join(dir, runtimeconfig.WorkDirConfigFileName)
+	writeGraphConfigAt(t, path, cfg)
+	return path
+}
+
+// writeGraphConfigAt writes one specific config file, whichever of the two it
+// is, so both helpers above share one serialization.
 func writeGraphConfigAt(t *testing.T, path string, cfg runtimeconfig.FileConfig) {
 	t.Helper()
 	raw, err := json.Marshal(cfg)
@@ -163,7 +178,7 @@ func writeGraphConfigAt(t *testing.T, path string, cfg runtimeconfig.FileConfig)
 }
 
 // TestLoadRuntimeConfig_TerminalWorkDir covers the precedence rules for the
-// terminal launch working directory: TERMINAL_WORKDIR env var > graph-config.json
+// terminal launch working directory: TERMINAL_WORKDIR env var > the home config's
 // "workDir" key > fallback to the process's os.Getwd(), mirroring the existing
 // terminalCommand precedence pattern.
 func TestLoadRuntimeConfig_TerminalWorkDir(t *testing.T) {
@@ -202,7 +217,7 @@ func TestLoadRuntimeConfig_TerminalWorkDir(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resolvedDir := tempCwd(t)
-			stubHome(t)
+			home := stubHome(t)
 
 			if tt.envValue != "" {
 				t.Setenv("TERMINAL_WORKDIR", tt.envValue)
@@ -211,7 +226,7 @@ func TestLoadRuntimeConfig_TerminalWorkDir(t *testing.T) {
 			}
 
 			if tt.jsonWorkDir != "" {
-				writeGraphConfig(t, resolvedDir, runtimeconfig.FileConfig{WorkDir: tt.jsonWorkDir})
+				writeHomeConfig(t, home, runtimeconfig.FileConfig{WorkDir: tt.jsonWorkDir})
 			}
 
 			rc, err := loadRuntimeConfig()
@@ -238,12 +253,12 @@ func TestLoadRuntimeConfig_TerminalWorkDir(t *testing.T) {
 // the new workDir/TERMINAL_WORKDIR resolution is independent of the existing
 // terminalCommand precedence logic.
 func TestLoadRuntimeConfig_TerminalWorkDir_DoesNotAffectTerminalCommand(t *testing.T) {
-	resolvedDir := tempCwd(t)
-	stubHome(t)
+	tempCwd(t)
+	home := stubHome(t)
 
 	t.Setenv("TERMINAL_COMMAND", "iterm")
 	t.Setenv("TERMINAL_WORKDIR", "/tmp/target-project")
-	writeGraphConfig(t, resolvedDir, runtimeconfig.FileConfig{
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		TerminalCommand: "kitty",
 		WorkDir:         "/tmp/json-project",
 	})
@@ -262,7 +277,7 @@ func TestLoadRuntimeConfig_TerminalWorkDir_DoesNotAffectTerminalCommand(t *testi
 }
 
 // TestLoadRuntimeConfig_DBBackendDefaultsToSQLite covers the backward-
-// compatibility completion criterion: a graph-config.json with no
+// compatibility completion criterion: a home config with no
 // dbBackend key (the shape every existing installation has) must resolve
 // to "sqlite", not fail or leave the field empty.
 func TestLoadRuntimeConfig_DBBackendDefaultsToSQLite(t *testing.T) {
@@ -283,9 +298,9 @@ func TestLoadRuntimeConfig_DBBackendDefaultsToSQLite(t *testing.T) {
 // unrecognized value must fail loadRuntimeConfig outright, never silently
 // fall back to sqlite.
 func TestLoadRuntimeConfig_UnsupportedDBBackendFailsLoudly(t *testing.T) {
-	resolvedDir := tempCwd(t)
-	stubHome(t)
-	writeGraphConfig(t, resolvedDir, runtimeconfig.FileConfig{DBBackend: "postgres"})
+	tempCwd(t)
+	home := stubHome(t)
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{DBBackend: "postgres"})
 
 	if _, err := loadRuntimeConfig(); err == nil {
 		t.Fatal("expected an error for an unsupported dbBackend value")
@@ -297,10 +312,10 @@ func TestLoadRuntimeConfig_UnsupportedDBBackendFailsLoudly(t *testing.T) {
 // as "${ENV_VAR}" resolves to that variable's real value once dbBackend is
 // "mysql".
 func TestLoadRuntimeConfig_ResolvesMySQLPasswordFromEnv(t *testing.T) {
-	resolvedDir := tempCwd(t)
-	stubHome(t)
+	tempCwd(t)
+	home := stubHome(t)
 	t.Setenv("GRAPH_OPS_TEST_MYSQL_PW", "actual-password")
-	writeGraphConfig(t, resolvedDir, runtimeconfig.FileConfig{
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "db.example.com", MySQLDatabase: "graph_ops",
 		MySQLUser: "app", MySQLPassword: "${GRAPH_OPS_TEST_MYSQL_PW}",
 	})
@@ -322,9 +337,9 @@ func TestLoadRuntimeConfig_ResolvesMySQLPasswordFromEnv(t *testing.T) {
 // loadRuntimeConfig must fail rather than silently connecting with an
 // empty/literal password.
 func TestLoadRuntimeConfig_MySQLPasswordMissingEnvVarFailsLoudly(t *testing.T) {
-	resolvedDir := tempCwd(t)
-	stubHome(t)
-	writeGraphConfig(t, resolvedDir, runtimeconfig.FileConfig{
+	tempCwd(t)
+	home := stubHome(t)
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "db.example.com", MySQLDatabase: "graph_ops",
 		MySQLUser: "app", MySQLPassword: "${GRAPH_OPS_TEST_DEFINITELY_UNSET_VAR_DFLT_00020}",
 	})
@@ -340,9 +355,9 @@ func TestLoadRuntimeConfig_MySQLPasswordMissingEnvVarFailsLoudly(t *testing.T) {
 // sqlite startup -- only actually selecting the mysql backend should
 // trigger resolution (and thus that failure mode).
 func TestLoadRuntimeConfig_MySQLPasswordEnvVarIgnoredWhenBackendIsSQLite(t *testing.T) {
-	resolvedDir := tempCwd(t)
-	stubHome(t)
-	writeGraphConfig(t, resolvedDir, runtimeconfig.FileConfig{
+	tempCwd(t)
+	home := stubHome(t)
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		MySQLPassword: "${GRAPH_OPS_TEST_DEFINITELY_UNSET_VAR_DFLT_00020}",
 	})
 
@@ -363,9 +378,9 @@ func TestLoadRuntimeConfig_MySQLPasswordEnvVarIgnoredWhenBackendIsSQLite(t *test
 // is that a configuration that never mentions TLS gets a verified
 // connection, not a plaintext one.
 func TestLoadRuntimeConfig_MySQLTLSDefaultsToVerifyFull(t *testing.T) {
-	resolvedDir := tempCwd(t)
-	stubHome(t)
-	writeGraphConfig(t, resolvedDir, runtimeconfig.FileConfig{
+	tempCwd(t)
+	home := stubHome(t)
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "db.example.com", MySQLDatabase: "graph_ops", MySQLUser: "app",
 	})
 
@@ -382,9 +397,9 @@ func TestLoadRuntimeConfig_MySQLTLSDefaultsToVerifyFull(t *testing.T) {
 // file precedence every other mysql* setting already has.
 func TestLoadRuntimeConfig_MySQLTLSEnvVarOverridesFile(t *testing.T) {
 	resolvedDir := tempCwd(t)
-	stubHome(t)
+	home := stubHome(t)
 	caPath := filepath.Join(resolvedDir, "ca.pem")
-	writeGraphConfig(t, resolvedDir, runtimeconfig.FileConfig{
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "db.example.com", MySQLDatabase: "graph_ops", MySQLUser: "app",
 		MySQLTLS: "disabled",
 	})
@@ -409,9 +424,9 @@ func TestLoadRuntimeConfig_MySQLTLSEnvVarOverridesFile(t *testing.T) {
 // close -- see F-2/F-3 in the execution plan) must fail startup outright
 // under the mysql backend.
 func TestLoadRuntimeConfig_MySQLTLSInvalidModeFailsLoudly(t *testing.T) {
-	resolvedDir := tempCwd(t)
-	stubHome(t)
-	writeGraphConfig(t, resolvedDir, runtimeconfig.FileConfig{
+	tempCwd(t)
+	home := stubHome(t)
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "db.example.com", MySQLDatabase: "graph_ops", MySQLUser: "app",
 		MySQLTLS: "preferred",
 	})
@@ -426,9 +441,9 @@ func TestLoadRuntimeConfig_MySQLTLSInvalidModeFailsLoudly(t *testing.T) {
 // pin trust to and must not silently fall back to the OS trust store (see
 // store.ValidateMySQLTLSSettings).
 func TestLoadRuntimeConfig_MySQLTLSVerifyCAWithoutCAFailsLoudly(t *testing.T) {
-	resolvedDir := tempCwd(t)
-	stubHome(t)
-	writeGraphConfig(t, resolvedDir, runtimeconfig.FileConfig{
+	tempCwd(t)
+	home := stubHome(t)
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "db.example.com", MySQLDatabase: "graph_ops", MySQLUser: "app",
 		MySQLTLS: "verify-ca",
 	})
@@ -443,9 +458,9 @@ func TestLoadRuntimeConfig_MySQLTLSVerifyCAWithoutCAFailsLoudly(t *testing.T) {
 // for TLS settings: a leftover invalid mysqlTls (e.g. from a past mysql
 // experiment) must not block a plain sqlite startup.
 func TestLoadRuntimeConfig_MySQLTLSInvalidModeIgnoredWhenBackendIsSQLite(t *testing.T) {
-	resolvedDir := tempCwd(t)
-	stubHome(t)
-	writeGraphConfig(t, resolvedDir, runtimeconfig.FileConfig{MySQLTLS: "preferred"})
+	tempCwd(t)
+	home := stubHome(t)
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{MySQLTLS: "preferred"})
 
 	rc, err := loadRuntimeConfig()
 	if err != nil {
@@ -472,7 +487,7 @@ func TestLoadRuntimeConfig_StoreConfigFromRuntimeConfigCarriesMySQLTLS(t *testin
 // The tests below fix the behaviour specified in DFLT-00027's Gherkin
 // feature. They fall into four groups: the defaults themselves, the
 // directory creation that makes those defaults usable on a first run, the
-// precedence chain (env > graph-config.json > default) which the change must
+// precedence chain (env > the home config > default) which the change must
 // leave structurally intact, and the deliberate *absence* of a
 // backward-compatibility fallback to <cwd>/graph.db.
 
@@ -699,14 +714,14 @@ func TestLoadRuntimeConfig_PathPrecedenceStillHolds(t *testing.T) {
 			wantArtifactsFn: func(home, cwd string) string { return filepath.Join(cwd, "env-artifacts") },
 		},
 		{
-			name:            "graph-config.json beats the new default",
+			name:            "the home config file beats the new default",
 			fileDB:          "file-graph.db",
 			fileArtifacts:   "file-artifacts",
 			wantDBFn:        func(home, cwd string) string { return filepath.Join(cwd, "file-graph.db") },
 			wantArtifactsFn: func(home, cwd string) string { return filepath.Join(cwd, "file-artifacts") },
 		},
 		{
-			name:            "env var beats graph-config.json",
+			name:            "env var beats the home config file",
 			envDB:           "env-graph.db",
 			envArtifacts:    "env-artifacts",
 			fileDB:          "file-graph.db",
@@ -736,18 +751,17 @@ func TestLoadRuntimeConfig_PathPrecedenceStillHolds(t *testing.T) {
 			if tt.envArtifacts != "" {
 				t.Setenv("GRAPH_ARTIFACTS_DIR", filepath.Join(cwd, tt.envArtifacts))
 			}
-			if tt.fileDB != "" {
-				writeGraphConfig(t, cwd, runtimeconfig.FileConfig{DBPath: filepath.Join(cwd, tt.fileDB)})
-			}
-			// artifactsDir goes in the HOME config, not the
-			// working-directory one: since DFLT-00104 it is a home-only key,
-			// and a working-directory graph-config.json's copy of it is
-			// ignored (see runtimeconfig.HomeOnlyKeys). The precedence being
-			// pinned here -- env var beats config file beats default -- is
-			// unchanged; only which file counts as "the config file" for
-			// this one key is.
-			if tt.fileArtifacts != "" {
-				writeHomeGraphConfig(t, home, runtimeconfig.FileConfig{ArtifactsDir: filepath.Join(cwd, tt.fileArtifacts)})
+			// One write, not two: both settings live in the same file now,
+			// so writing it twice would leave only the second key.
+			if tt.fileDB != "" || tt.fileArtifacts != "" {
+				fileCfg := runtimeconfig.FileConfig{}
+				if tt.fileDB != "" {
+					fileCfg.DBPath = filepath.Join(cwd, tt.fileDB)
+				}
+				if tt.fileArtifacts != "" {
+					fileCfg.ArtifactsDir = filepath.Join(cwd, tt.fileArtifacts)
+				}
+				writeHomeConfig(t, home, fileCfg)
 			}
 
 			rc, err := loadRuntimeConfig()
@@ -892,10 +906,10 @@ func TestLoadRuntimeConfig_UnresolvableHomeFallsBackToCwd(t *testing.T) {
 // resolves and creates $HOME/.graph-ops/artifacts -- while of course
 // creating no SQLite database file.
 func TestLoadRuntimeConfig_MySQLBackendStillUsesTheArtifactsDefault(t *testing.T) {
-	cwd := tempCwd(t)
+	tempCwd(t)
 	home := stubHome(t)
 	clearPathEnv(t)
-	writeGraphConfig(t, cwd, runtimeconfig.FileConfig{
+	writeHomeConfig(t, home, runtimeconfig.FileConfig{
 		DBBackend: "mysql", MySQLHost: "db.example.com",
 		MySQLDatabase: "graph_ops", MySQLUser: "app",
 	})

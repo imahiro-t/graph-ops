@@ -53,11 +53,12 @@ or link anything from GraphOps.
 
 ## Configuring graph-engine
 
-### graph-config.json and environment variables
+### The home config file and environment variables
 
-graph-engine reads its settings from `graph-config.json` in the directory it
-starts from, or else from `$HOME/.graph-ops/config.json` (see the root
-README). Three fields select and configure the HTTP data source:
+graph-engine reads its settings from one file, `$HOME/.graph-ops/config.json`,
+and from environment variables -- nothing is read out of the directory it
+starts in (see the root README). Three fields select and configure the HTTP
+data source:
 
 | Field | Environment variable (takes precedence) | Meaning |
 |---|---|---|
@@ -102,7 +103,7 @@ reference.
 
 ### Configuring it from the Web UI
 
-Settings (gear button) > **Global Settings** > **App Settings** > data storage
+Settings (gear button) > **App Settings** > data storage
 offers **HTTP custom data source**, with an **Endpoint URL** field and a
 **Bearer token** field. Storage changes take effect the next time the server
 starts.
@@ -128,11 +129,11 @@ starts.
   show no error and the save still fail (or the other way round).
 
 **Token supplied only through `GRAPH_HTTP_DATASOURCE_TOKEN`.** The Web UI
-validates what will be written to `graph-config.json`, and it does not look at
-`GRAPH_HTTP_DATASOURCE_TOKEN`. Saving a remote URL with an empty token field
-is therefore rejected ("a remote data source requires a bearer token"), even
-if that variable is set. Enter a `${ENV_VAR}` reference in the token field
-instead -- for example `${GRAPH_HTTP_DATASOURCE_TOKEN}` or
+validates what will be written to `$HOME/.graph-ops/config.json`, and it does
+not look at `GRAPH_HTTP_DATASOURCE_TOKEN`. Saving a remote URL with an empty
+token field is therefore rejected ("a remote data source requires a bearer
+token"), even if that variable is set. Enter a `${ENV_VAR}` reference in the
+token field instead -- for example `${GRAPH_HTTP_DATASOURCE_TOKEN}` or
 `${GRAPHOPS_DATASOURCE_TOKEN}` -- which keeps the secret out of the file and
 is saved without problems.
 
@@ -213,10 +214,10 @@ in lowerCamelCase.
 | Current project | `GET/PUT /current-project` (**deprecated**) |
 
 `/current-project` is deprecated: the current project is a per-user choice, so
-graph-engine now keeps it in its own `graph-config.json` rather than in the
-data source. Keep implementing `GET` -- it is not a one-off migration call
+graph-engine now keeps it in each user's home config file
+(`$HOME/.graph-ops/config.json`) rather than in the data source. Keep implementing `GET` -- it is not a one-off migration call
 that can be removed once an upgrade is done. graph-engine calls `GET` only
-while an environment's `graph-config.json` has no `currentProjectId` of its
+while that home config file has no `currentProjectId` of its
 own: once on an environment upgrading with a selection to inherit (a non-empty
 answer is written there, which carries that selection over, and `GET` is not
 called again in that environment), and on each read until a project is
@@ -392,19 +393,28 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8787/protocol
 
 ### 3. Point graph-engine at it -- without touching your real data
 
-graph-engine reads `graph-config.json` from the directory it starts in, so use
-a scratch directory:
+Do this with environment variables, not with a config file. graph-engine reads
+settings from `$HOME/.graph-ops/config.json` alone, whichever directory you run
+it in, so writing a `graph-config.json` into a scratch directory and working
+there does **not** isolate anything: the file is never read, and every command
+you run would quietly go to your real database instead. Environment variables
+are the one channel that is deliberate -- they are set by whoever starts the
+process, for that process, and they take precedence over the file -- which is
+exactly what a verification run needs:
 
 ```sh
-mkdir -p /tmp/graphops-plugin-dev && cd /tmp/graphops-plugin-dev
-cat > graph-config.json <<'EOF'
-{
-  "dbBackend": "http",
-  "httpDataSourceUrl": "http://127.0.0.1:8787",
-  "httpDataSourceToken": "${GRAPHOPS_DATASOURCE_TOKEN}"
-}
-EOF
+export GRAPH_DB_BACKEND=http
+export GRAPH_HTTP_DATASOURCE_URL=http://127.0.0.1:8787
+export GRAPH_HTTP_DATASOURCE_TOKEN="$GRAPHOPS_DATASOURCE_TOKEN"
 ```
+
+Set them in one shell and use only that shell for the steps below; a shell
+without them keeps reading your normal configuration, so your real tickets are
+never touched. Your `$HOME/.graph-ops/config.json` stays exactly as it is --
+there is nothing to edit and nothing to put back afterwards. To check which
+settings a command will actually use, unset the variables again and compare
+(`graph-engine list-projects` against your real data, with them set against the
+plugin).
 
 Use the `graph-engine` installed with the plugin, or build one from this
 repository (`cd packages/core-go && go build -o graph-engine ./cmd/graph-engine`).
@@ -423,8 +433,8 @@ graph-engine get-ticket <ticket id>              # nodes, edges and artifacts re
 ```
 
 Run `graph-engine` without arguments for the full command list. Then start
-the Web UI from the same directory and check the ticket list, the execution
-graph and artifact previews:
+the Web UI from that same shell -- so it inherits the three variables -- and
+check the ticket list, the execution graph and artifact previews:
 
 ```sh
 graph-engine serve --host 127.0.0.1 --port 49180

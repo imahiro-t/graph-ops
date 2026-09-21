@@ -463,9 +463,127 @@ describe('App project scoping', () => {
       // A slow poll of an already-loaded list keeps showing it.
       expect(screen.getByText('ALP-00001')).toBeInTheDocument();
     });
+
+    // DFLT-00112 added a second way to trigger a poll: the tab becoming
+    // visible again. It is held to the same rule as the interval, or
+    // switching back to a tab whose (slow) first fetch is still running
+    // would supersede that fetch exactly like the tick used to.
+    it('does not start a second run when the tab becomes visible mid-fetch', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      let visibility: DocumentVisibilityState = 'visible';
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
+      try {
+        const realFetch = backend.fetch.bind(backend);
+        backend.fetch = async (input, init) => {
+          if (String(input) === `/api/tickets?project_id=${alpha.id}`) {
+            await new Promise(r => setTimeout(r, 20_000));
+          }
+          return realFetch(input, init);
+        };
+
+        render(<App />);
+        await screen.findByRole('button', { name: /Alpha/ });
+        await waitFor(() => expect(ticketListRequests()).toHaveLength(1));
+
+        visibility = 'hidden';
+        document.dispatchEvent(new Event('visibilitychange'));
+        visibility = 'visible';
+        document.dispatchEvent(new Event('visibilitychange'));
+        expect(ticketListRequests()).toHaveLength(1);
+
+        await vi.advanceTimersByTimeAsync(20_500);
+        await screen.findByText('ALP-00001');
+        expect(ticketListRequests()).toHaveLength(1);
+      } finally {
+        Reflect.deleteProperty(document, 'visibilityState');
+      }
+    });
   });
 
-  // GET /api/current-project reads this environment's graph-config.json
+  // DFLT-00112 moved artifacts out of the list: an expanded ticket's detail
+  // is its own request, issued on expand and on every round. Such a request
+  // can still be in flight when the user switches projects.
+  describe('an expanded ticket of the project the user has left', () => {
+    beforeEach(() => {
+      seed();
+      // An expanded panel measures its node list with a ResizeObserver,
+      // which jsdom lacks. Undone by unstubAllGlobals in afterEach.
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          observe() {}
+          unobserve() {}
+          disconnect() {}
+        }
+      );
+    });
+
+    it('does not bring that ticket back when its detail arrives after the switch', async () => {
+      const user = userEvent.setup();
+      let releaseDetail!: () => void;
+      const held = new Promise<void>(resolve => {
+        releaseDetail = resolve;
+      });
+      const realFetch = backend.fetch.bind(backend);
+      backend.fetch = async (input, init) => {
+        if (String(input) === '/api/tickets/ALP-00001') await held;
+        return realFetch(input, init);
+      };
+
+      render(<App />);
+      await user.click(await screen.findByText('ALP-00001'));
+      await waitFor(() => expect(fetchMock.mock.calls.map(c => String(c[0]))).toContain('/api/tickets/ALP-00001'));
+
+      await user.click(screen.getByRole('button', { name: /Alpha/ }));
+      await user.click(screen.getByRole('button', { name: /Beta/ }));
+      await screen.findByText('BETA-00001');
+
+      releaseDetail();
+      await new Promise(r => setTimeout(r, 50));
+
+      expect(screen.getByRole('button', { name: /Beta/ })).toBeInTheDocument();
+      expect(screen.getByText('BETA-00001')).toBeInTheDocument();
+      expect(screen.queryByText('ALP-00001')).not.toBeInTheDocument();
+    });
+  });
+
+  // DFLT-00112 stops polling while the tab is hidden and fetches once when it
+  // becomes visible again. That fetch has to follow the header like every
+  // other one: the listener belongs to the same effect as the interval, so a
+  // switch re-points it too.
+  describe('coming back to a hidden tab after a switch', () => {
+    beforeEach(() => seed());
+
+    it('fetches the project the header shows now, and nothing while hidden', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      let visibility: DocumentVisibilityState = 'visible';
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
+      try {
+        render(<App />);
+        await screen.findByText('ALP-00001');
+        await user.click(screen.getByRole('button', { name: /Alpha/ }));
+        await user.click(screen.getByRole('button', { name: /Beta/ }));
+        await screen.findByText('BETA-00001');
+
+        visibility = 'hidden';
+        document.dispatchEvent(new Event('visibilitychange'));
+        const hiddenMark = ticketListRequests().length;
+        await vi.advanceTimersByTimeAsync(40_000);
+        expect(ticketListRequests().slice(hiddenMark)).toEqual([]);
+
+        visibility = 'visible';
+        document.dispatchEvent(new Event('visibilitychange'));
+        await waitFor(() => expect(ticketListRequests().length).toBeGreaterThan(hiddenMark));
+        expect(ticketListRequests().slice(hiddenMark)).toEqual([`/api/tickets?project_id=${beta.id}`]);
+        expect(screen.getByText('BETA-00001')).toBeInTheDocument();
+      } finally {
+        Reflect.deleteProperty(document, 'visibilityState');
+      }
+    });
+  });
+
+  // GET /api/current-project reads this user's home config file
   // (DFLT-00106), a local file that can be unreadable on its own while
   // everything else works. "Could not read it" is not "you have no project":
   // showing the create-a-project screen to somebody who does have one is how

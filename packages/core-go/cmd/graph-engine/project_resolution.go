@@ -24,10 +24,10 @@ const (
 //
 //  1. If cwd (the CLI's current directory, runtimeConfig.WorkDir) is non-empty and
 //     equals or lies under some project's local path (projectPaths, i.e.
-//     graph-config.json's per-environment project ID -> path map, see
+//     the home config file's per-environment project ID -> path map, see
 //     DFLT-00080), that project wins -- the deepest such path when several
 //     nest (see findProjectForDir).
-//  2. Otherwise, this environment's current project (graph-config.json's
+//  2. Otherwise, this environment's current project (the home config file's
 //     currentProjectId, set by use-project and by the Web UI's project
 //     switcher -- see internal/currentproject), supplied by the caller as
 //     currentProjectID so this function stays independent of where that
@@ -35,9 +35,14 @@ const (
 //  3. Otherwise, the long-standing "no current project selected" error.
 //
 // The order is unchanged by DFLT-00106; only step 2's source moved, from the
-// DB's single shared app_state.current_project_id to this machine's own
-// settings file. That is what stops a colleague's `use-project` on a shared
+// DB's single shared app_state.current_project_id to this user's own home
+// config file. That is what stops a colleague's `use-project` on a shared
 // MySQL from redirecting tickets created here.
+//
+// home is os.UserHomeDir()'s result (runtimeConfig.HomeDir), used only to
+// name the file the step-3 error tells the user to edit -- see
+// runtimeconfig.HomeConfigPathForMessage, which also words the case where
+// there is no such file.
 //
 // An empty cwd skips step 1 entirely rather than falling back to
 // os.Getwd()/filepath.Abs("") -- the caller didn't supply a cwd, and
@@ -49,9 +54,9 @@ const (
 // the UI last selected is exactly the misrouting this resolution exists to
 // prevent. Likewise a currentProjectId that no longer names a project --
 // which is what a project deleted from the shared DB leaves behind in every
-// other environment's settings file -- is an error (with the dangling id in
-// the message) rather than something to guess around.
-func resolveCreateTicketProject(repo store.GraphRepository, cwd string, projectPaths map[string]string, currentProjectID func() (string, error)) (*domain.Project, projectResolutionSource, error) {
+// other environment's home config file -- is an error (with the dangling id
+// in the message) rather than something to guess around.
+func resolveCreateTicketProject(repo store.GraphRepository, cwd, home string, projectPaths map[string]string, currentProjectID func() (string, error)) (*domain.Project, projectResolutionSource, error) {
 	if cwd != "" {
 		projects, err := repo.ListProjects()
 		if err != nil {
@@ -67,7 +72,7 @@ func resolveCreateTicketProject(repo store.GraphRepository, cwd string, projectP
 		return nil, "", err
 	}
 	if pid == "" {
-		return nil, "", fmt.Errorf("no current project selected, and the current directory matches no project's local path (projectPaths in graph-config.json); set the project's local path in the Web UI settings (or via `graph-engine create-project --workdir`), run `graph-engine use-project <id>`, or pass --project <id>")
+		return nil, "", fmt.Errorf("no current project selected, and the current directory matches no project's local path (projectPaths in %s); set the project's local path in the Web UI settings (or via `graph-engine create-project --workdir`), run `graph-engine use-project <id>`, or pass --project <id>", runtimeconfig.HomeConfigPathForMessage(home))
 	}
 	project, err := repo.GetProject(pid)
 	if err != nil {

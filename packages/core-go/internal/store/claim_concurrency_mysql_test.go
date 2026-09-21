@@ -77,7 +77,7 @@ func mysqlRepoForClaimTest(t *testing.T) *store.MySQLRepository {
 func TestGetExecutableNodes_ConcurrentCallsNeverHandOutTheSameNode(t *testing.T) {
 	repo := mysqlRepoForClaimTest(t)
 	eng := engine.New(repo)
-	catalog, err := config.LoadWithRoots(t.TempDir(), t.TempDir(), t.TempDir(), "")
+	catalog, err := config.LoadWithRoots(t.TempDir(), t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("config.LoadWithRoots: %v", err)
 	}

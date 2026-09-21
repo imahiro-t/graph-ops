@@ -24,9 +24,9 @@ import (
 // no-project-yet state (creating the first project, POST /api/tickets
 // failing with NO_CURRENT_PROJECT, etc).
 //
-// WorkDir and HomeDir are sandboxed temp dirs, so the graph-config.json the
-// project API reads/writes (projectPaths, DFLT-00080) never touches the
-// developer's real one or the package directory.
+// HomeDir is a sandboxed temp dir, so the home config file the project API
+// reads/writes (projectPaths, DFLT-00080) never touches the developer's real
+// one.
 func newBareTestServer(t *testing.T) (*Server, store.GraphRepository) {
 	t.Helper()
 	repo, err := store.NewSQLiteRepository(filepath.Join(t.TempDir(), "test.db"))
@@ -42,40 +42,40 @@ func newBareTestServer(t *testing.T) (*Server, store.GraphRepository) {
 }
 
 // setCurrent selects a project for s's environment the way PUT
-// /api/current-project and `graph-engine use-project` do: in
-// graph-config.json, not in the DB (DFLT-00106).
+// /api/current-project and `graph-engine use-project` do: in the home
+// config file, not in the DB (DFLT-00106).
 func setCurrent(t *testing.T, s *Server, projectID string) {
 	t.Helper()
-	if err := currentproject.Set(s.cfg.WorkDir, s.cfg.HomeDir, projectID); err != nil {
+	if err := currentproject.Set(s.cfg.HomeDir, projectID); err != nil {
 		t.Fatalf("currentproject.Set(%q): %v", projectID, err)
 	}
 }
 
-// currentProjectIDOnDisk returns s's graph-config.json currentProjectId as
+// currentProjectIDOnDisk returns s's home config file's currentProjectId as
 // stored: nil when the key is absent (never set here), otherwise a pointer
 // to the value -- "" included, which means "deliberately deselected".
 func currentProjectIDOnDisk(t *testing.T, s *Server) *string {
 	t.Helper()
-	cfg, _, err := runtimeconfig.Load(s.cfg.WorkDir, s.cfg.HomeDir)
+	cfg, err := runtimeconfig.LoadHomeConfig(s.cfg.HomeDir)
 	if err != nil {
-		t.Fatalf("runtimeconfig.Load: %v", err)
+		t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 	}
 	return cfg.CurrentProjectID
 }
 
-// projectPathsOnDisk loads s's graph-config.json projectPaths.
+// projectPathsOnDisk loads s's home config file's projectPaths.
 func projectPathsOnDisk(t *testing.T, s *Server) map[string]string {
 	t.Helper()
-	cfg, _, err := runtimeconfig.Load(s.cfg.WorkDir, s.cfg.HomeDir)
+	cfg, err := runtimeconfig.LoadHomeConfig(s.cfg.HomeDir)
 	if err != nil {
-		t.Fatalf("runtimeconfig.Load: %v", err)
+		t.Fatalf("runtimeconfig.LoadHomeConfig: %v", err)
 	}
 	return cfg.ProjectPaths
 }
 
 func setLocalPath(t *testing.T, s *Server, projectID, path string) {
 	t.Helper()
-	if _, err := runtimeconfig.SetProjectPath(s.cfg.WorkDir, s.cfg.HomeDir, projectID, path); err != nil {
+	if _, err := runtimeconfig.SetProjectPath(s.cfg.HomeDir, projectID, path); err != nil {
 		t.Fatalf("SetProjectPath: %v", err)
 	}
 }
@@ -94,7 +94,7 @@ func decodeProject(t *testing.T, body []byte) (projectResponse, map[string]any) 
 }
 
 // Scenario: a project can be created by specifying a name, prefix, and
-// local path -- the path goes to graph-config.json, not the DB.
+// local path -- the path goes to the home config file, not the DB.
 func TestHandleCreateProject_ExplicitPrefixAndLocalPath(t *testing.T) {
 	s, repo := newBareTestServer(t)
 
@@ -160,7 +160,7 @@ func TestHandleCreateProject_LocalPathSaveFailureIs500AndSaysCreated(t *testing.
 	var logBuf bytes.Buffer
 	var mu sync.Mutex
 	s.logger = slog.New(slog.NewTextHandler(&lockedWriter{w: &logBuf, mu: &mu}, nil))
-	// No graph-config.json exists, so Save would create $HOME/.graph-ops;
+	// No the home config file exists, so Save would create $HOME/.graph-ops;
 	// a read-only HomeDir makes that fail.
 	if err := os.Chmod(s.cfg.HomeDir, 0o500); err != nil {
 		t.Fatal(err)
@@ -376,7 +376,7 @@ func TestHandleDeleteProject_CleanupFailureStillSucceedsAndLogs(t *testing.T) {
 	setLocalPath(t, s, beta.ID, "/work/beta")
 	// Saves go through a temp file + rename in the config file's directory,
 	// so making that directory read-only is what makes the cleanup fail.
-	dir := filepath.Dir(runtimeconfig.ResolvePath(s.cfg.WorkDir, s.cfg.HomeDir))
+	dir := filepath.Dir(runtimeconfig.HomeConfigPath(s.cfg.HomeDir))
 	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
@@ -396,16 +396,17 @@ func TestHandleDeleteProject_CleanupFailureStillSucceedsAndLogs(t *testing.T) {
 	}
 }
 
-// A graph-config.json that cannot be parsed makes projectLocalPath fall back
+// A home config file that cannot be parsed makes projectLocalPath fall back
 // to "not set" (Claude launch / catalog loading keep working), but the reason
-// is logged instead of being swallowed.
+// is logged instead of being swallowed. This is decision D-6's read side:
+// reading tolerates a broken file, writing refuses it.
 func TestProjectLocalPath_UnreadableConfigFallsBackAndLogs(t *testing.T) {
 	s, repo := newBareTestServer(t)
 	var logBuf bytes.Buffer
 	var mu sync.Mutex
 	s.logger = slog.New(slog.NewTextHandler(&lockedWriter{w: &logBuf, mu: &mu}, nil))
 	beta, _ := repo.CreateProject("Beta", "")
-	path := runtimeconfig.ResolvePath(s.cfg.WorkDir, s.cfg.HomeDir)
+	path := runtimeconfig.HomeConfigPath(s.cfg.HomeDir)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +419,7 @@ func TestProjectLocalPath_UnreadableConfigFallsBackAndLogs(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if !strings.Contains(logBuf.String(), "project_local_path_load_failed") || !strings.Contains(logBuf.String(), beta.ID) {
+	if !strings.Contains(logBuf.String(), "project_paths_load_failed") {
 		t.Errorf("expected a load-failure log line, got %q", logBuf.String())
 	}
 }
@@ -504,11 +505,11 @@ func TestCurrentProjectGetAndSwitch(t *testing.T) {
 
 // Plan review condition 2: PATCH /api/projects/{id} (projectPaths) and PUT
 // /api/settings/app (paginationPageSize) hitting the server at the same time
-// must never lose each other's update in graph-config.json.
+// must never lose each other's update in the home config file.
 func TestConcurrentLocalPathAndAppSettingsWritesDoNotLoseUpdates(t *testing.T) {
 	s, repo := newBareTestServer(t)
 	proj, _ := repo.CreateProject("AAA", "")
-	if _, err := runtimeconfig.Save(s.cfg.WorkDir, s.cfg.HomeDir, runtimeconfig.FileConfig{PaginationPageSize: 20}); err != nil {
+	if _, err := seedHomeConfig(s.cfg.HomeDir, runtimeconfig.FileConfig{PaginationPageSize: 20}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -538,7 +539,7 @@ func TestConcurrentLocalPathAndAppSettingsWritesDoNotLoseUpdates(t *testing.T) {
 		t.Error(e)
 	}
 
-	cfg, _, err := runtimeconfig.Load(s.cfg.WorkDir, s.cfg.HomeDir)
+	cfg, err := runtimeconfig.LoadHomeConfig(s.cfg.HomeDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -605,7 +606,7 @@ func TestHandleListTickets_ScopedByProjectIDQuery(t *testing.T) {
 }
 
 // DFLT-00106: PUT /api/current-project stores the selection in this
-// environment's graph-config.json and leaves the data source's shared
+// environment's home config file and leaves the data source's shared
 // app_state row alone, so a second environment on the same DB is unaffected.
 func TestHandleSetCurrentProject_WritesConfigNotDB(t *testing.T) {
 	s, repo := newBareTestServer(t)
@@ -616,7 +617,7 @@ func TestHandleSetCurrentProject_WritesConfigNotDB(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	if got := currentProjectIDOnDisk(t, s); got == nil || *got != a.ID {
-		t.Errorf("graph-config.json currentProjectId = %v, want %q", got, a.ID)
+		t.Errorf("home config currentProjectId = %v, want %q", got, a.ID)
 	}
 	if cur, err := repo.GetCurrentProjectID(); err != nil || cur != "" {
 		t.Errorf("the shared app_state row must not be written, got %q (err=%v)", cur, err)
@@ -642,7 +643,7 @@ func TestHandleSetCurrentProject_UnknownProjectKeepsSelection(t *testing.T) {
 	}
 }
 
-// DFLT-00106: two environments (two graph-config.json files) on ONE data
+// DFLT-00106: two environments (two home config files) on ONE data
 // source keep their own current project -- the completion criterion that
 // this whole ticket exists for. Both servers share repo; only their
 // WorkDir/HomeDir differ, exactly as two teammates on one MySQL do.
@@ -741,7 +742,7 @@ func TestHandleCreateTicket_ExplicitlyEmptyCurrentProjectFails(t *testing.T) {
 	if err := repo.SetCurrentProjectID(alpha.ID); err != nil {
 		t.Fatalf("SetCurrentProjectID: %v", err)
 	}
-	if err := currentproject.Clear(s.cfg.WorkDir, s.cfg.HomeDir); err != nil {
+	if err := currentproject.Clear(s.cfg.HomeDir); err != nil {
 		t.Fatalf("currentproject.Clear: %v", err)
 	}
 
@@ -759,7 +760,7 @@ func TestHandleCreateTicket_ExplicitlyEmptyCurrentProjectFails(t *testing.T) {
 
 // DFLT-00106 (NFR-2): reading the current project used to be a DB read --
 // if that broke, everything else broke with it and nobody had to be told
-// twice. It is now a read of one per-environment graph-config.json, which
+// twice. It is now a read of one per-environment home config file, which
 // can be unreadable all by itself while the rest of the app works, so both
 // readers log the failure with the path of the file that could not be read.
 // Without it the only trace is the browser console (or, for the CLI, a bare
@@ -773,14 +774,17 @@ func TestCurrentProjectReadFailure_IsLoggedWithTheConfigPath(t *testing.T) {
 	if err := repo.Init(); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	workDir := t.TempDir()
-	configPath := filepath.Join(workDir, "graph-config.json")
+	home := t.TempDir()
+	configPath := runtimeconfig.HomeConfigPath(home)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
 	if err := os.WriteFile(configPath, []byte("{ not json"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	var logged bytes.Buffer
 	s := New(repo, engine.New(repo), Config{
-		ArtifactsDir: t.TempDir(), WorkDir: workDir, HomeDir: t.TempDir(),
+		ArtifactsDir: t.TempDir(), WorkDir: t.TempDir(), HomeDir: home,
 		Logger: slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	})
 
@@ -854,7 +858,8 @@ func TestCurrentProject_InheritsDBValueOnce(t *testing.T) {
 }
 
 // DFLT-00106: nothing to inherit means nothing is written -- a fresh install
-// must not get a graph-config.json just because a page loaded.
+// must not get a home config file (nor a graph-config.json in its working
+// directory) just because a page loaded.
 func TestCurrentProject_EmptyDBValueCreatesNoConfigFile(t *testing.T) {
 	s, _ := newBareTestServer(t)
 
@@ -862,9 +867,12 @@ func TestCurrentProject_EmptyDBValueCreatesNoConfigFile(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Body.String() != "null\n" {
 		t.Fatalf("expected 200 null, got %d: %s", rec.Code, rec.Body.String())
 	}
-	for _, path := range runtimeconfig.CandidatePaths(s.cfg.WorkDir, s.cfg.HomeDir) {
+	for _, path := range []string{
+		runtimeconfig.HomeConfigPath(s.cfg.HomeDir),
+		filepath.Join(s.cfg.WorkDir, runtimeconfig.WorkDirConfigFileName),
+	} {
 		if _, err := os.Stat(path); err == nil {
-			t.Errorf("no graph-config.json should have been created, but %s exists", path)
+			t.Errorf("no config file should have been created, but %s exists", path)
 		}
 	}
 }
@@ -877,7 +885,7 @@ func TestCurrentProject_ExplicitlyEmptyDoesNotReInherit(t *testing.T) {
 	if err := repo.SetCurrentProjectID(alpha.ID); err != nil {
 		t.Fatalf("SetCurrentProjectID: %v", err)
 	}
-	if err := currentproject.Clear(s.cfg.WorkDir, s.cfg.HomeDir); err != nil {
+	if err := currentproject.Clear(s.cfg.HomeDir); err != nil {
 		t.Fatalf("currentproject.Clear: %v", err)
 	}
 
@@ -981,7 +989,7 @@ func TestHandleDeleteProject_KeepsUnrelatedCurrentProject(t *testing.T) {
 }
 
 // DFLT-00106: the other side of the delete. Only the environment that ran
-// the delete can clean its own graph-config.json -- nothing can reach into a
+// the delete can clean its own home config file -- nothing can reach into a
 // teammate's file -- so an environment that had the same project selected is
 // left holding a dangling id. The guarantee is therefore not "it gets
 // cleaned up" but "the dangling id stays safe": its header reads as nothing
@@ -1181,5 +1189,43 @@ func TestResolveLaunchWorkDir_FallsBackToGlobalConfig(t *testing.T) {
 	got := s.resolveLaunchWorkDir("", "")
 	if got != "/fallback" {
 		t.Errorf("expected fallback /fallback, got %q", got)
+	}
+}
+
+// DFLT-00106 x DFLT-00124: the current project is read from the home config
+// file only. A graph-config.json in the server's working directory -- which
+// before DFLT-00124 would have won outright, so a UI server started in one
+// directory and a CLI started in another could each see a different current
+// project -- is not consulted, even when it names a different project and
+// even when it is not valid JSON. Selecting a project writes the home file
+// and leaves that leftover alone.
+func TestCurrentProject_IgnoresWorkingDirectoryConfig(t *testing.T) {
+	s, repo := newBareTestServer(t)
+	alpha, _ := repo.CreateProject("Alpha", "")
+	beta, _ := repo.CreateProject("Beta", "")
+	setCurrent(t, s, alpha.ID)
+
+	stale := filepath.Join(s.cfg.WorkDir, runtimeconfig.WorkDirConfigFileName)
+	for _, content := range []string{`{"currentProjectId": "` + beta.ID + `"}`, "{ not json"} {
+		if err := os.WriteFile(stale, []byte(content), 0o600); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+		rec := doJSON(t, s, http.MethodGet, "/api/current-project", nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 with %q in the working directory: %s", rec.Code, content, rec.Body.String())
+		}
+		if cur, _ := decodeProject(t, rec.Body.Bytes()); cur.ID != alpha.ID {
+			t.Errorf("current project = %q with %q in the working directory, want the home config's %q", cur.ID, content, alpha.ID)
+		}
+	}
+
+	if rec := doJSON(t, s, http.MethodPut, "/api/current-project", map[string]any{"project_id": beta.ID}); rec.Code != http.StatusOK {
+		t.Fatalf("PUT: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := currentProjectIDOnDisk(t, s); got == nil || *got != beta.ID {
+		t.Errorf("home config currentProjectId = %v, want %q", got, beta.ID)
+	}
+	if raw, _ := os.ReadFile(stale); string(raw) != "{ not json" {
+		t.Errorf("the working-directory file must be left untouched, got %q", raw)
 	}
 }

@@ -1,7 +1,7 @@
 package runtimeconfig
 
 // DFLT-00106: currentProjectId has to survive a round trip through
-// graph-config.json with all THREE of its states distinguishable -- absent,
+// the home config file with all THREE of its states distinguishable -- absent,
 // an explicit empty string, and an id. That is the whole reason the field is
 // a *string: with a plain string + omitempty, "never set here" and
 // "deliberately deselected" would both be an absent key, and every project
@@ -27,13 +27,16 @@ func TestCurrentProjectID_ThreeStatesRoundTripThroughJSON(t *testing.T) {
 		{"an id", strPtr("proj-alpha"), true, "proj-alpha"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
 			home := t.TempDir()
-			if _, err := Save(dir, home, FileConfig{CurrentProjectID: tc.value, MyName: "山田"}); err != nil {
-				t.Fatalf("Save: %v", err)
+			if _, _, err := UpdateHome(home, func(cfg *FileConfig) error {
+				cfg.CurrentProjectID = tc.value
+				cfg.MyName = "山田"
+				return nil
+			}); err != nil {
+				t.Fatalf("UpdateHome: %v", err)
 			}
 
-			raw := readRawConfig(t, ResolvePath(dir, home))
+			raw := readRawConfig(t, HomeConfigPath(home))
 			got, has := raw["currentProjectId"]
 			if has != tc.wantKey {
 				t.Fatalf("currentProjectId present = %v, want %v (file: %v)", has, tc.wantKey, raw)
@@ -42,9 +45,9 @@ func TestCurrentProjectID_ThreeStatesRoundTripThroughJSON(t *testing.T) {
 				t.Errorf("currentProjectId = %v, want %v", got, tc.wantRaw)
 			}
 
-			cfg, _, err := Load(dir, home)
+			cfg, err := LoadHomeConfig(home)
 			if err != nil {
-				t.Fatalf("Load: %v", err)
+				t.Fatalf("LoadHomeConfig: %v", err)
 			}
 			switch {
 			case tc.value == nil && cfg.CurrentProjectID != nil:
@@ -62,7 +65,7 @@ func TestCurrentProjectID_ThreeStatesRoundTripThroughJSON(t *testing.T) {
 }
 
 // The distinction has to hold at the encoding/json level too, not only
-// through Save/Load -- GET /api/settings/app marshals the same struct.
+// through UpdateHome/LoadHomeConfig -- GET /api/settings/app marshals the same struct.
 func TestCurrentProjectID_EmptyStringIsNotOmitted(t *testing.T) {
 	withEmpty, err := json.Marshal(FileConfig{CurrentProjectID: strPtr("")})
 	if err != nil {
