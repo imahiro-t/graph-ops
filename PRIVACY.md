@@ -12,9 +12,9 @@ None. GraphOps has no telemetry, analytics, or crash reporting, and it does not 
 
 ### Where your data is stored
 
-Everything GraphOps creates stays on your machine, or in a database you choose:
+Everything GraphOps creates stays on your machine, or in a database or service you choose:
 
-- Tickets, execution graphs, and artifacts: the SQLite file `~/.graph-ops/graph.db` by default. If you configure MySQL instead, they are stored in the database you specify.
+- Tickets, execution graphs, and artifacts: the SQLite file `~/.graph-ops/graph.db` by default. If you configure MySQL instead, they are stored in the database you specify. If you configure an HTTP custom data source, they are stored by the service at the URL you specify.
 - Working files for artifacts: `~/.graph-ops/artifacts`.
 - Settings: `~/.graph-ops/config.json` and `~/.graph-ops/config.yaml`. These are the only files GraphOps reads settings from (environment variables aside); nothing is read out of the directory you start it in.
 - The downloaded `graph-engine` binary: `~/.cache/graph-ops/engine/` (or the directory set in `GRAPH_OPS_ENGINE_DIR`).
@@ -25,6 +25,7 @@ Everything GraphOps creates stays on your machine, or in a database you choose:
 - **Installing the plugin**: Claude Code fetches the plugin from GitHub with `git`.
 - **Web UI**: the local UI server listens on `127.0.0.1` by default, and the UI itself loads no resources from external sites unless you explicitly ask it to. It is reachable from other machines only if you change `host` in your settings (or `GRAPH_HOST`). A remote image inside a Markdown artifact is not fetched just because the artifact is displayed: the viewer shows the image's host and requests it only after you click to load it. An HTML artifact you preview in the UI can still load whatever external resources the artifact itself references.
 - **MySQL**: if you configure MySQL, GraphOps connects to the server you specify.
+- **HTTP custom data source**: if you set `dbBackend` to `"http"`, graph-engine sends your tickets, execution graphs (nodes and edges), artifacts including their content, projects, and labels to the URL you configure (`httpDataSourceUrl` or `GRAPH_HTTP_DATASOURCE_URL`), and reads them back from it. If you configure a token (`httpDataSourceToken` or `GRAPH_HTTP_DATASOURCE_TOKEN`), every request carries it as an `Authorization: Bearer` header. A URL that is not on the loopback address must use HTTPS and must have a token, and redirects are never followed, so the data and the token go only to that URL. What that server does with the data afterwards (for example, forwarding it to Jira) is up to the service you run there. See [docs/http-datasource/README.md](docs/http-datasource/README.md).
 
 GraphOps makes no other network requests.
 
@@ -34,7 +35,7 @@ GraphOps runs inside Claude Code. Your conversations with Claude, including tick
 
 ### Deleting your data
 
-Delete `~/.graph-ops/` to remove tickets, artifacts, and settings, and `~/.cache/graph-ops/` to remove downloaded binaries. If you use MySQL, delete the data from that database. Uninstalling the plugin does not delete these.
+Delete `~/.graph-ops/` to remove tickets, artifacts, and settings, and `~/.cache/graph-ops/` to remove downloaded binaries. If you use MySQL, delete the data from that database. If you use an HTTP custom data source, delete the data in the service at that URL. Uninstalling the plugin does not delete these.
 
 ### Changes and contact
 
@@ -50,9 +51,9 @@ Changes to this policy are published in this file in the repository. For questio
 
 ### データの保存場所
 
-GraphOps が作るデータは、すべてお使いのマシン上か、ご自身で指定したデータベースに保存されます。
+GraphOps が作るデータは、すべてお使いのマシン上か、ご自身で指定したデータベースやサービスに保存されます。
 
-- チケット、実行グラフ、成果物: 既定では SQLite ファイル `~/.graph-ops/graph.db`。MySQL を設定した場合は、指定したデータベース。
+- チケット、実行グラフ、成果物: 既定では SQLite ファイル `~/.graph-ops/graph.db`。MySQL を設定した場合は、指定したデータベース。HTTP カスタムデータソースを設定した場合は、指定した URL のサービス。
 - 成果物用の作業ファイル: `~/.graph-ops/artifacts`
 - 設定: `~/.graph-ops/config.json`、`~/.graph-ops/config.yaml`（環境変数を除けば、GraphOps が設定を読み込むのはこの 2 ファイルだけです。起動したディレクトリからは何も読み込みません）
 - ダウンロードした `graph-engine` バイナリ: `~/.cache/graph-ops/engine/`（`GRAPH_OPS_ENGINE_DIR` を設定した場合はそのディレクトリ）
@@ -63,6 +64,7 @@ GraphOps が作るデータは、すべてお使いのマシン上か、ご自�
 - **プラグインのインストール**: Claude Code が `git` で GitHub からプラグインを取得します。
 - **Web UI**: ローカルの UI サーバーは既定で `127.0.0.1` だけで待ち受け、UI 自体は、利用者が明示的に操作しない限り外部サイトからリソースを読み込みません。設定の `host`（または `GRAPH_HOST`）を変えない限り、他のマシンからは接続できません。Markdown 成果物の中の外部画像は、表示しただけでは読み込まれません。画像のホスト名が表示され、読み込みをクリックしたときに初めて取得されます。ただし、UI でプレビューする HTML 成果物は、その成果物自体が参照している外部リソースを読み込むことがあります。
 - **MySQL**: MySQL を設定した場合は、指定したサーバーに接続します。
+- **HTTP カスタムデータソース**: `dbBackend` を `"http"` にした場合、graph-engine は、チケット、実行グラフ（ノードとエッジ）、成果物（内容を含む）、プロジェクト、ラベルを、設定した URL（`httpDataSourceUrl` または `GRAPH_HTTP_DATASOURCE_URL`）へ送り、そこから読み込みます。トークン（`httpDataSourceToken` または `GRAPH_HTTP_DATASOURCE_TOKEN`）を設定した場合は、すべてのリクエストでそれを `Authorization: Bearer` ヘッダーとして送ります。ループバック以外の URL には HTTPS とトークンが必須で、リダイレクトはたどらないため、データとトークンはその URL にだけ送られます。受け取ったサーバーがデータをその後どう扱うか（たとえば Jira への転送）は、そこで動かしているサービス次第です。詳しくは [docs/http-datasource/README.md](docs/http-datasource/README.md) を参照してください。
 
 これ以外のネットワーク通信は行いません。
 
@@ -72,7 +74,7 @@ GraphOps は Claude Code の中で動きます。Claude との会話（Claude �
 
 ### データの削除
 
-チケット、成果物、設定を消すには `~/.graph-ops/` を、ダウンロードしたバイナリを消すには `~/.cache/graph-ops/` を削除してください。MySQL を使っている場合は、そのデータベースからデータを削除してください。プラグインをアンインストールしても、これらは削除されません。
+チケット、成果物、設定を消すには `~/.graph-ops/` を、ダウンロードしたバイナリを消すには `~/.cache/graph-ops/` を削除してください。MySQL を使っている場合は、そのデータベースからデータを削除してください。HTTP カスタムデータソースを使っている場合は、その URL のサービス側でデータを削除してください。プラグインをアンインストールしても、これらは削除されません。
 
 ### 変更と問い合わせ
 
