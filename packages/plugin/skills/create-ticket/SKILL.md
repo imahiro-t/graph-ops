@@ -35,11 +35,25 @@ Keep this pass lightweight (a couple of exchanges, not a full requirements inter
 
 Once the title/description are settled, judge the ticket's priority (`HIGH`/`MEDIUM`/`LOW`) from its content -- urgency, blast radius, whether it blocks other work, how visible the problem is -- and present that judgment to the user together with your reasoning, then ask them to confirm or override it before creating the ticket. If the user has no particular preference, don't insist: the ticket can be created without `--priority`, and it then gets the default priority `MEDIUM`.
 
-At the same point, ask the user whether they want any labels on the ticket (for example "バグ" / "機能追加"). Labels are optional -- if they want none, create the ticket without `--label`. Keep in mind:
+At the same point, work out the ticket's labels with the user, in this order:
 
-- Only labels already registered for the target project can be used. Labels are registered, renamed and deleted only in the Web UI's settings (設定 → ラベル), whose Labels tab has its own project selector; there is no CLI command to create, rename, delete or list labels.
-- Names are matched ignoring surrounding spaces and letter case.
-- If any given name isn't registered, `create-ticket` fails with `LABEL_NOT_FOUND` and **no ticket is created**. The error message lists the project's registered label names -- pick from those with the user (or have them register the label in the Web UI first) and run the command again.
+1. **List the target project's labels.** Run `graph-engine list-labels`. It picks the project exactly the way `create-ticket` does (the project whose local path contains the current directory, else the current project), so run it from the same directory; if you are going to pass `--project <id>` to `create-ticket`, pass the same `--project <id>` here. The output is a JSON array of `{id, name, color, ticket_count, ...}` (`[]` when the project has none), and a `resolved project: ...` line on stderr tells you which project it looked at.
+2. **Propose existing labels.** From the ticket's content, pick the existing labels that fit (for example "バグ" / "機能追加") and propose them to the user with a short reason for each.
+3. **Propose a new label only if nothing fits.** If no existing label covers something the ticket clearly needs, propose a new label: a name, and a color from the palette `gray red orange amber green teal blue indigo purple pink` -- or leave the color out and let `create-label` pick one the project doesn't use yet. Prefer an existing label over a near-duplicate new one.
+4. **Register new labels only after the user approves them.** **Never create a label without the user's explicit approval** of that label -- a proposal is not approval, and the user may rename it, pick a different color, or decline it. Once approved, register each one, with the same `--project` as in 1 if you use one:
+
+   ```bash
+   graph-engine create-label "<name>" [--color <color>] [--project <id>]
+   ```
+
+   Then attach it with `create-ticket --label` in step 3 below.
+
+Labels are optional: if the user wants none, respect that and create the ticket without `--label`. Keep in mind:
+
+- Names are 1-50 characters, trimmed, and unique within the project ignoring letter case. `create-label` fails with `LABEL_NAME_TAKEN` when a label with the same name in different case already exists -- use that existing label instead of registering another. `INVALID_LABEL_NAME` / `INVALID_LABEL_COLOR` mean the name or color was not accepted; nothing is created, so fix it with the user and try again.
+- A label registered here stays in the project even if the ticket ends up not being created (the user changed their mind, or `create-ticket` failed) -- tell the user so; it can be removed in the Web UI.
+- Renaming and deleting labels are done only in the Web UI's settings (設定 → ラベル); there is no CLI command for them.
+- `--label` names are matched ignoring surrounding spaces and letter case. If any given name isn't registered, `create-ticket` fails with `LABEL_NOT_FOUND` and **no ticket is created**; the error message lists the project's registered label names.
 
 ## 3. Create the ticket
 

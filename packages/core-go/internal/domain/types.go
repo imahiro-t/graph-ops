@@ -314,6 +314,36 @@ func ParseLabelColor(s string) (LabelColor, error) {
 	return "", NewAPIError(ErrCodeInvalidLabelColor, "invalid label color %q: must be one of the fixed palette colors", s)
 }
 
+// PickLabelColor chooses a color for a new label when none was given
+// (`graph-engine create-label` without --color, DFLT-00138), from the colors
+// the project's existing labels already use:
+//
+//   - the first palette color (in LabelColors order) nobody uses yet;
+//   - otherwise -- every color is taken -- the least-used palette color,
+//     ties going to the one earlier in the palette. Reusing a color is
+//     allowed then; picking the least-used one keeps the palette balanced
+//     and the result deterministic.
+//
+// A used color outside the palette (which the store never writes, but old or
+// hand-edited data could hold) is ignored. The Web UI's new-label form is
+// unrelated: it always starts at gray and lets the user pick.
+func PickLabelColor(used []LabelColor) LabelColor {
+	counts := make(map[LabelColor]int, len(LabelColors))
+	for _, c := range used {
+		counts[c]++
+	}
+	best := LabelColors[0]
+	for _, c := range LabelColors {
+		if counts[c] < counts[best] {
+			best = c
+		}
+		if counts[c] == 0 {
+			return c
+		}
+	}
+	return best
+}
+
 // MaxLabelNameLength is the maximum label name length in runes (not bytes),
 // after surrounding whitespace is trimmed.
 const MaxLabelNameLength = 50

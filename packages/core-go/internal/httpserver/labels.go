@@ -10,8 +10,11 @@ import (
 )
 
 // Label master API (DFLT-00084). Labels are project-scoped rows in the
-// (possibly team-shared) DB, managed from the Web UI's settings; there is
-// deliberately no CLI equivalent. Validation and the duplicate-name rule
+// (possibly team-shared) DB, managed from the Web UI's settings. Since
+// DFLT-00138 the CLI can also list and create them (`graph-engine
+// list-labels` / `create-label`, going straight to the store rather than
+// through this API); renaming and deleting remain Web UI only, with no CLI
+// equivalent. Validation and the duplicate-name rule
 // live in the store (see store.GraphRepository's label methods), and their
 // APIErrors map to 400/404 through statusForError.
 

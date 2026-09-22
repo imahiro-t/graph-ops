@@ -95,9 +95,11 @@ func (e *GraphEngine) CreateTicketWithOptions(projectID, title, description stri
 // labels (DFLT-00084), for the CLI's --label flags. Each name is trimmed and
 // matched case-insensitively; repeated names collapse to one ID. If any name
 // matches nothing, it returns LABEL_NOT_FOUND naming every unmatched name
-// and every label the project does have, and the caller writes nothing --
-// there is no CLI command to list labels, so the message is how an agent
-// learns the valid names.
+// and every label the project does have, and the caller writes nothing.
+// `graph-engine list-labels` (DFLT-00138) is the proper way to look the names
+// up beforehand; the list in the message is a convenience for a caller that
+// guessed wrong, and it points at `graph-engine create-label` when the
+// project has no labels at all.
 func (e *GraphEngine) resolveLabelNames(projectID string, names []string) ([]string, error) {
 	registered, err := e.repo.ListLabelsByProject(projectID)
 	if err != nil {
@@ -130,13 +132,47 @@ func (e *GraphEngine) resolveLabelNames(projectID string, names []string) ([]str
 		}
 		list := strings.Join(available, ", ")
 		if list == "" {
-			list = "(none; register labels in the Web UI settings)"
+			list = `(none; register labels with "graph-engine create-label" or in the Web UI settings)`
 		}
 		return nil, domain.NewAPIError(domain.ErrCodeLabelNotFound,
 			"LABEL_NOT_FOUND: label(s) %s not registered in project %s; registered labels: %s",
 			strings.Join(missing, ", "), projectID, list)
 	}
 	return ids, nil
+}
+
+// CreateLabel registers a new label in projectID for `graph-engine
+// create-label` (DFLT-00138). DFLT-00084 kept label management in the Web UI
+// only; DFLT-00138 lifts that for listing and creating so a ticket skill can
+// add a missing label (with the user's approval) without a trip to the
+// settings. Renaming and deleting stay Web UI only.
+//
+// A non-empty color is passed to the store untouched. With color empty, the
+// project's existing labels are listed and domain.PickLabelColor chooses one
+// (the first unused palette color, else the least used); a missing project
+// fails right there with PROJECT_NOT_FOUND. Either way every check -- name
+// normalization and length, the palette, the project's existence and the
+// case-insensitive duplicate-name rule -- is the store's CreateLabel, run in
+// its one transaction, so a rejected label writes nothing and all three
+// backends (sqlite, MySQL, HTTP data source) behave alike without any change
+// to the store interface or the HTTP data source protocol.
+//
+// Two concurrent color-less calls in the same project may both see a color
+// as unused and pick it; that only duplicates a color, which is allowed, so
+// no lock is taken. Duplicate names are still stopped by the store.
+func (e *GraphEngine) CreateLabel(projectID, name, color string) (domain.Label, error) {
+	if color == "" {
+		existing, err := e.repo.ListLabelsByProject(projectID)
+		if err != nil {
+			return domain.Label{}, err
+		}
+		used := make([]domain.LabelColor, len(existing))
+		for i, l := range existing {
+			used[i] = l.Color
+		}
+		color = string(domain.PickLabelColor(used))
+	}
+	return e.repo.CreateLabel(projectID, name, color)
 }
 
 // LabelChange describes what RefineTicketWithLabels does to a ticket's

@@ -39,11 +39,32 @@ Every ticket always has one of `HIGH`/`MEDIUM`/`LOW`; a ticket created without a
 
 ## 3b. Check whether the labels need to change
 
-Look at the ticket's current `labels` in step 1's `get-ticket` output (an array of `{id, name, color, ...}`; `[]` means no labels). If the clarified content suggests adding or removing labels, propose the change to the user and confirm it. Otherwise leave labels alone.
+Look at the ticket's current `labels` in step 1's `get-ticket` output (an array of `{id, name, color, ...}`; `[]` means no labels), then:
+
+1. **List the ticket's project's labels.** Always pass the ticket's `project_id` from step 1's `get-ticket` output -- without `--project` the command resolves the project from the current directory, which may be a different project than the ticket's:
+
+   ```bash
+   graph-engine list-labels --project "<ticket's project_id>"
+   ```
+
+   The output is a JSON array of `{id, name, color, ticket_count, ...}` (`[]` when the project has none).
+2. **Propose existing labels.** If the clarified content suggests adding or removing labels, propose the change using the existing labels that fit, with a short reason for each. If the current labels still fit, say so and leave labels alone.
+3. **Propose a new label only if nothing fits.** If no existing label covers something the ticket clearly needs, propose a new label: a name, and a color from the palette `gray red orange amber green teal blue indigo purple pink` -- or leave the color out and let `create-label` pick one the project doesn't use yet. Prefer an existing label over a near-duplicate new one.
+4. **Register new labels only after the user approves them, then set them in step 4.** **Never create a label without the user's explicit approval** of that label -- a proposal is not approval, and the user may rename it, pick a different color, or decline it. Once approved, register each one in the ticket's project:
+
+   ```bash
+   graph-engine create-label "<name>" [--color <color>] --project "<ticket's project_id>"
+   ```
+
+   Then include it in the `--label` set of the `refine-ticket` command in step 4.
+
+Keep in mind:
 
 - `--label <name>` (repeatable) **replaces the ticket's whole label set** with exactly the names given. To add a label, pass every existing label you want to keep **plus** the new one; a label you leave out is removed.
 - Omitting `--label` leaves the labels unchanged. There is no CLI way to remove every label -- that is done in the Web UI.
-- Only labels already registered for the ticket's project can be used; they are managed only in the Web UI's settings (設定 → ラベル), whose Labels tab has its own project selector. Names are matched ignoring surrounding spaces and letter case.
+- Only labels registered for the ticket's project can be attached. Names are matched ignoring surrounding spaces and letter case. Label names are 1-50 characters and unique within the project ignoring letter case: `create-label` fails with `LABEL_NAME_TAKEN` when the same name in different case already exists -- use that existing label instead. On `INVALID_LABEL_NAME` / `INVALID_LABEL_COLOR` nothing is created; fix it with the user and try again.
+- A label registered here stays in the project even if the refine is then abandoned or fails -- tell the user so; it can be removed in the Web UI.
+- Renaming and deleting labels are done only in the Web UI's settings (設定 → ラベル); there is no CLI command for them.
 - If any given name isn't registered, `refine-ticket` fails with `LABEL_NOT_FOUND` and **nothing on the ticket changes** (not the description, priority, labels or status). The error message lists the registered label names.
 - Note: `refine-ticket` always sets the ticket's status to `REFINED`, even when you only change labels. If the ticket is already further along (e.g. `IN PROGRESS`), tell the user about this side effect before running it for a label-only change, or suggest changing the labels in the Web UI instead. (`graph-engine update-ticket` keeps the status but cannot change labels.)
 
