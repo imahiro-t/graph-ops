@@ -29,7 +29,8 @@ const mockedSaveCatalog = saveSettingsCatalog as unknown as ReturnType<typeof vi
 // code_review is never overridden in this scope's own tier_document, so it
 // only shows up in merged_catalog -- a plugin-default row (isOverridden
 // false). qa_review has an entry in tier_document too, so it's an override
-// already made in this scope (isOverridden true).
+// already made in this scope (isOverridden true). Both are plugin defaults,
+// so both are in inherited_catalog.
 const CATALOG_RESPONSE: SettingsCatalogResponse = {
   tier_document: {
     version: 1,
@@ -44,7 +45,50 @@ const CATALOG_RESPONSE: SettingsCatalogResponse = {
     },
     nodes: []
   },
-  inherited_catalog: { review_gates: {}, nodes: [] }
+  inherited_catalog: {
+    review_gates: {
+      code_review: { name: 'Code Review', criteria: 'code criteria', max_iterations: 3, enabled: true },
+      qa_review: { name: 'QA Review', criteria: 'default qa criteria', max_iterations: 3, enabled: true }
+    },
+    nodes: []
+  }
+};
+
+// CATALOG_RESPONSE plus an override of a custom gate (custom_review) that
+// has no plugin default behind it.
+const WITH_CUSTOM_GATE: SettingsCatalogResponse = {
+  ...CATALOG_RESPONSE,
+  tier_document: {
+    version: 1,
+    review_gates: {
+      ...CATALOG_RESPONSE.tier_document.review_gates,
+      custom_review: { name: 'Custom Review', criteria: 'custom criteria' }
+    }
+  },
+  merged_catalog: {
+    ...CATALOG_RESPONSE.merged_catalog,
+    review_gates: {
+      ...CATALOG_RESPONSE.merged_catalog.review_gates,
+      custom_review: { name: 'Custom Review', criteria: 'custom criteria' }
+    }
+  }
+};
+
+// code_review with a partial override (only max_iterations) in this scope --
+// what saving a single changed field of the default gate produces.
+const WITH_PARTIAL_DEFAULT_OVERRIDE: SettingsCatalogResponse = {
+  ...CATALOG_RESPONSE,
+  tier_document: {
+    version: 1,
+    review_gates: { ...CATALOG_RESPONSE.tier_document.review_gates, code_review: { max_iterations: 5 } }
+  },
+  merged_catalog: {
+    ...CATALOG_RESPONSE.merged_catalog,
+    review_gates: {
+      ...CATALOG_RESPONSE.merged_catalog.review_gates,
+      code_review: { name: 'Code Review', criteria: 'code criteria', max_iterations: 5, enabled: true }
+    }
+  }
 };
 
 describe('ReviewGatesEditor', () => {
@@ -138,11 +182,46 @@ describe('ReviewGatesEditor', () => {
 
       await user.click(saveButton());
 
-      expect(await screen.findByText(i18n.t('settings.reviewGates.emptyIdError'))).toBeInTheDocument();
+      // Announced to assistive technology, and tied to the offending field.
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(i18n.t('settings.reviewGates.emptyIdError'));
+      const idsAfter = fieldsOf('settings.reviewGates.idLabel');
+      const emptyId = idsAfter[idsAfter.length - 1];
+      expect(emptyId).toHaveAttribute('aria-invalid', 'true');
+      expect(emptyId).toHaveAttribute('aria-describedby', alert.id);
+      expect(idsAfter[0]).not.toHaveAttribute('aria-invalid');
+      expect(idsAfter[0]).not.toHaveAttribute('aria-describedby');
       expect(mockedSaveCatalog).not.toHaveBeenCalled();
       expect(mockedFetchCatalog.mock.calls.length).toBe(fetchCallsBefore);
       expect(screen.queryByText(i18n.t('settings.common.saveSuccess'))).not.toBeInTheDocument();
       expect(screen.getByDisplayValue('Unnamed Gate')).toBeInTheDocument();
+    });
+
+    it('stops marking the ID field invalid once an ID is entered', async () => {
+      const user = userEvent.setup();
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+      await user.click(screen.getByRole('button', { name: i18n.t('settings.reviewGates.addGate') }));
+      await user.click(saveButton());
+      await screen.findByRole('alert');
+
+      const id = fieldsOf('settings.reviewGates.idLabel')[2];
+      expect(id).toHaveAttribute('aria-invalid', 'true');
+      await user.type(id, 'security_review');
+      expect(id).not.toHaveAttribute('aria-invalid');
+      expect(id).not.toHaveAttribute('aria-describedby');
+    });
+
+    it('does not mark any ID field invalid for an error from the API', async () => {
+      mockedSaveCatalog.mockRejectedValue(new Error('boom'));
+      const user = userEvent.setup();
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+      await user.type(fieldsOf('settings.reviewGates.criteriaLabel')[0], ' extra');
+      await user.click(saveButton());
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('boom');
+      for (const id of fieldsOf('settings.reviewGates.idLabel')) expect(id).not.toHaveAttribute('aria-invalid');
     });
   });
 
@@ -246,19 +325,23 @@ describe('ReviewGatesEditor', () => {
       expect(gates.qa_review).toEqual({ max_iterations: 4, additional_criteria: 'qa extra' });
     });
 
-    it('moves an existing override to its new ID when the ID is changed', async () => {
+    it('moves an existing override of a custom gate to its new ID when the ID is changed', async () => {
+      mockedFetchCatalog.mockResolvedValue(WITH_CUSTOM_GATE);
       const user = userEvent.setup();
       render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
-      await screen.findByDisplayValue('Code Review');
+      await screen.findByDisplayValue('Custom Review');
 
-      const id = fieldsOf('settings.reviewGates.idLabel')[1];
+      const id = fieldsOf('settings.reviewGates.idLabel')[2];
+      expect(id).toHaveValue('custom_review');
+      expect(id).not.toBeDisabled();
+      expect(id).not.toHaveAttribute('title');
       await user.clear(id);
-      await user.type(id, 'qa_review_v2');
+      await user.type(id, 'custom_review_v2');
       await user.click(saveButton());
 
       const gates = await waitFor(savedGates);
-      expect(gates).not.toHaveProperty('qa_review');
-      expect(gates.qa_review_v2).toEqual({ name: 'QA Review (overridden)', criteria: 'qa criteria', max_iterations: 2, enabled: true });
+      expect(gates).not.toHaveProperty('custom_review');
+      expect(gates.custom_review_v2).toEqual({ name: 'Custom Review', criteria: 'custom criteria' });
     });
 
     it('writes a newly added gate with the fields that were filled in', async () => {
@@ -286,5 +369,73 @@ describe('ReviewGatesEditor', () => {
     expect(fieldsOf('settings.reviewGates.idLabel')[0]).toBeDisabled();
     // The name field opens up once the row is being overridden, as before.
     expect(fieldsOf('settings.reviewGates.nameLabel')[0]).not.toBeDisabled();
+  });
+
+  describe('the ID of a gate with a plugin default', () => {
+    it('stays disabled, with the reason as its title, once the gate has a partial override', async () => {
+      mockedFetchCatalog.mockResolvedValue(WITH_PARTIAL_DEFAULT_OVERRIDE);
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('QA Review (overridden)');
+
+      const ids = fieldsOf('settings.reviewGates.idLabel');
+      expect(ids[0]).toHaveValue('code_review');
+      expect(ids[0]).toBeDisabled();
+      expect(ids[0]).toHaveAttribute('title', i18n.t('settings.reviewGates.cannotChangeDefaultIdHint'));
+      // A full override of a default gate is locked as well.
+      expect(ids[1]).toBeDisabled();
+    });
+
+    it('stays disabled after saving a single changed field of a default gate', async () => {
+      const user = userEvent.setup();
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+
+      mockedFetchCatalog.mockResolvedValue(WITH_PARTIAL_DEFAULT_OVERRIDE);
+      const max = fieldsOf('settings.reviewGates.maxIterationsLabel')[0];
+      await user.clear(max);
+      await user.type(max, '5');
+      await user.click(saveButton());
+      await screen.findByText(i18n.t('settings.common.saveSuccess'));
+
+      expect(fieldsOf('settings.reviewGates.idLabel')[0]).toBeDisabled();
+    });
+
+    it('is disabled with the reason for a not-yet-overridden gate too', async () => {
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+
+      const id = fieldsOf('settings.reviewGates.idLabel')[0];
+      expect(id).toBeDisabled();
+      expect(id).toHaveAttribute('title', i18n.t('settings.reviewGates.cannotChangeDefaultIdHint'));
+    });
+  });
+
+  it("shows the inherited default as the placeholder of an override's empty fields", async () => {
+    mockedFetchCatalog.mockResolvedValue(WITH_PARTIAL_DEFAULT_OVERRIDE);
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('QA Review (overridden)');
+
+    const placeholder = (value: string | number) => i18n.t('settings.reviewGates.inheritedPlaceholder', { value });
+    const name = fieldsOf('settings.reviewGates.nameLabel')[0];
+    expect(name).toHaveValue('');
+    expect(name).toHaveAttribute('placeholder', placeholder('Code Review'));
+    const criteria = fieldsOf('settings.reviewGates.criteriaLabel')[0];
+    expect(criteria).toHaveValue('');
+    expect(criteria).toHaveAttribute('placeholder', placeholder('code criteria'));
+    // A field the override sets shows its own value; its placeholder still
+    // names the default it replaces.
+    const max = fieldsOf('settings.reviewGates.maxIterationsLabel')[0];
+    expect(max).toHaveValue(5);
+    expect(max).toHaveAttribute('placeholder', placeholder(3));
+  });
+
+  it('keeps the plain label placeholders on a newly added gate', async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.reviewGates.addGate') }));
+
+    expect(fieldsOf('settings.reviewGates.nameLabel')[2]).toHaveAttribute('placeholder', i18n.t('settings.reviewGates.nameLabel'));
+    expect(fieldsOf('settings.reviewGates.criteriaLabel')[2]).not.toHaveAttribute('placeholder');
   });
 });

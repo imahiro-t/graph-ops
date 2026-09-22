@@ -81,14 +81,16 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
   // Switches the selected skill, asking first when the current one has
   // unsaved edits -- mirrors NodeTypesEditor's / TemplatesEditor's select.
-  const select = (next: string) => {
-    if (next === selected) return;
-    if (isDirty && !window.confirm(t('settings.unsavedChanges.confirmMessage'))) return;
+  // Returns whether the switch happened, like NodeTypesEditor's.
+  const select = (next: string): boolean => {
+    if (next === selected) return true;
+    if (isDirty && !window.confirm(t('settings.unsavedChanges.confirmMessage'))) return false;
     // Discarding: reset the text first so isDirty is already false while the
     // next skill loads (see NodeTypesEditor's select for why).
     setTierText(savedTierText);
     onDirtyChange(false);
     setSelected(next);
+    return true;
   };
 
   const handleSave = async () => {

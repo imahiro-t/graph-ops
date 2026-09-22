@@ -315,12 +315,14 @@
       "defaultBadgeHint": "This is a plugin-default review gate you have not overridden. Edit any field to override it.",
       "cannotDeleteDefaultHint": "This is a plugin default, not one of your overrides -- there's nothing to remove. Edit a field first to override it, then it can be deleted.",
       "cannotRenameDefaultHint": "This is a plugin-default review gate -- its name can't be changed. The name stays tied to the locale so translated names keep showing up when the locale is switched.",
+      "cannotChangeDefaultIdHint": "This is a plugin-default review gate -- its ID can't be changed, even once it has been overridden. Use \"Add Review Gate\" for a gate with a different ID.",
       "tableEmpty": "No review gates defined yet.",
       "mergedPreviewLabel": "Merged preview (plugin default + your override; a team tier is not included)",
       "mergedCriteriaLabel": "Merged criteria",
       "mergedMaxIterationsLabel": "Merged max iterations",
       "mergedEnabledLabel": "Merged enabled",
-      "previewUnavailableHint": "The preview appears after this gate has been saved."
+      "previewUnavailableHint": "The preview appears after this gate has been saved.",
+      "inheritedPlaceholder": "Default: {{value}}"
     },
     "skills": {
       "listTitle": "Skills",

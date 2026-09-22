@@ -315,12 +315,14 @@
       "defaultBadgeHint": "まだ上書きしていない、プラグイン既定のレビューゲートです。いずれかの項目を編集すると上書きされます。",
       "cannotDeleteDefaultHint": "プラグイン既定であり、ユーザー上書きではないため削除できません。先にいずれかの項目を編集して上書きしてください。",
       "cannotRenameDefaultHint": "プラグイン既定のレビューゲートのため名前は変更できません。ロケール切り替えで翻訳された名前が表示されるよう、名前は固定されています。",
+      "cannotChangeDefaultIdHint": "プラグイン既定のレビューゲートのため ID は変更できません（上書きした後も同じです）。別の ID のゲートが必要なときは「レビューゲートを追加」を使ってください。",
       "tableEmpty": "レビューゲートはまだ定義されていません。",
       "mergedPreviewLabel": "継承後のプレビュー（プラグイン既定＋ユーザー上書き。チーム層は含みません）",
       "mergedCriteriaLabel": "合成後の合格基準",
       "mergedMaxIterationsLabel": "合成後の最大イテレーション数",
       "mergedEnabledLabel": "合成後の有効状態",
-      "previewUnavailableHint": "このゲートを保存すると、プレビューが表示されます。"
+      "previewUnavailableHint": "このゲートを保存すると、プレビューが表示されます。",
+      "inheritedPlaceholder": "既定: {{value}}"
     },
     "skills": {
       "listTitle": "スキル一覧",
