@@ -533,6 +533,14 @@ func isClaimed(status domain.NodeStatus) bool {
 // the ticket itself into TicketInReview -- deriveTicketStatus reserves that
 // for a pending human approval_gate (DFLT-00046); a ticket with a
 // review/review_gate node running stays IN PROGRESS.
+//
+// It either hands a claimed node back or releases it (DFLT-00136). If the
+// call fails after claiming -- a later node's ClaimNode or the closing
+// syncTicketStatus erroring -- it returns the nodes it claimed to their
+// pre-claim status before returning the error, so no node is left looking
+// "in progress" with nobody running it; the caller can simply retry. Only if
+// a release itself fails does the error name nodes left claimed, for
+// unstick-node. See releaseClaims.
 func (e *GraphEngine) GetExecutableNodes(ticketID string, catalog config.Catalog) ([]domain.GraphNode, error) {
 	// Checked before EnsureGraphStarted (which seeds the graph on first
 	// call): a CLOSED ticket must never gain nodes just because something
@@ -569,6 +577,8 @@ func (e *GraphEngine) GetExecutableNodes(ticketID string, catalog config.Catalog
 	}
 
 	executable := []domain.GraphNode{}
+	// claims mirrors executable with what releaseClaims needs to undo it.
+	var claims []nodeClaim
 	for _, n := range detail.Nodes {
 		if isClaimed(n.Status) {
 			continue
@@ -594,7 +604,14 @@ func (e *GraphEngine) GetExecutableNodes(ticketID string, catalog config.Catalog
 		// claimable statuses is unchanged.
 		claimed, err := e.repo.ClaimNode(n.ID, claimedStatus, claimableExclusions)
 		if err != nil {
-			return nil, err
+			// This node itself is not released: the failure may have come
+			// after the write (claimNodeCAS reads the row back), but it may
+			// equally have come before it while somebody else claimed the
+			// node, and releasing that claim would hand their node out a
+			// second time. Its ID goes in the message instead, so a human
+			// can check it with get-ticket.
+			cause := fmt.Errorf("claiming node %s: %w (if it now shows IN PROGRESS/IN REVIEW and no worker was handed it, run unstick-node on it)", n.ID, err)
+			return nil, e.releaseClaims(claims, cause)
 		}
 		// Somebody else got there first (or the node has since been
 		// deleted). Leave it out of this call's result and carry on --
@@ -603,6 +620,7 @@ func (e *GraphEngine) GetExecutableNodes(ticketID string, catalog config.Catalog
 		if claimed == nil {
 			continue
 		}
+		claims = append(claims, nodeClaim{id: n.ID, from: n.Status, to: claimedStatus})
 		executable = append(executable, *claimed)
 	}
 
@@ -613,10 +631,72 @@ func (e *GraphEngine) GetExecutableNodes(ticketID string, catalog config.Catalog
 	// other node left to claim -- would otherwise keep whatever stale status
 	// (often DONE, from when only the seed existed) syncTicketStatus last
 	// computed, silently hiding a ticket that's actually waiting on a human.
+	//
+	// A failure here hands back no nodes, so the claims above are released
+	// first: returned or released, never left claimed with no worker. The
+	// ticket row needs no compensating write -- the failed UpdateTicket is
+	// the only write syncTicketStatus makes, and with the claims undone the
+	// derived status is back to what it was before this call.
 	if err := e.syncTicketStatus(ticketID); err != nil {
-		return nil, err
+		return nil, e.releaseClaims(claims, fmt.Errorf("syncing ticket %s status: %w", ticketID, err))
 	}
 	return executable, nil
+}
+
+// nodeClaim records one claim GetExecutableNodes made, so it can be undone if
+// the call fails before handing the node back: the node's status before the
+// claim (from the detail snapshot) and the status the claim set.
+type nodeClaim struct {
+	id   string
+	from domain.NodeStatus
+	to   domain.NodeStatus
+}
+
+// releaseClaims is GetExecutableNodes' compensation (DFLT-00136): it returns
+// every node in claims to the status it had before this call claimed it, then
+// returns cause -- augmented, if any release failed, with the IDs that could
+// not be released so they can be fixed with unstick-node. The result always
+// wraps cause, so errors.Is/As still reach the original failure.
+//
+// A release is itself a ClaimNode CAS whose excluded set is every status
+// except the one this call claimed the node to. It therefore only moves a
+// node that still sits at exactly that status; a node somebody has since
+// moved on -- completed to DONE, rewound to TODO by a loop-back -- fails the
+// condition and is left alone ((nil, nil), which counts as released). The
+// CAS's contract, newStatus in excluded, holds because a claimable status
+// (TODO, AWAITING FIX, REJECTED) is never a claimed one (IN PROGRESS,
+// IN REVIEW).
+//
+// The check is on status alone, so it has an ABA window: were the node
+// rewound and then claimed again by another process to the same status in
+// the milliseconds before the release, the release would undo that claim
+// too. The cost is the node being handed out once more -- the same kind of
+// cost DFLT-00119 accepted -- and far less than a node stuck claimed. On the
+// HTTP backend ClaimNode is a GET then a PATCH, and the release inherits that
+// same non-atomicity.
+//
+// A failed release does not stop the others: every node that can be
+// released is.
+func (e *GraphEngine) releaseClaims(claims []nodeClaim, cause error) error {
+	var stuck []string
+	var releaseErrs []string
+	for _, c := range claims {
+		excluded := make([]domain.NodeStatus, 0, len(domain.AllNodeStatuses()))
+		for _, s := range domain.AllNodeStatuses() {
+			if s != c.to {
+				excluded = append(excluded, s)
+			}
+		}
+		if _, err := e.repo.ClaimNode(c.id, c.from, excluded); err != nil {
+			stuck = append(stuck, c.id)
+			releaseErrs = append(releaseErrs, fmt.Sprintf("%s: %v", c.id, err))
+		}
+	}
+	if len(stuck) == 0 {
+		return cause
+	}
+	return fmt.Errorf("%w; additionally failed to release claimed node(s) %s -- they remain IN PROGRESS/IN REVIEW with no worker; run unstick-node on each: %s",
+		cause, strings.Join(stuck, ", "), strings.Join(releaseErrs, "; "))
 }
 
 // reachableVia walks adjacency breadth-first from `from` and returns every id
@@ -1551,13 +1631,14 @@ func (e *GraphEngine) syncTicketStatus(ticketID string) error {
 	// Init's backfill, and it matters for the same reason -- a read-only
 	// command must not become a contender for the write lock. get-executable
 	// runs syncTicketStatus on every invocation, so without this guard
-	// *every* read of the executable set rewrote the ticket row, and on
-	// SQLite that write is a deferred read-then-write transaction upgrade,
-	// which busy_timeout cannot cover (SQLite returns SQLITE_BUSY/517
-	// immediately rather than invoking the busy handler, to avoid deadlock).
-	// Skipping the no-op write removes the contention instead of waiting it
-	// out, without introducing BEGIN IMMEDIATE (out of scope for
-	// DFLT-00100).
+	// *every* read of the executable set rewrote the ticket row and took
+	// the write lock to do it. When DFLT-00100 added this guard, that write
+	// was a deferred read-then-write transaction on SQLite, which failed
+	// outright under contention, so the guard was the workaround. Since
+	// DFLT-00136 SQLite transactions begin IMMEDIATE and wait out the lock
+	// under busy_timeout instead, so the guard is no longer what keeps these
+	// commands from failing; it stays as the optimization it also is -- no
+	// write, no lock, no waiting.
 	//
 	// Deliberate behaviour change: a ticket whose derived status is unchanged
 	// no longer gets its updated_at bumped by complete-node/get-executable.

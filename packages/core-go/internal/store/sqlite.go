@@ -195,22 +195,31 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 	// milliseconds a CLI call holds the lock, so it absorbs the contention
 	// without giving anyone a knob to mistune.
 	//
-	// It does not cover every conflict, and the gap is not academic. SQLite
-	// skips the busy handler entirely when a transaction that has already
-	// read tries to become a writer -- waiting there could deadlock -- so
-	// every deferred read-then-write transaction in this package still
-	// fails at once under concurrent processes: updateTicket (labels.go),
-	// which syncTicketStatus drives from complete-node and get-executable,
-	// and the ID allocation in CreateTicket/CreateNode. DFLT-00100 shrank
-	// the exposure from the other end instead -- syncTicketStatus no longer
-	// calls UpdateTicket when the derived status already matches, so those
-	// two commands only enter the transaction on a real status transition
-	// -- but the transaction is still deferred, so concurrent transitions
-	// of the same ticket can still fail. Closing that needs BEGIN IMMEDIATE
-	// (DSN _txlock=immediate) or a retry, both of which DFLT-00100 puts out
-	// of scope; see
-	// TestSQLiteBusyTimeoutDoesNotCoverDeferredTransactionUpgrade.
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)", dbPath)
+	// busy_timeout alone does not cover every conflict. SQLite skips the
+	// busy handler entirely when a transaction that has already read tries
+	// to become a writer -- waiting there could deadlock -- so a deferred
+	// read-then-write transaction fails at once with SQLITE_BUSY under
+	// concurrent processes. Every transaction this package opens with
+	// db.Begin() writes (CreateTicket/CreateNode's ID allocation,
+	// CreateProject, DeleteProject, and labels.go's createLabel/updateLabel/
+	// deleteLabel/updateTicket -- the last is what syncTicketStatus drives
+	// from complete-node and get-executable), and before DFLT-00136 every
+	// one of them was deferred, which is how get-executable could fail
+	// after claiming nodes and leave them IN PROGRESS with no worker.
+	//
+	// _txlock=immediate makes modernc.org/sqlite issue BEGIN IMMEDIATE, so
+	// a transaction takes the write lock when it starts rather than
+	// upgrading to it midway. A conflict then surfaces at BEGIN, where
+	// busy_timeout does apply: the contender waits for the holder to commit
+	// instead of failing (TestSQLiteImmediateTransactionWaitsInsteadOfFailingUpgrade).
+	// The cost is that a transaction holds the write lock for its whole
+	// (millisecond-long) life; there are no read-only transactions here for
+	// that to penalize, and autocommit statements are unaffected. A new
+	// db.Begin() that only reads should use a plain query instead.
+	//
+	// SQLite-only: MySQL (row locks, no deferred-upgrade failure) and the
+	// HTTP data source are unaffected.
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_txlock=immediate", dbPath)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite db: %w", err)

@@ -11,9 +11,12 @@ import (
 // DFLT-00100: syncTicketStatus used to call UpdateTicket unconditionally, so
 // every complete-node and -- worse -- every read-only get-executable rewrote
 // the ticket row (and bumped its updated_at) even when the derived status was
-// the one already stored. On SQLite that write is a deferred read-then-write
-// transaction upgrade, which busy_timeout cannot cover, so it was the one
-// remaining source of "database is locked" once the DSN fix landed.
+// the one already stored. On SQLite that write was then a deferred
+// read-then-write transaction upgrade, which busy_timeout cannot cover, so it
+// was the one remaining source of "database is locked" once the DSN fix
+// landed. DFLT-00136 has since made SQLite transactions begin IMMEDIATE, so
+// the write now waits for the lock instead of failing; the guard remains as
+// an optimization (no write, no lock to wait for), not as the lock-error fix.
 //
 // These tests pin the guard: a no-op sync issues no write at all, while a
 // sync that really does change the status still writes exactly once.

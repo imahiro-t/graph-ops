@@ -26,17 +26,20 @@ import (
 // serializes everything inside one process, so a goroutine-only test passes
 // even with the bug present.
 //
-// Two tests live here, covering the two shapes the contention takes:
+// Three tests live here, covering the shapes the contention takes. Nothing
+// may fail in any of them:
 //
 //   - TestConcurrentCLIProcessesShareOneSQLiteDB is the steady state -- the
 //     ticket's derived status does not change while the nodes work -- which
-//     is what process-ticket spends nearly all of its time in. Nothing may
-//     fail here at all.
+//     is what process-ticket spends nearly all of its time in.
 //   - TestConcurrentCompleteNodeProcessesContendOnOneTicketRow is the worst
 //     case -- several processes deriving the *same new* status for the *same
 //     ticket row* at the same moment, so they genuinely have to write it.
-//     That is where the residual deferred read-then-write defect still
-//     bites, and the test bounds it rather than ignoring it.
+//     Until DFLT-00136 made SQLite transactions begin IMMEDIATE, this is
+//     where the deferred read-then-write failure still bit.
+//   - TestConcurrentGetExecutableAndCompleteNodeLeaveNoOrphanClaims mixes
+//     get-executable into that worst case and checks that no node is left
+//     claimed without having been handed to anyone (DFLT-00136).
 
 // cliSubprocessBarrierEnv names a file that a CLI subprocess waits for
 // before it starts doing any work. Process startup (re-exec of the test
@@ -117,100 +120,49 @@ func releaseCLISubprocessBarrier(t *testing.T, barrierPath string) {
 // lockErrorFragments are the shapes BUG-01 takes in a CLI process's output.
 // "SQLITE_BUSY" is matched as a substring, so it also covers
 // SQLITE_BUSY_SNAPSHOT (517) and SQLITE_BUSY_RECOVERY (261).
+//
+// None of them is tolerated anywhere in this file. Until DFLT-00136 one was:
+// SQLite transactions began deferred, and a transaction that read and then
+// wrote (updateTicket, driven by syncTicketStatus from complete-node and
+// get-executable) failed at once when another process held the write lock,
+// because SQLite does not run the busy handler for that upgrade. The DSN now
+// sets _txlock=immediate, so the write lock is taken at BEGIN, where
+// busy_timeout waits for it (internal/store's
+// TestSQLiteImmediateTransactionWaitsInsteadOfFailingUpgrade pins that
+// deterministically), and the allowance these tests used to carry for the
+// "known remaining defect" is gone.
 var lockErrorFragments = []string{"database is locked", "SQLITE_BUSY"}
 
-// deferredUpgradeMarker identifies the one lock failure busy_timeout cannot
-// remove: updateTicket (internal/store/labels.go) runs a deferred
-// transaction that reads the ticket and then writes it, and SQLite refuses to
-// run the busy handler when a reading transaction tries to become a writer.
-// The CLI reports it as "updating ticket <id>: database is locked".
-//
-// TestSQLiteBusyTimeoutDoesNotCoverDeferredTransactionUpgrade
-// (internal/store) pins that behaviour deterministically. DFLT-00100 removed
-// nearly all exposure to it by making syncTicketStatus skip UpdateTicket when
-// the derived status already matches the stored one, so the transaction is
-// now entered only on a real status transition. It is a KNOWN REMAINING
-// DEFECT, not an accepted one -- closing it needs BEGIN IMMEDIATE (DSN
-// _txlock=immediate) or a retry, both out of this ticket's scope.
-const deferredUpgradeMarker = "updating ticket "
-
-// processOutcome classifies what one CLI subprocess did.
-type processOutcome int
-
-const (
-	// outcomeOK: exited 0 with no lock error in sight.
-	outcomeOK processOutcome = iota
-	// outcomeKnownDeferredUpgrade: failed only on the residual
-	// deferred-upgrade defect, in a command that actually goes through
-	// syncTicketStatus.
-	outcomeKnownDeferredUpgrade
-	// outcomeUnexpected: anything else -- a lock failure busy_timeout was
-	// supposed to absorb, a deferred-upgrade failure from a command that
-	// cannot legitimately produce one, or a plain non-zero exit.
-	outcomeUnexpected
-)
-
-// commandGoesThroughSyncTicketStatus reports whether the command behind label
-// can legitimately hit the deferred-upgrade defect. Only complete-node and
-// get-executable call syncTicketStatus -> UpdateTicket; add-artifact writes
-// through the repository directly (cmdAddArtifact in main.go) and therefore
-// never enters that transaction, so a lock failure from add-artifact is
-// always a real regression even if the text happens to mention a ticket.
-func commandGoesThroughSyncTicketStatus(label string) bool {
-	return strings.HasPrefix(label, "complete-node") || strings.HasPrefix(label, "get-executable")
-}
-
-// classifyProcessOutcome inspects one process's combined output line by line.
-// The known-failure allowance is deliberately narrow: the marker has to sit
-// on the very line that carries the lock error (not merely somewhere in the
-// output), and the command has to be one that reaches updateTicket at all.
-// Any other lock error anywhere in the output wins and makes the outcome
-// unexpected.
-func classifyProcessOutcome(label, out string, code int) (processOutcome, string) {
-	sawKnown := false
-	for _, line := range strings.Split(out, "\n") {
-		hasLockError := false
-		for _, fragment := range lockErrorFragments {
-			if strings.Contains(line, fragment) {
-				hasLockError = true
-				break
-			}
+// classifyProcessOutcome reports whether one process finished cleanly --
+// exit 0 and no lock error anywhere in its output -- and, if not, why.
+func classifyProcessOutcome(label, out string, code int) (bool, string) {
+	for _, fragment := range lockErrorFragments {
+		if strings.Contains(out, fragment) {
+			return false, fmt.Sprintf(
+				"%s hit a lock failure -- concurrent graph-engine processes have to wait for the write lock (busy_timeout, BEGIN IMMEDIATE), not fail:\n%s",
+				label, out)
 		}
-		if !hasLockError {
-			continue
-		}
-		if commandGoesThroughSyncTicketStatus(label) && strings.Contains(line, deferredUpgradeMarker) {
-			sawKnown = true
-			continue
-		}
-		return outcomeUnexpected, fmt.Sprintf(
-			"%s hit a lock failure that busy_timeout must absorb -- concurrent graph-engine processes have to wait for the write lock, not fail:\n%s",
-			label, out)
-	}
-	if sawKnown {
-		return outcomeKnownDeferredUpgrade, ""
 	}
 	if code != 0 {
-		return outcomeUnexpected, fmt.Sprintf("%s exited with code %d, want 0:\n%s", label, code, out)
+		return false, fmt.Sprintf("%s exited with code %d, want 0:\n%s", label, code, out)
 	}
-	return outcomeOK, ""
+	return true, ""
 }
 
 // outcomeTally is the per-run breakdown every concurrency test asserts on,
 // rather than eyeballing a log line.
 type outcomeTally struct {
-	total      int
-	ok         int
-	known      int
-	unexpected int
+	total  int
+	ok     int
+	failed int
 }
 
 func (t outcomeTally) String() string {
-	return fmt.Sprintf("%d process(es): %d ok, %d known deferred-upgrade failures, %d unexpected", t.total, t.ok, t.known, t.unexpected)
+	return fmt.Sprintf("%d process(es): %d ok, %d failed", t.total, t.ok, t.failed)
 }
 
-// classifyAll tallies every process, reporting each unexpected outcome as a
-// test failure as it goes. matching, when non-empty, restricts the tally to
+// classifyAll tallies every process, reporting each failure as a test
+// failure as it goes. matching, when non-empty, restricts the tally to
 // processes whose label starts with it.
 func classifyAll(t *testing.T, procs []*cliProcess, outputs []string, codes []int, matching string) outcomeTally {
 	t.Helper()
@@ -220,14 +172,10 @@ func classifyAll(t *testing.T, procs []*cliProcess, outputs []string, codes []in
 			continue
 		}
 		tally.total++
-		outcome, reason := classifyProcessOutcome(p.label, outputs[i], codes[i])
-		switch outcome {
-		case outcomeOK:
+		if ok, reason := classifyProcessOutcome(p.label, outputs[i], codes[i]); ok {
 			tally.ok++
-		case outcomeKnownDeferredUpgrade:
-			tally.known++
-		case outcomeUnexpected:
-			tally.unexpected++
+		} else {
+			tally.failed++
 			t.Error(reason)
 		}
 	}
@@ -273,8 +221,7 @@ const (
 // working and the graph was never expanded, so deriveTicketStatus cannot
 // reach DONE), which is the steady state process-ticket runs in. Since
 // DFLT-00100 made syncTicketStatus skip the no-op write, that means *no
-// process writes the ticket row at all* -- so the run must be completely
-// clean, with zero known-failure allowance.
+// process writes the ticket row at all*.
 func TestConcurrentCLIProcessesShareOneSQLiteDB(t *testing.T) {
 	runMainIfSubprocess()
 
@@ -347,13 +294,6 @@ func TestConcurrentCLIProcessesShareOneSQLiteDB(t *testing.T) {
 
 	tally := classifyAll(t, procs, outputs, codes, "")
 	t.Logf("steady state, %s in %s", tally, elapsed)
-	// No process needs to write the ticket row in this shape, so there is
-	// nothing for the deferred-upgrade defect to bite. Anything above zero
-	// means either the syncTicketStatus guard regressed or a new write
-	// appeared on a path that must stay read-only.
-	if tally.known != 0 {
-		t.Errorf("%d process(es) hit the deferred read-then-write failure in updateTicket, want 0: in the steady state the derived status never changes, so no command may write the ticket row", tally.known)
-	}
 	if tally.ok != tally.total {
 		t.Errorf("only %d of %d processes finished cleanly; every concurrent graph-engine call has to succeed", tally.ok, tally.total)
 	}
@@ -411,55 +351,24 @@ func TestConcurrentCLIProcessesShareOneSQLiteDB(t *testing.T) {
 // same ticket row in the transition test.
 const contendingCompleteProcs = 6
 
-// maxContendingDeferredUpgradeFailures bounds the residual defect.
-//
-// Measured distribution, 600 runs on an idle and on a deliberately loaded
-// machine (Apple silicon, 10 cores; the loaded batches ran with 40 spinning
-// shell loops alongside the test):
-//
-//	failures per run | 0   | 1  | 2 | 3
-//	runs             | 538 | 59 | 0 | 3
-//
-// So the observed maximum is 3 of the 6 processes, and all three of those
-// runs came from the loaded batches. An earlier 85-run sample on the same
-// machine saw the same ceiling from the other side: 68 / 14 / 3 / 1.
-//
-// The bound is therefore contendingCompleteProcs-1 rather than the observed
-// maximum: half the processes (3) is exactly what a loaded machine already
-// produces, so it would have made this test flake in CI rather than tell us
-// anything. Leaving one process out of the allowance keeps the property that
-// actually matters -- at least one of the racing syncs has to land -- and
-// assertTicketStatus below enforces that consequence directly, since the
-// ticket row only reaches IN PROGRESS if some process got its write in.
-//
-// Two things, not this ceiling, are what catch a regression in the guard:
-// TestConcurrentCLIProcessesShareOneSQLiteDB, which allows zero failures in
-// the steady state (200 runs clean, idle and loaded), and
-// internal/engine/ticket_status_write_test.go, which counts the ticket writes
-// directly. This ceiling only stops the known defect from silently widening
-// to "every process failed"; the per-run tally is logged either way, so a
-// drift upwards is visible in the test output before it trips.
-const maxContendingDeferredUpgradeFailures = contendingCompleteProcs - 1
-
 // TestConcurrentCompleteNodeProcessesContendOnOneTicketRow covers QA-5: the
-// path that actually breaks in production, where several complete-node
+// path that actually broke in production, where several complete-node
 // processes all derive a *new* status for the *same* ticket and therefore all
-// have to write the same row through updateTicket's deferred read-then-write
+// have to write the same row through updateTicket's read-then-write
 // transaction.
 //
-// This is the residual defect's home. The guard added in DFLT-00100 removes
-// the steady-state exposure but not this one, so the test does not pretend it
-// is clean. What it does pin is that the defect stays bounded and the data
-// converges anyway:
+// Until DFLT-00136 this was the home of a known remaining defect: the
+// transaction began deferred, SQLite refused to wait when it upgraded to a
+// writer, and the test had to allow up to five of the six processes to fail
+// (the measured distribution over 600 runs was 538 / 59 / 0 / 3 runs with
+// 0 / 1 / 2 / 3 failures). With _txlock=immediate the transaction takes the
+// write lock at BEGIN and waits for it under busy_timeout, so every process
+// has to succeed now:
 //
-//   - the failures stay under an explicit ceiling
-//     (maxContendingDeferredUpgradeFailures), so the allowance cannot silently
-//     widen as the contention gets worse;
-//   - every node still reaches DONE, because complete-node writes the node
-//     before it syncs the ticket;
-//   - the ticket row converges to the derived status -- either straight away,
-//     or on the next get-executable, which is what the engine does on every
-//     poll.
+//   - no process fails, lock error or otherwise;
+//   - every node reaches DONE;
+//   - the ticket row reaches the derived status, and a following poll leaves
+//     it there.
 func TestConcurrentCompleteNodeProcessesContendOnOneTicketRow(t *testing.T) {
 	runMainIfSubprocess()
 
@@ -508,15 +417,7 @@ func TestConcurrentCompleteNodeProcessesContendOnOneTicketRow(t *testing.T) {
 
 	tally := classifyAll(t, procs, outputs, codes, "")
 	t.Logf("same-row transition, %s in %s", tally, elapsed)
-	// The bound. Without it the allowance is open-ended and the test would
-	// stay green even if every single process failed.
-	if tally.known > maxContendingDeferredUpgradeFailures {
-		t.Errorf("%d of %d processes hit the deferred read-then-write failure in updateTicket (%s), above the ceiling of %d; the residual defect got worse",
-			tally.known, contendingCompleteProcs, tally, maxContendingDeferredUpgradeFailures)
-	}
 
-	// The node writes happen before syncTicketStatus, so they must all have
-	// landed regardless of how many syncs failed.
 	for _, nodeID := range nodeIDs {
 		node, err := repo.GetNode(nodeID)
 		if err != nil {
@@ -527,18 +428,187 @@ func TestConcurrentCompleteNodeProcessesContendOnOneTicketRow(t *testing.T) {
 		}
 	}
 
-	// The ticket row converged. IN PROGRESS (not DONE) because the graph was
-	// never expanded -- see deriveTicketStatus.
+	// IN PROGRESS (not DONE) because the graph was never expanded -- see
+	// deriveTicketStatus.
 	assertTicketStatus(t, repo, ticket.ID, domain.TicketInProgress)
 
-	// And it stays converged: a following poll must not reopen the race,
-	// because the derived status now matches what is stored and
-	// syncTicketStatus skips the write.
+	// And it stays there: a following poll finds the derived status already
+	// stored, so syncTicketStatus skips the write.
 	follow := startCLISubprocess(t, testName, dir, dbPath, barrierPath,
 		"get-executable #follow", "get-executable", ticket.ID)
 	followOut, followCode := follow.wait(t)
-	if outcome, reason := classifyProcessOutcome(follow.label, followOut, followCode); outcome != outcomeOK {
+	if ok, reason := classifyProcessOutcome(follow.label, followOut, followCode); !ok {
 		t.Errorf("the follow-up get-executable did not run cleanly once the status had settled: %s", reason)
 	}
 	assertTicketStatus(t, repo, ticket.ID, domain.TicketInProgress)
+}
+
+// Sizing of the orphan-claim test: DFLT-00100's contention shape -- six
+// processes, get-executable and complete-node, on one ticket -- repeated over
+// several fresh tickets.
+const (
+	orphanClaimRounds        = 30
+	orphanClaimExecProcs     = 3
+	orphanClaimCompleteProcs = 3
+	orphanClaimTodoNodes     = 4
+)
+
+// TestConcurrentGetExecutableAndCompleteNodeLeaveNoOrphanClaims is
+// DFLT-00136's end-to-end check. get-executable claims nodes and then syncs
+// the ticket's status; before the fix, a sync that lost the deferred-upgrade
+// race returned an error without handing out the nodes it had just claimed,
+// leaving them IN PROGRESS with no worker (an "orphan claim") until someone
+// ran unstick-node. In DFLT-00100's measurements that happened to 1.9-3.1% of
+// processes under six-way contention.
+//
+// Each round puts a fresh ticket at stored status TODO, so the first sync is
+// a real transition and the ticket-row write is contended -- exactly the
+// failing path -- and runs three get-executable and three complete-node
+// processes against it at once. Every round must show:
+//
+//	(a) no process failing, and no lock error in any output;
+//	(b) every get-executable answering with a JSON node list, and no node
+//	    handed to two of them;
+//	(c) no orphan claim: every node at IN PROGRESS/IN REVIEW, other than the
+//	    complete-node targets, was handed to some get-executable -- and so
+//	    every TODO node was handed out;
+//	(d) every complete-node target DONE;
+//	(e) the ticket at IN PROGRESS.
+//
+// This test is probabilistic: at the pre-fix failure rate a single round
+// would usually pass even with the bug present, hence the repetition. The
+// deterministic guarantees live in internal/store's
+// TestSQLiteImmediateTransactionWaitsInsteadOfFailingUpgrade (the lock
+// error) and internal/engine's get_executable_rollback_test.go (the release
+// of claims when get-executable fails anyway).
+//
+// Measured on an Apple silicon laptop (10 cores): 30 rounds take about 0.95s.
+// With _txlock=immediate removed from the DSN, 10 rounds caught the lock
+// failure in 11 of 20 runs; 30 rounds with both fixes removed failed 10 of
+// 10 runs, one of which also showed the orphan claims themselves. With both
+// fixes in place, 20 consecutive runs were clean.
+func TestConcurrentGetExecutableAndCompleteNodeLeaveNoOrphanClaims(t *testing.T) {
+	runMainIfSubprocess()
+
+	const testName = "TestConcurrentGetExecutableAndCompleteNodeLeaveNoOrphanClaims"
+	repo, dir, dbPath := newSubprocessSQLiteRepo(t)
+	proj, err := repo.CreateProject("Orphans", "ORPH")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	start := time.Now()
+	for round := 0; round < orphanClaimRounds; round++ {
+		ticket, err := repo.CreateTicket(proj.ID, domain.Ticket{
+			Title: fmt.Sprintf("orphan claims, round %d", round), Status: domain.TicketTODO, AutoExecutable: true,
+		})
+		if err != nil {
+			t.Fatalf("round %d: CreateTicket: %v", round, err)
+		}
+		todoNodes := map[string]bool{}
+		for i := 0; i < orphanClaimTodoNodes; i++ {
+			node, err := repo.CreateNode(domain.GraphNode{
+				TicketID: ticket.ID, Name: fmt.Sprintf("impl-%d", i), Type: domain.NodeTypeImplementation,
+				Status: domain.NodeTODO, MaxIterations: 3,
+			})
+			if err != nil {
+				t.Fatalf("round %d: CreateNode(impl-%d): %v", round, i, err)
+			}
+			todoNodes[node.ID] = true
+		}
+		completeNodes := map[string]bool{}
+		completeOrder := make([]string, 0, orphanClaimCompleteProcs)
+		for i := 0; i < orphanClaimCompleteProcs; i++ {
+			node, err := repo.CreateNode(domain.GraphNode{
+				TicketID: ticket.ID, Name: fmt.Sprintf("inv-%d", i), Type: domain.NodeTypeInvestigation,
+				Status: domain.NodeInProgress, MaxIterations: 3,
+			})
+			if err != nil {
+				t.Fatalf("round %d: CreateNode(inv-%d): %v", round, i, err)
+			}
+			completeNodes[node.ID] = true
+			completeOrder = append(completeOrder, node.ID)
+		}
+
+		barrierPath := filepath.Join(dir, fmt.Sprintf("start-barrier-%d", round))
+		procs := make([]*cliProcess, 0, orphanClaimExecProcs+orphanClaimCompleteProcs)
+		for i := 0; i < orphanClaimExecProcs || i < orphanClaimCompleteProcs; i++ {
+			if i < orphanClaimExecProcs {
+				procs = append(procs, startCLISubprocess(t, testName, dir, dbPath, barrierPath,
+					fmt.Sprintf("round %d get-executable #%d", round, i), "get-executable", ticket.ID))
+			}
+			if i < orphanClaimCompleteProcs {
+				procs = append(procs, startCLISubprocess(t, testName, dir, dbPath, barrierPath,
+					fmt.Sprintf("round %d complete-node #%d", round, i), "complete-node", completeOrder[i], "true"))
+			}
+		}
+		releaseCLISubprocessBarrier(t, barrierPath)
+		outputs := make([]string, len(procs))
+		codes := make([]int, len(procs))
+		for i, p := range procs {
+			outputs[i], codes[i] = p.wait(t)
+		}
+
+		// (a)
+		classifyAll(t, procs, outputs, codes, "")
+
+		// (b)
+		handedTo := map[string]string{}
+		for i, p := range procs {
+			if !strings.Contains(p.label, "get-executable") || codes[i] != 0 {
+				continue
+			}
+			var nodes []struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal([]byte(outputs[i]), &nodes); err != nil {
+				t.Errorf("%s: output is not a JSON list of executable nodes (%v):\n%s", p.label, err, outputs[i])
+				continue
+			}
+			for _, n := range nodes {
+				if other, dup := handedTo[n.ID]; dup {
+					t.Errorf("round %d: node %s was handed to both %s and %s", round, n.ID, other, p.label)
+				}
+				handedTo[n.ID] = p.label
+			}
+		}
+
+		detail, err := repo.GetTicketDetail(ticket.ID)
+		if err != nil || detail == nil {
+			t.Fatalf("round %d: GetTicketDetail: %v", round, err)
+		}
+		var orphans, unfinished []string
+		for _, n := range detail.Nodes {
+			if completeNodes[n.ID] {
+				// (d) -- checked apart from (c): a failed complete-node
+				// leaves its target IN PROGRESS too, and must not be
+				// mistaken for an orphan claim.
+				if n.Status != domain.NodeDone {
+					unfinished = append(unfinished, fmt.Sprintf("%s (%s)", n.ID, n.Status))
+				}
+				continue
+			}
+			// (c)
+			if _, handed := handedTo[n.ID]; !handed {
+				if n.Status == domain.NodeInProgress || n.Status == domain.NodeInReview {
+					orphans = append(orphans, fmt.Sprintf("%s (%s)", n.ID, n.Status))
+				} else if todoNodes[n.ID] {
+					unfinished = append(unfinished, fmt.Sprintf("%s (%s, never handed out)", n.ID, n.Status))
+				}
+			}
+		}
+		if len(orphans) != 0 {
+			t.Errorf("round %d: %d orphan claim(s) -- IN PROGRESS/IN REVIEW but returned by no get-executable: %v", round, len(orphans), orphans)
+		}
+		if len(unfinished) != 0 {
+			t.Errorf("round %d: node(s) not where the run should have left them: %v", round, unfinished)
+		}
+
+		// (e)
+		assertTicketStatus(t, repo, ticket.ID, domain.TicketInProgress)
+		if t.Failed() {
+			t.Fatalf("stopping after round %d", round)
+		}
+	}
+	t.Logf("%d rounds of %d processes in %s", orphanClaimRounds, orphanClaimExecProcs+orphanClaimCompleteProcs, time.Since(start))
 }
