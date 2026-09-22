@@ -79,6 +79,20 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   useEffect(() => { loadSkills(); }, [loadSkills]);
   useEffect(() => { if (selected) loadSelected(selected); }, [selected, loadSelected]);
 
+  // Switches the selected skill, asking first when the current one has
+  // unsaved edits -- mirrors NodeTypesEditor's / TemplatesEditor's select.
+  // Returns whether the switch happened, like NodeTypesEditor's.
+  const select = (next: string): boolean => {
+    if (next === selected) return true;
+    if (isDirty && !window.confirm(t('settings.unsavedChanges.confirmMessage'))) return false;
+    // Discarding: reset the text first so isDirty is already false while the
+    // next skill loads (see NodeTypesEditor's select for why).
+    setTierText(savedTierText);
+    onDirtyChange(false);
+    setSelected(next);
+    return true;
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setError('');
@@ -114,7 +128,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
           return (
             <button
               key={info.name}
-              onClick={() => setSelected(info.name)}
+              onClick={() => select(info.name)}
               className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 border-b border-slate-100 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-900 transition ${
                 selected === info.name ? 'bg-white dark:bg-slate-900 font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'
               }`}

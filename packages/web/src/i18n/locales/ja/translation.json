@@ -295,6 +295,7 @@
       "newTypeLabel": "新しいノード種別名",
       "invalidTypeName": "「/」「\\」「.」「..」を含まない名前を入力してください。",
       "deleteType": "このノード種別の上書きを削除",
+      "confirmDeleteType": "ノード種別「{{name}}」の上書きを削除します。保存済みの指示文は元に戻せません。削除しますか？",
       "defaultBadge": "既定",
       "defaultBadgeHint": "まだ上書きしていない、プラグイン既定のノード種別です。下の欄に入力すると上書きされます。",
       "cannotDeleteDefaultHint": "プラグイン既定のノード種別のため削除できません（上書き、またはそのままにすることのみ可能です）。"
@@ -302,6 +303,7 @@
     "reviewGates": {
       "intro": "review_gate ノードが gate id で参照するレビューゲート定義です。",
       "addGate": "レビューゲートを追加",
+      "emptyIdError": "ゲートID が空のレビューゲートがあります。ID を入力するか、その行を削除してから保存してください。",
       "idLabel": "ゲートID",
       "nameLabel": "名前",
       "criteriaLabel": "合格基準（criteria、継承内容を置き換え）",
@@ -313,12 +315,14 @@
       "defaultBadgeHint": "まだ上書きしていない、プラグイン既定のレビューゲートです。いずれかの項目を編集すると上書きされます。",
       "cannotDeleteDefaultHint": "プラグイン既定であり、ユーザー上書きではないため削除できません。先にいずれかの項目を編集して上書きしてください。",
       "cannotRenameDefaultHint": "プラグイン既定のレビューゲートのため名前は変更できません。ロケール切り替えで翻訳された名前が表示されるよう、名前は固定されています。",
+      "cannotChangeDefaultIdHint": "プラグイン既定のレビューゲートのため ID は変更できません（上書きした後も同じです）。別の ID のゲートが必要なときは「レビューゲートを追加」を使ってください。",
       "tableEmpty": "レビューゲートはまだ定義されていません。",
       "mergedPreviewLabel": "継承後のプレビュー（プラグイン既定＋ユーザー上書き。チーム層は含みません）",
       "mergedCriteriaLabel": "合成後の合格基準",
       "mergedMaxIterationsLabel": "合成後の最大イテレーション数",
       "mergedEnabledLabel": "合成後の有効状態",
-      "previewUnavailableHint": "このゲートを保存すると、プレビューが表示されます。"
+      "previewUnavailableHint": "このゲートを保存すると、プレビューが表示されます。",
+      "inheritedPlaceholder": "既定: {{value}}"
     },
     "skills": {
       "listTitle": "スキル一覧",

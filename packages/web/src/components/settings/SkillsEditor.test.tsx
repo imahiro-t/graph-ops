@@ -3,7 +3,7 @@
 // ticket's plan sections 3-2 (#7/#8) and 4-2.
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import i18n from '../../i18n';
 import { SkillsEditor } from './SkillsEditor';
 import { SettingsSkillInfo } from '../../types';
@@ -94,5 +94,71 @@ describe('SkillsEditor', () => {
 
     expect(mockedFetchSkills).toHaveBeenCalledTimes(1);
     expect(mockedFetchSkill).toHaveBeenCalledTimes(1);
+  });
+
+  // DFLT-00137: switching the selected skill with unsaved edits asks first.
+  describe('switching the selection with unsaved edits', () => {
+    let confirmSpy: MockInstance<typeof window.confirm>;
+    beforeEach(() => {
+      confirmSpy = vi.spyOn(window, 'confirm');
+    });
+    afterEach(() => {
+      confirmSpy.mockRestore();
+    });
+
+    const refineButton = () => screen.getByRole('button', { name: i18n.t('settings.skills.names.refineTicket') });
+    const createButton = () => screen.getByRole('button', { name: i18n.t('settings.skills.names.createTicket') });
+
+    it('keeps the selection and the edit when the user cancels', async () => {
+      confirmSpy.mockReturnValue(false);
+      const user = userEvent.setup();
+      render(<SkillsEditor onDirtyChange={vi.fn()} />);
+      const textarea = await screen.findByDisplayValue('create-ticket-tier-text');
+      await user.clear(textarea);
+      await user.type(textarea, 'unsaved edit');
+
+      await user.click(refineButton());
+
+      expect(confirmSpy).toHaveBeenCalledWith(i18n.t('settings.unsavedChanges.confirmMessage'));
+      expect(mockedFetchSkill).not.toHaveBeenCalledWith(expect.anything(), 'refine-ticket');
+      expect(screen.getByDisplayValue('unsaved edit')).toBeInTheDocument();
+    });
+
+    it('switches and clears the relayed dirty flag when the user confirms', async () => {
+      confirmSpy.mockReturnValue(true);
+      const onDirtyChange = vi.fn();
+      const user = userEvent.setup();
+      render(<SkillsEditor onDirtyChange={onDirtyChange} />);
+      const textarea = await screen.findByDisplayValue('create-ticket-tier-text');
+      await user.clear(textarea);
+      await user.type(textarea, 'unsaved edit');
+      expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+
+      await user.click(refineButton());
+
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+      expect(await screen.findByDisplayValue('refine-ticket-tier-text')).toBeInTheDocument();
+      expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+      const values = onDirtyChange.mock.calls.map(c => c[0]);
+      expect(values.lastIndexOf(false)).toBeGreaterThan(values.lastIndexOf(true));
+    });
+
+    it('switches without asking when nothing is unsaved, and re-picking the selected skill does nothing', async () => {
+      const user = userEvent.setup();
+      render(<SkillsEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('create-ticket-tier-text');
+
+      await user.click(createButton());
+      expect(mockedFetchSkill).toHaveBeenCalledTimes(1);
+
+      await user.click(refineButton());
+      const textarea = await screen.findByDisplayValue('refine-ticket-tier-text');
+
+      await user.type(textarea, ' more');
+      await user.click(refineButton());
+
+      expect(confirmSpy).not.toHaveBeenCalled();
+      expect(screen.getByDisplayValue('refine-ticket-tier-text more')).toBeInTheDocument();
+    });
   });
 });

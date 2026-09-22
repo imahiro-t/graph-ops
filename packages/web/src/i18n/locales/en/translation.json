@@ -295,6 +295,7 @@
       "newTypeLabel": "New node type name",
       "invalidTypeName": "Enter a name with no \"/\", \"\\\", \".\" or \"..\".",
       "deleteType": "Delete this node type's override",
+      "confirmDeleteType": "Delete the override for the node type \"{{name}}\"? Its saved instructions cannot be restored.",
       "defaultBadge": "Default",
       "defaultBadgeHint": "This is a plugin-default node type you have not overridden. Edit the text below to override it.",
       "cannotDeleteDefaultHint": "This is a plugin-default node type -- it can't be removed, only overridden (or left as-is)."
@@ -302,6 +303,7 @@
     "reviewGates": {
       "intro": "Review gates referenced by review_gate nodes (via their gate id).",
       "addGate": "Add Review Gate",
+      "emptyIdError": "A review gate has an empty gate ID. Enter an ID or delete that row before saving.",
       "idLabel": "Gate ID",
       "nameLabel": "Name",
       "criteriaLabel": "Criteria (replaces the inherited criteria)",
@@ -313,12 +315,14 @@
       "defaultBadgeHint": "This is a plugin-default review gate you have not overridden. Edit any field to override it.",
       "cannotDeleteDefaultHint": "This is a plugin default, not one of your overrides -- there's nothing to remove. Edit a field first to override it, then it can be deleted.",
       "cannotRenameDefaultHint": "This is a plugin-default review gate -- its name can't be changed. The name stays tied to the locale so translated names keep showing up when the locale is switched.",
+      "cannotChangeDefaultIdHint": "This is a plugin-default review gate -- its ID can't be changed, even once it has been overridden. Use \"Add Review Gate\" for a gate with a different ID.",
       "tableEmpty": "No review gates defined yet.",
       "mergedPreviewLabel": "Merged preview (plugin default + your override; a team tier is not included)",
       "mergedCriteriaLabel": "Merged criteria",
       "mergedMaxIterationsLabel": "Merged max iterations",
       "mergedEnabledLabel": "Merged enabled",
-      "previewUnavailableHint": "The preview appears after this gate has been saved."
+      "previewUnavailableHint": "The preview appears after this gate has been saved.",
+      "inheritedPlaceholder": "Default: {{value}}"
     },
     "skills": {
       "listTitle": "Skills",
