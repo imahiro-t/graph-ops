@@ -16,7 +16,7 @@ GraphOps is a ticket management and execution platform for AI-driven development
 - **One execution graph per ticket**: each ticket gets a DAG of nodes such as `plan`, `investigation`, `review`, `gherkin_spec`, `implementation`, `review_gate`, `gherkin_test`, `documentation`, `approval_gate`, `report`, and `release`. `/graph-ops:process-ticket` picks the graph's shape from the ticket (for example investigation only, or implementation with Gherkin tests). Nodes run in order or in parallel according to their dependencies. When a review fails, the graph loops back to the node that needs rework.
 - **Review gates and approval gates**: a `review_gate` node judges pass/fail automatically against configurable criteria (code, QA, security, non-functional, ...). An `approval_gate` node always waits for a human decision, made either in the terminal running `/graph-ops:process-ticket` or in the Web UI.
 - **Web UI**: a ticket list with search, filters (status, assignee, priority, label), and paging; an interactive view of each ticket's execution graph; formatted previews of every artifact (Markdown, Gherkin, HTML); approve/reject buttons; and buttons that launch Claude Code for you.
-- **Customizable without editing the plugin**: node-type instructions, review-gate criteria, skill instructions, and the plan / review / report templates can be extended globally (per user) or per project (shared with your team), from the Web UI's Settings screen.
+- **Customizable without editing the plugin**: node-type instructions, review-gate criteria, skill instructions, and the plan / review / report templates can be extended for yourself from the Web UI's Settings screen, and shared with a team through a shared directory that `teamExtensionsDir` points at (see [Settings](#settings)).
 - **Choice of storage**: a local SQLite file by default, a MySQL database to share projects and tickets with a team, or an HTTP custom data source that keeps the data in a system of your own, such as Jira.
 
 ### Requirements
@@ -174,7 +174,7 @@ GraphOps は、実行グラフ（DAG／並列／ループ）を軸にした、AI
 - **チケットごとの実行グラフ**: チケットごとに、`plan`／`investigation`／`review`／`gherkin_spec`／`implementation`／`review_gate`／`gherkin_test`／`documentation`／`approval_gate`／`report`／`release` などのノードから成る DAG を持ちます。グラフの形は、`/graph-ops:process-ticket` がチケットの内容から決めます（調査だけ、Gherkin テスト付きの実装など）。ノードは依存関係に従って直列・並列に実行されます。レビューに落ちると、手直しが必要なノードへ差し戻し（ループ）ます。
 - **レビューゲートと承認ゲート**: `review_gate` ノードは、設定した観点（コード、QA、セキュリティ、非機能など）で自動的に合否を判定します。`approval_gate` ノードは、必ず人間の判断を待ちます。判断は、`/graph-ops:process-ticket` を実行中のターミナルでも Web UI でもできます。
 - **Web UI**: 検索・フィルタ（ステータス・担当者・優先度・ラベル）・ページングに対応したチケット一覧、チケットごとの実行グラフのインタラクティブな表示、すべての成果物（Markdown／Gherkin／HTML）の整形プレビュー、承認・却下ボタン、Claude Code を起動するボタンを備えています。
-- **プラグインを編集せずにカスタマイズ**: ノード種別ごとの指示、レビューゲートの観点、スキルへの指示、計画・レビュー・レポートのテンプレートを、全体（ユーザーごと）またはプロジェクト単位（チームで共有）で拡張できます。Web UI の設定画面から編集します。
+- **プラグインを編集せずにカスタマイズ**: ノード種別ごとの指示、レビューゲートの観点、スキルへの指示、計画・レビュー・レポートのテンプレートを拡張できます。自分用の設定は Web UI の設定画面から編集し、チームで共有したい場合は `teamExtensionsDir` で共有ディレクトリを指します（詳しくは「[設定](#設定)」の節）。
 - **データ保存先を選べる**: 既定はローカルの SQLite ファイルです。チームでプロジェクトやチケットを共有するなら MySQL、Jira などの自前のシステムにデータを置くなら HTTP カスタムデータソースを使えます。
 
 ### 必要なもの
