@@ -135,13 +135,31 @@ const (
 // deriveTicketStatus), so a status outside the set is not an extension point
 // -- it is a node the engine can no longer reason about.
 func ParseNodeStatus(s string) (NodeStatus, error) {
-	switch st := NodeStatus(s); st {
-	case NodeTODO, NodeInProgress, NodeInReview, NodeDone, NodeRejected, NodeAwaitingFix:
-		return st, nil
-	default:
-		return "", fmt.Errorf("invalid node status %q: must be one of %q, %q, %q, %q, %q, %q", s,
-			NodeTODO, NodeInProgress, NodeInReview, NodeDone, NodeRejected, NodeAwaitingFix)
+	st := NodeStatus(s)
+	for _, known := range allNodeStatuses {
+		if st == known {
+			return st, nil
+		}
 	}
+	quoted := make([]string, len(allNodeStatuses))
+	for i, known := range allNodeStatuses {
+		quoted[i] = fmt.Sprintf("%q", known)
+	}
+	return "", fmt.Errorf("invalid node status %q: must be one of %s", s, strings.Join(quoted, ", "))
+}
+
+// allNodeStatuses is the one definition of the closed NodeStatus enum, in
+// declaration order. ParseNodeStatus validates against it, and the engine
+// builds sets from it that must cover every status -- GetExecutableNodes'
+// claim compensation (DFLT-00136) excludes "every status except the one I
+// claimed", and a status added to the const block but not here would slip
+// out of that exclusion and let the compensation overwrite it.
+var allNodeStatuses = []NodeStatus{NodeTODO, NodeInProgress, NodeInReview, NodeDone, NodeRejected, NodeAwaitingFix}
+
+// AllNodeStatuses returns every NodeStatus this domain defines, as a fresh
+// slice the caller may modify.
+func AllNodeStatuses() []NodeStatus {
+	return append([]NodeStatus(nil), allNodeStatuses...)
 }
 
 // NodeType is a plain string, not a closed enum: project/user config and

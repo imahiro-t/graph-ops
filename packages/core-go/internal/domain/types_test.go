@@ -30,3 +30,35 @@ func TestIsFileBackedArtifactType(t *testing.T) {
 		}
 	}
 }
+
+// TestAllNodeStatusesMatchesParseNodeStatus pins the closed NodeStatus enum
+// in one place (DFLT-00136). GetExecutableNodes' claim compensation builds
+// its CAS exclusion as "every status except the claimed one" from
+// AllNodeStatuses, so a status ParseNodeStatus accepts but the list omits
+// would silently fall outside that exclusion.
+func TestAllNodeStatusesMatchesParseNodeStatus(t *testing.T) {
+	want := []NodeStatus{NodeTODO, NodeInProgress, NodeInReview, NodeDone, NodeRejected, NodeAwaitingFix}
+	got := AllNodeStatuses()
+	if len(got) != len(want) {
+		t.Fatalf("AllNodeStatuses() = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("AllNodeStatuses() = %q, want %q", got, want)
+		}
+		if parsed, err := ParseNodeStatus(string(want[i])); err != nil || parsed != want[i] {
+			t.Errorf("ParseNodeStatus(%q) = %q, %v", want[i], parsed, err)
+		}
+	}
+	// The caller gets its own copy.
+	got[0] = "MUTATED"
+	if AllNodeStatuses()[0] != NodeTODO {
+		t.Error("AllNodeStatuses() returned a slice aliasing the package's list")
+	}
+	// The error wording predates the list and is kept verbatim.
+	_, err := ParseNodeStatus("BOGUS")
+	const wantErr = `invalid node status "BOGUS": must be one of "TODO", "IN PROGRESS", "IN REVIEW", "DONE", "REJECTED", "AWAITING FIX"`
+	if err == nil || err.Error() != wantErr {
+		t.Errorf("ParseNodeStatus(\"BOGUS\") error = %v, want %q", err, wantErr)
+	}
+}
