@@ -297,6 +297,8 @@ func TestCmdGetTicketAndListTickets_IncludeLabels(t *testing.T) {
 	}
 }
 
+// list-labels and create-label exist since DFLT-00138 (see
+// labels_cli_test.go); renaming and deleting still have no command.
 func TestPrintUsage_DocumentsLabelFlagAndNoLabelCommands(t *testing.T) {
 	out := captureStdout(t, printUsage)
 	for _, want := range []string{
@@ -309,10 +311,9 @@ func TestPrintUsage_DocumentsLabelFlagAndNoLabelCommands(t *testing.T) {
 	}
 	for _, line := range strings.Split(out, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "create-label") || strings.HasPrefix(trimmed, "list-labels") ||
-			strings.HasPrefix(trimmed, "rename-label") || strings.HasPrefix(trimmed, "delete-label") ||
+		if strings.HasPrefix(trimmed, "rename-label") || strings.HasPrefix(trimmed, "delete-label") ||
 			strings.HasPrefix(trimmed, "update-label") {
-			t.Errorf("there must be no label master command, found %q", trimmed)
+			t.Errorf("there must be no command to rename or delete labels, found %q", trimmed)
 		}
 	}
 }

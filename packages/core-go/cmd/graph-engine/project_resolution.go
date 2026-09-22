@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"os"
 
+	"github.com/graph-ops/core-go/internal/currentproject"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
@@ -82,6 +84,41 @@ func resolveCreateTicketProject(repo store.GraphRepository, cwd, home string, pr
 		return nil, "", fmt.Errorf("current project %s not found; run `graph-engine use-project <id>` to select an existing project, or pass --project <id>", pid)
 	}
 	return project, resolvedFromCurrentProject, nil
+}
+
+// resolveCLIProject is the project-targeting rule shared by the CLI commands
+// that act on one project -- create-ticket, and since DFLT-00138 list-labels
+// and create-label, so a skill that lists or registers labels lands in the
+// same project the ticket it then creates does.
+//
+// A non-empty projectFlag (--project) is returned as-is with no notice:
+// nothing else is consulted, and a nonexistent id is left for the command's
+// own store call to reject (PROJECT_NOT_FOUND). Otherwise the project comes
+// from resolveCreateTicketProject (cwd's local path, then use-project's
+// current project, then an error), and notice is the one line -- without a
+// trailing newline -- that the caller writes to stderr after it succeeds,
+// "resolved project: <name> (<id>) from <source>". Printing it only on
+// success keeps stdout the command's JSON alone and a failed command quiet
+// about a choice that led nowhere.
+func resolveCLIProject(repo store.GraphRepository, rc runtimeConfig, projectFlag string) (projectID, notice string, err error) {
+	if projectFlag != "" {
+		return projectFlag, "", nil
+	}
+	project, source, err := resolveCreateTicketProject(repo, rc.WorkDir, rc.HomeDir, rc.ProjectPaths, func() (string, error) {
+		return currentproject.Get(rc.HomeDir, repo, nil)
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return project.ID, fmt.Sprintf("resolved project: %s (%s) from %s", project.Name, project.ID, source), nil
+}
+
+// printResolvedProjectNotice writes resolveCLIProject's notice to stderr, or
+// nothing when there is none (--project was given).
+func printResolvedProjectNotice(notice string) {
+	if notice != "" {
+		fmt.Fprintln(os.Stderr, notice)
+	}
 }
 
 // findProjectForDir returns the project whose local path (projectPaths) is

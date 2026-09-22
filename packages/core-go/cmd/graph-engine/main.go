@@ -93,6 +93,10 @@ func run(cmd string, args []string) error {
 		return cmdListProjects(repo, rc)
 	case "use-project":
 		return cmdUseProject(repo, rc, args)
+	case "list-labels":
+		return cmdListLabels(repo, rc, args)
+	case "create-label":
+		return cmdCreateLabel(eng, repo, rc, args)
 	case "refine-ticket":
 		return cmdRefineTicket(eng, args)
 	case "close-ticket":
@@ -232,9 +236,32 @@ Commands:
                                            validated (HIGH/MEDIUM/LOW only) before the ticket is created.
                                            --label <name> (repeatable) attaches labels already registered
                                            in the project (matched case-insensitively); an unregistered
-                                           name is an error and no ticket is created. Labels are
-                                           registered, renamed and deleted only in the Web UI's settings.
+                                           name is an error and no ticket is created. See the registered
+                                           ones with list-labels; register a new one with create-label or
+                                           in the Web UI's settings (renaming and deleting are Web UI only).
                                            Tickets start unassigned; use the Web UI's assign button)
+  list-labels [--project <id>]           (prints the project's registered labels as a JSON array, sorted by
+                                           name case-insensitively, each with "id", "project_id", "name",
+                                           "color" and "ticket_count"; [] when there are none. The project
+                                           is resolved exactly like create-ticket's: --project omitted ->
+                                           cwd's local path, else the current project, else an error, with
+                                           the same one "resolved project: ..." line on stderr; --project
+                                           given -> used as-is, nothing on stderr. An unknown project is an
+                                           error (PROJECT_NOT_FOUND))
+  create-label <name> [--color <color>] [--project <id>]
+                                          (registers a new label in the project and prints it as JSON.
+                                           Project resolution and the stderr line: same as list-labels.
+                                           <name> is trimmed and must be 1-50 characters, unique in the
+                                           project ignoring case (quote a name with spaces; one starting
+                                           with "--" can't be passed). --color is one of the palette keys
+                                           gray red orange amber green teal blue indigo purple pink
+                                           (exact, lowercase). --color omitted -> the first of those, in
+                                           that order, no label in the project uses yet; if every color is
+                                           taken, the least used one (earliest in that order on a tie), so
+                                           a color may repeat. An invalid name (INVALID_LABEL_NAME) or color
+                                           (INVALID_LABEL_COLOR), a name already taken (LABEL_NAME_TAKEN) or
+                                           an unknown project (PROJECT_NOT_FOUND) is an error and creates
+                                           nothing. Renaming and deleting labels are Web UI only)
   refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...
                                           (replaces the ticket's description with the refined text; builds
                                            no graph. Description "-" -> read from stdin and saved byte
@@ -252,7 +279,10 @@ Commands:
                                            --label <name> (repeatable) REPLACES the ticket's labels with
                                            exactly the named registered labels -- name existing ones too
                                            to keep them; omitted leaves labels untouched. An unregistered
-                                           name is an error and changes nothing. Like any refine, this
+                                           name is an error and changes nothing; see the registered ones
+                                           with list-labels and register a new one with create-label
+                                           (pass --project <the ticket's project_id> to both, since they
+                                           otherwise resolve the project from the cwd). Like any refine, this
                                            sets the status to REFINED; to fix a title, description or
                                            priority without changing the status, use update-ticket)
   close-ticket <ticketId> [--reason "<text>"]
@@ -512,8 +542,10 @@ func readDescriptionArg(arg, usage string) (string, error) {
 // with domain.DefaultTicketPriority (MEDIUM, DFLT-00083).
 //
 // --label <name> (DFLT-00084) may be repeated anywhere among the positionals.
-// Names must already be registered in the target project (labels are
-// managed only in the Web UI); an unregistered name fails the command with
+// Names must already be registered in the target project (list them with
+// list-labels, register new ones with create-label or in the Web UI's
+// settings -- DFLT-00138; renaming and deleting are Web UI only); an
+// unregistered name fails the command with
 // LABEL_NOT_FOUND and no ticket is created. A trailing --label with no value
 // is a usage error.
 //
@@ -584,22 +616,12 @@ func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc run
 		}
 	}
 
-	opts := engine.CreateTicketOptions{Priority: priority, LabelNames: labelNames}
-	if projectFlag != "" {
-		ticket, err := eng.CreateTicketWithOptions(projectFlag, title, description, opts)
-		if err != nil {
-			return err
-		}
-		return printJSON(ticket)
-	}
-
-	project, source, err := resolveCreateTicketProject(repo, rc.WorkDir, rc.HomeDir, rc.ProjectPaths, func() (string, error) {
-		return currentproject.Get(rc.HomeDir, repo, nil)
-	})
+	projectID, notice, err := resolveCLIProject(repo, rc, projectFlag)
 	if err != nil {
 		return err
 	}
-	ticket, err := eng.CreateTicketWithOptions(project.ID, title, description, opts)
+	opts := engine.CreateTicketOptions{Priority: priority, LabelNames: labelNames}
+	ticket, err := eng.CreateTicketWithOptions(projectID, title, description, opts)
 	if err != nil {
 		return err
 	}
@@ -608,7 +630,116 @@ func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc run
 	}
 	// stdout stays the ticket JSON alone (callers parse it); the implicit
 	// choice goes to stderr so a human can spot a surprising target.
-	fmt.Fprintf(os.Stderr, "resolved project: %s (%s) from %s\n", project.Name, project.ID, source)
+	printResolvedProjectNotice(notice)
+	return nil
+}
+
+// Usage lines for list-labels and create-label (DFLT-00138).
+const (
+	listLabelsUsageLine  = `usage: graph-engine list-labels [--project <id>]`
+	createLabelUsageLine = `usage: graph-engine create-label <name> [--color <color>] [--project <id>]`
+)
+
+// parseLabelCommandArgs parses the arguments list-labels and create-label
+// share: --project <id> and (create-label only, allowColor) --color <color>
+// anywhere among the positionals. A flag with no value, an unknown flag
+// (anything else starting with "--"), or a repeated flag is a usage error --
+// so a label name beginning with "--" can't be created from the CLI (use the
+// Web UI). Everything else is a positional -- including "", so an empty name
+// reaches the store's validation (INVALID_LABEL_NAME) rather than being
+// mistaken for a missing argument.
+func parseLabelCommandArgs(args []string, usage string, allowColor bool) (projectFlag, colorFlag string, positional []string, err error) {
+	seen := map[string]bool{}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--project" || (a == "--color" && allowColor):
+			// An explicit empty value counts as missing too: `--color ""`
+			// would otherwise silently mean "pick one for me".
+			if i+1 >= len(args) || args[i+1] == "" {
+				return "", "", nil, fmt.Errorf("%s: %s requires a value", usage, a)
+			}
+			if seen[a] {
+				return "", "", nil, fmt.Errorf("%s: %s given more than once", usage, a)
+			}
+			seen[a] = true
+			if a == "--project" {
+				projectFlag = args[i+1]
+			} else {
+				colorFlag = args[i+1]
+			}
+			i++
+		case strings.HasPrefix(a, "--"):
+			return "", "", nil, fmt.Errorf("%s: unknown flag %s", usage, a)
+		default:
+			positional = append(positional, a)
+		}
+	}
+	return projectFlag, colorFlag, positional, nil
+}
+
+// cmdListLabels prints the target project's registered labels as JSON
+// (DFLT-00138): repo.ListLabelsByProject's []domain.LabelUsage -- each label
+// plus "ticket_count", sorted by name case-insensitively -- or [] when there
+// are none. The project is resolved exactly like create-ticket's (see
+// resolveCLIProject), with the same one stderr line when --project is
+// omitted, so a skill sees the labels of the project its ticket goes to.
+// An unknown --project fails with the store's PROJECT_NOT_FOUND.
+func cmdListLabels(repo store.GraphRepository, rc runtimeConfig, args []string) error {
+	projectFlag, _, positional, err := parseLabelCommandArgs(args, listLabelsUsageLine, false)
+	if err != nil {
+		return err
+	}
+	if len(positional) != 0 {
+		return fmt.Errorf("%s: unexpected argument %q", listLabelsUsageLine, positional[0])
+	}
+	projectID, notice, err := resolveCLIProject(repo, rc, projectFlag)
+	if err != nil {
+		return err
+	}
+	labels, err := repo.ListLabelsByProject(projectID)
+	if err != nil {
+		return err
+	}
+	if labels == nil {
+		labels = []domain.LabelUsage{}
+	}
+	if err := printJSON(labels); err != nil {
+		return err
+	}
+	printResolvedProjectNotice(notice)
+	return nil
+}
+
+// cmdCreateLabel registers one label in the target project and prints it as
+// JSON (DFLT-00138). The name is the single positional (quote a name with
+// spaces); --color omitted lets GraphEngine.CreateLabel pick one (the first
+// palette color the project doesn't use yet, else the least used). All
+// validation -- INVALID_LABEL_NAME, INVALID_LABEL_COLOR, LABEL_NAME_TAKEN,
+// PROJECT_NOT_FOUND -- is the store's CreateLabel, deliberately not repeated
+// here, and a rejected label creates nothing. The project is resolved like
+// create-ticket's (see resolveCLIProject). Renaming and deleting labels stay
+// Web UI only; there is no CLI for them.
+func cmdCreateLabel(eng *engine.GraphEngine, repo store.GraphRepository, rc runtimeConfig, args []string) error {
+	projectFlag, colorFlag, positional, err := parseLabelCommandArgs(args, createLabelUsageLine, true)
+	if err != nil {
+		return err
+	}
+	if len(positional) != 1 {
+		return fmt.Errorf("%s: expected exactly one label name, got %d arguments", createLabelUsageLine, len(positional))
+	}
+	projectID, notice, err := resolveCLIProject(repo, rc, projectFlag)
+	if err != nil {
+		return err
+	}
+	label, err := eng.CreateLabel(projectID, positional[0], colorFlag)
+	if err != nil {
+		return err
+	}
+	if err := printJSON(label); err != nil {
+		return err
+	}
+	printResolvedProjectNotice(notice)
 	return nil
 }
 
