@@ -87,6 +87,23 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   useEffect(() => { loadTypes(); }, [loadTypes]);
   useEffect(() => { if (selected) loadSelected(selected); }, [selected, loadSelected]);
 
+  // Switches the selected type, asking first when the current one has
+  // unsaved edits -- same shape and wording as TemplatesEditor's select, so
+  // every list in the settings modal behaves alike. Returns whether the
+  // switch happened (confirmAddType keeps its input row open on a cancel).
+  const select = (next: string): boolean => {
+    if (next === selected) return true;
+    if (isDirty && !window.confirm(t('settings.unsavedChanges.confirmMessage'))) return false;
+    // Discarding: put the text back to its saved value first so isDirty is
+    // already false while the next type loads -- otherwise the effect above
+    // would re-send onDirtyChange(true) until the fetch lands, and the next
+    // tab switch in SettingsModal would ask a second time.
+    setTierText(savedTierText);
+    onDirtyChange(false);
+    setSelected(next);
+    return true;
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setError('');
@@ -116,10 +133,12 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       return;
     }
     setError('');
+    // Switch first (it may ask about unsaved edits); on a cancel, keep the
+    // input row open and leave the list untouched.
+    if (!select(name)) return;
     if (!types.some(info => info.type === name)) {
       setTypes(prev => [...prev, { type: name, has_default: false, has_user_override: false }]);
     }
-    setSelected(name);
     setNewTypeName('');
     setIsAddingType(false);
   };
@@ -136,7 +155,12 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // otherwise, see the JSX below): a plugin-default type has no "removed"
   // state to fall back to, only an overridden/not-yet-overridden one, exactly
   // like レビューゲート's default rows.
+  // The saved instructions cannot be restored afterwards, so ask first
+  // (same window.confirm shape as AppSettingsEditor's handleDeleteProject).
+  // Only custom types reach here and they have no translated label, so the
+  // type name itself is what the user sees in the list.
   const removeType = async (type: string) => {
+    if (!window.confirm(t('settings.nodeTypes.confirmDeleteType', { name: type }))) return;
     setError('');
     try {
       await saveSettingsNodeType(t, type, '');
@@ -179,7 +203,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               }`}
             >
               <button
-                onClick={() => setSelected(info.type)}
+                onClick={() => select(info.type)}
                 className={`flex-1 min-w-0 text-left pl-3 pr-1 py-2 text-xs flex items-center gap-2 ${
                   selected === info.type ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'
                 }`}

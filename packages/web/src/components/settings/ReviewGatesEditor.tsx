@@ -28,7 +28,80 @@ interface Props {
 // ever writes isOverridden rows into review_gates, so an untouched default
 // row is never turned into a needless duplicate override just by being
 // displayed.
-type GateRow = ReviewGateDef & { id: string; isOverridden: boolean };
+//
+// origin/baseline record where the row came from when it was loaded and the
+// values it showed then, so a save can write only the fields the user
+// actually changed (see buildGateOverride) instead of freezing the whole row
+// -- a whole-row copy would stop later plugin-default updates (criteria,
+// max_iterations, ...) from ever reaching that gate. 'inherited' rows show
+// the merged values with no override at this scope, 'override' rows show
+// this scope's own override, 'new' rows were added with "Add Review Gate".
+//
+// hasDefault marks a row whose ID (as loaded) has a gate in
+// inherited_catalog behind it. Such a row's ID can't be edited: its override
+// -- partial, now that only changed fields are saved -- relies on that
+// default for every field it leaves out, so moving it to another ID would
+// leave a gate with no criteria/name behind it. A custom gate's override
+// (no default) stays renamable, and a 'new' row never has a default.
+type GateOrigin = 'inherited' | 'override' | 'new';
+type GateRow = ReviewGateDef & {
+  id: string;
+  isOverridden: boolean;
+  origin: GateOrigin;
+  baseline: ReviewGateDef;
+  hasDefault: boolean;
+};
+
+type GateField = keyof ReviewGateDef;
+const GATE_FIELDS: GateField[] = ['name', 'criteria', 'additional_criteria', 'max_iterations', 'enabled'];
+
+// Normalizes a field's value the way the form displays it, so an untouched
+// field, or one changed and then changed back, compares equal to its
+// baseline: strings treat undefined/null as '', max_iterations treats
+// undefined as null, and enabled treats anything but false as enabled
+// (matching the checkbox's `g.enabled !== false`).
+function normalizeGateField(field: GateField, value: ReviewGateDef[GateField]): string | number | boolean | null {
+  if (field === 'enabled') return value !== false;
+  if (field === 'max_iterations') return value ?? null;
+  return (value as string | null | undefined) ?? '';
+}
+
+// "Empty" means inherit from the layer below (mergeReviewGates treats an
+// empty string or a missing field that way): only '' for the text fields
+// and null for max_iterations. enabled always normalizes to a boolean, so
+// it is never "empty" -- a changed checkbox is always written as true/false.
+function isEmptyGateValue(value: string | number | boolean | null): boolean {
+  return value === '' || value === null;
+}
+
+// Builds the override this scope saves for one row, or null when nothing
+// should be written for it. Starts from the existing override (so fields it
+// already had are kept) or from nothing, then applies each field whose value
+// differs from what the row showed when loaded: an emptied field is dropped
+// (inherit again), any other value is written. An 'inherited' row whose
+// changes all ended up reverted writes nothing; an 'override' row keeps its
+// entry even if it ends up empty (removing an override is the delete
+// button's job), and a 'new' row is always written.
+function buildGateOverride(row: GateRow): ReviewGateDef | null {
+  const result: ReviewGateDef = row.origin === 'override' ? { ...row.baseline } : {};
+  for (const field of GATE_FIELDS) {
+    const current = normalizeGateField(field, row[field]);
+    if (current === normalizeGateField(field, row.baseline[field])) continue;
+    if (isEmptyGateValue(current)) {
+      delete result[field];
+    } else {
+      (result as Record<GateField, unknown>)[field] = current;
+    }
+  }
+  if (row.origin === 'inherited' && Object.keys(result).length === 0) return null;
+  return result;
+}
+
+type FetchedRows = {
+  rows: GateRow[];
+  merged: SettingsCatalog['review_gates'];
+  inherited: SettingsCatalog['review_gates'];
+};
 
 const SMALL_LABEL_CLASS = 'block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5';
 
@@ -42,10 +115,17 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const [gates, setGates] = useState<GateRow[]>([]);
   const [savedGates, setSavedGates] = useState<GateRow[]>([]);
   const [mergedGates, setMergedGates] = useState<SettingsCatalog['review_gates']>({});
+  // The defaults this scope inherits, per gate ID: shown as placeholders in
+  // an override's empty fields, which inherit these values.
+  const [inheritedGates, setInheritedGates] = useState<SettingsCatalog['review_gates']>({});
   const [expandedPreview, setExpandedPreview] = useState<Record<number, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  // True while `error` is the empty-ID validation error, so the rows whose ID
+  // is (still) empty can be marked invalid and point at the message.
+  const [emptyIdErrorShown, setEmptyIdErrorShown] = useState(false);
+  const errorId = `${idPrefix}-error`;
   const { savedFlash, showSavedFlash } = useSavedFlash();
 
   const isDirty = JSON.stringify(gates) !== JSON.stringify(savedGates);
@@ -58,33 +138,48 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // per completion criterion. A row's displayed values come from the tier
   // document when overridden here, otherwise from the merged/effective
   // values (a sensible starting point if the user decides to override it).
-  const fetchRows = useCallback(async (): Promise<{ rows: GateRow[]; merged: SettingsCatalog['review_gates'] }> => {
+  const fetchRows = useCallback(async (): Promise<FetchedRows> => {
     const catalogRes = await fetchSettingsCatalog(tRef.current);
     const overrideMap = catalogRes.tier_document.review_gates || {};
     const mergedMap = catalogRes.merged_catalog.review_gates || {};
+    const inheritedMap = catalogRes.inherited_catalog?.review_gates || {};
     const ids = Array.from(new Set([...Object.keys(mergedMap), ...Object.keys(overrideMap)]));
     const rows: GateRow[] = ids.map(id => {
       const isOverridden = id in overrideMap;
       const base = isOverridden ? overrideMap[id] : mergedMap[id];
-      return { ...base, id, isOverridden };
+      return {
+        ...base,
+        id,
+        isOverridden,
+        origin: isOverridden ? 'override' : 'inherited',
+        baseline: { ...base },
+        // A row with no override here is showing an inherited gate, so it
+        // has a default even if inherited_catalog were to omit it.
+        hasDefault: !isOverridden || id in inheritedMap
+      };
     });
-    return { rows, merged: mergedMap };
+    return { rows, merged: mergedMap, inherited: inheritedMap };
   }, [tRef]);
+
+  const applyFetched = useCallback(({ rows, merged, inherited }: FetchedRows) => {
+    setGates(rows);
+    setSavedGates(rows);
+    setMergedGates(merged);
+    setInheritedGates(inherited);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
+    setEmptyIdErrorShown(false);
     try {
-      const { rows, merged } = await fetchRows();
-      setGates(rows);
-      setSavedGates(rows);
-      setMergedGates(merged);
+      applyFetched(await fetchRows());
     } catch (e) {
       setError(errorMessage(e, tRef.current('errors.UNKNOWN')));
     } finally {
       setLoading(false);
     }
-  }, [fetchRows, tRef]);
+  }, [fetchRows, applyFetched, tRef]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -95,7 +190,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   };
 
   const addGate = () => {
-    setGates(prev => [...prev, { id: '', name: '', criteria: '', max_iterations: undefined, enabled: true, isOverridden: true }]);
+    setGates(prev => [...prev, { id: '', name: '', criteria: '', max_iterations: undefined, enabled: true, isOverridden: true, origin: 'new', baseline: {}, hasDefault: false }]);
   };
 
   // Only ever called from a button that's disabled unless g.isOverridden
@@ -106,15 +201,24 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   };
 
   const handleSave = async () => {
+    // A row without an ID cannot be saved; refuse the whole save (and keep
+    // every input as typed) instead of silently dropping that row and still
+    // reporting success.
+    if (gates.some(g => g.id.trim() === '')) {
+      setError(t('settings.reviewGates.emptyIdError'));
+      setEmptyIdErrorShown(true);
+      return;
+    }
     setSaving(true);
     setError('');
+    setEmptyIdErrorShown(false);
     try {
       const catalogRes = await fetchSettingsCatalog(t);
       const review_gates: Record<string, ReviewGateDef> = {};
       for (const g of gates) {
-        if (!g.id || !g.isOverridden) continue;
-        const { id, isOverridden, ...rest } = g;
-        review_gates[id] = rest;
+        if (!g.isOverridden) continue;
+        const override = buildGateOverride(g);
+        if (override) review_gates[g.id] = override;
       }
       const document = {
         ...catalogRes.tier_document,
@@ -126,10 +230,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       // a deleted override needs to reappear as a non-overridden default row
       // (if it's still part of merged_catalog), which a simple
       // setSavedGates(gates) wouldn't do.
-      const { rows, merged } = await fetchRows();
-      setGates(rows);
-      setSavedGates(rows);
-      setMergedGates(merged);
+      applyFetched(await fetchRows());
       showSavedFlash();
     } catch (e) {
       setError(errorMessage(e, t('errors.UNKNOWN')));
@@ -149,7 +250,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   return (
     <div className="flex flex-col gap-3 h-full min-h-0">
       <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.intro')}</p>
-      {error && <div className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900 whitespace-pre-wrap">{error}</div>}
+      {error && <div id={errorId} role="alert" className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900 whitespace-pre-wrap">{error}</div>}
 
       <div className="flex-1 min-h-0 overflow-auto space-y-3">
         {gates.length === 0 && (
@@ -157,7 +258,17 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
             {t('settings.reviewGates.tableEmpty')}
           </div>
         )}
-        {gates.map((g, idx) => (
+        {gates.map((g, idx) => {
+          const inherited = inheritedGates[g.id];
+          // An override's empty field inherits the default, so show that
+          // default as the field's placeholder instead of a blank box.
+          const inheritedPlaceholder = (value: string | number | null | undefined, fallback?: string) =>
+            value === undefined || value === null || value === ''
+              ? fallback
+              : t('settings.reviewGates.inheritedPlaceholder', { value });
+          const idLocked = !g.isOverridden || g.hasDefault;
+          const idInvalid = emptyIdErrorShown && g.id.trim() === '';
+          return (
           <div key={idx} className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2 bg-white dark:bg-slate-900">
             {/* Each text field has a small visible label above it (the
                 placeholders stay as a supplementary hint); items-end keeps
@@ -168,7 +279,13 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 <input
                   id={`${idPrefix}-${idx}-id`}
                   value={g.id}
-                  disabled={!g.isOverridden}
+                  // A gate with a default behind it keeps its ID (see
+                  // GateRow's hasDefault) -- use "Add Review Gate" for a new
+                  // ID instead.
+                  disabled={idLocked}
+                  title={idLocked ? t('settings.reviewGates.cannotChangeDefaultIdHint') : undefined}
+                  aria-invalid={idInvalid || undefined}
+                  aria-describedby={idInvalid ? errorId : undefined}
                   placeholder={t('settings.reviewGates.idLabel')}
                   onChange={e => updateGate(idx, { id: e.target.value })}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100 disabled:opacity-60"
@@ -188,7 +305,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   id={`${idPrefix}-${idx}-name`}
                   value={g.name || ''}
                   disabled={!g.isOverridden}
-                  placeholder={t('settings.reviewGates.nameLabel')}
+                  placeholder={inheritedPlaceholder(inherited?.name, t('settings.reviewGates.nameLabel'))}
                   onChange={e => updateGate(idx, { name: e.target.value })}
                   title={g.isOverridden ? undefined : t('settings.reviewGates.cannotRenameDefaultHint')}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
@@ -212,7 +329,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   type="number"
                   min={1}
                   value={g.max_iterations ?? ''}
-                  placeholder={t('settings.reviewGates.maxIterationsLabel')}
+                  placeholder={inheritedPlaceholder(inherited?.max_iterations, t('settings.reviewGates.maxIterationsLabel'))}
                   onChange={e => updateGate(idx, { max_iterations: e.target.value === '' ? undefined : Number(e.target.value) })}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
                 />
@@ -231,6 +348,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               <textarea
                 id={`${idPrefix}-${idx}-criteria`}
                 value={g.criteria || ''}
+                placeholder={inheritedPlaceholder(inherited?.criteria)}
                 onChange={e => updateGate(idx, { criteria: e.target.value })}
                 rows={2}
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
@@ -241,6 +359,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               <textarea
                 id={`${idPrefix}-${idx}-additional`}
                 value={g.additional_criteria || ''}
+                placeholder={inheritedPlaceholder(inherited?.additional_criteria)}
                 onChange={e => updateGate(idx, { additional_criteria: e.target.value })}
                 rows={2}
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
@@ -275,7 +394,8 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               )}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="flex justify-between items-center">
