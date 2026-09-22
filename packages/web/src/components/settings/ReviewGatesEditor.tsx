@@ -28,7 +28,66 @@ interface Props {
 // ever writes isOverridden rows into review_gates, so an untouched default
 // row is never turned into a needless duplicate override just by being
 // displayed.
-type GateRow = ReviewGateDef & { id: string; isOverridden: boolean };
+//
+// origin/baseline record where the row came from when it was loaded and the
+// values it showed then, so a save can write only the fields the user
+// actually changed (see buildGateOverride) instead of freezing the whole row
+// -- a whole-row copy would stop later plugin-default updates (criteria,
+// max_iterations, ...) from ever reaching that gate. 'inherited' rows show
+// the merged values with no override at this scope, 'override' rows show
+// this scope's own override, 'new' rows were added with "Add Review Gate".
+type GateOrigin = 'inherited' | 'override' | 'new';
+type GateRow = ReviewGateDef & {
+  id: string;
+  isOverridden: boolean;
+  origin: GateOrigin;
+  baseline: ReviewGateDef;
+};
+
+type GateField = keyof ReviewGateDef;
+const GATE_FIELDS: GateField[] = ['name', 'criteria', 'additional_criteria', 'max_iterations', 'enabled'];
+
+// Normalizes a field's value the way the form displays it, so an untouched
+// field, or one changed and then changed back, compares equal to its
+// baseline: strings treat undefined/null as '', max_iterations treats
+// undefined as null, and enabled treats anything but false as enabled
+// (matching the checkbox's `g.enabled !== false`).
+function normalizeGateField(field: GateField, value: ReviewGateDef[GateField]): string | number | boolean | null {
+  if (field === 'enabled') return value !== false;
+  if (field === 'max_iterations') return value ?? null;
+  return (value as string | null | undefined) ?? '';
+}
+
+// "Empty" means inherit from the layer below (mergeReviewGates treats an
+// empty string or a missing field that way): only '' for the text fields
+// and null for max_iterations. enabled always normalizes to a boolean, so
+// it is never "empty" -- a changed checkbox is always written as true/false.
+function isEmptyGateValue(value: string | number | boolean | null): boolean {
+  return value === '' || value === null;
+}
+
+// Builds the override this scope saves for one row, or null when nothing
+// should be written for it. Starts from the existing override (so fields it
+// already had are kept) or from nothing, then applies each field whose value
+// differs from what the row showed when loaded: an emptied field is dropped
+// (inherit again), any other value is written. An 'inherited' row whose
+// changes all ended up reverted writes nothing; an 'override' row keeps its
+// entry even if it ends up empty (removing an override is the delete
+// button's job), and a 'new' row is always written.
+function buildGateOverride(row: GateRow): ReviewGateDef | null {
+  const result: ReviewGateDef = row.origin === 'override' ? { ...row.baseline } : {};
+  for (const field of GATE_FIELDS) {
+    const current = normalizeGateField(field, row[field]);
+    if (current === normalizeGateField(field, row.baseline[field])) continue;
+    if (isEmptyGateValue(current)) {
+      delete result[field];
+    } else {
+      (result as Record<GateField, unknown>)[field] = current;
+    }
+  }
+  if (row.origin === 'inherited' && Object.keys(result).length === 0) return null;
+  return result;
+}
 
 const SMALL_LABEL_CLASS = 'block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5';
 
@@ -66,7 +125,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     const rows: GateRow[] = ids.map(id => {
       const isOverridden = id in overrideMap;
       const base = isOverridden ? overrideMap[id] : mergedMap[id];
-      return { ...base, id, isOverridden };
+      return { ...base, id, isOverridden, origin: isOverridden ? 'override' : 'inherited', baseline: { ...base } };
     });
     return { rows, merged: mergedMap };
   }, [tRef]);
@@ -95,7 +154,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   };
 
   const addGate = () => {
-    setGates(prev => [...prev, { id: '', name: '', criteria: '', max_iterations: undefined, enabled: true, isOverridden: true }]);
+    setGates(prev => [...prev, { id: '', name: '', criteria: '', max_iterations: undefined, enabled: true, isOverridden: true, origin: 'new', baseline: {} }]);
   };
 
   // Only ever called from a button that's disabled unless g.isOverridden
@@ -106,15 +165,22 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   };
 
   const handleSave = async () => {
+    // A row without an ID cannot be saved; refuse the whole save (and keep
+    // every input as typed) instead of silently dropping that row and still
+    // reporting success.
+    if (gates.some(g => g.id.trim() === '')) {
+      setError(t('settings.reviewGates.emptyIdError'));
+      return;
+    }
     setSaving(true);
     setError('');
     try {
       const catalogRes = await fetchSettingsCatalog(t);
       const review_gates: Record<string, ReviewGateDef> = {};
       for (const g of gates) {
-        if (!g.id || !g.isOverridden) continue;
-        const { id, isOverridden, ...rest } = g;
-        review_gates[id] = rest;
+        if (!g.isOverridden) continue;
+        const override = buildGateOverride(g);
+        if (override) review_gates[g.id] = override;
       }
       const document = {
         ...catalogRes.tier_document,
@@ -168,7 +234,11 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 <input
                   id={`${idPrefix}-${idx}-id`}
                   value={g.id}
-                  disabled={!g.isOverridden}
+                  // An inherited row only ever saves the fields changed on
+                  // it, so renaming it would create a partial gate under an
+                  // ID with no defaults behind it -- use "Add Review Gate"
+                  // for a new ID instead.
+                  disabled={!g.isOverridden || g.origin === 'inherited'}
                   placeholder={t('settings.reviewGates.idLabel')}
                   onChange={e => updateGate(idx, { id: e.target.value })}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100 disabled:opacity-60"

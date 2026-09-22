@@ -5,7 +5,7 @@
 // override) must keep working exactly as before. See this ticket's plan --
 // the guard/tooltip pattern mirrors the existing delete button
 // (disabled={!canEdit || !g.isOverridden} + cannotDeleteDefaultHint).
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
@@ -21,9 +21,10 @@ vi.mock('../../lib/settingsApi', async () => {
   };
 });
 
-import { fetchSettingsCatalog } from '../../lib/settingsApi';
+import { fetchSettingsCatalog, saveSettingsCatalog } from '../../lib/settingsApi';
 
 const mockedFetchCatalog = fetchSettingsCatalog as unknown as ReturnType<typeof vi.fn>;
+const mockedSaveCatalog = saveSettingsCatalog as unknown as ReturnType<typeof vi.fn>;
 
 // code_review is never overridden in this scope's own tier_document, so it
 // only shows up in merged_catalog -- a plugin-default row (isOverridden
@@ -50,6 +51,8 @@ describe('ReviewGatesEditor', () => {
   beforeEach(async () => {
     mockedFetchCatalog.mockReset();
     mockedFetchCatalog.mockResolvedValue(CATALOG_RESPONSE);
+    mockedSaveCatalog.mockReset();
+    mockedSaveCatalog.mockResolvedValue(undefined);
     await i18n.changeLanguage('ja');
   });
 
@@ -105,5 +108,183 @@ describe('ReviewGatesEditor', () => {
 
     await user.type(nameInput, 'New Gate');
     expect(await screen.findByDisplayValue('New Gate')).toBeInTheDocument();
+  });
+
+  // DFLT-00137 -----------------------------------------------------------
+
+  // Row inputs by label, in row order (code_review, qa_review, then any
+  // added rows).
+  const fieldsOf = (label: string) => screen.getAllByLabelText(i18n.t(label)) as HTMLInputElement[];
+  const saveButton = () => screen.getByRole('button', { name: i18n.t('settings.common.save') });
+  const savedGates = () => {
+    expect(mockedSaveCatalog).toHaveBeenCalledTimes(1);
+    return mockedSaveCatalog.mock.calls[0][1].review_gates;
+  };
+
+  describe('a row with an empty gate ID', () => {
+    it.each([
+      ['empty', ''],
+      ['whitespace-only', '   ']
+    ])('refuses to save (%s), shows an error and keeps the input', async (_label, id) => {
+      const user = userEvent.setup();
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+      await user.click(screen.getByRole('button', { name: i18n.t('settings.reviewGates.addGate') }));
+      const ids = fieldsOf('settings.reviewGates.idLabel');
+      if (id) await user.type(ids[ids.length - 1], id);
+      const names = fieldsOf('settings.reviewGates.nameLabel');
+      await user.type(names[names.length - 1], 'Unnamed Gate');
+      const fetchCallsBefore = mockedFetchCatalog.mock.calls.length;
+
+      await user.click(saveButton());
+
+      expect(await screen.findByText(i18n.t('settings.reviewGates.emptyIdError'))).toBeInTheDocument();
+      expect(mockedSaveCatalog).not.toHaveBeenCalled();
+      expect(mockedFetchCatalog.mock.calls.length).toBe(fetchCallsBefore);
+      expect(screen.queryByText(i18n.t('settings.common.saveSuccess'))).not.toBeInTheDocument();
+      expect(screen.getByDisplayValue('Unnamed Gate')).toBeInTheDocument();
+    });
+  });
+
+  describe('saving only the fields that changed', () => {
+    it('writes just max_iterations for a not-yet-overridden gate', async () => {
+      const user = userEvent.setup();
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+
+      const max = fieldsOf('settings.reviewGates.maxIterationsLabel')[0];
+      await user.clear(max);
+      await user.type(max, '5');
+      await user.click(saveButton());
+
+      const gates = await waitFor(savedGates);
+      expect(gates.code_review).toEqual({ max_iterations: 5 });
+      expect(await screen.findByText(i18n.t('settings.common.saveSuccess'))).toBeInTheDocument();
+    });
+
+    it('does not write a field changed and then changed back (including toggling enabled twice)', async () => {
+      const user = userEvent.setup();
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+
+      const criteria = fieldsOf('settings.reviewGates.criteriaLabel')[0];
+      await user.type(criteria, ' extra');
+      await user.clear(criteria);
+      await user.type(criteria, 'code criteria');
+      const enabled = screen.getAllByRole('checkbox', { name: i18n.t('settings.reviewGates.enabledLabel') })[0];
+      await user.click(enabled);
+      await user.click(enabled);
+      await user.type(fieldsOf('settings.reviewGates.additionalCriteriaLabel')[0], 'also check docs');
+      await user.click(saveButton());
+
+      const gates = await waitFor(savedGates);
+      expect(gates.code_review).toEqual({ additional_criteria: 'also check docs' });
+    });
+
+    it('writes nothing for a not-yet-overridden gate whose changes were all reverted', async () => {
+      const user = userEvent.setup();
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+
+      const enabled = screen.getAllByRole('checkbox', { name: i18n.t('settings.reviewGates.enabledLabel') })[0];
+      await user.click(enabled);
+      await user.click(enabled);
+      await user.click(saveButton());
+
+      const gates = await waitFor(savedGates);
+      expect(gates).not.toHaveProperty('code_review');
+    });
+
+    it('writes enabled: false when a default gate is disabled', async () => {
+      const user = userEvent.setup();
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+
+      await user.click(screen.getAllByRole('checkbox', { name: i18n.t('settings.reviewGates.enabledLabel') })[0]);
+      await user.click(saveButton());
+
+      const gates = await waitFor(savedGates);
+      expect(gates.code_review).toEqual({ enabled: false });
+    });
+
+    it('keeps the fields of an existing override and sends an untouched override as-is', async () => {
+      const user = userEvent.setup();
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+
+      const criteria = fieldsOf('settings.reviewGates.criteriaLabel')[1];
+      await user.clear(criteria);
+      await user.type(criteria, 'new qa criteria');
+      await user.click(saveButton());
+
+      const gates = await waitFor(savedGates);
+      expect(gates.qa_review).toEqual({ name: 'QA Review (overridden)', criteria: 'new qa criteria', max_iterations: 2, enabled: true });
+      expect(gates).not.toHaveProperty('code_review');
+    });
+
+    it('keeps a partial override partial and drops a field that is emptied', async () => {
+      mockedFetchCatalog.mockResolvedValue({
+        ...CATALOG_RESPONSE,
+        tier_document: { version: 1, review_gates: { qa_review: { max_iterations: 4, criteria: 'own qa criteria' } } },
+        merged_catalog: {
+          ...CATALOG_RESPONSE.merged_catalog,
+          review_gates: {
+            ...CATALOG_RESPONSE.merged_catalog.review_gates,
+            qa_review: { name: 'QA Review', criteria: 'own qa criteria', max_iterations: 4, enabled: true }
+          }
+        }
+      });
+      const user = userEvent.setup();
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+
+      await user.type(fieldsOf('settings.reviewGates.additionalCriteriaLabel')[1], 'qa extra');
+      await user.clear(fieldsOf('settings.reviewGates.criteriaLabel')[1]);
+      await user.click(saveButton());
+
+      const gates = await waitFor(savedGates);
+      expect(gates.qa_review).toEqual({ max_iterations: 4, additional_criteria: 'qa extra' });
+    });
+
+    it('moves an existing override to its new ID when the ID is changed', async () => {
+      const user = userEvent.setup();
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+
+      const id = fieldsOf('settings.reviewGates.idLabel')[1];
+      await user.clear(id);
+      await user.type(id, 'qa_review_v2');
+      await user.click(saveButton());
+
+      const gates = await waitFor(savedGates);
+      expect(gates).not.toHaveProperty('qa_review');
+      expect(gates.qa_review_v2).toEqual({ name: 'QA Review (overridden)', criteria: 'qa criteria', max_iterations: 2, enabled: true });
+    });
+
+    it('writes a newly added gate with the fields that were filled in', async () => {
+      const user = userEvent.setup();
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+
+      await user.click(screen.getByRole('button', { name: i18n.t('settings.reviewGates.addGate') }));
+      await user.type(fieldsOf('settings.reviewGates.idLabel')[2], 'security_review');
+      await user.type(fieldsOf('settings.reviewGates.criteriaLabel')[2], 'no secrets');
+      await user.click(saveButton());
+
+      const gates = await waitFor(savedGates);
+      expect(gates.security_review).toEqual({ criteria: 'no secrets' });
+    });
+  });
+
+  it('keeps the ID field of a not-yet-overridden gate disabled after another field is edited', async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+
+    await user.type(fieldsOf('settings.reviewGates.criteriaLabel')[0], ' extra');
+
+    expect(fieldsOf('settings.reviewGates.idLabel')[0]).toBeDisabled();
+    // The name field opens up once the row is being overridden, as before.
+    expect(fieldsOf('settings.reviewGates.nameLabel')[0]).not.toBeDisabled();
   });
 });

@@ -295,6 +295,7 @@
       "newTypeLabel": "新しいノード種別名",
       "invalidTypeName": "「/」「\\」「.」「..」を含まない名前を入力してください。",
       "deleteType": "このノード種別の上書きを削除",
+      "confirmDeleteType": "ノード種別「{{name}}」の上書きを削除します。保存済みの指示文は元に戻せません。削除しますか？",
       "defaultBadge": "既定",
       "defaultBadgeHint": "まだ上書きしていない、プラグイン既定のノード種別です。下の欄に入力すると上書きされます。",
       "cannotDeleteDefaultHint": "プラグイン既定のノード種別のため削除できません（上書き、またはそのままにすることのみ可能です）。"
@@ -302,6 +303,7 @@
     "reviewGates": {
       "intro": "review_gate ノードが gate id で参照するレビューゲート定義です。",
       "addGate": "レビューゲートを追加",
+      "emptyIdError": "ゲートID が空のレビューゲートがあります。ID を入力するか、その行を削除してから保存してください。",
       "idLabel": "ゲートID",
       "nameLabel": "名前",
       "criteriaLabel": "合格基準（criteria、継承内容を置き換え）",

@@ -295,6 +295,7 @@
       "newTypeLabel": "New node type name",
       "invalidTypeName": "Enter a name with no \"/\", \"\\\", \".\" or \"..\".",
       "deleteType": "Delete this node type's override",
+      "confirmDeleteType": "Delete the override for the node type \"{{name}}\"? Its saved instructions cannot be restored.",
       "defaultBadge": "Default",
       "defaultBadgeHint": "This is a plugin-default node type you have not overridden. Edit the text below to override it.",
       "cannotDeleteDefaultHint": "This is a plugin-default node type -- it can't be removed, only overridden (or left as-is)."
@@ -302,6 +303,7 @@
     "reviewGates": {
       "intro": "Review gates referenced by review_gate nodes (via their gate id).",
       "addGate": "Add Review Gate",
+      "emptyIdError": "A review gate has an empty gate ID. Enter an ID or delete that row before saving.",
       "idLabel": "Gate ID",
       "nameLabel": "Name",
       "criteriaLabel": "Criteria (replaces the inherited criteria)",
