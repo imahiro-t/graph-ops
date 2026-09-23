@@ -1,16 +1,17 @@
 // "レビューゲート" tab: edits this scope's own Document.review_gates
-// (criteria/additional_criteria/max_iterations/enabled per gate id), and
+// (criteria/additional_criteria/enabled per gate id) plus the workflow-wide
+// review iteration limit (Document.max_iterations: 3/4/5, DFLT-00140), and
 // shows -- per gate -- the merged preview (what an agent actually sees once
 // this scope's overrides are folded into the inherited defaults), mirroring
 // the ノード tab's mergedPreviewLabel. Per mergeReviewGates
 // (internal/config/merge.go), additional_criteria is already folded into
 // criteria by the time it reaches merged_catalog, so the preview only needs
-// to show the resulting criteria/max_iterations/enabled -- not a separate
-// additional_criteria field.
+// to show the resulting criteria/enabled -- not a separate
+// additional_criteria field. There is no per-gate iteration limit any more.
 import React, { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Save, Plus, Trash2, CheckCircle2, ChevronDown, ChevronRight } from 'lucide-react';
-import { ReviewGateDef, SettingsCatalog } from '../../types';
+import { Loader2, Save, Plus, Trash2, CheckCircle2, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
+import { ReviewGateDef, SettingsCatalog, SettingsDocument } from '../../types';
 import { fetchSettingsCatalog, saveSettingsCatalog } from '../../lib/settingsApi';
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
@@ -33,7 +34,7 @@ interface Props {
 // values it showed then, so a save can write only the fields the user
 // actually changed (see buildGateOverride) instead of freezing the whole row
 // -- a whole-row copy would stop later plugin-default updates (criteria,
-// max_iterations, ...) from ever reaching that gate. 'inherited' rows show
+// enabled, ...) from ever reaching that gate. 'inherited' rows show
 // the merged values with no override at this scope, 'override' rows show
 // this scope's own override, 'new' rows were added with "Add Review Gate".
 //
@@ -53,25 +54,35 @@ type GateRow = ReviewGateDef & {
 };
 
 type GateField = keyof ReviewGateDef;
-const GATE_FIELDS: GateField[] = ['name', 'criteria', 'additional_criteria', 'max_iterations', 'enabled'];
+const GATE_FIELDS: GateField[] = ['name', 'criteria', 'additional_criteria', 'enabled'];
+
+// The values the workflow-wide review iteration limit may take (the server
+// rejects anything else with INVALID_MAX_ITERATIONS).
+const MAX_ITERATIONS_CHOICES = [3, 4, 5] as const;
+const DEFAULT_MAX_ITERATIONS = 3;
 
 // Normalizes a field's value the way the form displays it, so an untouched
 // field, or one changed and then changed back, compares equal to its
-// baseline: strings treat undefined/null as '', max_iterations treats
-// undefined as null, and enabled treats anything but false as enabled
-// (matching the checkbox's `g.enabled !== false`).
-function normalizeGateField(field: GateField, value: ReviewGateDef[GateField]): string | number | boolean | null {
+// baseline: strings treat undefined/null as '', and enabled treats anything
+// but false as enabled (matching the checkbox's `g.enabled !== false`).
+function normalizeGateField(field: GateField, value: ReviewGateDef[GateField]): string | boolean {
   if (field === 'enabled') return value !== false;
-  if (field === 'max_iterations') return value ?? null;
   return (value as string | null | undefined) ?? '';
 }
 
 // "Empty" means inherit from the layer below (mergeReviewGates treats an
-// empty string or a missing field that way): only '' for the text fields
-// and null for max_iterations. enabled always normalizes to a boolean, so
-// it is never "empty" -- a changed checkbox is always written as true/false.
-function isEmptyGateValue(value: string | number | boolean | null): boolean {
-  return value === '' || value === null;
+// empty string or a missing field that way): only '' for the text fields.
+// enabled always normalizes to a boolean, so it is never "empty" -- a
+// changed checkbox is always written as true/false.
+function isEmptyGateValue(value: string | boolean): boolean {
+  return value === '';
+}
+
+// A retired per-gate max_iterations may still come back from an older
+// server or file; it is never shown, compared or sent back.
+function withoutLegacyMaxIterations(gate: ReviewGateDef): ReviewGateDef {
+  const { max_iterations: _legacy, ...rest } = gate as ReviewGateDef & { max_iterations?: unknown };
+  return rest;
 }
 
 // Builds the override this scope saves for one row, or null when nothing
@@ -101,6 +112,11 @@ type FetchedRows = {
   rows: GateRow[];
   merged: SettingsCatalog['review_gates'];
   inherited: SettingsCatalog['review_gates'];
+  // This scope's own workflow-wide limit (null = inherit), the value it
+  // would inherit, and the server's merge warnings.
+  maxIterations: number | null;
+  inheritedMaxIterations: number;
+  warnings: string[];
 };
 
 const SMALL_LABEL_CLASS = 'block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5';
@@ -119,6 +135,12 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // an override's empty fields, which inherit these values.
   const [inheritedGates, setInheritedGates] = useState<SettingsCatalog['review_gates']>({});
   const [expandedPreview, setExpandedPreview] = useState<Record<number, boolean>>({});
+  // The workflow-wide review iteration limit this scope sets (null =
+  // inherit), as edited and as last loaded/saved.
+  const [maxIterations, setMaxIterations] = useState<number | null>(null);
+  const [savedMaxIterations, setSavedMaxIterations] = useState<number | null>(null);
+  const [inheritedMaxIterations, setInheritedMaxIterations] = useState<number>(DEFAULT_MAX_ITERATIONS);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -128,7 +150,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const errorId = `${idPrefix}-error`;
   const { savedFlash, showSavedFlash } = useSavedFlash();
 
-  const isDirty = JSON.stringify(gates) !== JSON.stringify(savedGates);
+  const isDirty = JSON.stringify(gates) !== JSON.stringify(savedGates) || maxIterations !== savedMaxIterations;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
 
   // Builds the row list from the union of merged_catalog.review_gates (every
@@ -146,7 +168,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     const ids = Array.from(new Set([...Object.keys(mergedMap), ...Object.keys(overrideMap)]));
     const rows: GateRow[] = ids.map(id => {
       const isOverridden = id in overrideMap;
-      const base = isOverridden ? overrideMap[id] : mergedMap[id];
+      const base = withoutLegacyMaxIterations(isOverridden ? overrideMap[id] : mergedMap[id]);
       return {
         ...base,
         id,
@@ -158,14 +180,25 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         hasDefault: !isOverridden || id in inheritedMap
       };
     });
-    return { rows, merged: mergedMap, inherited: inheritedMap };
+    return {
+      rows,
+      merged: mergedMap,
+      inherited: inheritedMap,
+      maxIterations: catalogRes.tier_document.max_iterations ?? null,
+      inheritedMaxIterations: catalogRes.inherited_catalog?.max_iterations ?? DEFAULT_MAX_ITERATIONS,
+      warnings: catalogRes.warnings ?? []
+    };
   }, [tRef]);
 
-  const applyFetched = useCallback(({ rows, merged, inherited }: FetchedRows) => {
-    setGates(rows);
-    setSavedGates(rows);
-    setMergedGates(merged);
-    setInheritedGates(inherited);
+  const applyFetched = useCallback((fetched: FetchedRows) => {
+    setGates(fetched.rows);
+    setSavedGates(fetched.rows);
+    setMergedGates(fetched.merged);
+    setInheritedGates(fetched.inherited);
+    setMaxIterations(fetched.maxIterations);
+    setSavedMaxIterations(fetched.maxIterations);
+    setInheritedMaxIterations(fetched.inheritedMaxIterations);
+    setWarnings(fetched.warnings);
   }, []);
 
   const load = useCallback(async () => {
@@ -190,7 +223,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   };
 
   const addGate = () => {
-    setGates(prev => [...prev, { id: '', name: '', criteria: '', max_iterations: undefined, enabled: true, isOverridden: true, origin: 'new', baseline: {}, hasDefault: false }]);
+    setGates(prev => [...prev, { id: '', name: '', criteria: '', enabled: true, isOverridden: true, origin: 'new', baseline: {}, hasDefault: false }]);
   };
 
   // Only ever called from a button that's disabled unless g.isOverridden
@@ -220,11 +253,18 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         const override = buildGateOverride(g);
         if (override) review_gates[g.id] = override;
       }
-      const document = {
+      const document: SettingsDocument = {
         ...catalogRes.tier_document,
         version: catalogRes.tier_document.version || 1,
         review_gates
       };
+      // "Inherit" is expressed by leaving the key out, which clears this
+      // scope's own value on save.
+      if (maxIterations === null) {
+        delete document.max_iterations;
+      } else {
+        document.max_iterations = maxIterations;
+      }
       await saveSettingsCatalog(t, document);
       // Re-derive rows from the server rather than patching local state --
       // a deleted override needs to reappear as a non-overridden default row
@@ -252,6 +292,41 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.intro')}</p>
       {error && <div id={errorId} role="alert" className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900 whitespace-pre-wrap">{error}</div>}
 
+      {warnings.length > 0 && (
+        <div
+          role="note"
+          aria-labelledby={`${idPrefix}-warnings-title`}
+          className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-200 text-[11px] rounded-lg border border-amber-200 dark:border-amber-900"
+        >
+          <p id={`${idPrefix}-warnings-title`} className="flex items-center gap-1 font-semibold">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            {t('settings.reviewGates.warningsTitle')}
+          </p>
+          <ul className="mt-1 list-disc pl-5 space-y-0.5">
+            {warnings.map((w, i) => <li key={i} className="break-words">{w}</li>)}
+          </ul>
+        </div>
+      )}
+
+      <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 bg-white dark:bg-slate-900">
+        <label htmlFor={`${idPrefix}-workflow-max`} className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+          {t('settings.reviewGates.workflowMaxIterationsLabel')}
+        </label>
+        <select
+          id={`${idPrefix}-workflow-max`}
+          value={maxIterations === null ? '' : String(maxIterations)}
+          aria-describedby={`${idPrefix}-workflow-max-help`}
+          onChange={e => setMaxIterations(e.target.value === '' ? null : Number(e.target.value))}
+          className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100"
+        >
+          <option value="">{t('settings.reviewGates.workflowMaxIterationsInherit', { value: inheritedMaxIterations })}</option>
+          {MAX_ITERATIONS_CHOICES.map(v => <option key={v} value={String(v)}>{v}</option>)}
+        </select>
+        <p id={`${idPrefix}-workflow-max-help`} className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+          {t('settings.reviewGates.workflowMaxIterationsHelp')}
+        </p>
+      </div>
+
       <div className="flex-1 min-h-0 overflow-auto space-y-3">
         {gates.length === 0 && (
           <div className="text-center text-slate-400 dark:text-slate-500 text-xs py-8 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
@@ -262,7 +337,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           const inherited = inheritedGates[g.id];
           // An override's empty field inherits the default, so show that
           // default as the field's placeholder instead of a blank box.
-          const inheritedPlaceholder = (value: string | number | null | undefined, fallback?: string) =>
+          const inheritedPlaceholder = (value: string | null | undefined, fallback?: string) =>
             value === undefined || value === null || value === ''
               ? fallback
               : t('settings.reviewGates.inheritedPlaceholder', { value });
@@ -320,20 +395,6 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 />
                 {t('settings.reviewGates.enabledLabel')}
               </label>
-              <div className="w-20 flex flex-col">
-                <label htmlFor={`${idPrefix}-${idx}-max`} className={`${SMALL_LABEL_CLASS} truncate`} title={t('settings.reviewGates.maxIterationsLabel')}>
-                  {t('settings.reviewGates.maxIterationsLabel')}
-                </label>
-                <input
-                  id={`${idPrefix}-${idx}-max`}
-                  type="number"
-                  min={1}
-                  value={g.max_iterations ?? ''}
-                  placeholder={inheritedPlaceholder(inherited?.max_iterations, t('settings.reviewGates.maxIterationsLabel'))}
-                  onChange={e => updateGate(idx, { max_iterations: e.target.value === '' ? undefined : Number(e.target.value) })}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
-                />
-              </div>
               <button
                 onClick={() => removeGate(idx)}
                 disabled={!g.isOverridden}
@@ -384,7 +445,6 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                       </pre>
                     </div>
                     <div className="flex items-center gap-4 text-[11px] text-slate-600 dark:text-slate-400">
-                      <span>{t('settings.reviewGates.mergedMaxIterationsLabel')}: {mergedGates[g.id].max_iterations ?? t('settings.common.none')}</span>
                       <span>{t('settings.reviewGates.mergedEnabledLabel')}: {mergedGates[g.id].enabled === false ? t('settings.common.no') : t('settings.common.yes')}</span>
                     </div>
                   </div>

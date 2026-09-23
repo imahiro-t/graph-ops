@@ -195,9 +195,10 @@ func TestParallelGates_WholeRoundSpendsOneIteration(t *testing.T) {
 }
 
 // TestParallelGates_BudgetSurvivesFourGates is case (e): with
-// max_iterations 3 and four parallel gates, `impl` can genuinely be redone
-// three times, and only the fourth round blocks. Before DFLT-00119 the first
-// round alone spent four iterations and blocked the ticket outright.
+// max_iterations 3 (review rounds, DFLT-00140) and four parallel gates, the
+// gates genuinely get three rounds -- `impl` is redone twice -- and only the
+// third round's rejection blocks. Before DFLT-00119 the first round alone
+// spent four iterations and blocked the ticket outright.
 func TestParallelGates_BudgetSurvivesFourGates(t *testing.T) {
 	e, repo, projectID := newTestEngine(t)
 	ticketID, cat, gates := defaultWorkflowAtParallelGates(t, e, projectID)
@@ -206,7 +207,7 @@ func TestParallelGates_BudgetSurvivesFourGates(t *testing.T) {
 		t.Fatalf("precondition: expected the default max_iterations of 3, got %d", impl.MaxIterations)
 	}
 
-	for round := 1; round <= 3; round++ {
+	for round := 1; round <= 2; round++ {
 		res, err := e.CompleteNode(gates[0].ID, false, nil)
 		if err != nil {
 			t.Fatalf("round %d: CompleteNode(%s, fail): %v", round, *gates[0].ConfigID, err)
@@ -221,20 +222,20 @@ func TestParallelGates_BudgetSurvivesFourGates(t *testing.T) {
 		gates = reworkImplAndClaimGates(t, e, ticketID, cat)
 	}
 
-	// Fourth round: the budget is gone.
+	// Third round: the last one allowed, so its rejection blocks.
 	res, err := e.CompleteNode(gates[0].ID, false, nil)
 	if err != nil {
-		t.Fatalf("round 4: CompleteNode(%s, fail): %v", *gates[0].ConfigID, err)
+		t.Fatalf("round 3: CompleteNode(%s, fail): %v", *gates[0].ConfigID, err)
 	}
 	if res.NextStatus != "BLOCKED" || res.LoopedBack {
-		t.Fatalf("round 4: expected {BLOCKED false}, got %+v", res)
+		t.Fatalf("round 3: expected {BLOCKED false}, got %+v", res)
 	}
 	if ticket, _ := repo.GetTicket(ticketID); !ticket.Blocked {
-		t.Error("round 4: expected the ticket to block once the budget was spent")
+		t.Error("round 3: expected the ticket to block once the budget was spent")
 	}
 	// Blocking writes nothing: impl keeps the DONE status and the count it
 	// had, and the gate that rejected keeps its claim.
-	assertNodeStatus(t, repo, ticketID, "impl", domain.NodeDone, 3)
+	assertNodeStatus(t, repo, ticketID, "impl", domain.NodeDone, 2)
 	if got, _ := repo.GetNode(gates[0].ID); got.Status != domain.NodeInReview {
 		t.Errorf("expected the rejecting gate to stay IN REVIEW when the loop-back never happened, got %s", got.Status)
 	}
@@ -313,7 +314,7 @@ func TestReopenNodes_RecoversBlockedTicketWithTodoLoopTarget(t *testing.T) {
 	}
 	// Spend the rest of the budget and block the ticket without moving impl
 	// off TODO -- the shape the old double-counting produced.
-	atLimit := impl.MaxIterations
+	atLimit := impl.MaxIterations - 1 // round max_iterations reached
 	if _, err := repo.UpdateNode(impl.ID, store.NodePatch{IterationCount: &atLimit}); err != nil {
 		t.Fatalf("UpdateNode(impl iteration_count): %v", err)
 	}
@@ -339,8 +340,8 @@ func TestReopenNodes_RecoversBlockedTicketWithTodoLoopTarget(t *testing.T) {
 	// A node that never ran again costs no attempt: impl is still at the
 	// count it had, against the raised ceiling.
 	assertNodeStatus(t, repo, ticketID, "impl", domain.NodeTODO, atLimit)
-	if got, _ := repo.GetNode(impl.ID); got.MaxIterations != atLimit+1 {
-		t.Errorf("expected max_iterations %d after the grant, got %d", atLimit+1, got.MaxIterations)
+	if got, _ := repo.GetNode(impl.ID); got.MaxIterations != impl.MaxIterations+1 {
+		t.Errorf("expected max_iterations %d after the grant, got %d", impl.MaxIterations+1, got.MaxIterations)
 	}
 	exec, _ := e.GetExecutableNodes(ticketID, cat)
 	if len(exec) != 1 || *exec[0].ConfigID != "impl" {
@@ -450,7 +451,8 @@ func TestCompleteNode_SidewaysLoopBackStillSpendsAnIteration(t *testing.T) {
 
 	sideTask := nodeByConfigID(t, repo, ticket.ID, "side_task")
 	testReview := nodeByConfigID(t, repo, ticket.ID, "test_review")
-	for round := 1; round <= sideTask.MaxIterations; round++ {
+	// Rounds 1..max_iterations-1 loop back; the last round's failure blocks.
+	for round := 1; round < sideTask.MaxIterations; round++ {
 		setNodeStatus(t, repo, testReview.ID, domain.NodeInReview)
 		res, err := e.CompleteNode(testReview.ID, false, nil)
 		if err != nil {

@@ -85,9 +85,19 @@ func atomicWriteFile(path string, data []byte) error {
 
 // SaveDocumentAt serializes doc as YAML and writes it to path, creating any
 // missing parent directories. The write is atomic -- see atomicWriteFile.
+// Any review gate's retired per-gate max_iterations
+// (ReviewGateDef.LegacyMaxIterations) is dropped rather than written back.
 func SaveDocumentAt(path string, doc Document) error {
 	if path == "" {
 		return fmt.Errorf("SaveDocumentAt: empty path")
+	}
+	if len(doc.ReviewGates) > 0 {
+		gates := make(map[string]ReviewGateDef, len(doc.ReviewGates))
+		for id, g := range doc.ReviewGates {
+			g.LegacyMaxIterations = nil
+			gates[id] = g
+		}
+		doc.ReviewGates = gates
 	}
 	raw, err := yaml.Marshal(doc)
 	if err != nil {

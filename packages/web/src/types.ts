@@ -255,11 +255,13 @@ export interface Project {
 // node can reference by id). additional_criteria is appended to (not
 // replacing) whatever criteria was inherited from a lower-priority layer;
 // criteria, when set, replaces it outright.
+//
+// There is no per-gate max_iterations any more (DFLT-00140): the review
+// iteration limit is the workflow-wide SettingsDocument.max_iterations.
 export interface ReviewGateDef {
   name?: string;
   criteria?: string;
   additional_criteria?: string;
-  max_iterations?: number | null;
   enabled?: boolean | null;
 }
 
@@ -284,10 +286,15 @@ export interface WorkflowDef {
 // The shape of the user tier's own override file -- what GET
 // /api/settings/catalog's tier_document returns, and what PUT's body submits
 // back.
+//
+// max_iterations is the workflow-wide review iteration limit (the maximum
+// number of review rounds, counting the first review): 3, 4 or 5. Absent or
+// null means "inherit" (the plugin default, 3).
 export interface SettingsDocument {
   version: number;
   review_gates?: Record<string, ReviewGateDef>;
   workflow?: WorkflowDef;
+  max_iterations?: number | null;
 }
 
 // A merged, ready-to-use catalog: the plugin default plus the user tier
@@ -299,12 +306,16 @@ export interface SettingsCatalog {
   review_gates: Record<string, ReviewGateDef>;
   nodes: NodeDef[];
   seed?: string[];
+  max_iterations?: number | null;
 }
 
+// warnings lists what the merge ignored in the user tier -- e.g. a review
+// gate that still sets the retired per-gate max_iterations.
 export interface SettingsCatalogResponse {
   tier_document: SettingsDocument;
   merged_catalog: SettingsCatalog;
   inherited_catalog: SettingsCatalog;
+  warnings?: string[];
 }
 
 export interface SettingsNodeTypeInfo {

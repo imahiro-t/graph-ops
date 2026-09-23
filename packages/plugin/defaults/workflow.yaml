@@ -1,26 +1,35 @@
 version: 1
 
+# Workflow-wide review iteration limit: the maximum number of review rounds
+# (counting the first review) any review loop may run. A review that fails in
+# the last round blocks the ticket instead of looping back again. Must be 3, 4
+# or 5; the user tier (~/.graph-ops/config.yaml) or team tier (workflow.yaml)
+# can override it, team winning. It also picks the convergence tiers
+# get-review-criteria applies per round:
+#   3: Normal / Important / Final
+#   4: Normal, Normal / Important / Final
+#   5: Normal, Normal / Important, Important / Final
+# The value in effect when a ticket's graph is built is stored on its nodes,
+# so changing it later does not affect tickets already in progress.
+max_iterations: 3
+
 review_gates:
   code_review:
     name: "Code Review"
     criteria: |
       Review for code quality, soundness of the design, naming/readability, and any unnecessary duplication or complexity.
-    max_iterations: 3
   qa_review:
     name: "QA Review"
     criteria: |
       Review whether the requirements and Gherkin scenarios are satisfied, and whether any edge cases have been overlooked, from a QA perspective.
-    max_iterations: 3
   security_review:
     name: "Security Review"
     criteria: |
       Review authentication/authorization, input validation, handling of sensitive data, and any vulnerabilities corresponding to the OWASP Top 10.
-    max_iterations: 3
   non_functional_review:
     name: "Non-functional Review"
     criteria: |
       Review performance, scalability, availability, and logging/monitoring for any issues.
-    max_iterations: 3
   # Not part of the default `nodes` template below -- used only when
   # process-ticket decides a ticket is investigation-only (no implementation,
   # no Gherkin testing) and builds a custom expand-graph patch referencing it.
@@ -28,7 +37,6 @@ review_gates:
     name: "Investigation Review"
     criteria: |
       Confirm the investigation is accurate, covers the necessary points, and that its conclusions/recommendations are well-founded.
-    max_iterations: 3
   # Also not part of the default `nodes` template below. Most tickets don't
   # touch anything a user interacts with, so this isn't wired in
   # unconditionally alongside code/qa/security/non_functional -- process-ticket
@@ -38,7 +46,6 @@ review_gates:
     name: "Accessibility Review"
     criteria: |
       Review UI changes for accessibility: WCAG conformance, keyboard operability, screen-reader/semantic markup correctness, color contrast, and focus management.
-    max_iterations: 3
 
 workflow:
   # Fixed skeleton: unlike review_gates, this Nodes/Seed pair is no longer

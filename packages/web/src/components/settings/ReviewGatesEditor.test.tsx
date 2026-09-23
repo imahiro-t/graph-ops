@@ -35,23 +35,26 @@ const CATALOG_RESPONSE: SettingsCatalogResponse = {
   tier_document: {
     version: 1,
     review_gates: {
-      qa_review: { name: 'QA Review (overridden)', criteria: 'qa criteria', max_iterations: 2, enabled: true }
+      qa_review: { name: 'QA Review (overridden)', criteria: 'qa criteria', enabled: true }
     }
   },
   merged_catalog: {
     review_gates: {
-      code_review: { name: 'Code Review', criteria: 'code criteria', max_iterations: 3, enabled: true },
-      qa_review: { name: 'QA Review (overridden)', criteria: 'qa criteria', max_iterations: 2, enabled: true }
+      code_review: { name: 'Code Review', criteria: 'code criteria', enabled: true },
+      qa_review: { name: 'QA Review (overridden)', criteria: 'qa criteria', enabled: true }
     },
-    nodes: []
+    nodes: [],
+    max_iterations: 3
   },
   inherited_catalog: {
     review_gates: {
-      code_review: { name: 'Code Review', criteria: 'code criteria', max_iterations: 3, enabled: true },
-      qa_review: { name: 'QA Review', criteria: 'default qa criteria', max_iterations: 3, enabled: true }
+      code_review: { name: 'Code Review', criteria: 'code criteria', enabled: true },
+      qa_review: { name: 'QA Review', criteria: 'default qa criteria', enabled: true }
     },
-    nodes: []
-  }
+    nodes: [],
+    max_iterations: 3
+  },
+  warnings: []
 };
 
 // CATALOG_RESPONSE plus an override of a custom gate (custom_review) that
@@ -74,19 +77,19 @@ const WITH_CUSTOM_GATE: SettingsCatalogResponse = {
   }
 };
 
-// code_review with a partial override (only max_iterations) in this scope --
-// what saving a single changed field of the default gate produces.
+// code_review with a partial override (only additional_criteria) in this
+// scope -- what saving a single changed field of the default gate produces.
 const WITH_PARTIAL_DEFAULT_OVERRIDE: SettingsCatalogResponse = {
   ...CATALOG_RESPONSE,
   tier_document: {
     version: 1,
-    review_gates: { ...CATALOG_RESPONSE.tier_document.review_gates, code_review: { max_iterations: 5 } }
+    review_gates: { ...CATALOG_RESPONSE.tier_document.review_gates, code_review: { additional_criteria: 'also docs' } }
   },
   merged_catalog: {
     ...CATALOG_RESPONSE.merged_catalog,
     review_gates: {
       ...CATALOG_RESPONSE.merged_catalog.review_gates,
-      code_review: { name: 'Code Review', criteria: 'code criteria', max_iterations: 5, enabled: true }
+      code_review: { name: 'Code Review', criteria: 'code criteria\nalso docs', enabled: true }
     }
   }
 };
@@ -121,7 +124,7 @@ describe('ReviewGatesEditor', () => {
   });
 
   // DFLT-00074: every row's fields have visible labels tied to their inputs.
-  it('labels the id, name, max iterations and criteria fields of each row', async () => {
+  it('labels the id, name and criteria fields of each row', async () => {
     render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
     await screen.findByDisplayValue('Code Review');
 
@@ -129,8 +132,6 @@ describe('ReviewGatesEditor', () => {
     expect(ids.map(el => (el as HTMLInputElement).value)).toEqual(['code_review', 'qa_review']);
     const names = screen.getAllByLabelText(i18n.t('settings.reviewGates.nameLabel'));
     expect(names.map(el => (el as HTMLInputElement).value)).toEqual(['Code Review', 'QA Review (overridden)']);
-    const maxIterations = screen.getAllByLabelText(i18n.t('settings.reviewGates.maxIterationsLabel'));
-    expect(maxIterations.map(el => (el as HTMLInputElement).value)).toEqual(['3', '2']);
     const criteria = screen.getAllByLabelText(i18n.t('settings.reviewGates.criteriaLabel'));
     expect(criteria.map(el => (el as HTMLTextAreaElement).value)).toEqual(['code criteria', 'qa criteria']);
     expect(screen.getAllByLabelText(i18n.t('settings.reviewGates.additionalCriteriaLabel'))).toHaveLength(2);
@@ -226,18 +227,16 @@ describe('ReviewGatesEditor', () => {
   });
 
   describe('saving only the fields that changed', () => {
-    it('writes just max_iterations for a not-yet-overridden gate', async () => {
+    it('writes just additional_criteria for a not-yet-overridden gate', async () => {
       const user = userEvent.setup();
       render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
       await screen.findByDisplayValue('Code Review');
 
-      const max = fieldsOf('settings.reviewGates.maxIterationsLabel')[0];
-      await user.clear(max);
-      await user.type(max, '5');
+      await user.type(fieldsOf('settings.reviewGates.additionalCriteriaLabel')[0], 'also docs');
       await user.click(saveButton());
 
       const gates = await waitFor(savedGates);
-      expect(gates.code_review).toEqual({ max_iterations: 5 });
+      expect(gates.code_review).toEqual({ additional_criteria: 'also docs' });
       expect(await screen.findByText(i18n.t('settings.common.saveSuccess'))).toBeInTheDocument();
     });
 
@@ -297,19 +296,19 @@ describe('ReviewGatesEditor', () => {
       await user.click(saveButton());
 
       const gates = await waitFor(savedGates);
-      expect(gates.qa_review).toEqual({ name: 'QA Review (overridden)', criteria: 'new qa criteria', max_iterations: 2, enabled: true });
+      expect(gates.qa_review).toEqual({ name: 'QA Review (overridden)', criteria: 'new qa criteria', enabled: true });
       expect(gates).not.toHaveProperty('code_review');
     });
 
     it('keeps a partial override partial and drops a field that is emptied', async () => {
       mockedFetchCatalog.mockResolvedValue({
         ...CATALOG_RESPONSE,
-        tier_document: { version: 1, review_gates: { qa_review: { max_iterations: 4, criteria: 'own qa criteria' } } },
+        tier_document: { version: 1, review_gates: { qa_review: { enabled: true, criteria: 'own qa criteria' } } },
         merged_catalog: {
           ...CATALOG_RESPONSE.merged_catalog,
           review_gates: {
             ...CATALOG_RESPONSE.merged_catalog.review_gates,
-            qa_review: { name: 'QA Review', criteria: 'own qa criteria', max_iterations: 4, enabled: true }
+            qa_review: { name: 'QA Review', criteria: 'own qa criteria', enabled: true }
           }
         }
       });
@@ -322,7 +321,7 @@ describe('ReviewGatesEditor', () => {
       await user.click(saveButton());
 
       const gates = await waitFor(savedGates);
-      expect(gates.qa_review).toEqual({ max_iterations: 4, additional_criteria: 'qa extra' });
+      expect(gates.qa_review).toEqual({ enabled: true, additional_criteria: 'qa extra' });
     });
 
     it('moves an existing override of a custom gate to its new ID when the ID is changed', async () => {
@@ -391,9 +390,7 @@ describe('ReviewGatesEditor', () => {
       await screen.findByDisplayValue('Code Review');
 
       mockedFetchCatalog.mockResolvedValue(WITH_PARTIAL_DEFAULT_OVERRIDE);
-      const max = fieldsOf('settings.reviewGates.maxIterationsLabel')[0];
-      await user.clear(max);
-      await user.type(max, '5');
+      await user.type(fieldsOf('settings.reviewGates.additionalCriteriaLabel')[0], 'also docs');
       await user.click(saveButton());
       await screen.findByText(i18n.t('settings.common.saveSuccess'));
 
@@ -422,11 +419,8 @@ describe('ReviewGatesEditor', () => {
     const criteria = fieldsOf('settings.reviewGates.criteriaLabel')[0];
     expect(criteria).toHaveValue('');
     expect(criteria).toHaveAttribute('placeholder', placeholder('code criteria'));
-    // A field the override sets shows its own value; its placeholder still
-    // names the default it replaces.
-    const max = fieldsOf('settings.reviewGates.maxIterationsLabel')[0];
-    expect(max).toHaveValue(5);
-    expect(max).toHaveAttribute('placeholder', placeholder(3));
+    // A field the override sets shows its own value.
+    expect(fieldsOf('settings.reviewGates.additionalCriteriaLabel')[0]).toHaveValue('also docs');
   });
 
   it('keeps the plain label placeholders on a newly added gate', async () => {
@@ -437,5 +431,120 @@ describe('ReviewGatesEditor', () => {
 
     expect(fieldsOf('settings.reviewGates.nameLabel')[2]).toHaveAttribute('placeholder', i18n.t('settings.reviewGates.nameLabel'));
     expect(fieldsOf('settings.reviewGates.criteriaLabel')[2]).not.toHaveAttribute('placeholder');
+  });
+
+  // DFLT-00140 -----------------------------------------------------------
+
+  describe('the workflow-wide review iteration limit', () => {
+    const limitSelect = () =>
+      screen.getByLabelText(i18n.t('settings.reviewGates.workflowMaxIterationsLabel')) as HTMLSelectElement;
+    const inheritLabel = (value: number) => i18n.t('settings.reviewGates.workflowMaxIterationsInherit', { value });
+    const savedDocument = () => {
+      expect(mockedSaveCatalog).toHaveBeenCalledTimes(1);
+      return mockedSaveCatalog.mock.calls[0][1];
+    };
+
+    it('has no per-gate iteration field, and one labelled select offering inherit/3/4/5', async () => {
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+
+      expect(screen.queryAllByRole('spinbutton')).toHaveLength(0);
+      const select = limitSelect();
+      expect(select.tagName).toBe('SELECT');
+      expect(Array.from(select.options).map(o => o.textContent)).toEqual([inheritLabel(3), '3', '4', '5']);
+      expect(select).toHaveAccessibleDescription(i18n.t('settings.reviewGates.workflowMaxIterationsHelp'));
+    });
+
+    it('selects "inherit (3)" when the user tier sets nothing', async () => {
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+      expect(limitSelect()).toHaveValue('');
+      expect(limitSelect().selectedOptions[0].textContent).toBe(inheritLabel(3));
+    });
+
+    it("selects the user tier's own value, keeping inherit available", async () => {
+      mockedFetchCatalog.mockResolvedValue({
+        ...CATALOG_RESPONSE,
+        tier_document: { ...CATALOG_RESPONSE.tier_document, max_iterations: 4 },
+        merged_catalog: { ...CATALOG_RESPONSE.merged_catalog, max_iterations: 4 }
+      });
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+      expect(limitSelect()).toHaveValue('4');
+      expect(screen.getByRole('option', { name: inheritLabel(3) })).toBeInTheDocument();
+    });
+
+    it('marks the tab dirty and saves the chosen value at the top level', async () => {
+      const onDirtyChange = vi.fn();
+      const user = userEvent.setup();
+      render(<ReviewGatesEditor onDirtyChange={onDirtyChange} />);
+      await screen.findByDisplayValue('Code Review');
+      expect(saveButton()).toBeDisabled();
+
+      await user.selectOptions(limitSelect(), '5');
+      expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+      expect(saveButton()).not.toBeDisabled();
+
+      mockedFetchCatalog.mockResolvedValue({
+        ...CATALOG_RESPONSE,
+        tier_document: { ...CATALOG_RESPONSE.tier_document, max_iterations: 5 },
+        merged_catalog: { ...CATALOG_RESPONSE.merged_catalog, max_iterations: 5 }
+      });
+      await user.click(saveButton());
+
+      const doc = await waitFor(savedDocument);
+      expect(doc.max_iterations).toBe(5);
+      expect(doc.review_gates).toEqual({ qa_review: CATALOG_RESPONSE.tier_document.review_gates!.qa_review });
+      await screen.findByText(i18n.t('settings.common.saveSuccess'));
+      expect(limitSelect()).toHaveValue('5');
+      expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it('drops the top-level value when switched back to inherit', async () => {
+      const withFour = {
+        ...CATALOG_RESPONSE,
+        tier_document: { ...CATALOG_RESPONSE.tier_document, max_iterations: 4 },
+        merged_catalog: { ...CATALOG_RESPONSE.merged_catalog, max_iterations: 4 }
+      };
+      mockedFetchCatalog.mockResolvedValue(withFour);
+      const onDirtyChange = vi.fn();
+      const user = userEvent.setup();
+      render(<ReviewGatesEditor onDirtyChange={onDirtyChange} />);
+      await screen.findByDisplayValue('Code Review');
+
+      await user.selectOptions(limitSelect(), '');
+      expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+
+      // The first fetch inside save still sees the stored 4; after the save
+      // the server reports it gone.
+      mockedFetchCatalog.mockResolvedValueOnce(withFour).mockResolvedValue(CATALOG_RESPONSE);
+      await user.click(saveButton());
+
+      const doc = await waitFor(savedDocument);
+      expect(doc.max_iterations ?? null).toBeNull();
+      await screen.findByText(i18n.t('settings.common.saveSuccess'));
+      expect(limitSelect()).toHaveValue('');
+      expect(limitSelect().selectedOptions[0].textContent).toBe(inheritLabel(3));
+      expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it('shows the server warnings above the gate list', async () => {
+      const warning = 'review gate "code_review": max_iterations is no longer supported per gate and is ignored; set the top-level max_iterations (3/4/5) instead';
+      mockedFetchCatalog.mockResolvedValue({ ...CATALOG_RESPONSE, warnings: [warning] });
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+
+      const note = screen.getByRole('note', { name: i18n.t('settings.reviewGates.warningsTitle') });
+      expect(note).toHaveTextContent(warning);
+      // Above the list: it precedes the first gate row in document order.
+      const firstId = fieldsOf('settings.reviewGates.idLabel')[0];
+      expect(note.compareDocumentPosition(firstId) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('shows no warning note when there are none', async () => {
+      render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('Code Review');
+      expect(screen.queryByRole('note')).not.toBeInTheDocument();
+    });
   });
 });

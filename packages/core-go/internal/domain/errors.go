@@ -63,8 +63,9 @@ const (
 	// internal/engine.ValidateCatalog for a reason not covered by a more
 	// specific code above.
 	ErrCodeCatalogInvalidDocument ErrorCode = "CATALOG_INVALID_DOCUMENT"
-	// ErrCodeInvalidMaxIterations: a review gate's max_iterations was set to
-	// a value less than 1.
+	// ErrCodeInvalidMaxIterations: the settings catalog's workflow-wide
+	// max_iterations was not 3, 4 or 5, or a node PATCH set a node's
+	// max_iterations to a value less than 1.
 	ErrCodeInvalidMaxIterations ErrorCode = "INVALID_MAX_ITERATIONS"
 	// ErrCodeInvalidReportTemplate: a settings report-template save was
 	// rejected because the submitted HTML is missing one of the fixed

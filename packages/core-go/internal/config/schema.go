@@ -3,6 +3,8 @@
 // project (.graph-ops/workflow.yaml), project taking precedence.
 package config
 
+import "fmt"
+
 // ReviewGateDef describes one reusable review perspective. AdditionalCriteria
 // is appended to (not replacing) whatever Criteria was inherited from a
 // lower-priority layer; Criteria, when set, replaces it outright.
@@ -10,8 +12,14 @@ type ReviewGateDef struct {
 	Name               string `yaml:"name,omitempty" json:"name,omitempty"`
 	Criteria           string `yaml:"criteria,omitempty" json:"criteria,omitempty"`
 	AdditionalCriteria string `yaml:"additional_criteria,omitempty" json:"additional_criteria,omitempty"`
-	MaxIterations      *int   `yaml:"max_iterations,omitempty" json:"max_iterations,omitempty"`
-	Enabled            *bool  `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	// LegacyMaxIterations is the retired per-gate max_iterations. It is
+	// kept only so an old config file that still sets it can be detected
+	// and warned about (see Merge's Warnings): it no longer affects
+	// anything, is never serialized to JSON (so the settings API neither
+	// shows nor accepts it), and SaveDocumentAt drops it before writing.
+	// The iteration limit is now the workflow-wide Document.MaxIterations.
+	LegacyMaxIterations *int  `yaml:"max_iterations,omitempty" json:"-"`
+	Enabled             *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 }
 
 // NodeDef is one node in the workflow template. Gate references a
@@ -50,6 +58,31 @@ type Document struct {
 	// locked to the plugin default. Empty means "unset" -- no locale is
 	// applied and the English plugin defaults stand.
 	Language string `yaml:"language,omitempty" json:"language,omitempty"`
+	// MaxIterations is the workflow-wide review iteration limit: the maximum
+	// number of review rounds (counting the first review) a review loop may
+	// run before a failing review blocks the ticket instead of looping back.
+	// It must be one of AllowedMaxIterations; nil means "unset, inherit".
+	// Later tiers win (see Merge), and the value in effect when a node is
+	// created is stored on that node, so changing it later does not affect
+	// tickets already in progress.
+	MaxIterations *int `yaml:"max_iterations,omitempty" json:"max_iterations,omitempty"`
+}
+
+// DefaultMaxIterations is the workflow-wide review iteration limit used when
+// no tier sets Document.MaxIterations.
+const DefaultMaxIterations = 3
+
+// AllowedMaxIterations lists the values Document.MaxIterations may take.
+var AllowedMaxIterations = []int{3, 4, 5}
+
+// ValidateMaxIterations reports whether v is one of AllowedMaxIterations.
+func ValidateMaxIterations(v int) error {
+	for _, a := range AllowedMaxIterations {
+		if v == a {
+			return nil
+		}
+	}
+	return fmt.Errorf("max_iterations must be 3, 4 or 5, got %d", v)
 }
 
 // Catalog is the fully merged, ready-to-use result of all three layers.
@@ -61,6 +94,13 @@ type Catalog struct {
 	// Document.Language and ResolveLanguage) -- "" if none of the merged
 	// tiers set one.
 	Language string `json:"language,omitempty"`
+	// MaxIterations is the resolved workflow-wide review iteration limit
+	// (see Document.MaxIterations); DefaultMaxIterations when no tier sets
+	// one.
+	MaxIterations int `json:"max_iterations"`
+	// Warnings lists non-fatal problems found while merging, e.g. a review
+	// gate that still sets the retired per-gate max_iterations.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // EnabledReviewGates returns the catalog's review gates with Enabled=false

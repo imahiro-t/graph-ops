@@ -16,4 +16,5 @@ to the review criteria (the `get-review-criteria` content) explicit.
 # Conditions (if Conditionally Approved)
 
 REPLACE_WITH_CONDITIONS -- the conditions that must be met when the verdict is
-"Conditionally Approved". If not applicable, say so explicitly ("N/A").
+"Conditionally Approved", or the carry-over items (points recorded without
+failing the review). If there are neither, say so explicitly ("N/A").

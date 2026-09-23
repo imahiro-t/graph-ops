@@ -34,7 +34,7 @@ If `content` comes back empty, you're on a custom node type nobody has documente
   ```bash
   graph-engine get-review-criteria "<nodeId>"
   ```
-  (`review_gate` returns gate-specific criteria plus the iteration convergence criteria; `review` returns only the convergence criteria.) Also fetch the fixed Markdown template (shared by both node types) and fill in its headings:
+  (`review_gate` returns gate-specific criteria plus the iteration convergence criteria; `review` returns only the convergence criteria.) The output includes a `Review round: <r> / <limit> — tier: <Normal|Important|Final>` line: judge at that tier, and apply the rules it lists as never relaxed (a bug, regression or security problem newly introduced since the previous round is judged as strictly as at the Normal tier; a serious issue flagged earlier that is still unfixed fails the review). **From round 2 on, before judging, fetch your own previous review result** (the latest review artifact on this node in `get-ticket`'s output) **and the changes made since it** (for code, `git log` / `git diff` over the commits after that review was written; for a document, the difference between the loop target's latest artifact and the one you reviewed last time). Points you record without failing the review (carry-over items, at the Important/Final tiers) go under the review template's last heading, with the unconditional-approval verdict -- never a conditional approval that requires code changes, since nothing sends the work back to the implementation node from an approval. Also fetch the fixed Markdown template (shared by both node types) and fill in its headings:
   ```bash
   graph-engine get-review-template
   ```

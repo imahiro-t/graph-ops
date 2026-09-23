@@ -281,7 +281,6 @@ review_gates:
     name: "Design System Review"
     criteria: |
       Verify all new UI matches the design-system token list.
-    max_iterations: 2
 workflow:
   nodes:
     - id: design_review

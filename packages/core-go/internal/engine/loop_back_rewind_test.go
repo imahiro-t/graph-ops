@@ -358,10 +358,11 @@ func TestCompleteNode_LoopBackAtIterationLimitRewindsNothing(t *testing.T) {
 	e, repo, projectID := newTestEngine(t)
 	ticketID, cat := defaultWorkflowAtTestReview(t, e, projectID)
 	impl := nodeByConfigID(t, repo, ticketID, "impl")
-	// Drive the loop target's counter to its ceiling directly rather than
-	// looping max_iterations times: what is under test is the branch taken
-	// once the budget is gone, not the counting.
-	atLimit := impl.MaxIterations
+	// Drive the loop target's counter to its last round directly
+	// (iteration_count max_iterations-1, DFLT-00140) rather than looping:
+	// what is under test is the branch taken once the budget is gone, not
+	// the counting.
+	atLimit := impl.MaxIterations - 1
 	if _, err := repo.UpdateNode(impl.ID, store.NodePatch{IterationCount: &atLimit}); err != nil {
 		t.Fatalf("UpdateNode(impl iteration_count): %v", err)
 	}

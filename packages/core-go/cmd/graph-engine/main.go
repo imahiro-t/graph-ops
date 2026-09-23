@@ -350,10 +350,13 @@ Commands:
                                            TODO/AWAITING FIX nodes never ran, so they cost no attempt.
                                            Requires the ticket to currently be blocked. Errors, writing
                                            nothing, if any bumped node would exceed its max_iterations
-                                           -- no partial application. Against a ticket an ITERATION
-                                           LIMIT blocked, the loop target is at max_iterations by
-                                           definition, so raise the budget with grant-iterations first
-                                           -- see below.)
+                                           -- no partial application. For a loop target, max_iterations
+                                           counts review rounds, so it is refused once
+                                           iteration_count + 1 >= max_iterations. Against a ticket an
+                                           ITERATION LIMIT blocked, the loop target has used its last
+                                           round by definition (the review failed in round
+                                           max_iterations), so raise the budget with grant-iterations
+                                           first -- see below.)
   grant-iterations <ticketId> <nodeId1,nodeId2,...> [--extra <n>]
                                           (raises the given nodes' max_iterations by n (default 1),
                                            touching nothing else -- not their status, not their
@@ -392,6 +395,15 @@ Commands:
                                            read the content from stdin, e.g. for a large write-up:
                                              cat notes.md | graph-engine add-artifact T N Name text -)
   get-review-criteria <nodeId>
+                                          (prints the review node's gate-specific criteria, if any,
+                                           then "Review round: <r> / <limit> — tier: <Normal|Important|
+                                           Final>" and the rules for that tier. The round is the loop
+                                           target's iteration_count + 1 (a review with no loop target
+                                           is always round 1); the tier follows the workflow-wide
+                                           max_iterations (3/4/5) the graph was built with, and every
+                                           round granted past it is Final. From round 2 on it also
+                                           tells the reviewer to fetch its previous review and the
+                                           changes made since.)
   wait-node <nodeId> [<nodeId> ...] [--timeout <duration>]
                                           (blocks, polling the DB every ~2s, until at least one given node
                                            is no longer TODO -- any other status counts, including IN
@@ -1192,6 +1204,7 @@ func cmdGetExecutable(eng *engine.GraphEngine, repo store.GraphRepository, rc ru
 	if err != nil {
 		return err
 	}
+	emitCatalogWarnings(catalog)
 	nodes, err := eng.GetExecutableNodes(ticketID, catalog)
 	if err != nil {
 		return err
@@ -1236,6 +1249,8 @@ func cmdExpandGraph(eng *engine.GraphEngine, repo store.GraphRepository, rc runt
 	if err != nil {
 		return err
 	}
+	emitCatalogWarnings(catalog)
+	emitWarnings(engine.InlineGateMaxIterationsWarnings(patch))
 	if err := eng.ExpandGraph(ticketID, catalog, patch); err != nil {
 		return err
 	}
@@ -1598,6 +1613,11 @@ func validateReportArtifactIfNeeded(repo store.GraphRepository, nodeID string, f
 	return config.ValidateReportHTML(string(raw))
 }
 
+// cmdGetReviewCriteria prints what a review/review_gate node is judged
+// against: its gate-specific criteria (if any), then the review round, the
+// round limit and the convergence tier, which come from the node's loop
+// target -- so the ticket's whole graph is loaded, not just the node. See
+// engine.GetReviewCriteria.
 func cmdGetReviewCriteria(repo store.GraphRepository, args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: graph-engine get-review-criteria <nodeId>")
@@ -1609,7 +1629,14 @@ func cmdGetReviewCriteria(repo store.GraphRepository, args []string) error {
 	if node == nil {
 		return fmt.Errorf("node %s not found", args[0])
 	}
-	fmt.Println(engine.GetReviewCriteria(*node))
+	detail, err := repo.GetTicketDetail(node.TicketID)
+	if err != nil {
+		return err
+	}
+	if detail == nil {
+		return fmt.Errorf("ticket %s not found", node.TicketID)
+	}
+	fmt.Println(engine.GetReviewCriteria(*node, *detail))
 	return nil
 }
 
@@ -1628,6 +1655,7 @@ func cmdGetWorkflowCatalog(rc runtimeConfig, args []string) error {
 	if err != nil {
 		return err
 	}
+	emitCatalogWarnings(catalog)
 	// catalog.Language (via Merge) only ever reflects a *persistent*
 	// user/team Document.Language -- it never gets language written into it
 	// (see config.ResolveLanguage/LoadWithRoots), which is exactly right for
@@ -1645,10 +1673,30 @@ func cmdGetWorkflowCatalog(rc runtimeConfig, args []string) error {
 		respLanguage = language
 	}
 	return printJSON(map[string]any{
-		"review_gates": catalog.EnabledReviewGates(),
-		"nodes":        catalog.EnabledNodes(),
-		"language":     respLanguage,
+		"review_gates":   catalog.EnabledReviewGates(),
+		"nodes":          catalog.EnabledNodes(),
+		"language":       respLanguage,
+		"max_iterations": catalog.MaxIterations,
 	})
+}
+
+// emitCatalogWarnings prints the non-fatal problems config.Merge found while
+// loading the workflow catalog (catalog.Warnings -- e.g. a review gate in the
+// user or team tier that still sets the retired per-gate max_iterations) to
+// configWarnWriter, one "graph-ops: warning: " line each. Never stdout: the
+// commands that load the catalog (get-executable, expand-graph,
+// get-workflow-catalog) print JSON that skills parse, and neither their
+// output nor their exit status may change because of a warning. The team
+// tier is not editable from the Web UI, so this is where a leftover value
+// there gets noticed.
+func emitCatalogWarnings(catalog config.Catalog) {
+	emitWarnings(catalog.Warnings)
+}
+
+func emitWarnings(warnings []string) {
+	for _, w := range warnings {
+		fmt.Fprintln(configWarnWriter, "graph-ops: warning: "+w)
+	}
 }
 
 // cmdGetLanguageSettings reports whether a persistent language setting

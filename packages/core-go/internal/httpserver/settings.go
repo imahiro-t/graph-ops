@@ -125,11 +125,22 @@ func (s *Server) handleGetSettingsCatalog(w http.ResponseWriter, r *http.Request
 	}
 	inherited := config.Merge(def)
 
+	// warnings surfaces what the merge ignored in the tier this screen
+	// edits -- today, review gates that still set the retired per-gate
+	// max_iterations (DFLT-00140). Saving from the screen drops those values
+	// (config.SaveDocumentAt), which clears the warning. Always an array, so
+	// the UI never has to tell null from empty.
+	warnings := merged.Warnings
+	if warnings == nil {
+		warnings = []string{}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"tier_document":     tierDoc,
 		"merged_catalog":    merged,
 		"inherited_catalog": inherited,
 		"resolved_language": mergedLang,
+		"warnings":          warnings,
 	})
 }
 
@@ -183,17 +194,18 @@ func (s *Server) handlePutSettingsCatalog(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"merged_catalog": candidate})
 }
 
-// validateMaxIterations enforces "1 or more" for every review gate's
-// max_iterations in doc (nil is fine -- it means "inherit"; 0 or negative is
-// not, since GraphEngine.CompleteNode would otherwise block a ticket after
-// its very first loop-back iteration, which is never what a UI-entered "0"
-// or a stray negative number was meant to express).
+// validateMaxIterations enforces the workflow-wide review iteration limit's
+// allowed values (config.AllowedMaxIterations: 3, 4 or 5). nil is fine -- it
+// means "inherit". The retired per-gate max_iterations is not checked at
+// all: it is not part of the JSON shape (ReviewGateDef.LegacyMaxIterations
+// is json:"-"), so a value sent for it is simply ignored.
 func validateMaxIterations(doc config.Document) error {
-	for id, gate := range doc.ReviewGates {
-		if gate.MaxIterations != nil && *gate.MaxIterations < 1 {
-			return domain.NewAPIError(domain.ErrCodeInvalidMaxIterations,
-				"review gate %q: max_iterations must be 1 or greater, got %d", id, *gate.MaxIterations)
-		}
+	if doc.MaxIterations == nil {
+		return nil
+	}
+	if config.ValidateMaxIterations(*doc.MaxIterations) != nil {
+		return domain.NewAPIError(domain.ErrCodeInvalidMaxIterations,
+			"max_iterations must be 3, 4 or 5, got %d", *doc.MaxIterations)
 	}
 	return nil
 }

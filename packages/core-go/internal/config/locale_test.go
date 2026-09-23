@@ -85,7 +85,7 @@ func TestApplyLocale_OnlyReplacesNameFields(t *testing.T) {
 			},
 		},
 		ReviewGates: map[string]ReviewGateDef{
-			"code_review": {Name: "Code Review", Criteria: "quality", MaxIterations: intPtr(3), Enabled: boolPtr(true)},
+			"code_review": {Name: "Code Review", Criteria: "quality", Enabled: boolPtr(true)},
 			"custom_gate": {Name: "Custom Gate", Criteria: "custom"},
 		},
 	}
@@ -127,7 +127,7 @@ func TestApplyLocale_OnlyReplacesNameFields(t *testing.T) {
 	if gate.Name != "コードレビュー" {
 		t.Errorf("code_review.Name = %q, want コードレビュー", gate.Name)
 	}
-	if gate.Criteria != "quality" || gate.MaxIterations == nil || *gate.MaxIterations != 3 || gate.Enabled == nil || !*gate.Enabled {
+	if gate.Criteria != "quality" || gate.Enabled == nil || !*gate.Enabled {
 		t.Errorf("code_review's non-Name fields must be untouched, got %+v", gate)
 	}
 	customGate := out.ReviewGates["custom_gate"]

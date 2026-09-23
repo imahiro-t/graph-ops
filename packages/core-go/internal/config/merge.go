@@ -1,5 +1,10 @@
 package config
 
+import (
+	"fmt"
+	"sort"
+)
+
 // mergeReviewGates layers overlay on top of base, keyed by gate id. A field
 // left zero-valued in overlay does not clobber the inherited value; the one
 // exception is AdditionalCriteria, which is *appended* to the inherited
@@ -27,9 +32,6 @@ func mergeReviewGates(base, overlay map[string]ReviewGateDef) map[string]ReviewG
 			} else {
 				cur.Criteria = ov.AdditionalCriteria
 			}
-		}
-		if ov.MaxIterations != nil {
-			cur.MaxIterations = ov.MaxIterations
 		}
 		if ov.Enabled != nil {
 			cur.Enabled = ov.Enabled
@@ -61,14 +63,27 @@ func mergeReviewGates(base, overlay map[string]ReviewGateDef) map[string]ReviewG
 // one's. This is what lets user- and team-tier config.yaml/workflow.yaml
 // pick the display-name locale (see locale.go's ResolveLanguage) without
 // touching the locked workflow skeleton itself.
+//
+// MaxIterations is a fourth kind: a single workflow-wide value resolved
+// "last non-nil wins" across every layer (so team beats user beats the
+// plugin default), falling back to DefaultMaxIterations when no layer sets
+// it. The retired per-gate ReviewGateDef.LegacyMaxIterations is not merged
+// at all: each layer's gate that still sets it only adds an entry to
+// Catalog.Warnings, and the value itself is ignored.
 func Merge(docs ...Document) Catalog {
 	var gates map[string]ReviewGateDef
 	var language string
+	maxIterations := DefaultMaxIterations
+	var warnings []string
 	for _, d := range docs {
 		gates = mergeReviewGates(gates, d.ReviewGates)
 		if d.Language != "" {
 			language = d.Language
 		}
+		if d.MaxIterations != nil {
+			maxIterations = *d.MaxIterations
+		}
+		warnings = append(warnings, LegacyMaxIterationsWarnings(d)...)
 	}
 	var nodes []NodeDef
 	var seed []string
@@ -76,5 +91,22 @@ func Merge(docs ...Document) Catalog {
 		nodes = docs[0].Workflow.Nodes
 		seed = docs[0].Workflow.Seed
 	}
-	return Catalog{ReviewGates: gates, Nodes: nodes, Seed: seed, Language: language}
+	return Catalog{ReviewGates: gates, Nodes: nodes, Seed: seed, Language: language, MaxIterations: maxIterations, Warnings: warnings}
+}
+
+// LegacyMaxIterationsWarnings returns one warning per review gate in doc that
+// still sets the retired per-gate max_iterations, sorted by gate id.
+func LegacyMaxIterationsWarnings(doc Document) []string {
+	ids := make([]string, 0, len(doc.ReviewGates))
+	for id, g := range doc.ReviewGates {
+		if g.LegacyMaxIterations != nil {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, fmt.Sprintf("review gate %q: max_iterations is no longer supported per gate and is ignored; set the top-level max_iterations (3/4/5) instead", id))
+	}
+	return out
 }
