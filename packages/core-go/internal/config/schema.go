@@ -99,8 +99,71 @@ type Catalog struct {
 	// one.
 	MaxIterations int `json:"max_iterations"`
 	// Warnings lists non-fatal problems found while merging, e.g. a review
-	// gate that still sets the retired per-gate max_iterations.
-	Warnings []string `json:"warnings,omitempty"`
+	// gate that still sets the retired per-gate max_iterations. It is not
+	// part of the catalog's JSON shape: the CLI prints each Message() to
+	// stderr, and the settings API returns the structured values in its own
+	// top-level "warnings" field.
+	Warnings []Warning `json:"-"`
+}
+
+// Warning codes. A code is a fixed, machine-readable identifier: the Web UI
+// translates it (packages/web's SETTINGS_CATALOG_WARNINGS and the
+// settings.reviewGates.warnings.* messages), while the CLI prints the English
+// Message() instead.
+const (
+	// WarnLegacyGateMaxIterations: a review gate (GateID) still sets the
+	// retired per-gate max_iterations, which is ignored.
+	WarnLegacyGateMaxIterations = "LEGACY_GATE_MAX_ITERATIONS"
+	// WarnMaxIterationsOutOfRange: a tier's own top-level max_iterations
+	// (Value) is not one of AllowedMaxIterations. LoadWithRoots refuses such
+	// a file outright; the settings API reports it with this code instead so
+	// the screen can show it and let the user pick a valid value.
+	WarnMaxIterationsOutOfRange = "MAX_ITERATIONS_OUT_OF_RANGE"
+)
+
+// Warning is one non-fatal configuration problem, as structured data so a
+// client can localize it: Code says what it is, GateID/Value carry the
+// details the message needs.
+type Warning struct {
+	Code   string `json:"code"`
+	GateID string `json:"gate_id,omitempty"`
+	Value  *int   `json:"value,omitempty"`
+}
+
+// Message is the English, developer-facing text for w -- what the CLI prints
+// to stderr. The Web UI never shows it; it translates Code instead.
+func (w Warning) Message() string {
+	switch w.Code {
+	case WarnLegacyGateMaxIterations:
+		return fmt.Sprintf("review gate %q: max_iterations is no longer supported per gate and is ignored; set the top-level max_iterations (3/4/5) instead", w.GateID)
+	case WarnMaxIterationsOutOfRange:
+		if w.Value != nil {
+			return fmt.Sprintf("max_iterations must be 3, 4 or 5, got %d", *w.Value)
+		}
+		return "max_iterations must be 3, 4 or 5"
+	default:
+		return w.Code
+	}
+}
+
+// Messages returns each warning's Message(), in order.
+func Messages(warnings []Warning) []string {
+	out := make([]string, 0, len(warnings))
+	for _, w := range warnings {
+		out = append(out, w.Message())
+	}
+	return out
+}
+
+// MaxIterationsWarnings returns a WarnMaxIterationsOutOfRange warning when
+// doc's own top-level max_iterations is set to a value outside
+// AllowedMaxIterations (e.g. a hand-edited 7), and nothing otherwise.
+func MaxIterationsWarnings(doc Document) []Warning {
+	if doc.MaxIterations == nil || ValidateMaxIterations(*doc.MaxIterations) == nil {
+		return nil
+	}
+	v := *doc.MaxIterations
+	return []Warning{{Code: WarnMaxIterationsOutOfRange, Value: &v}}
 }
 
 // EnabledReviewGates returns the catalog's review gates with Enabled=false

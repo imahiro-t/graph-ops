@@ -125,15 +125,19 @@ func (s *Server) handleGetSettingsCatalog(w http.ResponseWriter, r *http.Request
 	}
 	inherited := config.Merge(def)
 
-	// warnings surfaces what the merge ignored in the tier this screen
-	// edits -- today, review gates that still set the retired per-gate
-	// max_iterations (DFLT-00140). Saving from the screen drops those values
-	// (config.SaveDocumentAt), which clears the warning. Always an array, so
-	// the UI never has to tell null from empty.
-	warnings := merged.Warnings
-	if warnings == nil {
-		warnings = []string{}
-	}
+	// warnings surfaces, as structured config.Warning values the UI
+	// translates by code, what is wrong with the tier this screen edits
+	// (DFLT-00140):
+	//   - MAX_ITERATIONS_OUT_OF_RANGE: the file's own top-level
+	//     max_iterations is not 3/4/5 (a hand edit -- the PUT never writes
+	//     one). The CLI refuses such a file, so this screen is how the user
+	//     sees and fixes it; saving any valid choice clears it.
+	//   - LEGACY_GATE_MAX_ITERATIONS: a review gate still sets the retired
+	//     per-gate max_iterations. Saving from the screen drops those values
+	//     (config.SaveDocumentAt), which clears the warning.
+	// Always an array, so the UI never has to tell null from empty.
+	warnings := append([]config.Warning{}, config.MaxIterationsWarnings(tierDoc)...)
+	warnings = append(warnings, merged.Warnings...)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"tier_document":     tierDoc,

@@ -324,7 +324,10 @@
       "workflowMaxIterationsLabel": "Review iteration limit (rounds)",
       "workflowMaxIterationsHelp": "Applies to every review in the workflow. A review that still fails in the last round blocks the ticket instead of sending it back. The review criteria loosen by round: 3 = Normal / Important / Final, 4 = Normal x2 / Important / Final, 5 = Normal x2 / Important x2 / Final. Tickets already in progress keep the limit they started with.",
       "workflowMaxIterationsInherit": "Inherit ({{value}})",
-      "warningsTitle": "Some settings are ignored"
+      "warningsTitle": "There are problems with these settings",
+      "warningLegacyGateMaxIterations": "Review gate \"{{id}}\": max_iterations can no longer be set per gate and is ignored. Choose 3, 4 or 5 under \"Review iteration limit\" instead. Saving from this screen removes the gate's max_iterations.",
+      "warningMaxIterationsOutOfRange": "The review iteration limit in the settings file is {{value}}. Only 3, 4 or 5 are allowed, and agents cannot load the settings until it is fixed. Choose 3, 4, 5 or inherit under \"Review iteration limit\" and save.",
+      "workflowMaxIterationsInvalid": "{{value}} (invalid)"
     },
     "skills": {
       "listTitle": "Skills",

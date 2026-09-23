@@ -82,6 +82,22 @@ From round 2 on, before judging, fetch both of these:
 Check the changes against the never-relaxed rules, and check that every serious
 issue from your previous review is fixed.
 
+A review in round 2 or later can still have no previous review of its own: the
+round comes from the loop target, so a parallel gate rewound by a sibling gate
+before its verdict was recorded, a later review (test results, report) whose
+loop target was already redone for other reviews, or a round reopened after an
+approval was rejected all start past round 1. In that case:
+
+- Judge the whole output under review at the tier you are given.
+- Take the diff base from the loop target's previous round instead: for code,
+  the commits made since the loop target's previous output (for example, after
+  its previous implementation notes were saved); for a document, the
+  difference between the loop target's latest artifact and its previous one.
+- A draft this node saved in a round whose verdict was refused is not a
+  previous review, though its findings may serve as a checklist.
+- The never-relaxed rules still apply in full to everything that diff
+  introduced.
+
 Carry-over items -- points you record without failing the review, at the
 Important or Final tier -- go under the template's last heading. The verdict is
 then the unconditional-approval word, not the conditional-approval word with

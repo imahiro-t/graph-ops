@@ -138,9 +138,12 @@ func TestLoadWithRoots_LegacyPerGateMaxIterationsIsIgnoredWithAWarning(t *testin
 				t.Errorf("MaxIterations = %d, want 3 (the per-gate value must not leak in)", cat.MaxIterations)
 			}
 			if len(cat.Warnings) != 1 {
-				t.Fatalf("Warnings = %q, want exactly one", cat.Warnings)
+				t.Fatalf("Warnings = %+v, want exactly one", cat.Warnings)
 			}
-			w := cat.Warnings[0]
+			if got := cat.Warnings[0]; got.Code != WarnLegacyGateMaxIterations || got.GateID != "code_review" {
+				t.Errorf("warning = %+v, want code %s for code_review", got, WarnLegacyGateMaxIterations)
+			}
+			w := cat.Warnings[0].Message()
 			for _, want := range []string{`"code_review"`, "max_iterations", "ignored", "top-level max_iterations (3/4/5)"} {
 				if !strings.Contains(w, want) {
 					t.Errorf("warning %q does not contain %q", w, want)
@@ -161,7 +164,7 @@ func TestLoadWithRoots_NoLegacyValueMeansNoWarnings(t *testing.T) {
 		t.Fatalf("LoadWithRoots: %v", err)
 	}
 	if len(cat.Warnings) != 0 {
-		t.Errorf("Warnings = %q, want none", cat.Warnings)
+		t.Errorf("Warnings = %+v, want none", cat.Warnings)
 	}
 }
 
@@ -230,7 +233,7 @@ func TestDefaults_MaxIterationsIsTopLevelOnly(t *testing.T) {
 		}
 	}
 	if w := Merge(def).Warnings; len(w) != 0 {
-		t.Errorf("defaults produce warnings: %q", w)
+		t.Errorf("defaults produce warnings: %+v", w)
 	}
 	plugin, err := os.ReadFile(filepath.Join("..", "..", "..", "plugin", "defaults", "workflow.yaml"))
 	if err != nil {
@@ -238,5 +241,31 @@ func TestDefaults_MaxIterationsIsTopLevelOnly(t *testing.T) {
 	}
 	if !bytes.Equal(plugin, defaultYAML) {
 		t.Errorf("internal/config/defaults/workflow.yaml is out of sync with packages/plugin/defaults/workflow.yaml; run npm run sync:defaults")
+	}
+}
+
+// MaxIterationsWarnings flags only a set, out-of-range top-level value, and
+// Message gives the CLI's English text for each warning code.
+func TestMaxIterationsWarningsAndMessages(t *testing.T) {
+	for _, v := range []int{3, 4, 5} {
+		v := v
+		if w := MaxIterationsWarnings(Document{MaxIterations: &v}); len(w) != 0 {
+			t.Errorf("value %d: warnings = %+v, want none", v, w)
+		}
+	}
+	if w := MaxIterationsWarnings(Document{}); len(w) != 0 {
+		t.Errorf("unset: warnings = %+v, want none", w)
+	}
+	seven := 7
+	w := MaxIterationsWarnings(Document{MaxIterations: &seven})
+	if len(w) != 1 || w[0].Code != WarnMaxIterationsOutOfRange || w[0].Value == nil || *w[0].Value != 7 {
+		t.Fatalf("value 7: warnings = %+v", w)
+	}
+	msgs := Messages(append(w, Warning{Code: WarnLegacyGateMaxIterations, GateID: "qa_review"}))
+	if msgs[0] != "max_iterations must be 3, 4 or 5, got 7" {
+		t.Errorf("out-of-range message = %q", msgs[0])
+	}
+	if !strings.Contains(msgs[1], `review gate "qa_review"`) || !strings.Contains(msgs[1], "ignored") {
+		t.Errorf("legacy message = %q", msgs[1])
 	}
 }

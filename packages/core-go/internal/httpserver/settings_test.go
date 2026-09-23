@@ -275,8 +275,8 @@ type settingsMaxIterationsResponse struct {
 	InheritedCatalog struct {
 		MaxIterations int `json:"max_iterations"`
 	} `json:"inherited_catalog"`
-	TierDocument map[string]any `json:"tier_document"`
-	Warnings     []string       `json:"warnings"`
+	TierDocument map[string]any   `json:"tier_document"`
+	Warnings     []map[string]any `json:"warnings"`
 }
 
 // readUserDocumentGeneric parses the user tier's config.yaml as a generic map
@@ -392,8 +392,13 @@ review_gates:
 	}
 	var get settingsMaxIterationsResponse
 	mustDecode(t, rec, &get)
-	if len(get.Warnings) != 1 || !strings.Contains(get.Warnings[0], `"code_review"`) {
-		t.Errorf("warnings = %q, want one naming code_review", get.Warnings)
+	// Structured, so the UI can translate it: a code plus the gate id, and no
+	// English sentence (DFLT-00140 accessibility review).
+	if len(get.Warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one", get.Warnings)
+	}
+	if w := get.Warnings[0]; w["code"] != config.WarnLegacyGateMaxIterations || w["gate_id"] != "code_review" || len(w) != 2 {
+		t.Errorf("warning = %v, want {code: %s, gate_id: code_review} only", w, config.WarnLegacyGateMaxIterations)
 	}
 	for id, gate := range get.MergedCatalog.ReviewGates {
 		if _, ok := gate["max_iterations"]; ok {
@@ -422,7 +427,44 @@ review_gates:
 	var after settingsMaxIterationsResponse
 	mustDecode(t, rec, &after)
 	if len(after.Warnings) != 0 {
-		t.Errorf("warnings after saving = %q, want none", after.Warnings)
+		t.Errorf("warnings after saving = %v, want none", after.Warnings)
+	}
+}
+
+// A hand-edited out-of-range top-level max_iterations (e.g. 7) is returned
+// as-is in tier_document and reported in GET's warnings as a structured
+// MAX_ITERATIONS_OUT_OF_RANGE with the value, so the screen can show it
+// instead of silently displaying "inherit". Saving a valid value clears it.
+func TestSettingsCatalog_OutOfRangeMaxIterationsIsReportedInWarnings(t *testing.T) {
+	s, _, _ := newSettingsTestServer(t)
+	if err := os.WriteFile(config.UserDocumentPath(s.cfg.UserExtensionsDir), []byte("version: 1\nmax_iterations: 7\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := doJSON(t, s, http.MethodGet, "/api/settings/catalog", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var get settingsMaxIterationsResponse
+	mustDecode(t, rec, &get)
+	if v, _ := get.TierDocument["max_iterations"].(float64); v != 7 {
+		t.Errorf("tier_document.max_iterations = %v, want 7", get.TierDocument["max_iterations"])
+	}
+	if len(get.Warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one", get.Warnings)
+	}
+	if w := get.Warnings[0]; w["code"] != config.WarnMaxIterationsOutOfRange || w["value"] != float64(7) || len(w) != 2 {
+		t.Errorf("warning = %v, want {code: %s, value: 7} only", w, config.WarnMaxIterationsOutOfRange)
+	}
+
+	rec = doJSON(t, s, http.MethodPut, "/api/settings/catalog", map[string]any{"document": map[string]any{"version": 1, "max_iterations": 4}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodGet, "/api/settings/catalog", nil)
+	var after settingsMaxIterationsResponse
+	mustDecode(t, rec, &after)
+	if len(after.Warnings) != 0 {
+		t.Errorf("warnings after saving 4 = %v, want none", after.Warnings)
 	}
 }
 

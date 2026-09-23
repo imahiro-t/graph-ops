@@ -324,7 +324,10 @@
       "workflowMaxIterationsLabel": "レビュー反復上限（巡回数）",
       "workflowMaxIterationsHelp": "ワークフロー内のすべてのレビューに適用されます。最後の巡回でも不合格なら、差し戻さずにチケットをブロックします。収束基準は巡回に応じて段階的に緩みます（3＝通常／重要／最終、4＝通常×2／重要／最終、5＝通常×2／重要×2／最終）。進行中のチケットには、開始時の上限がそのまま使われます。",
       "workflowMaxIterationsInherit": "継承（{{value}}）",
-      "warningsTitle": "無視されている設定があります"
+      "warningsTitle": "設定に問題があります",
+      "warningLegacyGateMaxIterations": "レビューゲート「{{id}}」の max_iterations は、ゲートごとには指定できなくなったため無視されています。代わりに「レビュー反復上限」で 3・4・5 のいずれかを選んでください。この画面から保存すると、ゲートの max_iterations は削除されます。",
+      "warningMaxIterationsOutOfRange": "設定ファイルのレビュー反復上限が {{value}} になっています。使える値は 3・4・5 だけで、このままではエージェントが設定を読み込めません。「レビュー反復上限」で 3・4・5 か継承を選んで保存してください。",
+      "workflowMaxIterationsInvalid": "{{value}}（無効な値）"
     },
     "skills": {
       "listTitle": "スキル一覧",

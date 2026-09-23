@@ -1690,7 +1690,7 @@ func cmdGetWorkflowCatalog(rc runtimeConfig, args []string) error {
 // tier is not editable from the Web UI, so this is where a leftover value
 // there gets noticed.
 func emitCatalogWarnings(catalog config.Catalog) {
-	emitWarnings(catalog.Warnings)
+	emitWarnings(config.Messages(catalog.Warnings))
 }
 
 func emitWarnings(warnings []string) {

@@ -5,12 +5,12 @@
 // override) must keep working exactly as before. See this ticket's plan --
 // the guard/tooltip pattern mirrors the existing delete button
 // (disabled={!canEdit || !g.isOverridden} + cannotDeleteDefaultHint).
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { ReviewGatesEditor } from './ReviewGatesEditor';
-import { SettingsCatalogResponse } from '../../types';
+import { SETTINGS_CATALOG_WARNINGS, SettingsCatalogResponse, SettingsCatalogWarning } from '../../types';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -528,17 +528,87 @@ describe('ReviewGatesEditor', () => {
       expect(onDirtyChange).toHaveBeenLastCalledWith(false);
     });
 
-    it('shows the server warnings above the gate list', async () => {
-      const warning = 'review gate "code_review": max_iterations is no longer supported per gate and is ignored; set the top-level max_iterations (3/4/5) instead';
-      mockedFetchCatalog.mockResolvedValue({ ...CATALOG_RESPONSE, warnings: [warning] });
+    // The server sends codes, never sentences: the note must show this
+    // screen's own translated wording in the UI's language (DFLT-00140
+    // accessibility review -- an English server string inside the Japanese
+    // UI was read out with the Japanese voice).
+    it.each(['ja', 'en'])('shows the legacy per-gate warning translated into %s, above the gate list', async lang => {
+      const previous = i18n.language;
+      await i18n.changeLanguage(lang);
+      try {
+        mockedFetchCatalog.mockResolvedValue({
+          ...CATALOG_RESPONSE,
+          warnings: [{ code: SETTINGS_CATALOG_WARNINGS.legacyGateMaxIterations, gate_id: 'code_review' }]
+        });
+        render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+        await screen.findByDisplayValue('Code Review');
+
+        const note = screen.getByRole('note', { name: i18n.t('settings.reviewGates.warningsTitle') });
+        const expected = i18n.t('settings.reviewGates.warningLegacyGateMaxIterations', { id: 'code_review' });
+        expect(expected).toContain('code_review');
+        expect(within(note).getByRole('listitem')).toHaveTextContent(expected);
+        expect(note).not.toHaveTextContent('is no longer supported per gate');
+        // Above the list: it precedes the first gate row in document order.
+        const firstId = fieldsOf('settings.reviewGates.idLabel')[0];
+        expect(note.compareDocumentPosition(firstId) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      } finally {
+        await i18n.changeLanguage(previous);
+      }
+    });
+
+    it('shows nothing for a warning code it has no message for', async () => {
+      mockedFetchCatalog.mockResolvedValue({
+        ...CATALOG_RESPONSE,
+        warnings: [{ code: 'SOMETHING_NEW' }, 'an old server sentence' as unknown as SettingsCatalogWarning]
+      });
       render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
       await screen.findByDisplayValue('Code Review');
+      expect(screen.queryByRole('note')).not.toBeInTheDocument();
+      expect(screen.queryByText('an old server sentence')).not.toBeInTheDocument();
+    });
 
+    // A hand-edited out-of-range value (QA review of DFLT-00140): the select
+    // must not pretend to be on "inherit" while holding 7.
+    it('shows an out-of-range value as an invalid choice, explains it, and saves the value picked instead', async () => {
+      const withSeven = {
+        ...CATALOG_RESPONSE,
+        tier_document: { ...CATALOG_RESPONSE.tier_document, max_iterations: 7 },
+        merged_catalog: { ...CATALOG_RESPONSE.merged_catalog, max_iterations: 7 },
+        warnings: [{ code: SETTINGS_CATALOG_WARNINGS.maxIterationsOutOfRange, value: 7 }]
+      };
+      mockedFetchCatalog.mockResolvedValue(withSeven);
+      const onDirtyChange = vi.fn();
+      const user = userEvent.setup();
+      render(<ReviewGatesEditor onDirtyChange={onDirtyChange} />);
+      await screen.findByDisplayValue('Code Review');
+
+      const message = i18n.t('settings.reviewGates.warningMaxIterationsOutOfRange', { value: 7 });
       const note = screen.getByRole('note', { name: i18n.t('settings.reviewGates.warningsTitle') });
-      expect(note).toHaveTextContent(warning);
-      // Above the list: it precedes the first gate row in document order.
-      const firstId = fieldsOf('settings.reviewGates.idLabel')[0];
-      expect(note.compareDocumentPosition(firstId) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(note).toHaveTextContent(message);
+
+      const select = limitSelect();
+      const invalidLabel = i18n.t('settings.reviewGates.workflowMaxIterationsInvalid', { value: 7 });
+      expect(select).toHaveValue('7');
+      expect(select.selectedOptions[0].textContent).toBe(invalidLabel);
+      expect(Array.from(select.options).map(o => o.textContent)).toEqual([inheritLabel(3), '3', '4', '5', invalidLabel]);
+      expect(select).toHaveAttribute('aria-invalid', 'true');
+      expect(select).toHaveAccessibleDescription(`${i18n.t('settings.reviewGates.workflowMaxIterationsHelp')} ${message}`);
+
+      await user.selectOptions(select, '4');
+      expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+      expect(select).not.toHaveAttribute('aria-invalid');
+      expect(screen.queryByRole('option', { name: invalidLabel })).not.toBeInTheDocument();
+
+      mockedFetchCatalog.mockResolvedValueOnce(withSeven).mockResolvedValue({
+        ...CATALOG_RESPONSE,
+        tier_document: { ...CATALOG_RESPONSE.tier_document, max_iterations: 4 },
+        merged_catalog: { ...CATALOG_RESPONSE.merged_catalog, max_iterations: 4 }
+      });
+      await user.click(saveButton());
+      const doc = await waitFor(savedDocument);
+      expect(doc.max_iterations).toBe(4);
+      await screen.findByText(i18n.t('settings.common.saveSuccess'));
+      expect(screen.queryByRole('note')).not.toBeInTheDocument();
     });
 
     it('shows no warning note when there are none', async () => {

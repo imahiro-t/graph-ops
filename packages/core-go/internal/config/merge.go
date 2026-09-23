@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"sort"
 )
 
@@ -74,7 +73,7 @@ func Merge(docs ...Document) Catalog {
 	var gates map[string]ReviewGateDef
 	var language string
 	maxIterations := DefaultMaxIterations
-	var warnings []string
+	var warnings []Warning
 	for _, d := range docs {
 		gates = mergeReviewGates(gates, d.ReviewGates)
 		if d.Language != "" {
@@ -94,9 +93,10 @@ func Merge(docs ...Document) Catalog {
 	return Catalog{ReviewGates: gates, Nodes: nodes, Seed: seed, Language: language, MaxIterations: maxIterations, Warnings: warnings}
 }
 
-// LegacyMaxIterationsWarnings returns one warning per review gate in doc that
-// still sets the retired per-gate max_iterations, sorted by gate id.
-func LegacyMaxIterationsWarnings(doc Document) []string {
+// LegacyMaxIterationsWarnings returns one WarnLegacyGateMaxIterations warning
+// per review gate in doc that still sets the retired per-gate max_iterations,
+// sorted by gate id.
+func LegacyMaxIterationsWarnings(doc Document) []Warning {
 	ids := make([]string, 0, len(doc.ReviewGates))
 	for id, g := range doc.ReviewGates {
 		if g.LegacyMaxIterations != nil {
@@ -104,9 +104,9 @@ func LegacyMaxIterationsWarnings(doc Document) []string {
 		}
 	}
 	sort.Strings(ids)
-	out := make([]string, 0, len(ids))
+	out := make([]Warning, 0, len(ids))
 	for _, id := range ids {
-		out = append(out, fmt.Sprintf("review gate %q: max_iterations is no longer supported per gate and is ignored; set the top-level max_iterations (3/4/5) instead", id))
+		out = append(out, Warning{Code: WarnLegacyGateMaxIterations, GateID: id})
 	}
 	return out
 }

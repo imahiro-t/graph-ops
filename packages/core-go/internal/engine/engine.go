@@ -1857,7 +1857,16 @@ const reviewNeverRelaxedText = `Never relaxed, at any tier:
 - A bug, regression, or security problem newly introduced by the changes made since the previous round is judged as strictly as at the Normal tier.
 - A serious issue flagged in a previous round that is still not fixed fails the review.`
 
-const reviewPreviousRoundText = "This is not the first round: before judging, fetch your own previous review result (the latest review artifact on this node, from get-ticket) and the changes made since that review (for code, git log / git diff of the commits after that review was written; for a document, the diff between the loop target's latest artifact and the one you reviewed last time), and check both against the rules above."
+// reviewPreviousRoundText is appended from round 2 on. Its second paragraph
+// covers a round 2+ review that has no earlier review of its own: the round
+// comes from the loop target's iteration_count, so a parallel gate rewound by
+// a sibling before its verdict was recorded, a later review (test results,
+// report) whose loop target was already redone for other reviews, or a round
+// reopened after an approval was rejected all start at round 2 or more with
+// nothing of their own to compare against.
+const reviewPreviousRoundText = `This is not the first round: before judging, fetch your own previous review result (the latest review artifact on this node, from get-ticket) and the changes made since that review (for code, git log / git diff of the commits after that review was written; for a document, the diff between the loop target's latest artifact and the one you reviewed last time), and check both against the rules above.
+
+If this node has no previous review of its own (for example a parallel gate rewound by a sibling gate before its verdict was recorded, a later review whose loop target was already redone for other reviews, or a round reopened after an approval was rejected): judge the whole output under review at this round's tier, and take the diff base from the loop target's previous round instead (for code, the commits made since the loop target's previous output -- e.g. after its previous implementation notes were saved; for a document, the diff between the loop target's latest artifact and its previous one). A draft this node saved in a round whose verdict was refused is not a previous review, though its findings may serve as a checklist. The never-relaxed rules still apply in full to everything that diff introduced.`
 
 const reviewCarryOverText = "Record carry-over items (points that do not fail the review) under the last heading of the review template. Do not turn them into a conditional approval that requires code changes -- there is no path back to the implementation node from an approval; pass with the unconditional verdict instead."
 

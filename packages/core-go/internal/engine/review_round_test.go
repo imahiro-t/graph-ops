@@ -255,6 +255,58 @@ func TestGetReviewCriteria_FixedRulesAndPreviousRoundInstruction(t *testing.T) {
 	}
 }
 
+// A round 2+ review can have no earlier review of its own (QA review of
+// DFLT-00140): a parallel gate rewound by a sibling before its verdict was
+// recorded, or test_review reached only after the gates already sent impl
+// back. The round-2+ instruction must then say to judge the whole output at
+// the given tier and take the diff base from the loop target's previous
+// round, while keeping the never-relaxed rules.
+func TestGetReviewCriteria_RoundTwoWithoutOwnPreviousReview(t *testing.T) {
+	e, repo, projectID := newTestEngine(t)
+	ticketID, _, gates := parallelGatesWithLimit(t, e, projectID, 3)
+	if res, err := e.CompleteNode(gates[0].ID, false, nil); err != nil || !res.LoopedBack {
+		t.Fatalf("first rejection: %+v, %v", res, err)
+	}
+	wantFallback := []string{
+		"If this node has no previous review of its own",
+		"judge the whole output under review at this round's tier",
+		"take the diff base from the loop target's previous round",
+		"A draft this node saved in a round whose verdict was refused is not a previous review",
+		"The never-relaxed rules still apply in full to everything that diff introduced.",
+	}
+	check := func(configID string) {
+		t.Helper()
+		node := nodeByConfigID(t, repo, ticketID, configID)
+		arts, err := repo.ListArtifactsByNode(node.ID)
+		if err != nil {
+			t.Fatalf("ListArtifactsByNode: %v", err)
+		}
+		if len(arts) != 0 {
+			t.Fatalf("%s: expected no earlier review of its own, got %d artifacts", configID, len(arts))
+		}
+		out := criteriaFor(t, repo, ticketID, configID)
+		if !strings.Contains(out, "Review round: 2 / 3") {
+			t.Errorf("%s: expected round 2 / 3:\n%s", configID, out)
+		}
+		for _, want := range append(wantFallback, "newly introduced by the changes made since the previous round is judged as strictly as at the Normal tier") {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s: output lacks %q:\n%s", configID, want, out)
+			}
+		}
+	}
+	// The sibling gates never recorded a verdict in round 1.
+	for _, g := range gates[1:] {
+		check(*g.ConfigID)
+	}
+	// test_review has never run at all, yet its loop target was already redone.
+	check("test_review")
+	// Round 1 never carries the fallback.
+	setIterationCount(t, repo, nodeByConfigID(t, repo, ticketID, "impl").ID, 0)
+	if out := criteriaFor(t, repo, ticketID, "test_review"); strings.Contains(out, wantFallback[0]) {
+		t.Errorf("round 1 must not carry the no-previous-review fallback:\n%s", out)
+	}
+}
+
 // Completion criterion 3: with limit N, rounds 1..N-1 loop back and round
 // N's failure blocks, writing nothing.
 func TestCompleteNode_BlocksInRoundNForEachLimit(t *testing.T) {

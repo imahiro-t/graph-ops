@@ -309,13 +309,36 @@ export interface SettingsCatalog {
   max_iterations?: number | null;
 }
 
-// warnings lists what the merge ignored in the user tier -- e.g. a review
-// gate that still sets the retired per-gate max_iterations.
+// The warning codes GET /api/settings/catalog can put in `warnings`. Both are
+// packages/core-go/internal/config/schema.go's Warn* constants, and each has
+// a `settings.reviewGates.warning*` message beside it in the translation
+// catalogues: the server never sends a sentence, so the screen shows its own
+// wording in the UI's language (DFLT-00140).
+export const SETTINGS_CATALOG_WARNINGS = {
+  // A review gate (gate_id) still sets the retired per-gate max_iterations,
+  // which is ignored. Saving from the screen drops it.
+  legacyGateMaxIterations: 'LEGACY_GATE_MAX_ITERATIONS',
+  // The user tier's own top-level max_iterations (value) is not 3, 4 or 5 --
+  // a hand edit. Agents refuse to load such a file; choosing a valid value
+  // (or inherit) and saving fixes it.
+  maxIterationsOutOfRange: 'MAX_ITERATIONS_OUT_OF_RANGE'
+} as const;
+
+// One problem found in the user tier: a code plus the details its message
+// needs. A code the client does not know is simply not shown.
+export interface SettingsCatalogWarning {
+  code: string;
+  gate_id?: string;
+  value?: number;
+}
+
+// warnings lists what is wrong with the user tier -- see
+// SETTINGS_CATALOG_WARNINGS for the codes.
 export interface SettingsCatalogResponse {
   tier_document: SettingsDocument;
   merged_catalog: SettingsCatalog;
   inherited_catalog: SettingsCatalog;
-  warnings?: string[];
+  warnings?: SettingsCatalogWarning[];
 }
 
 export interface SettingsNodeTypeInfo {

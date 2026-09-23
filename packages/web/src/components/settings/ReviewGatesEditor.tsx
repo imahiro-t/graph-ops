@@ -11,7 +11,7 @@
 import React, { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Save, Plus, Trash2, CheckCircle2, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
-import { ReviewGateDef, SettingsCatalog, SettingsDocument } from '../../types';
+import { ReviewGateDef, SETTINGS_CATALOG_WARNINGS, SettingsCatalog, SettingsCatalogWarning, SettingsDocument } from '../../types';
 import { fetchSettingsCatalog, saveSettingsCatalog } from '../../lib/settingsApi';
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
@@ -58,8 +58,21 @@ const GATE_FIELDS: GateField[] = ['name', 'criteria', 'additional_criteria', 'en
 
 // The values the workflow-wide review iteration limit may take (the server
 // rejects anything else with INVALID_MAX_ITERATIONS).
-const MAX_ITERATIONS_CHOICES = [3, 4, 5] as const;
+const MAX_ITERATIONS_CHOICES: readonly number[] = [3, 4, 5];
 const DEFAULT_MAX_ITERATIONS = 3;
+
+// The server's warnings are codes plus details, never sentences: keep only
+// well-formed entries with a code this screen has a message for, so an
+// unknown code (or an older server's plain string) shows nothing rather than
+// untranslated text.
+const KNOWN_WARNING_CODES: readonly string[] = Object.values(SETTINGS_CATALOG_WARNINGS);
+function knownWarnings(raw: unknown): SettingsCatalogWarning[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (w): w is SettingsCatalogWarning =>
+      typeof w === 'object' && w !== null && KNOWN_WARNING_CODES.includes((w as SettingsCatalogWarning).code)
+  );
+}
 
 // Normalizes a field's value the way the form displays it, so an untouched
 // field, or one changed and then changed back, compares equal to its
@@ -113,10 +126,10 @@ type FetchedRows = {
   merged: SettingsCatalog['review_gates'];
   inherited: SettingsCatalog['review_gates'];
   // This scope's own workflow-wide limit (null = inherit), the value it
-  // would inherit, and the server's merge warnings.
+  // would inherit, and the server's warnings about this scope's file.
   maxIterations: number | null;
   inheritedMaxIterations: number;
-  warnings: string[];
+  warnings: SettingsCatalogWarning[];
 };
 
 const SMALL_LABEL_CLASS = 'block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5';
@@ -140,7 +153,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const [maxIterations, setMaxIterations] = useState<number | null>(null);
   const [savedMaxIterations, setSavedMaxIterations] = useState<number | null>(null);
   const [inheritedMaxIterations, setInheritedMaxIterations] = useState<number>(DEFAULT_MAX_ITERATIONS);
-  const [warnings, setWarnings] = useState<string[]>([]);
+  const [warnings, setWarnings] = useState<SettingsCatalogWarning[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -186,7 +199,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       inherited: inheritedMap,
       maxIterations: catalogRes.tier_document.max_iterations ?? null,
       inheritedMaxIterations: catalogRes.inherited_catalog?.max_iterations ?? DEFAULT_MAX_ITERATIONS,
-      warnings: catalogRes.warnings ?? []
+      warnings: knownWarnings(catalogRes.warnings)
     };
   }, [tRef]);
 
@@ -279,6 +292,21 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     }
   };
 
+  // A hand-edited out-of-range value (e.g. 7) matches none of the choices;
+  // show it as its own, invalid option instead of letting the select fall
+  // back to displaying "inherit" while still holding 7.
+  const maxIterationsInvalid = maxIterations !== null && !MAX_ITERATIONS_CHOICES.includes(maxIterations);
+  const warningItemId = (i: number) => `${idPrefix}-warning-${i}`;
+  const outOfRangeWarningIndex = warnings.findIndex(w => w.code === SETTINGS_CATALOG_WARNINGS.maxIterationsOutOfRange);
+  const warningText = (w: SettingsCatalogWarning) =>
+    w.code === SETTINGS_CATALOG_WARNINGS.legacyGateMaxIterations
+      ? t('settings.reviewGates.warningLegacyGateMaxIterations', { id: w.gate_id ?? '' })
+      : t('settings.reviewGates.warningMaxIterationsOutOfRange', { value: w.value ?? '' });
+  const maxIterationsDescribedBy = [
+    `${idPrefix}-workflow-max-help`,
+    maxIterationsInvalid && outOfRangeWarningIndex >= 0 ? warningItemId(outOfRangeWarningIndex) : null
+  ].filter(Boolean).join(' ');
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 text-xs py-8 justify-center">
@@ -303,7 +331,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
             {t('settings.reviewGates.warningsTitle')}
           </p>
           <ul className="mt-1 list-disc pl-5 space-y-0.5">
-            {warnings.map((w, i) => <li key={i} className="break-words">{w}</li>)}
+            {warnings.map((w, i) => <li key={i} id={warningItemId(i)} className="break-words">{warningText(w)}</li>)}
           </ul>
         </div>
       )}
@@ -315,12 +343,16 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         <select
           id={`${idPrefix}-workflow-max`}
           value={maxIterations === null ? '' : String(maxIterations)}
-          aria-describedby={`${idPrefix}-workflow-max-help`}
+          aria-describedby={maxIterationsDescribedBy}
+          aria-invalid={maxIterationsInvalid || undefined}
           onChange={e => setMaxIterations(e.target.value === '' ? null : Number(e.target.value))}
           className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100"
         >
           <option value="">{t('settings.reviewGates.workflowMaxIterationsInherit', { value: inheritedMaxIterations })}</option>
           {MAX_ITERATIONS_CHOICES.map(v => <option key={v} value={String(v)}>{v}</option>)}
+          {maxIterationsInvalid && (
+            <option value={String(maxIterations)}>{t('settings.reviewGates.workflowMaxIterationsInvalid', { value: maxIterations })}</option>
+          )}
         </select>
         <p id={`${idPrefix}-workflow-max-help`} className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
           {t('settings.reviewGates.workflowMaxIterationsHelp')}
