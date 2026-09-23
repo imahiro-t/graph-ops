@@ -543,10 +543,16 @@ export const TicketItem: React.FC<Props> = ({
 
   return (
     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs transition-all overflow-clip mb-4">
-      {/* Header Row */}
+      {/* Header Row. gap-4 keeps a fixed space between the left group and
+          the right-hand group (DFLT-00141): justify-between alone leaves no
+          space once a long title stretches the flex-1 left group all the way
+          to the right, so its last item (a label chip, "+N", the rejected
+          badge or the title) would touch the first item on the right (the
+          assignee chip/button or the node progress). */}
       <div
         onClick={onToggleExpand}
-        className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition select-none"
+        data-testid="ticket-header-row"
+        className="p-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition select-none"
       >
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <button className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 shrink-0">
