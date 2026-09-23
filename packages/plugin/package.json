@@ -1,6 +1,6 @@
 {
   "name": "@graph-ops/plugin",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "description": "Claude Code Plugin for GraphOps",
   "scripts": {
