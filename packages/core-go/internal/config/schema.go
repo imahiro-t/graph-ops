@@ -3,6 +3,8 @@
 // project (.graph-ops/workflow.yaml), project taking precedence.
 package config
 
+import "fmt"
+
 // ReviewGateDef describes one reusable review perspective. AdditionalCriteria
 // is appended to (not replacing) whatever Criteria was inherited from a
 // lower-priority layer; Criteria, when set, replaces it outright.
@@ -10,8 +12,14 @@ type ReviewGateDef struct {
 	Name               string `yaml:"name,omitempty" json:"name,omitempty"`
 	Criteria           string `yaml:"criteria,omitempty" json:"criteria,omitempty"`
 	AdditionalCriteria string `yaml:"additional_criteria,omitempty" json:"additional_criteria,omitempty"`
-	MaxIterations      *int   `yaml:"max_iterations,omitempty" json:"max_iterations,omitempty"`
-	Enabled            *bool  `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	// LegacyMaxIterations is the retired per-gate max_iterations. It is
+	// kept only so an old config file that still sets it can be detected
+	// and warned about (see Merge's Warnings): it no longer affects
+	// anything, is never serialized to JSON (so the settings API neither
+	// shows nor accepts it), and SaveDocumentAt drops it before writing.
+	// The iteration limit is now the workflow-wide Document.MaxIterations.
+	LegacyMaxIterations *int  `yaml:"max_iterations,omitempty" json:"-"`
+	Enabled             *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 }
 
 // NodeDef is one node in the workflow template. Gate references a
@@ -50,6 +58,31 @@ type Document struct {
 	// locked to the plugin default. Empty means "unset" -- no locale is
 	// applied and the English plugin defaults stand.
 	Language string `yaml:"language,omitempty" json:"language,omitempty"`
+	// MaxIterations is the workflow-wide review iteration limit: the maximum
+	// number of review rounds (counting the first review) a review loop may
+	// run before a failing review blocks the ticket instead of looping back.
+	// It must be one of AllowedMaxIterations; nil means "unset, inherit".
+	// Later tiers win (see Merge), and the value in effect when a node is
+	// created is stored on that node, so changing it later does not affect
+	// tickets already in progress.
+	MaxIterations *int `yaml:"max_iterations,omitempty" json:"max_iterations,omitempty"`
+}
+
+// DefaultMaxIterations is the workflow-wide review iteration limit used when
+// no tier sets Document.MaxIterations.
+const DefaultMaxIterations = 3
+
+// AllowedMaxIterations lists the values Document.MaxIterations may take.
+var AllowedMaxIterations = []int{3, 4, 5}
+
+// ValidateMaxIterations reports whether v is one of AllowedMaxIterations.
+func ValidateMaxIterations(v int) error {
+	for _, a := range AllowedMaxIterations {
+		if v == a {
+			return nil
+		}
+	}
+	return fmt.Errorf("max_iterations must be 3, 4 or 5, got %d", v)
 }
 
 // Catalog is the fully merged, ready-to-use result of all three layers.
@@ -61,6 +94,76 @@ type Catalog struct {
 	// Document.Language and ResolveLanguage) -- "" if none of the merged
 	// tiers set one.
 	Language string `json:"language,omitempty"`
+	// MaxIterations is the resolved workflow-wide review iteration limit
+	// (see Document.MaxIterations); DefaultMaxIterations when no tier sets
+	// one.
+	MaxIterations int `json:"max_iterations"`
+	// Warnings lists non-fatal problems found while merging, e.g. a review
+	// gate that still sets the retired per-gate max_iterations. It is not
+	// part of the catalog's JSON shape: the CLI prints each Message() to
+	// stderr, and the settings API returns the structured values in its own
+	// top-level "warnings" field.
+	Warnings []Warning `json:"-"`
+}
+
+// Warning codes. A code is a fixed, machine-readable identifier: the Web UI
+// translates it (packages/web's SETTINGS_CATALOG_WARNINGS and the
+// settings.reviewGates.warnings.* messages), while the CLI prints the English
+// Message() instead.
+const (
+	// WarnLegacyGateMaxIterations: a review gate (GateID) still sets the
+	// retired per-gate max_iterations, which is ignored.
+	WarnLegacyGateMaxIterations = "LEGACY_GATE_MAX_ITERATIONS"
+	// WarnMaxIterationsOutOfRange: a tier's own top-level max_iterations
+	// (Value) is not one of AllowedMaxIterations. LoadWithRoots refuses such
+	// a file outright; the settings API reports it with this code instead so
+	// the screen can show it and let the user pick a valid value.
+	WarnMaxIterationsOutOfRange = "MAX_ITERATIONS_OUT_OF_RANGE"
+)
+
+// Warning is one non-fatal configuration problem, as structured data so a
+// client can localize it: Code says what it is, GateID/Value carry the
+// details the message needs.
+type Warning struct {
+	Code   string `json:"code"`
+	GateID string `json:"gate_id,omitempty"`
+	Value  *int   `json:"value,omitempty"`
+}
+
+// Message is the English, developer-facing text for w -- what the CLI prints
+// to stderr. The Web UI never shows it; it translates Code instead.
+func (w Warning) Message() string {
+	switch w.Code {
+	case WarnLegacyGateMaxIterations:
+		return fmt.Sprintf("review gate %q: max_iterations is no longer supported per gate and is ignored; set the top-level max_iterations (3/4/5) instead", w.GateID)
+	case WarnMaxIterationsOutOfRange:
+		if w.Value != nil {
+			return fmt.Sprintf("max_iterations must be 3, 4 or 5, got %d", *w.Value)
+		}
+		return "max_iterations must be 3, 4 or 5"
+	default:
+		return w.Code
+	}
+}
+
+// Messages returns each warning's Message(), in order.
+func Messages(warnings []Warning) []string {
+	out := make([]string, 0, len(warnings))
+	for _, w := range warnings {
+		out = append(out, w.Message())
+	}
+	return out
+}
+
+// MaxIterationsWarnings returns a WarnMaxIterationsOutOfRange warning when
+// doc's own top-level max_iterations is set to a value outside
+// AllowedMaxIterations (e.g. a hand-edited 7), and nothing otherwise.
+func MaxIterationsWarnings(doc Document) []Warning {
+	if doc.MaxIterations == nil || ValidateMaxIterations(*doc.MaxIterations) == nil {
+		return nil
+	}
+	v := *doc.MaxIterations
+	return []Warning{{Code: WarnMaxIterationsOutOfRange, Value: &v}}
 }
 
 // EnabledReviewGates returns the catalog's review gates with Enabled=false

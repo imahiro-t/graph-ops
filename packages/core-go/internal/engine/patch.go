@@ -1,12 +1,18 @@
 package engine
 
+import "fmt"
+
 // ExtraGateDef defines a brand-new, ticket-specific review gate inline in a
 // refine-ticket patch (as opposed to GateRef, which reuses an existing
 // catalog entry).
+//
+// LegacyMaxIterations is the retired per-gate max_iterations: still parsed so
+// expand-graph can warn that it is ignored (see InlineGateMaxIterationsWarnings),
+// but it has no effect -- every node takes the workflow-wide limit.
 type ExtraGateDef struct {
-	Name          string `json:"name"`
-	Criteria      string `json:"criteria"`
-	MaxIterations *int   `json:"max_iterations,omitempty"`
+	Name                string `json:"name"`
+	Criteria            string `json:"criteria"`
+	LegacyMaxIterations *int   `json:"max_iterations,omitempty"`
 }
 
 // ExtraNode is one LLM-proposed addition to the base workflow template,
@@ -27,4 +33,19 @@ type ExtraNode struct {
 // Patch is the top-level shape read from `refine-ticket --patch <file|->`.
 type Patch struct {
 	ExtraNodes []ExtraNode `json:"extra_nodes"`
+}
+
+// InlineGateMaxIterationsWarnings returns one warning per inline gate in p
+// that still sets the retired per-gate max_iterations.
+func InlineGateMaxIterationsWarnings(p *Patch) []string {
+	if p == nil {
+		return nil
+	}
+	var out []string
+	for _, n := range p.ExtraNodes {
+		if n.Gate != nil && n.Gate.LegacyMaxIterations != nil {
+			out = append(out, fmt.Sprintf("patch node %q: the inline gate's max_iterations is no longer supported and is ignored; the workflow-wide max_iterations (3/4/5) applies", n.ID))
+		}
+	}
+	return out
 }

@@ -6,8 +6,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/graph-ops/core-go/internal/config"
 	"github.com/graph-ops/core-go/internal/engine"
@@ -229,59 +232,260 @@ func TestSettingsCatalog_WorkflowSeedRejected(t *testing.T) {
 	}
 }
 
-// Scenario: 最大イテレーション数に0以下の値を入力するとバリデーションエラー
-// になる.
+// Scenario: the workflow-wide review iteration limit only accepts 3, 4 or 5
+// (DFLT-00140); anything else is a 400 INVALID_MAX_ITERATIONS and nothing is
+// written.
 func TestSettingsCatalog_InvalidMaxIterationsRejected(t *testing.T) {
-	s, _, _ := newSettingsTestServer(t)
+	for _, v := range []int{0, 2, 6} {
+		t.Run(strconv.Itoa(v), func(t *testing.T) {
+			s, _, _ := newSettingsTestServer(t)
+			path := config.UserDocumentPath(s.cfg.UserExtensionsDir)
+			original := "version: 1\nmax_iterations: 4\n"
+			if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+				t.Fatal(err)
+			}
 
-	rec := doJSON(t, s, http.MethodPut, "/api/settings/catalog", map[string]any{
-		"document": map[string]any{
-			"version": 1,
-			"review_gates": map[string]any{
-				"code_review": map[string]any{"max_iterations": 0},
-			},
-		},
-	})
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if got := decodeError(t, rec).Code; got != "INVALID_MAX_ITERATIONS" {
-		t.Errorf("error code = %q", got)
+			rec := doJSON(t, s, http.MethodPut, "/api/settings/catalog", map[string]any{
+				"document": map[string]any{"version": 1, "max_iterations": v},
+			})
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+			apiErr := decodeError(t, rec)
+			if apiErr.Code != "INVALID_MAX_ITERATIONS" {
+				t.Errorf("error code = %q", apiErr.Code)
+			}
+			if !strings.Contains(apiErr.Message, "3, 4 or 5") {
+				t.Errorf("error message %q does not say 3, 4 or 5", apiErr.Message)
+			}
+			if raw, _ := os.ReadFile(path); string(raw) != original {
+				t.Errorf("the user document changed on a rejected PUT:\n%s", raw)
+			}
+		})
 	}
 }
 
-// Scenario: a valid workflow/review-gate edit saves successfully and is
-// reflected in the merged catalog.
-func TestSettingsCatalog_ValidSaveRoundTrips(t *testing.T) {
-	s, _, _ := newSettingsTestServer(t)
+// settingsMaxIterationsResponse is the part of the settings GET/PUT
+// responses the max_iterations tests look at.
+type settingsMaxIterationsResponse struct {
+	MergedCatalog struct {
+		MaxIterations int                       `json:"max_iterations"`
+		ReviewGates   map[string]map[string]any `json:"review_gates"`
+	} `json:"merged_catalog"`
+	InheritedCatalog struct {
+		MaxIterations int `json:"max_iterations"`
+	} `json:"inherited_catalog"`
+	TierDocument map[string]any   `json:"tier_document"`
+	Warnings     []map[string]any `json:"warnings"`
+}
 
+// readUserDocumentGeneric parses the user tier's config.yaml as a generic map
+// so a test can tell "key absent" from "key present".
+func readUserDocumentGeneric(t *testing.T, s *Server) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(config.UserDocumentPath(s.cfg.UserExtensionsDir))
+	if err != nil {
+		t.Fatalf("read user document: %v", err)
+	}
+	var out map[string]any
+	if err := yaml.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("parse user document: %v", err)
+	}
+	return out
+}
+
+// Scenario: 3/4/5 save successfully, come back in merged_catalog, and land at
+// the top level of the user tier's config.yaml.
+func TestSettingsCatalog_ValidSaveRoundTrips(t *testing.T) {
+	for _, v := range []int{3, 4, 5} {
+		t.Run(strconv.Itoa(v), func(t *testing.T) {
+			s, _, _ := newSettingsTestServer(t)
+
+			rec := doJSON(t, s, http.MethodPut, "/api/settings/catalog", map[string]any{
+				"document": map[string]any{"version": 1, "max_iterations": v},
+			})
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			var put settingsMaxIterationsResponse
+			mustDecode(t, rec, &put)
+			if put.MergedCatalog.MaxIterations != v {
+				t.Errorf("PUT merged_catalog.max_iterations = %d, want %d", put.MergedCatalog.MaxIterations, v)
+			}
+			if got := readUserDocumentGeneric(t, s)["max_iterations"]; got != v {
+				t.Errorf("config.yaml max_iterations = %v, want %d", got, v)
+			}
+
+			rec = doJSON(t, s, http.MethodGet, "/api/settings/catalog", nil)
+			var get settingsMaxIterationsResponse
+			mustDecode(t, rec, &get)
+			if get.MergedCatalog.MaxIterations != v || get.InheritedCatalog.MaxIterations != 3 {
+				t.Errorf("GET merged/inherited max_iterations = %d/%d, want %d/3", get.MergedCatalog.MaxIterations, get.InheritedCatalog.MaxIterations, v)
+			}
+		})
+	}
+}
+
+// Scenario: GET with nothing set reports 3 merged and inherited, and no
+// warnings (as an empty array, not null).
+func TestSettingsCatalog_GetMaxIterationsDefaults(t *testing.T) {
+	s, _, _ := newSettingsTestServer(t)
+	rec := doJSON(t, s, http.MethodGet, "/api/settings/catalog", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body settingsMaxIterationsResponse
+	mustDecode(t, rec, &body)
+	if body.MergedCatalog.MaxIterations != 3 || body.InheritedCatalog.MaxIterations != 3 {
+		t.Errorf("merged/inherited max_iterations = %d/%d, want 3/3", body.MergedCatalog.MaxIterations, body.InheritedCatalog.MaxIterations)
+	}
+	if body.Warnings == nil || len(body.Warnings) != 0 {
+		t.Errorf("warnings = %#v, want an empty array", body.Warnings)
+	}
+}
+
+// Scenario: omitting max_iterations, or sending null, clears the user tier's
+// value so the inherited 3 applies again.
+func TestSettingsCatalog_PutWithoutMaxIterationsClearsIt(t *testing.T) {
+	for _, form := range []string{"omitted", "null"} {
+		t.Run(form, func(t *testing.T) {
+			s, _, _ := newSettingsTestServer(t)
+			if err := os.WriteFile(config.UserDocumentPath(s.cfg.UserExtensionsDir), []byte("version: 1\nmax_iterations: 4\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			doc := map[string]any{"version": 1}
+			if form == "null" {
+				doc["max_iterations"] = nil
+			}
+			rec := doJSON(t, s, http.MethodPut, "/api/settings/catalog", map[string]any{"document": doc})
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			var put settingsMaxIterationsResponse
+			mustDecode(t, rec, &put)
+			if put.MergedCatalog.MaxIterations != 3 {
+				t.Errorf("merged_catalog.max_iterations = %d, want 3", put.MergedCatalog.MaxIterations)
+			}
+			if _, ok := readUserDocumentGeneric(t, s)["max_iterations"]; ok {
+				t.Errorf("config.yaml still has a top-level max_iterations")
+			}
+		})
+	}
+}
+
+// Scenario: a per-gate max_iterations left in the user tier is reported in
+// GET's warnings and never shown in a gate definition; saving drops it.
+func TestSettingsCatalog_LegacyPerGateMaxIterationsWarnsAndIsDroppedOnSave(t *testing.T) {
+	s, _, _ := newSettingsTestServer(t)
+	if err := os.WriteFile(config.UserDocumentPath(s.cfg.UserExtensionsDir), []byte(`version: 1
+review_gates:
+  code_review:
+    criteria: keep me
+    max_iterations: 4
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := doJSON(t, s, http.MethodGet, "/api/settings/catalog", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var get settingsMaxIterationsResponse
+	mustDecode(t, rec, &get)
+	// Structured, so the UI can translate it: a code plus the gate id, and no
+	// English sentence (DFLT-00140 accessibility review).
+	if len(get.Warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one", get.Warnings)
+	}
+	if w := get.Warnings[0]; w["code"] != config.WarnLegacyGateMaxIterations || w["gate_id"] != "code_review" || len(w) != 2 {
+		t.Errorf("warning = %v, want {code: %s, gate_id: code_review} only", w, config.WarnLegacyGateMaxIterations)
+	}
+	for id, gate := range get.MergedCatalog.ReviewGates {
+		if _, ok := gate["max_iterations"]; ok {
+			t.Errorf("merged gate %q exposes max_iterations", id)
+		}
+	}
+	tierGates, _ := get.TierDocument["review_gates"].(map[string]any)
+	if gate, _ := tierGates["code_review"].(map[string]any); gate == nil || gate["max_iterations"] != nil {
+		t.Errorf("tier_document code_review = %v, want it without max_iterations", tierGates["code_review"])
+	}
+
+	// Save the tier document back as the UI would.
+	rec = doJSON(t, s, http.MethodPut, "/api/settings/catalog", map[string]any{"document": get.TierDocument})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	saved := readUserDocumentGeneric(t, s)
+	gate := saved["review_gates"].(map[string]any)["code_review"].(map[string]any)
+	if _, ok := gate["max_iterations"]; ok {
+		t.Errorf("the saved config.yaml still has code_review.max_iterations: %v", saved)
+	}
+	if gate["criteria"] != "keep me" {
+		t.Errorf("the rest of the gate was lost: %v", gate)
+	}
+	rec = doJSON(t, s, http.MethodGet, "/api/settings/catalog", nil)
+	var after settingsMaxIterationsResponse
+	mustDecode(t, rec, &after)
+	if len(after.Warnings) != 0 {
+		t.Errorf("warnings after saving = %v, want none", after.Warnings)
+	}
+}
+
+// A hand-edited out-of-range top-level max_iterations (e.g. 7) is returned
+// as-is in tier_document and reported in GET's warnings as a structured
+// MAX_ITERATIONS_OUT_OF_RANGE with the value, so the screen can show it
+// instead of silently displaying "inherit". Saving a valid value clears it.
+func TestSettingsCatalog_OutOfRangeMaxIterationsIsReportedInWarnings(t *testing.T) {
+	s, _, _ := newSettingsTestServer(t)
+	if err := os.WriteFile(config.UserDocumentPath(s.cfg.UserExtensionsDir), []byte("version: 1\nmax_iterations: 7\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := doJSON(t, s, http.MethodGet, "/api/settings/catalog", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var get settingsMaxIterationsResponse
+	mustDecode(t, rec, &get)
+	if v, _ := get.TierDocument["max_iterations"].(float64); v != 7 {
+		t.Errorf("tier_document.max_iterations = %v, want 7", get.TierDocument["max_iterations"])
+	}
+	if len(get.Warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one", get.Warnings)
+	}
+	if w := get.Warnings[0]; w["code"] != config.WarnMaxIterationsOutOfRange || w["value"] != float64(7) || len(w) != 2 {
+		t.Errorf("warning = %v, want {code: %s, value: 7} only", w, config.WarnMaxIterationsOutOfRange)
+	}
+
+	rec = doJSON(t, s, http.MethodPut, "/api/settings/catalog", map[string]any{"document": map[string]any{"version": 1, "max_iterations": 4}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodGet, "/api/settings/catalog", nil)
+	var after settingsMaxIterationsResponse
+	mustDecode(t, rec, &after)
+	if len(after.Warnings) != 0 {
+		t.Errorf("warnings after saving 4 = %v, want none", after.Warnings)
+	}
+}
+
+// Scenario: a max_iterations sent inside a gate definition is ignored, not
+// validated and not written.
+func TestSettingsCatalog_PerGateMaxIterationsInPutIsIgnored(t *testing.T) {
+	s, _, _ := newSettingsTestServer(t)
 	rec := doJSON(t, s, http.MethodPut, "/api/settings/catalog", map[string]any{
 		"document": map[string]any{
 			"version": 1,
 			"review_gates": map[string]any{
-				"code_review": map[string]any{"max_iterations": 5},
+				"code_review": map[string]any{"criteria": "c", "max_iterations": 9},
 			},
 		},
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-
-	rec = doJSON(t, s, http.MethodGet, "/api/settings/catalog", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	var body struct {
-		MergedCatalog struct {
-			ReviewGates map[string]struct {
-				MaxIterations *int `json:"max_iterations"`
-			} `json:"review_gates"`
-		} `json:"merged_catalog"`
-	}
-	mustDecode(t, rec, &body)
-	gate, ok := body.MergedCatalog.ReviewGates["code_review"]
-	if !ok || gate.MaxIterations == nil || *gate.MaxIterations != 5 {
-		t.Errorf("merged code_review gate = %+v (ok=%v)", gate, ok)
+	gate := readUserDocumentGeneric(t, s)["review_gates"].(map[string]any)["code_review"].(map[string]any)
+	if _, ok := gate["max_iterations"]; ok {
+		t.Errorf("code_review.max_iterations was written: %v", gate)
 	}
 }
 
@@ -356,11 +560,15 @@ func TestSettingsCatalog_MergedPreviewExcludesTheTeamTier(t *testing.T) {
 	s, _, _ := newSettingsTestServer(t)
 	teamDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(teamDir, "workflow.yaml"), []byte(`version: 1
+max_iterations: 5
 review_gates:
   code_review:
-    max_iterations: 9
+    criteria: from-team
 `), 0o644); err != nil {
 		t.Fatalf("write workflow.yaml: %v", err)
+	}
+	if err := os.WriteFile(config.UserDocumentPath(s.cfg.UserExtensionsDir), []byte("version: 1\nmax_iterations: 4\n"), 0o644); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
 	}
 	s.cfg.TeamExtensionsDir = teamDir
 
@@ -370,14 +578,21 @@ review_gates:
 	}
 	var body struct {
 		MergedCatalog struct {
-			ReviewGates map[string]struct {
-				MaxIterations *int `json:"max_iterations"`
+			MaxIterations int `json:"max_iterations"`
+			ReviewGates   map[string]struct {
+				Criteria string `json:"criteria"`
 			} `json:"review_gates"`
 		} `json:"merged_catalog"`
+		InheritedCatalog struct {
+			MaxIterations int `json:"max_iterations"`
+		} `json:"inherited_catalog"`
 	}
 	mustDecode(t, rec, &body)
-	if gate := body.MergedCatalog.ReviewGates["code_review"]; gate.MaxIterations != nil && *gate.MaxIterations == 9 {
+	if gate := body.MergedCatalog.ReviewGates["code_review"]; gate.Criteria == "from-team" {
 		t.Error("merged_catalog includes the team tier; this preview covers the plugin default plus the user tier only")
+	}
+	if body.MergedCatalog.MaxIterations != 4 || body.InheritedCatalog.MaxIterations != 3 {
+		t.Errorf("merged/inherited max_iterations = %d/%d, want 4/3 (team tier excluded)", body.MergedCatalog.MaxIterations, body.InheritedCatalog.MaxIterations)
 	}
 
 	// The engine still merges it, which is exactly why the preview's
@@ -387,8 +602,11 @@ review_gates:
 		t.Fatalf("LoadWithRoots: %v", err)
 	}
 	gate, ok := cat.ReviewGates["code_review"]
-	if !ok || gate.MaxIterations == nil || *gate.MaxIterations != 9 {
+	if !ok || gate.Criteria != "from-team" {
 		t.Errorf("the team tier must still reach an agent, got %+v (ok=%v)", gate, ok)
+	}
+	if cat.MaxIterations != 5 {
+		t.Errorf("agent-side max_iterations = %d, want the team tier's 5", cat.MaxIterations)
 	}
 }
 

@@ -29,7 +29,7 @@ func TestMergeReviewGates_NewGateIsAdded(t *testing.T) {
 
 func TestMergeReviewGates_CriteriaReplaces(t *testing.T) {
 	base := map[string]ReviewGateDef{
-		"security_review": {Name: "Security", Criteria: "old text", MaxIterations: intPtr(3)},
+		"security_review": {Name: "Security", Criteria: "old text", Enabled: boolPtr(true)},
 	}
 	overlay := map[string]ReviewGateDef{
 		"security_review": {Criteria: "new text"},
@@ -38,8 +38,8 @@ func TestMergeReviewGates_CriteriaReplaces(t *testing.T) {
 	if merged["security_review"].Criteria != "new text" {
 		t.Errorf("criteria = %q, want full replace", merged["security_review"].Criteria)
 	}
-	if *merged["security_review"].MaxIterations != 3 {
-		t.Errorf("max_iterations should be inherited when overlay omits it")
+	if e := merged["security_review"].Enabled; e == nil || !*e {
+		t.Errorf("enabled should be inherited when overlay omits it")
 	}
 }
 

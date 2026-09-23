@@ -240,7 +240,7 @@ func TestCompleteNode_FailingSeedNodeLoopsBack(t *testing.T) {
 	}
 }
 
-func TestCompleteNode_BlocksAfterExceedingMaxIterations(t *testing.T) {
+func TestCompleteNode_BlocksInTheLastAllowedRound(t *testing.T) {
 	e, repo, projectID := newTestEngine(t)
 	cat := baseCatalog(t)
 	ticket, _ := e.CreateTicket(projectID, "title", "")
@@ -251,22 +251,26 @@ func TestCompleteNode_BlocksAfterExceedingMaxIterations(t *testing.T) {
 	exec, _ = e.GetExecutableNodes(ticket.ID, cat)
 	planReview := exec[0]
 
-	// plan_review loops back to plan (max_iterations=3): 3 failures loop,
-	// the 4th (iteration_count 3->4 > 3) blocks the ticket.
+	// plan_review loops back to plan (max_iterations=3 review rounds): the
+	// failures in rounds 1 and 2 loop back, the one in round 3
+	// (iteration_count 2, 2+1 >= 3) blocks the ticket (DFLT-00140).
 	//
 	// Each retry is driven back through get-executable the way a real run
 	// is. A loop-back leaves plan at TODO and plan_review at AWAITING FIX,
 	// and since DFLT-00102 neither can be completed again until it has been
 	// claimed -- CompleteNode refuses a node nobody handed out.
 	var res CompleteNodeResult
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 3; i++ {
 		var err error
 		res, err = e.CompleteNode(planReview.ID, false, nil)
 		if err != nil {
 			t.Fatalf("failing plan_review (attempt %d): %v", i+1, err)
 		}
-		if i == 3 {
+		if i == 2 {
 			break
+		}
+		if res.NextStatus != "AWAITING FIX" {
+			t.Fatalf("round %d: expected a loop-back, got %+v", i+1, res)
 		}
 		exec, _ = e.GetExecutableNodes(ticket.ID, cat) // plan, back at TODO
 		if _, err := e.CompleteNode(exec[0].ID, true, nil); err != nil {
@@ -276,7 +280,7 @@ func TestCompleteNode_BlocksAfterExceedingMaxIterations(t *testing.T) {
 		planReview = exec[0]
 	}
 	if res.NextStatus != "BLOCKED" {
-		t.Fatalf("expected BLOCKED after exceeding max_iterations, got %+v", res)
+		t.Fatalf("expected BLOCKED in round max_iterations, got %+v", res)
 	}
 
 	got, _ := repo.GetTicket(ticket.ID)

@@ -191,7 +191,7 @@ func TestBuildPlanFromNodeDefs_ExternalIDDependencyIsNotACycle(t *testing.T) {
 	}}
 	externalIDs := map[string]bool{"plan_review": true}
 
-	planned, err := buildPlanFromNodeDefs(nil, nil, patch, externalIDs)
+	planned, err := buildPlanFromNodeDefs(nil, nil, patch, externalIDs, 3)
 	if err != nil {
 		t.Fatalf("expected a dependency on an external id to be valid and acyclic, got: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestBuildPlanFromNodeDefs_RejectsDependencyOnUnknownExternalID(t *testing.T
 	patch := &Patch{ExtraNodes: []ExtraNode{
 		{ID: "investigation", Type: "investigation", DependsOn: []string{"not_a_real_node"}},
 	}}
-	if _, err := buildPlanFromNodeDefs(nil, nil, patch, map[string]bool{"plan_review": true}); err == nil {
+	if _, err := buildPlanFromNodeDefs(nil, nil, patch, map[string]bool{"plan_review": true}, 3); err == nil {
 		t.Fatal("expected an error for a dependency that is neither in this batch nor in externalIDs")
 	}
 }

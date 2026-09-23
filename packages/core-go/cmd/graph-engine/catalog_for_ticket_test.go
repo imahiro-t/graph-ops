@@ -33,13 +33,13 @@ func TestCmdGetWorkflowCatalog_RepoGraphOpsIsNotATeamTier(t *testing.T) {
 	writeWorkflowYAML(t, cwd, `version: 1
 review_gates:
   code_review:
-    max_iterations: 5
+    criteria: from-cwd
 `)
 	projectLocalPath := t.TempDir()
 	writeWorkflowYAML(t, projectLocalPath, `version: 1
 review_gates:
   code_review:
-    max_iterations: 7
+    criteria: from-project-path
 `)
 
 	rc := runtimeConfig{
@@ -48,10 +48,10 @@ review_gates:
 		ProjectPaths:      map[string]string{"proj-x": projectLocalPath},
 	}
 	gate := codeReviewGateFromCatalog(t, rc, nil)
-	// Neither 5 nor 7: the plugin default survives untouched, because
+	// Neither override: the plugin default survives untouched, because
 	// neither workflow.yaml was read at all.
-	if gate.MaxIterations == nil || *gate.MaxIterations == 5 || *gate.MaxIterations == 7 {
-		t.Errorf("code_review.max_iterations = %v; no workflow.yaml outside teamExtensionsDir may be read", gate.MaxIterations)
+	if gate.Criteria == "" || gate.Criteria == "from-cwd" || gate.Criteria == "from-project-path" {
+		t.Errorf("code_review.criteria = %q; no workflow.yaml outside teamExtensionsDir may be read", gate.Criteria)
 	}
 }
 
@@ -63,27 +63,27 @@ func TestCmdGetWorkflowCatalog_ExplicitTeamExtensionsDirIsRead(t *testing.T) {
 	writeWorkflowYAML(t, cwd, `version: 1
 review_gates:
   code_review:
-    max_iterations: 5
+    criteria: from-cwd
 `)
 	shared := t.TempDir()
 	if err := os.WriteFile(filepath.Join(shared, "workflow.yaml"), []byte(`version: 1
 review_gates:
   code_review:
-    max_iterations: 9
+    criteria: from-team
 `), 0o644); err != nil {
 		t.Fatalf("write workflow.yaml: %v", err)
 	}
 
 	rc := runtimeConfig{WorkDir: cwd, UserExtensionsDir: t.TempDir(), TeamExtensionsDir: shared}
 	gate := codeReviewGateFromCatalog(t, rc, nil)
-	if gate.MaxIterations == nil || *gate.MaxIterations != 9 {
-		t.Fatalf("expected max_iterations=9 from teamExtensionsDir, got %+v", gate)
+	if gate.Criteria != "from-team" {
+		t.Fatalf("expected criteria from teamExtensionsDir, got %+v", gate)
 	}
 }
 
 // reviewGate is one entry of get-workflow-catalog's review_gates map.
 type reviewGate struct {
-	MaxIterations *int `json:"max_iterations"`
+	Criteria string `json:"criteria"`
 }
 
 // codeReviewGateFromCatalog runs get-workflow-catalog and returns its

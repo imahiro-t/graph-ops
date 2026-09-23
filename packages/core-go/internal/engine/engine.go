@@ -418,7 +418,7 @@ func (e *GraphEngine) EnsureGraphStarted(ticketID string, catalog config.Catalog
 		return fmt.Errorf("workflow catalog's seed list %v matches no enabled node", catalog.Seed)
 	}
 
-	planned, err := buildPlanFromNodeDefs(seedDefs, catalog.EnabledReviewGates(), nil, nil)
+	planned, err := buildPlanFromNodeDefs(seedDefs, catalog.EnabledReviewGates(), nil, nil, catalog.MaxIterations)
 	if err != nil {
 		return fmt.Errorf("invalid seed plan: %w", err)
 	}
@@ -475,7 +475,7 @@ func (e *GraphEngine) ExpandGraph(ticketID string, catalog config.Catalog, patch
 
 	var planned []plannedNode
 	if patch != nil {
-		planned, err = buildPlanFromNodeDefs(nil, catalog.EnabledReviewGates(), patch, seedSet)
+		planned, err = buildPlanFromNodeDefs(nil, catalog.EnabledReviewGates(), patch, seedSet, catalog.MaxIterations)
 	} else {
 		planned, err = buildPlan(catalog, nil)
 	}
@@ -954,8 +954,11 @@ type CompleteNodeResult struct {
 // target's whole `success`-edge forward closure to TODO as well (without
 // touching their iteration counts -- see loopBackRewindSet for which nodes
 // those are and why), and marking the failing node itself AWAITING FIX
-// (NextStatus "AWAITING FIX", DFLT-00042), or blocks the ticket once
-// max_iterations is exceeded (or if there's no loop edge to take at all). The
+// (NextStatus "AWAITING FIX", DFLT-00042), or blocks the ticket once the
+// review round limit is reached -- a failure in round max_iterations of the
+// loop target (round = iteration_count + 1) blocks instead of looping back,
+// so a limit of N allows at most N review rounds -- or if there's no loop
+// edge to take at all. The
 // one exception is NodeTypeApprovalGate: a "reject" there (passed=false)
 // always blocks the ticket immediately, regardless of any iteration_loop edge
 // -- see the dedicated branch below.
@@ -1103,7 +1106,13 @@ func (e *GraphEngine) CompleteNode(nodeID string, passed bool, artifacts []domai
 		// opens a new round. Checking it on a failure that counts nothing is
 		// how the parallel gates used to block a ticket with the second
 		// verdict of the first round.
-		if newIteration && target.IterationCount+1 > target.MaxIterations {
+		//
+		// max_iterations is a limit on review ROUNDS, counting the first
+		// review (DFLT-00140): the round being judged is IterationCount+1,
+		// and a failure in the last allowed round blocks rather than opening
+		// round N+1. (The comparison used to be `>`, which let a limit of 3
+		// run a fourth review.)
+		if newIteration && target.IterationCount+1 >= target.MaxIterations {
 			if err := e.blockTicket(node.TicketID); err != nil {
 				return CompleteNodeResult{}, err
 			}
@@ -1270,6 +1279,15 @@ func (e *GraphEngine) CompleteNode(nodeID string, passed bool, artifacts []domai
 // budget-checked. If any of them would exceed MaxIterations, this method
 // writes nothing at all and returns an error -- process-ticket must not have
 // to reason about a partially-applied reopen leaving the graph half-reset.
+//
+// For a loop target (the `to` of some iteration_loop edge) the check uses the
+// same round meaning CompleteNode does (DFLT-00140): max_iterations is the
+// number of review rounds, and reopening it starts round IterationCount+2,
+// so it is refused once IterationCount+1 >= MaxIterations. Without this,
+// right after a round-limit block (IterationCount == MaxIterations-1) a bare
+// reopen would start round N+1 with no grant at all, and grant-iterations
+// would make no difference. Every other node keeps the plain "would the
+// bumped count exceed MaxIterations" check.
 func (e *GraphEngine) ReopenNodes(ticketID string, nodeIDs []string) (domain.TicketDetail, error) {
 	if len(nodeIDs) == 0 {
 		return domain.TicketDetail{}, fmt.Errorf("no node ids given to reopen")
@@ -1320,9 +1338,13 @@ func (e *GraphEngine) ReopenNodes(ticketID string, nodeIDs []string) (domain.Tic
 	}
 
 	successors := make(map[string][]string, len(detail.Edges))
+	loopTargets := make(map[string]bool)
 	for _, edge := range detail.Edges {
-		if edge.Condition == domain.EdgeSuccess {
+		switch edge.Condition {
+		case domain.EdgeSuccess:
 			successors[edge.FromNodeID] = append(successors[edge.FromNodeID], edge.ToNodeID)
+		case domain.EdgeLoop:
+			loopTargets[edge.ToNodeID] = true
 		}
 	}
 	for len(queue) > 0 {
@@ -1349,6 +1371,12 @@ func (e *GraphEngine) ReopenNodes(ticketID string, nodeIDs []string) (domain.Tic
 	for id := range toReset {
 		n := byID[id]
 		if !spendsIteration(n.Status) {
+			continue
+		}
+		if loopTargets[id] {
+			if n.IterationCount+1 >= n.MaxIterations {
+				return domain.TicketDetail{}, fmt.Errorf("node %s (%s) has used all %d review rounds of its max_iterations; reopening it would start round %d -- raise the limit with grant-iterations first", id, n.Name, n.MaxIterations, n.IterationCount+2)
+			}
 			continue
 		}
 		if n.IterationCount+1 > n.MaxIterations {
@@ -1399,9 +1427,14 @@ const maxIterationsGrantPerCall = 10
 // `extra`, leaving their status and iteration_count alone. It is the missing
 // first step of recovering a ticket that an iteration limit blocked
 // (DFLT-00101 / BUG-14): at that point the loop target has
-// iteration_count == max_iterations, so ReopenNodes -- which bumps every
-// completed node it resets and refuses the whole call if any would exceed its
-// budget -- always fails. The sanctioned recovery is therefore:
+// iteration_count + 1 == max_iterations (a review failed in the last allowed
+// round, DFLT-00140), so ReopenNodes -- which refuses to reopen a loop target
+// whose next round would pass its max_iterations, and writes nothing if any
+// node fails its check -- always fails. Granting k extra lets exactly k more
+// rounds run; GetReviewCriteria judges every round past the original limit
+// at the Final tier (the tier limit is the review node's own
+// max_iterations, which grants to the loop target leave alone). The
+// sanctioned recovery is therefore:
 //
 //	grant-iterations <ticketId> <loop target>   (raise the budget)
 //	reopen-nodes <ticketId> <loop target>       (now succeeds; unblocks the ticket)
@@ -1746,28 +1779,122 @@ func (e *GraphEngine) ReopenTicket(ticketID string) (*domain.Ticket, error) {
 	return &updated, nil
 }
 
-// IterationTierText returns the convergence-control instructions for a given
-// loop-back iteration count: stricter on the first pass, progressively more
-// lenient afterward so review loops are guaranteed to terminate.
-func IterationTierText(iterationCount int) string {
-	switch {
-	case iterationCount <= 1:
-		return "Iteration 1 criteria: review strictly against standard review criteria (quality, requirement coverage, soundness of the design)."
-	case iterationCount == 2:
-		return "Iteration 2 criteria: prioritize convergence. Flag [only critical issues, fatal bugs, or security vulnerabilities]. Treat minor points or stylistic preferences as passing."
-	default:
-		return "Iteration 3+ criteria: flag [only new critical bugs introduced by fixes for previously flagged issues]. Everything else should pass (PASS) by default."
+// ReviewTier is the convergence tier a review round is judged at.
+type ReviewTier string
+
+const (
+	// TierNormal: anything that needs fixing, minor points included, fails.
+	TierNormal ReviewTier = "Normal"
+	// TierImportant: only correctness bugs, unmet completion criteria,
+	// security problems and regressions fail; minor/style points are
+	// carried over.
+	TierImportant ReviewTier = "Important"
+	// TierFinal: only critical bugs, security vulnerabilities, data
+	// corruption and unmet completion criteria fail.
+	TierFinal ReviewTier = "Final"
+)
+
+// ReviewRound locates where a review node stands in its loop. The loop
+// target is the `to` of the first iteration_loop edge leaving node:
+//
+//   - round is the review round being judged, counting the first review:
+//     target.IterationCount + 1 (the target's count is how many times it has
+//     been redone).
+//   - ceiling is target.MaxIterations -- the limit stored when the graph was
+//     built plus whatever grant-iterations added.
+//   - tierLimit is node.MaxIterations, the review node's own stored limit.
+//     Grants go to the loop target, so this stays at the original N and every
+//     granted round past it lands on the Final tier.
+//
+// A review with no loop target is always round 1 of node.MaxIterations.
+func ReviewRound(node domain.GraphNode, detail domain.TicketDetail) (round, ceiling, tierLimit int) {
+	tierLimit = node.MaxIterations
+	round, ceiling = 1, node.MaxIterations
+	for _, edge := range detail.Edges {
+		if edge.FromNodeID != node.ID || edge.Condition != domain.EdgeLoop {
+			continue
+		}
+		for _, n := range detail.Nodes {
+			if n.ID == edge.ToNodeID {
+				return n.IterationCount + 1, n.MaxIterations, tierLimit
+			}
+		}
 	}
+	return round, ceiling, tierLimit
 }
 
-// GetReviewCriteria combines a node's frozen gate-specific criteria (set at
-// refine time, see buildPlan) with the current iteration's convergence tier.
-// Generic `review` nodes (no gate) get the tier text alone, matching the
-// original behavior before per-gate criteria existed.
-func GetReviewCriteria(node domain.GraphNode) string {
-	tier := IterationTierText(node.IterationCount)
-	if node.Criteria != nil && *node.Criteria != "" {
-		return *node.Criteria + "\n\n" + tier
+// ReviewTierFor maps a review round to its tier under tierLimit:
+//
+//	limit 3: Normal / Important / Final
+//	limit 4: Normal, Normal / Important / Final
+//	limit 5: Normal, Normal / Important, Important / Final
+//
+// Round tierLimit and every round past it are Final. Before that the first
+// round (limit <= 3) or first two rounds (limit >= 4) are Normal and the rest
+// Important, so legacy limits degrade sensibly: 1 is always Final, 2 is
+// Normal then Final, 6+ is two Normal rounds, Important rounds, then Final.
+func ReviewTierFor(round, tierLimit int) ReviewTier {
+	if round >= tierLimit {
+		return TierFinal
 	}
-	return tier
+	normalRounds := 2
+	if tierLimit <= 3 {
+		normalRounds = 1
+	}
+	if round <= normalRounds {
+		return TierNormal
+	}
+	return TierImportant
+}
+
+var reviewTierDefinitions = map[ReviewTier]string{
+	TierNormal:    "Normal tier: fail the review if anything needs fixing, minor points included.",
+	TierImportant: "Important tier: fail the review only for correctness bugs, unmet completion criteria, security problems, or regressions. Record minor and stylistic points as carry-over items instead of failing the review for them.",
+	TierFinal:     "Final tier: fail the review only for critical bugs, security vulnerabilities, data corruption, or unmet completion criteria.",
+}
+
+const reviewNeverRelaxedText = `Never relaxed, at any tier:
+- A bug, regression, or security problem newly introduced by the changes made since the previous round is judged as strictly as at the Normal tier.
+- A serious issue flagged in a previous round that is still not fixed fails the review.`
+
+// reviewPreviousRoundText is appended from round 2 on. Its second paragraph
+// covers a round 2+ review that has no earlier review of its own: the round
+// comes from the loop target's iteration_count, so a parallel gate rewound by
+// a sibling before its verdict was recorded, a later review (test results,
+// report) whose loop target was already redone for other reviews, or a round
+// reopened after an approval was rejected all start at round 2 or more with
+// nothing of their own to compare against.
+const reviewPreviousRoundText = `This is not the first round: before judging, fetch your own previous review result (the latest review artifact on this node, from get-ticket) and the changes made since that review (for code, git log / git diff of the commits after that review was written; for a document, the diff between the loop target's latest artifact and the one you reviewed last time), and check both against the rules above.
+
+If this node has no previous review of its own (for example a parallel gate rewound by a sibling gate before its verdict was recorded, a later review whose loop target was already redone for other reviews, or a round reopened after an approval was rejected): judge the whole output under review at this round's tier, and take the diff base from the loop target's previous round instead (for code, the commits made since the loop target's previous output -- e.g. after its previous implementation notes were saved; for a document, the diff between the loop target's latest artifact and its previous one). A draft this node saved in a round whose verdict was refused is not a previous review, though its findings may serve as a checklist. The never-relaxed rules still apply in full to everything that diff introduced.`
+
+const reviewCarryOverText = "Record carry-over items (points that do not fail the review) under the last heading of the review template. Do not turn them into a conditional approval that requires code changes -- there is no path back to the implementation node from an approval; pass with the unconditional verdict instead."
+
+// GetReviewCriteria returns what a review/review_gate node is judged
+// against. review and review_gate are treated alike: a gate's frozen
+// gate-specific criteria (set when the graph was built, see buildPlan) come
+// first when present, then the round/tier line, the tier's definition, the
+// rules no tier relaxes, (from round 2 on) the instruction to fetch the
+// previous review and the changes since, and the carry-over rule. The text is
+// fixed English on purpose: the engine is language-independent, and the
+// language deliverables are written in comes from the onboarding
+// instructions instead.
+func GetReviewCriteria(node domain.GraphNode, detail domain.TicketDetail) string {
+	round, ceiling, tierLimit := ReviewRound(node, detail)
+	tier := ReviewTierFor(round, tierLimit)
+
+	parts := make([]string, 0, 6)
+	if node.Criteria != nil && *node.Criteria != "" {
+		parts = append(parts, *node.Criteria)
+	}
+	parts = append(parts,
+		fmt.Sprintf("Review round: %d / %d — tier: %s", round, ceiling, tier),
+		reviewTierDefinitions[tier],
+		reviewNeverRelaxedText,
+	)
+	if round >= 2 {
+		parts = append(parts, reviewPreviousRoundText)
+	}
+	parts = append(parts, reviewCarryOverText)
+	return strings.Join(parts, "\n\n")
 }

@@ -99,7 +99,24 @@ Permitted:
   - `review` and `review_gate` nodes fetch their criteria with
     `get-review-criteria "<nodeId>"`. A `review_gate` gets gate-specific
     criteria plus the iteration convergence criteria; a `review` gets only
-    the convergence criteria.
+    the convergence criteria. The convergence part starts with
+    `Review round: <r> / <limit> — tier: <Normal|Important|Final>`: the round
+    is the loop target's `iteration_count + 1` (a review with no loop target
+    is always round 1), the limit is the loop target's `max_iterations` (the
+    workflow-wide limit, 3/4/5, stored when the graph was built, plus any
+    `grant-iterations`), and the tier follows the review node's own
+    `max_iterations` -- 3: Normal / Important / Final; 4: Normal x2 /
+    Important / Final; 5: Normal x2 / Important x2 / Final; every round past
+    it is Final. It then gives the tier's definition, the rules no tier
+    relaxes, from round 2 the instruction to fetch the previous review and
+    the changes since (with a fallback for a node that has no previous review
+    of its own -- e.g. a parallel gate rewound by a sibling, a later review
+    whose loop target was already redone, a round reopened after a rejected
+    approval: judge the whole output at the given tier and take the diff base
+    from the loop target's previous round, never-relaxed rules unchanged),
+    and the rule that carry-over items go under the review
+    template's last heading rather than into a conditional approval
+    (`packages/core-go/internal/engine/engine.go`, `GetReviewCriteria`).
   - `report` nodes fetch the fixed template with `get-report-template`, and
     their `html` artifact is validated against the template's structural
     markers (`data-report-template="`, `data-report-version="`, and

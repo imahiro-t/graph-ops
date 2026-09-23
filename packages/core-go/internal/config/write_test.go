@@ -13,8 +13,9 @@ func TestSaveDocumentAt_RoundTripsAndCreatesDirs(t *testing.T) {
 	doc := Document{
 		Version: 1,
 		ReviewGates: map[string]ReviewGateDef{
-			"code_review": {Criteria: "be nice", MaxIterations: intPtr(5)},
+			"code_review": {Criteria: "be nice"},
 		},
+		MaxIterations: intPtr(5),
 	}
 	if err := SaveDocumentAt(path, doc); err != nil {
 		t.Fatalf("SaveDocumentAt: %v", err)
@@ -27,8 +28,8 @@ func TestSaveDocumentAt_RoundTripsAndCreatesDirs(t *testing.T) {
 	if got.Version != 1 || got.ReviewGates["code_review"].Criteria != "be nice" {
 		t.Errorf("round-tripped doc = %+v", got)
 	}
-	if *got.ReviewGates["code_review"].MaxIterations != 5 {
-		t.Errorf("max_iterations = %v", got.ReviewGates["code_review"].MaxIterations)
+	if got.MaxIterations == nil || *got.MaxIterations != 5 {
+		t.Errorf("max_iterations = %v", got.MaxIterations)
 	}
 }
 

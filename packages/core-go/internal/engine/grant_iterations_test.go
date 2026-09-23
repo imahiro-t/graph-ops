@@ -9,11 +9,11 @@ import (
 )
 
 // --- DFLT-00101 / BUG-14: a ticket blocked by an iteration limit had no
-// sanctioned way back. ReopenNodes bumps every node it resets and refuses the
-// whole call if any would exceed its budget, so reopening the loop target --
-// which is sitting at iteration_count == max_iterations, that being why the
-// ticket blocked -- always failed. GrantIterations raises the ceiling so the
-// rest of the recovery can run. ---
+// sanctioned way back. ReopenNodes refuses the whole call if any node would
+// pass its budget, so reopening the loop target -- which has used its last
+// round (iteration_count == max_iterations-1 since DFLT-00140), that being
+// why the ticket blocked -- always failed. GrantIterations raises the ceiling
+// so the rest of the recovery can run. ---
 
 // blockedAtIterationLimit drives the default workflow to a `test_review`
 // failure with `impl` already out of budget, i.e. exactly the state BUG-14 is
@@ -23,7 +23,7 @@ func blockedAtIterationLimit(t *testing.T, e *GraphEngine, projectID string) (ti
 	t.Helper()
 	ticketID, _ = defaultWorkflowAtTestReview(t, e, projectID)
 	impl := nodeByConfigID(t, e.repo, ticketID, "impl")
-	atLimit := impl.MaxIterations
+	atLimit := impl.MaxIterations - 1 // the last allowed round
 	if _, err := e.repo.UpdateNode(impl.ID, store.NodePatch{IterationCount: &atLimit}); err != nil {
 		t.Fatalf("UpdateNode(impl iteration_count): %v", err)
 	}

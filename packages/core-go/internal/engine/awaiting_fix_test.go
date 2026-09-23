@@ -297,8 +297,9 @@ func TestGetExecutableNodes_LegacyTodoReviewerStillReclaimed(t *testing.T) {
 }
 
 // TestCompleteNode_ExceedingMaxIterationsLeavesStatusesUnchanged is the
-// completion-criterion-4 regression: the blocking failure (target already at
-// max_iterations) must not mark the claimed reviewer AWAITING FIX.
+// completion-criterion-4 regression: the blocking failure (a review failing
+// in the last allowed round, target at iteration_count max_iterations-1) must
+// not mark the claimed reviewer AWAITING FIX.
 //
 // This is the minimal graph (plan -> plan_review, nothing in between), so
 // DFLT-00101's intermediate-node rewind cannot apply here and the
@@ -311,8 +312,9 @@ func TestCompleteNode_ExceedingMaxIterationsLeavesStatusesUnchanged(t *testing.T
 	plan := nodeByConfigID(t, repo, ticketID, "plan")
 	planReview := nodeByConfigID(t, repo, ticketID, "plan_review")
 
-	// max_iterations is 3: three loop-backs, each followed by a real re-run.
-	for i := 1; i <= plan.MaxIterations; i++ {
+	// max_iterations is 3 review rounds: two loop-backs, each followed by a
+	// real re-run, then round 3's failure blocks (DFLT-00140).
+	for i := 1; i < plan.MaxIterations; i++ {
 		res, _ := e.CompleteNode(planReview.ID, false, nil)
 		if res.NextStatus != "AWAITING FIX" {
 			t.Fatalf("loop-back %d: expected AWAITING FIX, got %+v", i, res)
@@ -324,8 +326,9 @@ func TestCompleteNode_ExceedingMaxIterationsLeavesStatusesUnchanged(t *testing.T
 			t.Fatalf("loop-back %d: expected plan_review to be re-claimed, got %+v", i, exec)
 		}
 	}
-	if got, _ := repo.GetNode(plan.ID); got.IterationCount != plan.MaxIterations || got.Status != domain.NodeDone {
-		t.Fatalf("precondition: expected plan DONE at iteration_count %d, got %s / %d", plan.MaxIterations, got.Status, got.IterationCount)
+	lastRound := plan.MaxIterations - 1
+	if got, _ := repo.GetNode(plan.ID); got.IterationCount != lastRound || got.Status != domain.NodeDone {
+		t.Fatalf("precondition: expected plan DONE at iteration_count %d, got %s / %d", lastRound, got.Status, got.IterationCount)
 	}
 
 	res, err := e.CompleteNode(planReview.ID, false, nil)
@@ -342,8 +345,8 @@ func TestCompleteNode_ExceedingMaxIterationsLeavesStatusesUnchanged(t *testing.T
 	if got, _ := repo.GetNode(planReview.ID); got.Status != domain.NodeInReview {
 		t.Errorf("expected plan_review to stay IN REVIEW (not AWAITING FIX), got %s", got.Status)
 	}
-	if got, _ := repo.GetNode(plan.ID); got.Status != domain.NodeDone || got.IterationCount != plan.MaxIterations {
-		t.Errorf("expected plan to stay DONE at iteration_count %d, got %s / %d", plan.MaxIterations, got.Status, got.IterationCount)
+	if got, _ := repo.GetNode(plan.ID); got.Status != domain.NodeDone || got.IterationCount != lastRound {
+		t.Errorf("expected plan to stay DONE at iteration_count %d, got %s / %d", lastRound, got.Status, got.IterationCount)
 	}
 }
 

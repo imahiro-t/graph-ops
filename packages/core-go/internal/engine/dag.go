@@ -9,8 +9,10 @@ import (
 
 // plannedNode is one fully-resolved node in a workflow plan: config-level
 // references (Gate, DependsOn ids by config id, not DB id) have already been
-// resolved to concrete Criteria/MaxIterations text, but nothing has been
-// persisted yet.
+// resolved to concrete Criteria text, but nothing has been persisted yet.
+// MaxIterations is the workflow-wide limit in effect when the plan was built
+// (catalog.MaxIterations), stored on every node so a later settings change
+// never affects a ticket already in progress.
 type plannedNode struct {
 	ConfigID      string
 	Name          string
@@ -26,7 +28,7 @@ type plannedNode struct {
 // buildPlan resolves the catalog's full base workflow plus an optional
 // LLM-proposed patch into a validated, ordered list of plannedNode.
 func buildPlan(catalog config.Catalog, patch *Patch) ([]plannedNode, error) {
-	return buildPlanFromNodeDefs(catalog.EnabledNodes(), catalog.EnabledReviewGates(), patch, nil)
+	return buildPlanFromNodeDefs(catalog.EnabledNodes(), catalog.EnabledReviewGates(), patch, nil, catalog.MaxIterations)
 }
 
 // buildPlanFromNodeDefs is buildPlan's underlying implementation, taking an
@@ -43,7 +45,18 @@ func buildPlan(catalog config.Catalog, patch *Patch) ([]plannedNode, error) {
 // patch-only plan) -- a depends_on/loop_back_to referencing one of these is
 // valid even though it isn't part of nodeDefs/patch, and it must NOT count
 // against this batch's own topological ordering (see detectCycles).
-func buildPlanFromNodeDefs(nodeDefs []config.NodeDef, gates map[string]config.ReviewGateDef, patch *Patch, externalIDs map[string]bool) ([]plannedNode, error) {
+//
+// maxIterations is the workflow-wide review iteration limit
+// (config.Catalog.MaxIterations) and is stored on every planned node, not
+// just on loop-back targets: a patch-only expansion may loop back to a seed
+// node persisted earlier (so "is this a loop target?" is not always knowable
+// here), and a review node's own value is what GetReviewCriteria uses as the
+// tier limit. A value below 1 (a zero Catalog built by hand in a test) falls
+// back to config.DefaultMaxIterations.
+func buildPlanFromNodeDefs(nodeDefs []config.NodeDef, gates map[string]config.ReviewGateDef, patch *Patch, externalIDs map[string]bool, maxIterations int) ([]plannedNode, error) {
+	if maxIterations < 1 {
+		maxIterations = config.DefaultMaxIterations
+	}
 	var planned []plannedNode
 	seen := make(map[string]bool)
 
@@ -60,7 +73,7 @@ func buildPlanFromNodeDefs(nodeDefs []config.NodeDef, gates map[string]config.Re
 			ConfigID:      id,
 			Name:          name,
 			Type:          typ,
-			MaxIterations: 3,
+			MaxIterations: maxIterations,
 			DependsOn:     dependsOn,
 			LoopBackTo:    loopBackTo,
 			IsManual:      isManual,
@@ -87,9 +100,6 @@ func buildPlanFromNodeDefs(nodeDefs []config.NodeDef, gates map[string]config.Re
 				if pn.Name == "" {
 					pn.Name = inlineGate.Name
 				}
-				if inlineGate.MaxIterations != nil {
-					pn.MaxIterations = *inlineGate.MaxIterations
-				}
 			case gateRef != "":
 				gate, ok := gates[gateRef]
 				if !ok {
@@ -101,9 +111,6 @@ func buildPlanFromNodeDefs(nodeDefs []config.NodeDef, gates map[string]config.Re
 				pn.Criteria = &criteria
 				if pn.Name == "" {
 					pn.Name = gate.Name
-				}
-				if gate.MaxIterations != nil {
-					pn.MaxIterations = *gate.MaxIterations
 				}
 			default:
 				return fmt.Errorf("review_gate node %q must set a gate reference or an inline gate definition", id)

@@ -219,6 +219,13 @@ func LoadWithRoots(userDirOverride, teamDirOverride, languageOverride string) (C
 		return Catalog{}, err
 	}
 
+	if err := validateDocumentMaxIterations(userPath, userDoc); err != nil {
+		return Catalog{}, err
+	}
+	if err := validateDocumentMaxIterations(teamPath, teamDoc); err != nil {
+		return Catalog{}, err
+	}
+
 	lang := ResolveLanguage(languageOverride, userDoc, teamDoc)
 	def, err := LocalizedDefault(lang)
 	if err != nil {
@@ -226,4 +233,18 @@ func LoadWithRoots(userDirOverride, teamDirOverride, languageOverride string) (C
 	}
 
 	return Merge(def, userDoc, teamDoc), nil
+}
+
+// validateDocumentMaxIterations rejects a tier file whose top-level
+// max_iterations is set to anything other than 3, 4 or 5. A typo is
+// reported (with the file's path) rather than silently replaced by the
+// default.
+func validateDocumentMaxIterations(path string, doc Document) error {
+	if doc.MaxIterations == nil {
+		return nil
+	}
+	if err := ValidateMaxIterations(*doc.MaxIterations); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	return nil
 }

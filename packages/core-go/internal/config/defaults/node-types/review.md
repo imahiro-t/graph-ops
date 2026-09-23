@@ -6,6 +6,9 @@ carrying criteria of its own is a `review_gate`.
 
 1. Fetch the criteria with `get-review-criteria "<nodeId>"`. For a `review`
    node this returns the iteration convergence criteria.
+   Judge by the review round, limit and tier it reports -- see "Review rounds
+   and convergence tiers" below. If the round is 2 or more, fetch your
+   previous review result and the changes made since it before going on.
 2. Fetch the fixed template by running `get-review-template` (the same
    template used by the `review_gate` node type).
 3. Read the artifacts of the node under review, together with the ticket's
@@ -31,12 +34,74 @@ carrying criteria of its own is a `review_gate`.
    fail; the unconditional-approval or conditional-approval word for pass,
    depending on whether you are attaching conditions. If you choose the
    conditional-approval word, write those conditions under the last heading
-   instead of leaving it with the template's "not applicable" answer. If a
+   instead of leaving it with the template's "not applicable" answer; carry-over
+   items go there too (see below). If a
    user or team override of the template words or orders its verdicts
    differently, match by role, not by position.
 6. The template is the shape of the output itself: start the saved review at
    the template's first heading, and add no preamble or meta information that
    the template does not have.
+
+## Review rounds and convergence tiers
+
+`get-review-criteria` tells you where this review stands in its loop: a line
+`Review round: <r> / <limit> — tier: <Normal|Important|Final>`, the definition
+of that tier, and the rules no tier relaxes. The round counts the first review
+(round 1) and comes from the loop target's `iteration_count`; the limit is the
+workflow-wide review iteration limit (3, 4 or 5) the graph was built with, plus
+any rounds granted with `grant-iterations`. A review that fails in the last
+round blocks the ticket instead of sending the work back, so judge by the tier
+you are given:
+
+- **Normal**: fail for anything that needs fixing, minor points included.
+- **Important**: fail only for correctness bugs, unmet completion criteria,
+  security problems, or regressions. Record minor and stylistic points as
+  carry-over items instead of failing for them.
+- **Final**: fail only for critical bugs, security vulnerabilities, data
+  corruption, or unmet completion criteria. Every round granted past the
+  original limit is Final.
+
+Never relaxed, at any tier:
+
+- A bug, regression, or security problem newly introduced by the changes made
+  since the previous round is judged as strictly as at the Normal tier.
+- A serious issue flagged in a previous round that is still not fixed fails
+  the review.
+
+From round 2 on, before judging, fetch both of these:
+
+1. Your own previous review result: the latest review artifact on this node
+   in `get-ticket`'s output.
+2. The changes made since that review. For code, `git log` / `git diff` over
+   the commits made after that review artifact was written. For a document
+   (a plan, a Gherkin spec, a report), the difference between the loop
+   target's latest artifact and the one you reviewed last time.
+
+Check the changes against the never-relaxed rules, and check that every serious
+issue from your previous review is fixed.
+
+A review in round 2 or later can still have no previous review of its own: the
+round comes from the loop target, so a parallel gate rewound by a sibling gate
+before its verdict was recorded, a later review (test results, report) whose
+loop target was already redone for other reviews, or a round reopened after an
+approval was rejected all start past round 1. In that case:
+
+- Judge the whole output under review at the tier you are given.
+- Take the diff base from the loop target's previous round instead: for code,
+  the commits made since the loop target's previous output (for example, after
+  its previous implementation notes were saved); for a document, the
+  difference between the loop target's latest artifact and its previous one.
+- A draft this node saved in a round whose verdict was refused is not a
+  previous review, though its findings may serve as a checklist.
+- The never-relaxed rules still apply in full to everything that diff
+  introduced.
+
+Carry-over items -- points you record without failing the review, at the
+Important or Final tier -- go under the template's last heading. The verdict is
+then the unconditional-approval word, not the conditional-approval word with
+required code changes as its conditions: nothing sends the work back to the
+implementation node from an approval, so such conditions would never be acted
+on.
 
 ## Artifacts
 

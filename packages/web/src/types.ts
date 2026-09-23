@@ -255,11 +255,13 @@ export interface Project {
 // node can reference by id). additional_criteria is appended to (not
 // replacing) whatever criteria was inherited from a lower-priority layer;
 // criteria, when set, replaces it outright.
+//
+// There is no per-gate max_iterations any more (DFLT-00140): the review
+// iteration limit is the workflow-wide SettingsDocument.max_iterations.
 export interface ReviewGateDef {
   name?: string;
   criteria?: string;
   additional_criteria?: string;
-  max_iterations?: number | null;
   enabled?: boolean | null;
 }
 
@@ -284,10 +286,15 @@ export interface WorkflowDef {
 // The shape of the user tier's own override file -- what GET
 // /api/settings/catalog's tier_document returns, and what PUT's body submits
 // back.
+//
+// max_iterations is the workflow-wide review iteration limit (the maximum
+// number of review rounds, counting the first review): 3, 4 or 5. Absent or
+// null means "inherit" (the plugin default, 3).
 export interface SettingsDocument {
   version: number;
   review_gates?: Record<string, ReviewGateDef>;
   workflow?: WorkflowDef;
+  max_iterations?: number | null;
 }
 
 // A merged, ready-to-use catalog: the plugin default plus the user tier
@@ -299,12 +306,39 @@ export interface SettingsCatalog {
   review_gates: Record<string, ReviewGateDef>;
   nodes: NodeDef[];
   seed?: string[];
+  max_iterations?: number | null;
 }
 
+// The warning codes GET /api/settings/catalog can put in `warnings`. Both are
+// packages/core-go/internal/config/schema.go's Warn* constants, and each has
+// a `settings.reviewGates.warning*` message beside it in the translation
+// catalogues: the server never sends a sentence, so the screen shows its own
+// wording in the UI's language (DFLT-00140).
+export const SETTINGS_CATALOG_WARNINGS = {
+  // A review gate (gate_id) still sets the retired per-gate max_iterations,
+  // which is ignored. Saving from the screen drops it.
+  legacyGateMaxIterations: 'LEGACY_GATE_MAX_ITERATIONS',
+  // The user tier's own top-level max_iterations (value) is not 3, 4 or 5 --
+  // a hand edit. Agents refuse to load such a file; choosing a valid value
+  // (or inherit) and saving fixes it.
+  maxIterationsOutOfRange: 'MAX_ITERATIONS_OUT_OF_RANGE'
+} as const;
+
+// One problem found in the user tier: a code plus the details its message
+// needs. A code the client does not know is simply not shown.
+export interface SettingsCatalogWarning {
+  code: string;
+  gate_id?: string;
+  value?: number;
+}
+
+// warnings lists what is wrong with the user tier -- see
+// SETTINGS_CATALOG_WARNINGS for the codes.
 export interface SettingsCatalogResponse {
   tier_document: SettingsDocument;
   merged_catalog: SettingsCatalog;
   inherited_catalog: SettingsCatalog;
+  warnings?: SettingsCatalogWarning[];
 }
 
 export interface SettingsNodeTypeInfo {
