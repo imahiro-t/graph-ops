@@ -92,6 +92,38 @@ describe('TicketItem labels', () => {
     expect(srText).toHaveTextContent('性能');
   });
 
+  // DFLT-00141: jsdom can't measure layout, so this pins the classes the
+  // spacing and truncation rely on. gap-4 on the row keeps the left group
+  // (ending in the label chips) off the right-hand group even when a long
+  // title stretches the flex-1 left group to the right edge.
+  it('keeps a gap between the labels and the right-hand group, however long the title', () => {
+    const longTitle = 'とても長いタイトル'.repeat(20);
+    render(
+      <TicketItem
+        ticket={{ ...makeTicket([BUG, FEAT, UI, PERF]), title: longTitle }}
+        isExpanded={false}
+        onToggleExpand={vi.fn()}
+        onRefresh={vi.fn()}
+        myName=""
+        projectLabels={[BUG, FEAT, UI, PERF]}
+      />
+    );
+
+    const row = screen.getByTestId('ticket-header-row');
+    expect(row).toHaveClass('flex', 'justify-between', 'gap-4');
+
+    const labels = screen.getByTestId('ticket-header-labels');
+    expect(row).toContainElement(labels);
+    expect(labels).toHaveClass('shrink-0');
+
+    // The left group is the row's first child and holds the title and labels;
+    // it must be able to shrink so the title truncates instead of overflowing.
+    const left = row.firstElementChild as HTMLElement;
+    expect(left).toContainElement(labels);
+    expect(left).toHaveClass('flex-1', 'min-w-0');
+    expect(screen.getByText(longTitle)).toHaveClass('truncate', 'min-w-0');
+  });
+
   it('shows no chips or "+N" for a ticket without labels', () => {
     renderItem([]);
     expect(screen.queryByTestId('ticket-header-labels')).not.toBeInTheDocument();
