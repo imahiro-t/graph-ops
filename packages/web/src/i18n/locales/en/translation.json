@@ -212,7 +212,9 @@
       "pendingStatus": "Awaiting approval",
       "rejectedHint": "Rejected -- blocked until process-ticket triages the rejection reason (reopening specific nodes) or a human resolves it.",
       "rejectedBadgeOne": "Rejected: {{name}}",
-      "rejectedBadgeMany": "{{count}} rejected"
+      "rejectedBadgeMany": "{{count}} rejected",
+      "rejectedAnnouncement": "Rejected {{name}}",
+      "noLongerPendingAnnouncement": "{{name}} is no longer awaiting approval"
     },
     "artifactsCount": "Artifacts {{count}}",
     "noArtifactsForNode": "No artifacts linked to this node yet",

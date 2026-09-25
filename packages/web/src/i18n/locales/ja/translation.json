@@ -211,7 +211,9 @@
       "pendingStatus": "承認待ち",
       "rejectedHint": "却下済み。process-ticketが却下理由をトリアージし（対象ノードを再実行するか）、または人手で解決するまでブロックされたままです。",
       "rejectedBadgeOne": "却下済み: {{name}}",
-      "rejectedBadgeMany": "却下済み {{count}}件"
+      "rejectedBadgeMany": "却下済み {{count}}件",
+      "rejectedAnnouncement": "{{name}} を却下しました",
+      "noLongerPendingAnnouncement": "{{name}} は承認待ちではなくなりました"
     },
     "artifactsCount": "成果物 {{count}}",
     "noArtifactsForNode": "このノードに紐付く成果物はまだありません",

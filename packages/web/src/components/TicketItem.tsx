@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronDown,
@@ -152,6 +152,88 @@ function isSelectionClick(
   if (pressSnapshot === undefined) return true;
   return !sameSelection(pressSnapshot, takeSelectionSnapshot());
 }
+
+interface RejectReasonPromptProps {
+  nodeId: string;
+  draft: string;
+  onDraftChange: (value: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+  isSubmitting: boolean;
+  // Must be stable (useCallback) -- they are this component's effect deps.
+  onMount: (nodeId: string) => void;
+  onUnmount: (nodeId: string, hadFocus: boolean) => void;
+}
+
+// An approval_gate's reject-with-reason prompt (DFLT-00016), split out of
+// TicketItem (DFLT-00172) only so that it can tell its parent, at the moment
+// it unmounts, whether focus was inside it.
+//
+// That has to happen in this component's own layout effect cleanup: React 18
+// runs the layout effect cleanups of a deleted subtree during the commit's
+// mutation phase, before it removes the subtree's host nodes from the DOM (and
+// before any layout effect of the same commit). So document.activeElement still
+// points into this prompt here, whereas by the time any effect of the parent
+// runs the input is gone and focus has fallen to <body>. Tracking focus with
+// onFocus/onBlur instead would not work either: whether removing a focused
+// element fires blur differs between browsers.
+//
+// Under React.StrictMode (development) this cleanup also runs for the fake
+// unmount StrictMode performs right after mounting, immediately followed by
+// the effect running again -- TicketItem's handlePromptMount discards the fake
+// closure for that reason.
+const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
+  nodeId,
+  draft,
+  onDraftChange,
+  onConfirm,
+  onCancel,
+  isSubmitting,
+  onMount,
+  onUnmount
+}) => {
+  const { t } = useTranslation();
+  const containerRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    onMount(nodeId);
+    return () => onUnmount(nodeId, container?.contains(document.activeElement) ?? false);
+  }, [nodeId, onMount, onUnmount]);
+
+  return (
+    <div ref={containerRef} className="px-3 pb-3 -mt-1 flex items-center gap-2" onClick={e => e.stopPropagation()}>
+      <input
+        type="text"
+        autoFocus
+        value={draft}
+        onChange={e => onDraftChange(e.target.value)}
+        placeholder={t('ticketItem.approvalGate.reasonPlaceholder')}
+        className="flex-1 text-[11px] border border-red-300 dark:border-red-800 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-red-400"
+      />
+      <button
+        type="button"
+        onClick={onConfirm}
+        disabled={isSubmitting || draft.trim() === ''}
+        className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition shrink-0"
+      >
+        {isSubmitting ? (
+          <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
+        ) : (
+          <X aria-hidden="true" className="w-3 h-3" />
+        )}
+        {t('ticketItem.approvalGate.confirmReject')}
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={isSubmitting}
+        className="px-2 py-1 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-50 text-[11px] font-semibold shrink-0"
+      >
+        {t('ticketItem.approvalGate.cancelReject')}
+      </button>
+    </div>
+  );
+};
 
 export const TicketItem: React.FC<Props> = ({
   ticket,
@@ -335,6 +417,119 @@ export const TicketItem: React.FC<Props> = ({
   const [rejectingNodeId, setRejectingNodeId] = useState<string | null>(null);
   const [rejectReasonDraft, setRejectReasonDraft] = useState('');
 
+  // DFLT-00172: where focus goes when the reject prompt unmounts, and what
+  // gets announced. Unmounting the prompt while focus is inside it would
+  // otherwise drop focus to <body> with no word about what happened (WCAG
+  // 2.4.3 / 4.1.3). By the time any effect of this component runs, the
+  // prompt's DOM is already gone and document.activeElement is <body>, so
+  // RejectReasonPrompt reports "was focus inside me?" from its own layout
+  // effect cleanup (see there) into these refs, and the layout effect below
+  // decides what the closure meant. Refs only -- the child's cleanup must
+  // not setState mid-commit.
+  //
+  // mountedPromptNodeRef: node id of the prompt currently mounted, if any.
+  const mountedPromptNodeRef = useRef<string | null>(null);
+  // promptClosureRef: the prompt that just unmounted and whether focus was
+  // inside it at that moment. Consumed (reset to null) by the layout effect.
+  const promptClosureRef = useRef<{ nodeId: string; hadFocus: boolean } | null>(null);
+  // closeReasonRef: why this component itself closed the prompt, tagged
+  // with the node id so it can never be applied to some other, later
+  // unmount. Anything else closing it (ticket CLOSED, gate judged
+  // elsewhere, a poll landing mid-submit) leaves this unset.
+  const closeReasonRef = useRef<{ nodeId: string; reason: 'submitted' | 'cancelled' | 'switched' } | null>(null);
+  // rejectInFlightRef: node id whose reject POST is in flight. A prompt that
+  // unmounts during it (App's polling can land the REJECTED gate before the
+  // POST's own response) is parked in deferredClosureRef, and the response
+  // decides whether it was our rejection or the gate being judged elsewhere.
+  const rejectInFlightRef = useRef<string | null>(null);
+  const deferredClosureRef = useRef<{ nodeId: string; hadFocus: boolean } | null>(null);
+  // Announced through a StatusLiveRegion that is always mounted (see the
+  // header). Cleared whenever a prompt opens so repeating the same text is
+  // still a change the screen reader picks up.
+  const [approvalAnnouncement, setApprovalAnnouncement] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  const handlePromptMount = useCallback((nodeId: string) => {
+    mountedPromptNodeRef.current = nodeId;
+    // React.StrictMode (main.tsx, development only) fakes an unmount and a
+    // remount of every newly mounted component right after the commit. The
+    // fake unmount records { nodeId, hadFocus: true } (the autoFocus input
+    // has focus), and nothing would consume it until the next commit -- the
+    // user's first keystroke -- which would then yank focus to the node
+    // toggle and announce "no longer awaiting approval". A real unmount is
+    // never followed by a mount of the same node's prompt, so a remount
+    // discarding its own closure only ever drops the fake one. (The layout
+    // effect below also ignores a closure whose prompt is still mounted, in
+    // case the order of StrictMode's double invocation ever changes.)
+    if (promptClosureRef.current?.nodeId === nodeId) promptClosureRef.current = null;
+  }, []);
+  const handlePromptUnmount = useCallback((nodeId: string, hadFocus: boolean) => {
+    // When one prompt replaces another in the same commit, the old one's
+    // cleanup (mutation phase) runs before the new one's mount (layout
+    // phase), so the new id survives.
+    if (mountedPromptNodeRef.current === nodeId) mountedPromptNodeRef.current = null;
+    promptClosureRef.current = { nodeId, hadFocus };
+  }, []);
+
+  const findInTicket = (selector: string) => rootRef.current?.querySelector<HTMLElement>(selector) ?? null;
+  // The node row's expand toggle is rendered in every state (DFLT-00152),
+  // which makes it the one stable place to land after the prompt is gone.
+  const focusNodeToggle = (nodeId: string) => findInTicket(`[data-testid="node-toggle-expand-${nodeId}"]`)?.focus();
+  const focusIsNowhere = () => {
+    const active = document.activeElement;
+    return active === null || active === document.body;
+  };
+  const gateName = (nodeId: string) => ticket.nodes.find(n => n.id === nodeId)?.name ?? nodeId;
+  // The prompt closed because the gate stopped being pending for a reason
+  // other than our own rejection. Only a user who was inside the prompt
+  // gets moved and told -- a background refresh must not steal focus or
+  // read out something unrelated to what they are doing.
+  const settleNoLongerPending = (nodeId: string, hadFocus: boolean) => {
+    if (!hadFocus) return;
+    focusNodeToggle(nodeId);
+    setApprovalAnnouncement(t('ticketItem.approvalGate.noLongerPendingAnnouncement', { name: gateName(nodeId) }));
+  };
+  // Our rejection went through. Focus follows unless the user has already
+  // moved somewhere else on purpose; "nowhere" counts as not having moved,
+  // since the confirm button turning disabled mid-submit drops focus to
+  // <body> in some browsers.
+  const settleSubmitted = (nodeId: string, hadFocus: boolean) => {
+    if (hadFocus || focusIsNowhere()) focusNodeToggle(nodeId);
+    setApprovalAnnouncement(t('ticketItem.approvalGate.rejectedAnnouncement', { name: gateName(nodeId) }));
+  };
+
+  // No dependency array: runs after every commit, and consumes whatever
+  // RejectReasonPrompt's cleanup recorded in that same commit (its cleanup
+  // runs in the mutation phase, before this layout effect).
+  useLayoutEffect(() => {
+    const closure = promptClosureRef.current;
+    if (!closure) return;
+    promptClosureRef.current = null;
+    // Still mounted: a StrictMode fake unmount, not a real one (see
+    // handlePromptMount). Leave closeReasonRef for the real unmount.
+    if (mountedPromptNodeRef.current === closure.nodeId) return;
+    const closeReason = closeReasonRef.current;
+    if (closeReason?.nodeId === closure.nodeId) {
+      closeReasonRef.current = null;
+      if (closeReason.reason === 'cancelled') {
+        // Back to the Reject button that just reappeared in its place. No
+        // announcement: the user did this themselves.
+        findInTicket(`[data-testid="node-reject-${closure.nodeId}"]`)?.focus();
+      } else if (closeReason.reason === 'submitted') {
+        settleSubmitted(closure.nodeId, closure.hadFocus);
+      }
+      // 'switched': another gate's prompt took over and its autoFocus input
+      // already has focus -- nothing to move or announce.
+      return;
+    }
+    if (rejectInFlightRef.current === closure.nodeId) {
+      // Our reject POST is still in flight; its response settles this.
+      deferredClosureRef.current = closure;
+      return;
+    }
+    settleNoLongerPending(closure.nodeId, closure.hadFocus);
+  });
+
   // Ticket deletion. A confirm dialog gates it (this is unrecoverable --
   // there's no undo/trash), same pattern as the approval_gate reject
   // confirmation below.
@@ -419,6 +614,7 @@ export const TicketItem: React.FC<Props> = ({
   // than here, so this function has one job: send the request.
   const handleApprovalDecision = async (nodeId: string, passed: boolean, reason?: string) => {
     setApprovalPendingNodeId(nodeId);
+    if (!passed) rejectInFlightRef.current = nodeId;
     setApprovalErrors(prev => {
       if (!(nodeId in prev)) return prev;
       const next = { ...prev };
@@ -438,12 +634,38 @@ export const TicketItem: React.FC<Props> = ({
       if (!res.ok) {
         throw new Error(await localizedApiErrorMessage(t, res));
       }
+      if (!passed) {
+        // DFLT-00172: how the rejection's focus/announcement is settled
+        // depends on whether its prompt is still on screen.
+        const deferred = deferredClosureRef.current;
+        if (mountedPromptNodeRef.current === nodeId) {
+          // Still mounted: the setRejectingNodeId below unmounts it in the
+          // next commit, and the layout effect settles it then.
+          closeReasonRef.current = { nodeId, reason: 'submitted' };
+        } else if (deferred?.nodeId === nodeId) {
+          // A poll already removed it while the POST was in flight. The DOM
+          // is committed, so settle it right here -- once.
+          settleSubmitted(nodeId, deferred.hadFocus);
+        } else {
+          // Its prompt was replaced by another gate's while in flight: the
+          // user is typing there, so only announce.
+          setApprovalAnnouncement(t('ticketItem.approvalGate.rejectedAnnouncement', { name: gateName(nodeId) }));
+        }
+      }
       setRejectingNodeId(prev => (prev === nodeId ? null : prev));
       setRejectReasonDraft('');
       await onRefresh();
     } catch (err) {
       setApprovalErrors(prev => ({ ...prev, [nodeId]: errorMessage(err, t('errors.UNKNOWN')) }));
+      // The prompt vanished mid-submit and the rejection failed: the gate
+      // stopped being pending some other way.
+      const deferred = deferredClosureRef.current;
+      if (deferred?.nodeId === nodeId) settleNoLongerPending(nodeId, deferred.hadFocus);
     } finally {
+      if (!passed) {
+        rejectInFlightRef.current = null;
+        deferredClosureRef.current = null;
+      }
       setApprovalPendingNodeId(null);
     }
   };
@@ -451,10 +673,19 @@ export const TicketItem: React.FC<Props> = ({
   // Opens the reject-with-reason prompt for nodeId, closing it for whatever
   // other node had it open (only one at a time -- see rejectingNodeId).
   const startRejecting = (nodeId: string) => {
+    // DFLT-00172: a fresh prompt starts with no leftover close reason, and
+    // an announcement slot that is empty so the next one is a change.
+    closeReasonRef.current = null;
+    const openPromptNodeId = mountedPromptNodeRef.current;
+    if (openPromptNodeId !== null && openPromptNodeId !== nodeId) {
+      closeReasonRef.current = { nodeId: openPromptNodeId, reason: 'switched' };
+    }
+    setApprovalAnnouncement('');
     setRejectingNodeId(nodeId);
     setRejectReasonDraft('');
   };
   const cancelRejecting = () => {
+    if (rejectingNodeId !== null) closeReasonRef.current = { nodeId: rejectingNodeId, reason: 'cancelled' };
     setRejectingNodeId(null);
     setRejectReasonDraft('');
   };
@@ -726,7 +957,11 @@ export const TicketItem: React.FC<Props> = ({
   const hiddenLabelCount = ticketLabels.length - headerLabels.length;
 
   return (
-    <div id={`ticket-${ticket.id}`} tabIndex={-1} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs transition-all overflow-clip mb-4">
+    <div ref={rootRef} id={`ticket-${ticket.id}`} tabIndex={-1} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs transition-all overflow-clip mb-4">
+      {/* Reject prompt closing (DFLT-00172). Always mounted -- outside the
+          header row and the expandable panel, which each keep their own
+          region -- so it exists before its text changes. */}
+      <StatusLiveRegion message={approvalAnnouncement} />
       {/* Header Row. gap-4 keeps a fixed space between the left group and
           the right-hand group (DFLT-00141): justify-between alone leaves no
           space once a long title stretches the flex-1 left group all the way
@@ -1505,6 +1740,7 @@ export const TicketItem: React.FC<Props> = ({
                                     type="button"
                                     onClick={() => startRejecting(node.id)}
                                     disabled={approvalPendingNodeId === node.id}
+                                    data-testid={`node-reject-${node.id}`}
                                     className="px-2 py-1 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50 disabled:cursor-not-allowed text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800 rounded text-[11px] font-bold flex items-center gap-1 transition"
                                   >
                                     <X aria-hidden="true" className="w-3 h-3" />
@@ -1532,37 +1768,16 @@ export const TicketItem: React.FC<Props> = ({
                               keep offering a reject that must fail
                               (DFLT-00157). */}
                           {rejectingNodeId === node.id && pendingApprovalNodeIds.has(node.id) && (
-                            <div className="px-3 pb-3 -mt-1 flex items-center gap-2" onClick={e => e.stopPropagation()}>
-                              <input
-                                type="text"
-                                autoFocus
-                                value={rejectReasonDraft}
-                                onChange={e => setRejectReasonDraft(e.target.value)}
-                                placeholder={t('ticketItem.approvalGate.reasonPlaceholder')}
-                                className="flex-1 text-[11px] border border-red-300 dark:border-red-800 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-red-400"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleApprovalDecision(node.id, false, rejectReasonDraft)}
-                                disabled={approvalPendingNodeId === node.id || rejectReasonDraft.trim() === ''}
-                                className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition shrink-0"
-                              >
-                                {approvalPendingNodeId === node.id ? (
-                                  <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
-                                ) : (
-                                  <X aria-hidden="true" className="w-3 h-3" />
-                                )}
-                                {t('ticketItem.approvalGate.confirmReject')}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={cancelRejecting}
-                                disabled={approvalPendingNodeId === node.id}
-                                className="px-2 py-1 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-50 text-[11px] font-semibold shrink-0"
-                              >
-                                {t('ticketItem.approvalGate.cancelReject')}
-                              </button>
-                            </div>
+                            <RejectReasonPrompt
+                              nodeId={node.id}
+                              draft={rejectReasonDraft}
+                              onDraftChange={setRejectReasonDraft}
+                              onConfirm={() => handleApprovalDecision(node.id, false, rejectReasonDraft)}
+                              onCancel={cancelRejecting}
+                              isSubmitting={approvalPendingNodeId === node.id}
+                              onMount={handlePromptMount}
+                              onUnmount={handlePromptUnmount}
+                            />
                           )}
 
                           {/* approval_gate approve/reject error (kept outside
