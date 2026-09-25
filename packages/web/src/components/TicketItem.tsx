@@ -713,7 +713,7 @@ export const TicketItem: React.FC<Props> = ({
         className="p-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition select-none"
       >
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <button className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 shrink-0">
+          <button className="text-slate-500 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 shrink-0">
             {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
           </button>
 
@@ -963,7 +963,7 @@ export const TicketItem: React.FC<Props> = ({
               onClick={handleReopenTicket}
               disabled={isReopeningTicket}
               title={t('ticketItem.reopen.button')}
-              className="text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
+              className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
             >
               {isReopeningTicket ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
             </button>
@@ -975,7 +975,7 @@ export const TicketItem: React.FC<Props> = ({
                 setIsClosePromptOpen(v => !v);
               }}
               title={t('ticketItem.close.button')}
-              className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 transition p-1 -m-1 rounded"
+              className="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition p-1 -m-1 rounded"
             >
               <Archive className="w-4 h-4" />
             </button>
@@ -992,7 +992,7 @@ export const TicketItem: React.FC<Props> = ({
             onClick={handleDeleteTicket}
             disabled={isDeletingTicket}
             title={t('ticketItem.delete.button')}
-            className="text-slate-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
+            className="text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
           >
             {isDeletingTicket ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
           </button>
@@ -1384,7 +1384,7 @@ export const TicketItem: React.FC<Props> = ({
                                 row is shrink-0 so the id/type/retry/manual/
                                 artifact badges never wrap. */}
                             <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                              <button className="text-slate-400 dark:text-slate-500 shrink-0">
+                              <button className="text-slate-500 dark:text-slate-400 shrink-0">
                                 {isNodeExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                               </button>
                               <span className="font-mono text-slate-400 dark:text-slate-500 w-4 shrink-0">{index + 1}</span>
