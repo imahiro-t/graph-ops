@@ -582,6 +582,16 @@ export const TicketItem: React.FC<Props> = ({
   // this "awaiting approval" definition is engine.HasPendingApproval, which
   // drives both the ticket's IN REVIEW status and the project switcher's
   // pending-approval counts (DFLT-00144); keep the two in step.
+  //
+  // DFLT-00157: a CLOSED ticket's gates are never pending here, however
+  // reached they look. The engine refuses to complete any node of a CLOSED
+  // ticket (INVALID_NODE_STATE), so approving or rejecting would always
+  // fail -- no blink, no "awaiting approval" tooltip, no approve/reject
+  // buttons. This is the same definition GET /api/projects/pending-approvals
+  // counts by (handlePendingApprovals in
+  // packages/core-go/internal/httpserver/pending_approvals.go leaves CLOSED
+  // tickets out, DFLT-00144 D-1); a DONE ticket is still counted by both.
+  // Change one only together with the other.
   const nodeById = new Map(ticket.nodes.map(n => [n.id, n]));
   const isNodeReached = (nodeId: string) =>
     ticket.edges.every(e => {
@@ -589,9 +599,11 @@ export const TicketItem: React.FC<Props> = ({
       return nodeById.get(e.from_node_id)?.status === 'DONE';
     });
   const pendingApprovalNodeIds = new Set(
-    ticket.nodes
-      .filter(n => n.type === 'approval_gate' && n.status === 'TODO' && isNodeReached(n.id))
-      .map(n => n.id)
+    ticket.status === 'CLOSED'
+      ? []
+      : ticket.nodes
+          .filter(n => n.type === 'approval_gate' && n.status === 'TODO' && isNodeReached(n.id))
+          .map(n => n.id)
   );
   // DFLT-00016: a REJECTED approval_gate is a materially different state
   // from a never-judged one -- it's not waiting on a human clicking
@@ -1501,8 +1513,12 @@ export const TicketItem: React.FC<Props> = ({
                               this flow's confirmation step (no window.confirm
                               dialog). Kept outside the clickable header row
                               so typing/clicking here doesn't toggle the
-                              artifacts accordion. */}
-                          {rejectingNodeId === node.id && (
+                              artifacts accordion. Only while the gate is
+                              still pending, so a ticket that turns CLOSED
+                              (or a gate judged elsewhere) mid-edit doesn't
+                              keep offering a reject that must fail
+                              (DFLT-00157). */}
+                          {rejectingNodeId === node.id && pendingApprovalNodeIds.has(node.id) && (
                             <div className="px-3 pb-3 -mt-1 flex items-center gap-2" onClick={e => e.stopPropagation()}>
                               <input
                                 type="text"
