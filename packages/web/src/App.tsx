@@ -1355,9 +1355,13 @@ export const App: React.FC = () => {
               role="alert"
             >
               <p>{t('projectSwitcher.loadFailed')}</p>
+              {/* DFLT-00164: the inherited slate-500 drops to 4.34:1 on the
+                  slate-100 hover background, so the button sets slate-600 /
+                  slate-300 (the DFLT-00162 pair) to keep WCAG 1.4.3's 4.5:1
+                  in both states and both themes. */}
               <button
                 onClick={retryCurrentProject}
-                className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold inline-flex items-center gap-1.5 transition"
+                className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold inline-flex items-center gap-1.5 transition"
               >
                 <RotateCw className="w-4 h-4" />
                 {t('projectSwitcher.retry')}

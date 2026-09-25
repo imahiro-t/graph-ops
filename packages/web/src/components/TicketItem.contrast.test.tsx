@@ -14,6 +14,10 @@
 // instead. The ratios per background are in the ticket's implementation
 // notes.
 //
+// DFLT-00164: the node row's node id sits on the same row, so it moves from
+// dark:text-slate-400 (4.04:1 on the slate-700 hover) to the same
+// text-slate-600 / dark:text-slate-300 pair.
+//
 // jsdom computes no colors, so these tests pin the Tailwind classes that
 // produce them, and check that the existing hover/disabled classes are kept.
 import { render, screen, within } from '@testing-library/react';
@@ -162,6 +166,16 @@ describe('TicketItem secondary text contrast (WCAG 1.4.3, DFLT-00162)', () => {
       expectNoOldColors(el);
     }
     // The row's hover background (a state color) is unchanged.
+    expect(row.parentElement).toHaveClass('hover:bg-slate-100', 'dark:hover:bg-slate-700');
+  });
+
+  it('draws the node row\'s node id in slate-600 / dark:slate-300, which also clear 4.5:1 on the hover background (DFLT-00164)', () => {
+    renderItem(makeTicket('IN PROGRESS', [NODE]), true);
+    const chevron = screen.getByRole('button', { name: i18n.t('ticketItem.toggleNode', { id: NODE.id }) });
+    const row = chevron.parentElement!;
+    const id = within(row).getByText(NODE.id, { exact: true });
+    expect(id).toHaveClass('text-slate-600', 'dark:text-slate-300', 'font-mono', 'font-bold');
+    expect(id).not.toHaveClass('dark:text-slate-400');
     expect(row.parentElement).toHaveClass('hover:bg-slate-100', 'dark:hover:bg-slate-700');
   });
 });

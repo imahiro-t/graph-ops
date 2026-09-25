@@ -1421,9 +1421,11 @@ export const TicketItem: React.FC<Props> = ({
                                   slate-400 text drops to 4.34:1 / 4.04:1, so
                                   the sequence number (and the update time
                                   below) use slate-600 / slate-300 to keep
-                                  WCAG 1.4.3's 4.5:1 in both states. */}
+                                  WCAG 1.4.3's 4.5:1 in both states. The node
+                                  id uses the same pair for the same reason
+                                  (DFLT-00164). */}
                               <span className="font-mono text-slate-600 dark:text-slate-300 w-4 shrink-0">{index + 1}</span>
-                              <span className="font-mono font-bold text-slate-600 dark:text-slate-400 shrink-0 whitespace-nowrap">
+                              <span className="font-mono font-bold text-slate-600 dark:text-slate-300 shrink-0 whitespace-nowrap">
                                 {node.id}
                               </span>
                               <NodeTypeBadge type={node.type} theme="light" className="shrink-0" />
