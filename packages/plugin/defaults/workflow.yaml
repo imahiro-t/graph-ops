@@ -55,7 +55,7 @@ workflow:
   # field). Names below are English only: DFLT-00051 replaced the old
   # hardcoded bilingual ("English / Japanese") names with a language-file
   # mechanism (see internal/config/locale.go and defaults/locales/*.yaml) --
-  # when the resolved language (user/team Document.Language, or an explicit
+  # when the resolved language (the user tier's Document.Language, or an explicit
   # --language override) has a matching locale file, LoadWithRoots/
   # LocalizedDefault substitute that locale's translations for these Name
   # fields before Merge ever runs, so the skeleton stays structurally locked

@@ -33,6 +33,13 @@ and `graph-engine get-node-type-context <type>` /
 `get-skill-context <skill>` / `get-report-template` / `get-plan-template` /
 `get-review-template` to see the merged result for a given install.
 
+The team tier outranks the user tier for what lives in these files and their
+extension counterparts: node-type instructions, `workflow.yaml` (review gates,
+`max_iterations`), the report/plan/review templates, skill instructions and
+`autopilot.yaml`. The working language is the exception: it is a personal
+setting, so a `language` in the team tier's `workflow.yaml` is ignored (with a
+warning on stderr) and only the user tier's `config.yaml` sets it.
+
 `packages/core-go/internal/config/defaults/` is a generated mirror of this
 directory (`go:embed` needs the files inside its own package tree) -- edit
 here, then run `npm run sync:defaults` (or any `npm run build`/`build:go`/
