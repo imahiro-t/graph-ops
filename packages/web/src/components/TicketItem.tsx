@@ -1739,13 +1739,22 @@ export const TicketItem: React.FC<Props> = ({
                               {/* Named toggle for the node row (DFLT-00152).
                                   No onClick of its own: its click bubbles to
                                   the row's toggleNodeExpand, so it toggles
-                                  exactly once. */}
+                                  exactly once.
+                                  DFLT-00175: focus returns here after an
+                                  approval gate's reject prompt closes
+                                  (DFLT-00172), so it draws its own
+                                  focus-visible ring instead of relying on the
+                                  browser outline, and none on a mouse click.
+                                  Dark mode uses blue-400: blue-500 is only
+                                  2.82:1 on the hovered slate-700 row, while
+                                  blue-400 keeps 4.07:1 (light blue-500:
+                                  3.52:1 / 3.36:1 on slate-50 / slate-100). */}
                               <button
                                 type="button"
                                 aria-expanded={isNodeExpanded}
                                 aria-label={t('ticketItem.toggleNode', { id: node.id })}
                                 data-testid={`node-toggle-expand-${node.id}`}
-                                className="text-slate-500 dark:text-slate-400 shrink-0"
+                                className="text-slate-500 dark:text-slate-400 shrink-0 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
                               >
                                 {isNodeExpanded
                                   ? <ChevronDown className="w-4 h-4" aria-hidden="true" />
