@@ -632,4 +632,21 @@ describe('project switcher accessibility', () => {
       }
     });
   });
+
+  describe('dropdown arrow contrast', () => {
+    it('draws the switcher\'s arrow in slate-500 (light) and slate-400 (dark), not the low-contrast colors', async () => {
+      await renderApp();
+
+      // The button holds two icons (FolderOpen first), so pick the arrow by
+      // the class lucide gives it rather than the first svg.
+      const arrow = switcher().querySelector('svg.lucide-chevron-down');
+      expect(arrow).not.toBeNull();
+      expect(arrow).toHaveClass('text-slate-500', 'dark:text-slate-400');
+      expect(arrow).not.toHaveClass('text-slate-400');
+      expect(arrow).not.toHaveClass('dark:text-slate-500');
+      // Size and hiding from assistive technology are unchanged.
+      expect(arrow).toHaveClass('w-3.5', 'h-3.5', 'shrink-0');
+      expect(arrow).toHaveAttribute('aria-hidden', 'true');
+    });
+  });
 });

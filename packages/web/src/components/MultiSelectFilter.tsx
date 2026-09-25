@@ -129,7 +129,9 @@ export function MultiSelectFilter<T extends string>({
         className="px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5 whitespace-nowrap"
       >
         {selected.length === 0 ? t(allKey) : t(selectedKey, { count: selected.length })}
-        <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" aria-hidden="true" />
+        {/* DFLT-00163: WCAG 1.4.11 (3:1). The arrow shows the button opens a list. slate-500 is
+            4.55:1 on the slate-50 button; slate-400 is 5.71:1 on the slate-800 button. */}
+        <ChevronDown className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 shrink-0" aria-hidden="true" />
       </button>
 
       {isOpen && (

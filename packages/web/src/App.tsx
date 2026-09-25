@@ -1074,7 +1074,10 @@ export const App: React.FC = () => {
                 <span className="truncate">
                   {currentProject ? currentProject.name : t('projectSwitcher.noProject')}
                 </span>
-                <ChevronDown aria-hidden="true" className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                {/* DFLT-00163: WCAG 1.4.11 (3:1). The arrow is the only sign that this opens a menu.
+                    slate-500 is 4.76:1 on white and 4.55:1 on the slate-50 hover; slate-400 is
+                    6.96:1 on slate-900 and 5.71:1 on the slate-800 hover. */}
+                <ChevronDown aria-hidden="true" className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 shrink-0" />
               </button>
 
               {isProjectMenuOpen && (
@@ -1206,7 +1209,10 @@ export const App: React.FC = () => {
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative">
-              <Search aria-hidden="true" className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+              {/* DFLT-00163: WCAG 1.4.11 (3:1). The magnifier marks this as a search field once the
+                  placeholder is gone. slate-500 is 4.55:1 on the slate-50 input; slate-400 is
+                  5.71:1 on the slate-800 input. */}
+              <Search aria-hidden="true" className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-500 dark:text-slate-400" />
               <input
                 type="text"
                 value={filterQuery}
