@@ -59,9 +59,12 @@ func mergeReviewGates(base, overlay map[string]ReviewGateDef) map[string]ReviewG
 // ReviewGates, but unlike Workflow.Nodes/Seed every layer is eligible to set
 // it (docs[0], the plugin default, never has one -- see DefaultDocument), so
 // a later, higher-priority document's Language always overrides an earlier
-// one's. This is what lets user- and team-tier config.yaml/workflow.yaml
-// pick the display-name locale (see locale.go's ResolveLanguage) without
-// touching the locked workflow skeleton itself.
+// one's. This is what lets the user tier's config.yaml pick the display-name
+// locale (see locale.go's ResolveLanguage) without touching the locked
+// workflow skeleton itself. The team tier does not get a say: the working
+// language is a personal setting (DFLT-00153), so LoadWithRoots clears the
+// team document's Language before calling Merge -- Merge itself stays
+// generic over whatever documents it is handed.
 //
 // MaxIterations is a fourth kind: a single workflow-wide value resolved
 // "last non-nil wins" across every layer (so team beats user beats the

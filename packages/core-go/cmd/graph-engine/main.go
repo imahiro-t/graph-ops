@@ -335,7 +335,7 @@ Commands:
                                           (auto-seeds the graph's plan/plan_review nodes on first call;
                                            --language, only meaningful on that first/seeding call, is this
                                            one call's explicit language choice -- see get-language-settings --
-                                           and outranks any persistent team/user language setting)
+                                           and outranks the persistent (user-tier) language setting)
   expand-graph <ticketId> [--patch <file|->] [--language <code>]
                                           (call once the seed passes; no patch = default full template;
                                            --language is this one call's explicit language choice, same
@@ -487,9 +487,10 @@ Commands:
                                            review_gate node types: team -> user -> plugin default)
   get-extension-roots                    ({"userDir","teamDir"} resolved paths, for a skill that needs to
                                            write into that tree directly, e.g. onboarding's language setup)
-  get-language-settings                  ({"resolved","source":"team"|"user"|"none","supported_locales"} --
-                                           whether a persistent language setting exists (team tier, else user
-                                           tier) and what it resolves to, so onboarding/process-ticket can
+  get-language-settings                  ({"resolved","source":"user"|"none","supported_locales"} --
+                                           whether a persistent language setting exists in the user tier
+                                           (the language is personal; a team tier's is ignored with a
+                                           warning on stderr) and what it resolves to, so onboarding/process-ticket can
                                            tell that apart from "nothing set yet, decide one for this
                                            session" without parsing prose)
   serve [--port N] [--host ADDR]
@@ -506,6 +507,12 @@ and environment variables only -- never from the current directory):
                                                    directory to share settings with a team; a
                                                    team root that is the same directory as the
                                                    user root is ignored)
+  The Web UI's app settings edit only the team directory ("Team settings directory");
+  userExtensionsDir is not edited there and is normally left at $HOME/.graph-ops.
+  The team tier wins over the user tier for node-type instructions, workflow.yaml
+  (review gates, max_iterations), templates, skill instructions and autopilot.yaml.
+  The working language is personal: a team workflow.yaml "language" is ignored
+  (with a warning on stderr).
 
 Help:
   graph-engine help | --help | -h         (prints this list)
@@ -1741,7 +1748,8 @@ func cmdGetWorkflowCatalog(rc runtimeConfig, args []string) error {
 	}
 	emitCatalogWarnings(catalog)
 	// catalog.Language (via Merge) only ever reflects a *persistent*
-	// user/team Document.Language -- it never gets language written into it
+	// user-tier Document.Language (a team tier's is ignored -- the language
+	// is a personal setting, DFLT-00153) -- it never gets language written into it
 	// (see config.ResolveLanguage/LoadWithRoots), which is exactly right for
 	// get-executable/expand-graph (a real node-creation path should answer
 	// "what's persisted", not echo back a one-off --language). But this
@@ -1784,7 +1792,7 @@ func emitWarnings(warnings []string) {
 }
 
 // cmdGetLanguageSettings reports whether a persistent language setting
-// exists (team tier, else user tier) and, if so, which code it resolves to
+// exists in the user tier and, if so, which code it resolves to
 // -- so a skill (onboarding, process-ticket) can tell "there's already a
 // persistent choice" from "nothing is set yet, decide one for this session"
 // without parsing prose out of another command's output (see the execution
@@ -1799,9 +1807,15 @@ func emitWarnings(warnings []string) {
 // that is the same directory as the user root is dropped, so the user tier's
 // config.yaml is never also read as the team tier (DFLT-00068).
 //
+// The working language is a personal setting (DFLT-00153): "source" is
+// "user" or "none", never "team". The team tier's workflow.yaml is still read,
+// but only to warn (on stderr, never in the JSON) when it sets a language that
+// is being ignored -- with the same message LoadWithRoots produces. A team
+// file that fails to parse is still an error, as before.
+//
 // The returned "resolved" value never reflects a call-scoped --language
 // override (there is none here -- this command exists precisely to answer
-// "what, if anything, is persisted"), only the two persistent tiers.
+// "what, if anything, is persisted"), only the user tier.
 func cmdGetLanguageSettings(rc runtimeConfig, args []string) error {
 	const usage = `usage: graph-engine get-language-settings`
 	if len(args) > 0 {
@@ -1825,16 +1839,15 @@ func cmdGetLanguageSettings(rc runtimeConfig, args []string) error {
 		}
 	}
 
+	emitWarnings(config.Messages(config.TeamLanguageIgnoredWarnings(teamDoc)))
+
 	source := "none"
-	switch {
-	case teamDoc.Language != "":
-		source = "team"
-	case userDoc.Language != "":
+	if userDoc.Language != "" {
 		source = "user"
 	}
 
 	return printJSON(map[string]any{
-		"resolved":          config.ResolveLanguage("", userDoc, teamDoc),
+		"resolved":          config.ResolveLanguage("", userDoc),
 		"source":            source,
 		"supported_locales": config.SupportedLocales(),
 	})

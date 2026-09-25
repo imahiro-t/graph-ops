@@ -51,8 +51,22 @@ func TestLoadWithRoots_UnsetLanguageMatchesEnglishDefault(t *testing.T) {
 	}
 }
 
-// TestLoadWithRoots_LanguagePriority covers the full "explicit override >
-// team > user > unset" precedence chain (execution plan, section 1.4).
+// countWarnings returns how many of warnings have the given code.
+func countWarnings(warnings []Warning, code string) int {
+	n := 0
+	for _, w := range warnings {
+		if w.Code == code {
+			n++
+		}
+	}
+	return n
+}
+
+// TestLoadWithRoots_LanguagePriority covers the "explicit override > user >
+// unset" precedence chain (execution plan, section 1.4). The team tier's
+// language is not part of it: the working language is a personal setting
+// (DFLT-00153), so a team workflow.yaml's language is ignored and reported as
+// a WarnTeamLanguageIgnored warning.
 func TestLoadWithRoots_LanguagePriority(t *testing.T) {
 	t.Run("user only", func(t *testing.T) {
 		userDir := t.TempDir()
@@ -69,28 +83,64 @@ func TestLoadWithRoots_LanguagePriority(t *testing.T) {
 		}
 	})
 
-	t.Run("team overrides user", func(t *testing.T) {
+	t.Run("team language is ignored", func(t *testing.T) {
 		userDir := t.TempDir()
 		teamDir := t.TempDir()
 		writeLoadTestDocument(t, userDir, userConfigFile, "ja")
-		// An unsupported code for "team" only proves team wins in terms of
-		// *which tier* is consulted; ApplyLocale then silently no-ops for an
-		// unrecognized code (see LocalizedDefault), so the node name falls
-		// back to English even though team, not user, decided the language.
 		writeLoadTestDocument(t, teamDir, teamConfigFile, "xx-unsupported")
 		cat, err := LoadWithRoots(userDir, teamDir, "")
 		if err != nil {
 			t.Fatalf("LoadWithRoots: %v", err)
 		}
-		if cat.Language != "xx-unsupported" {
-			t.Errorf("Catalog.Language = %q, want team's xx-unsupported to win over user's ja", cat.Language)
+		if cat.Language != "ja" {
+			t.Errorf("Catalog.Language = %q, want the user tier's ja (the team tier's language is ignored)", cat.Language)
 		}
-		if got := implNodeName(t, cat); got != "Implementation" {
-			t.Errorf("impl node name = %q, want the English default (unknown locale silently ignored)", got)
+		if got := implNodeName(t, cat); got != "実装" {
+			t.Errorf("impl node name = %q, want 実装 (localized by the user tier's ja)", got)
+		}
+		if n := countWarnings(cat.Warnings, WarnTeamLanguageIgnored); n != 1 {
+			t.Fatalf("got %d %s warnings, want exactly 1: %+v", n, WarnTeamLanguageIgnored, cat.Warnings)
+		}
+		for _, w := range cat.Warnings {
+			if w.Code == WarnTeamLanguageIgnored && w.Language != "xx-unsupported" {
+				t.Errorf("warning Language = %q, want xx-unsupported", w.Language)
+			}
 		}
 	})
 
-	t.Run("explicit override wins over both tiers", func(t *testing.T) {
+	t.Run("team language alone leaves the English default", func(t *testing.T) {
+		teamDir := t.TempDir()
+		writeLoadTestDocument(t, teamDir, teamConfigFile, "ja")
+		cat, err := LoadWithRoots(t.TempDir(), teamDir, "")
+		if err != nil {
+			t.Fatalf("LoadWithRoots: %v", err)
+		}
+		if cat.Language != "" {
+			t.Errorf("Catalog.Language = %q, want empty (only the team tier sets one)", cat.Language)
+		}
+		if got := implNodeName(t, cat); got != "Implementation" {
+			t.Errorf("impl node name = %q, want the English default", got)
+		}
+		if n := countWarnings(cat.Warnings, WarnTeamLanguageIgnored); n != 1 {
+			t.Errorf("got %d %s warnings, want exactly 1: %+v", n, WarnTeamLanguageIgnored, cat.Warnings)
+		}
+	})
+
+	t.Run("no warning without a team language", func(t *testing.T) {
+		userDir := t.TempDir()
+		teamDir := t.TempDir()
+		writeLoadTestDocument(t, userDir, userConfigFile, "ja")
+		writeLoadTestDocument(t, teamDir, teamConfigFile, "")
+		cat, err := LoadWithRoots(userDir, teamDir, "")
+		if err != nil {
+			t.Fatalf("LoadWithRoots: %v", err)
+		}
+		if n := countWarnings(cat.Warnings, WarnTeamLanguageIgnored); n != 0 {
+			t.Errorf("got %d %s warnings, want none: %+v", n, WarnTeamLanguageIgnored, cat.Warnings)
+		}
+	})
+
+	t.Run("explicit override wins over the user tier", func(t *testing.T) {
 		userDir := t.TempDir()
 		teamDir := t.TempDir()
 		writeLoadTestDocument(t, userDir, userConfigFile, "ja")
@@ -102,11 +152,14 @@ func TestLoadWithRoots_LanguagePriority(t *testing.T) {
 		if got := implNodeName(t, cat); got != "実装" {
 			t.Errorf("sanity check failed: impl node name = %q, want 実装", got)
 		}
+		if n := countWarnings(cat.Warnings, WarnTeamLanguageIgnored); n != 1 {
+			t.Errorf("got %d %s warnings, want exactly 1 for the team tier's ja", n, WarnTeamLanguageIgnored)
+		}
 
-		// Now pass an explicit override that differs from both tiers: per
+		// Now pass an explicit override that differs from the user tier: per
 		// ResolveLanguage's doc comment the override alone decides which
 		// locale is APPLIED to the default document (here, an unsupported
-		// code, so English node names), even though both tiers still set
+		// code, so English node names), even though the user tier still sets
 		// Language: ja. Catalog.Language itself (populated by Merge purely
 		// from each Document's own Language field -- see Merge's doc
 		// comment) is unaffected by languageOverride, since the override is
@@ -117,7 +170,7 @@ func TestLoadWithRoots_LanguagePriority(t *testing.T) {
 			t.Fatalf("LoadWithRoots: %v", err)
 		}
 		if catOverride.Language != "ja" {
-			t.Errorf("Catalog.Language = %q, want ja (from the team/user tiers, unaffected by languageOverride)", catOverride.Language)
+			t.Errorf("Catalog.Language = %q, want ja (from the user tier, unaffected by languageOverride)", catOverride.Language)
 		}
 		if got := implNodeName(t, catOverride); got != "Implementation" {
 			t.Errorf("impl node name = %q, want the English default (override's locale is unsupported)", got)

@@ -269,3 +269,24 @@ func TestMaxIterationsWarningsAndMessages(t *testing.T) {
 		t.Errorf("legacy message = %q", msgs[1])
 	}
 }
+
+// TeamLanguageIgnoredWarnings flags only a team document that sets language
+// (DFLT-00153), and its Message is prose, not the bare code.
+func TestTeamLanguageIgnoredWarningsAndMessage(t *testing.T) {
+	if w := TeamLanguageIgnoredWarnings(Document{}); len(w) != 0 {
+		t.Errorf("unset: warnings = %+v, want none", w)
+	}
+	w := TeamLanguageIgnoredWarnings(Document{Language: "ja"})
+	if len(w) != 1 || w[0].Code != WarnTeamLanguageIgnored || w[0].Language != "ja" {
+		t.Fatalf("language ja: warnings = %+v", w)
+	}
+	msg := Warning{Code: WarnTeamLanguageIgnored, Language: "ja"}.Message()
+	if msg == WarnTeamLanguageIgnored {
+		t.Fatalf("Message() returned the bare code %q", msg)
+	}
+	for _, want := range []string{`language "ja"`, "ignored", "personal setting"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message %q does not contain %q", msg, want)
+		}
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -85,9 +86,17 @@ type effectiveAppSettings struct {
 	DBPath    string `json:"dbPath"`
 	// HTTPDataSourceURL is the data source URL in effect when DBBackend is
 	// "http" (empty otherwise). The token is never part of this block.
-	HTTPDataSourceURL  string `json:"httpDataSourceUrl,omitempty"`
-	ArtifactsDir       string `json:"artifactsDir"`
-	UserExtensionsDir  string `json:"userExtensionsDir"`
+	HTTPDataSourceURL string `json:"httpDataSourceUrl,omitempty"`
+	ArtifactsDir      string `json:"artifactsDir"`
+	// UserExtensionsDir is the personal tier's directory in effect
+	// ($HOME/.graph-ops unless config.json's userExtensionsDir or
+	// GRAPH_USER_EXTENSIONS_DIR overrides it). It is reported for
+	// information only: the settings form does not edit it (DFLT-00153).
+	UserExtensionsDir string `json:"userExtensionsDir"`
+	// TeamExtensionsDir is the team tier's directory in effect, or "" when
+	// there is no team tier -- unset, or the same directory as the personal
+	// tier (config.ResolveRoots drops it then).
+	TeamExtensionsDir  string `json:"teamExtensionsDir"`
 	PaginationPageSize int    `json:"paginationPageSize"`
 }
 
@@ -415,6 +424,7 @@ func (s *Server) effectiveAppSettings() effectiveAppSettings {
 		HTTPDataSourceURL:  httpURL,
 		ArtifactsDir:       s.cfg.ArtifactsDir,
 		UserExtensionsDir:  roots.UserDir,
+		TeamExtensionsDir:  roots.TeamDir,
 		PaginationPageSize: s.cfg.PaginationPageSize,
 	}
 }
@@ -435,8 +445,9 @@ func (s *Server) loadHomeEffective() runtimeconfig.Effective {
 }
 
 // handleGetAppSettings backs the settings UI's app-settings tab (DB path,
-// artifacts dir, the node/workflow config directory override, ticket-list
-// pagination page size).
+// artifacts dir, the team settings directory (teamExtensionsDir), ticket-list
+// pagination page size). The personal tier's directory is reported in
+// `effective.userExtensionsDir` for information only; it is not edited here.
 //
 // This endpoint needs no CSRF header (it is a GET) and this server has no
 // authentication, so its response must be treated as world-readable by
@@ -450,10 +461,20 @@ func (s *Server) handleGetAppSettings(w http.ResponseWriter, r *http.Request) {
 // handlePutAppSettings saves the fields this endpoint owns
 // (dbBackend/dbPath/mysqlHost/mysqlPort/mysqlDatabase/mysqlUser/
 // mysqlPassword/mysqlTls/mysqlTlsCa/httpDataSourceUrl/httpDataSourceToken/
-// artifactsDir/userExtensionsDir/paginationPageSize/myName) into the home
+// artifactsDir/teamExtensionsDir/paginationPageSize/myName) into the home
 // config file, preserving every other field already in it
-// (port/host/claudeBinary/terminalCommand/workDir/teamExtensionsDir/
+// (port/host/claudeBinary/terminalCommand/workDir/userExtensionsDir/
 // projectPaths) untouched.
+//
+// userExtensionsDir used to be owned here; since DFLT-00153 the personal tier
+// is $HOME/.graph-ops unless config.json or GRAPH_USER_EXTENSIONS_DIR says
+// otherwise, and this endpoint neither writes nor clears it. A body that
+// still carries a userExtensionsDir field (an older client) has it ignored:
+// the decoder does not know the field. teamExtensionsDir is trimmed, saved
+// as-is when non-empty (it must then be an absolute path -- a relative one
+// would depend on the directory the process was started in, which the home
+// config deliberately does not (DFLT-00124) -- and is a 400 otherwise), and
+// removed from the file when empty.
 //
 // It is one write, through runtimeconfig.UpdateHome, which serializes it with
 // every other in-process writer of that file -- in particular the project
@@ -522,7 +543,7 @@ func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 		// resolveSubmittedHTTPDataSourceToken.
 		HTTPDataSourceToken string `json:"httpDataSourceToken"`
 		ArtifactsDir        string `json:"artifactsDir"`
-		UserExtensionsDir   string `json:"userExtensionsDir"`
+		TeamExtensionsDir   string `json:"teamExtensionsDir"`
 		PaginationPageSize  int    `json:"paginationPageSize"`
 		MyName              string `json:"myName"`
 	}
@@ -533,6 +554,12 @@ func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 	if body.PaginationPageSize < 1 {
 		writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeInvalidPaginationPageSize,
 			"pagination page size must be 1 or greater, got %d", body.PaginationPageSize))
+		return
+	}
+	teamExtensionsDir := strings.TrimSpace(body.TeamExtensionsDir)
+	if teamExtensionsDir != "" && !filepath.IsAbs(teamExtensionsDir) {
+		writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation,
+			"teamExtensionsDir must be an absolute path, got %q", teamExtensionsDir))
 		return
 	}
 	dbBackend := body.DBBackend
@@ -612,7 +639,7 @@ func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 		fileCfg.HTTPDataSourceURL = body.HTTPDataSourceURL
 		fileCfg.HTTPDataSourceToken = httpToken
 		fileCfg.ArtifactsDir = body.ArtifactsDir
-		fileCfg.UserExtensionsDir = body.UserExtensionsDir
+		fileCfg.TeamExtensionsDir = teamExtensionsDir
 		fileCfg.PaginationPageSize = body.PaginationPageSize
 		fileCfg.MyName = body.MyName
 		return nil
