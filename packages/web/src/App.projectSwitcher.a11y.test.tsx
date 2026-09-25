@@ -3,8 +3,12 @@
 // (aria-haspopup="dialog", matching the popup's role="dialog"), and Escape
 // closes the open popup and puts focus back on the button.
 //
+// DFLT-00158: the menu marks the current project's item with
+// aria-current="true" (and on no other item), and hides the decorative check
+// mark from assistive technology.
+//
 // fetch is served by test/fakeBackend.ts.
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
@@ -20,10 +24,10 @@ const PENDING_PATH = '/api/projects/pending-approvals';
 let backend: FakeBackend;
 let fetchMock: ReturnType<typeof vi.fn>;
 
-function seed() {
+function seed({ currentProjectId = alpha.id }: { currentProjectId?: string } = {}) {
   backend = createFakeBackend({
     projects: [alpha, beta],
-    currentProjectId: alpha.id,
+    currentProjectId,
     labels: [],
     tickets: [
       { id: 'AAA-00001', project_id: alpha.id, title: 'Alpha のチケット', status: 'TODO', priority: 'HIGH', labelIds: [] },
@@ -319,6 +323,88 @@ describe('project switcher accessibility', () => {
       await user.click(switcher());
       expect(popup()).not.toBeNull();
       await waitFor(() => expect(pendingRequests()).toBe(2));
+    });
+  });
+
+  describe('aria-current', () => {
+    // Looked up inside the popup: with no current project, the empty state
+    // offers a create button of its own.
+    function createNew() {
+      return within(popup()!).getByRole('button', { name: i18n.t('projectSwitcher.createNew') });
+    }
+
+    it('marks only the current project\'s item, not the others or "New project..."', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+
+      expect(menuItem(alpha)).toHaveAttribute('aria-current', 'true');
+      expect(menuItem(beta)).not.toHaveAttribute('aria-current');
+      expect(createNew()).not.toHaveAttribute('aria-current');
+      // Only the item carries it: not the header button or the popup.
+      expect(switcher()).not.toHaveAttribute('aria-current');
+      expect(popup()).not.toHaveAttribute('aria-current');
+    });
+
+    it('moves to the new current project after a switch', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+      await user.click(menuItem(beta));
+      await screen.findByText('BBB-00001');
+
+      await user.click(switcher(beta.name));
+      expect(menuItem(beta)).toHaveAttribute('aria-current', 'true');
+      expect(menuItem(alpha)).not.toHaveAttribute('aria-current');
+      expect(createNew()).not.toHaveAttribute('aria-current');
+    });
+
+    it('marks no item when there is no current project', async () => {
+      seed({ currentProjectId: '' });
+      const user = userEvent.setup();
+      render(<App />);
+      await screen.findByText(i18n.t('projectSwitcher.noProjectYet'));
+
+      await user.click(screen.getByRole('button', { name: i18n.t('projectSwitcher.noProject') }));
+      await waitFor(() => expect(menuItem(beta)).toBeInTheDocument());
+      expect(menuItem(alpha)).not.toHaveAttribute('aria-current');
+      expect(menuItem(beta)).not.toHaveAttribute('aria-current');
+      expect(createNew()).not.toHaveAttribute('aria-current');
+      expect(popup()!.querySelector('[aria-current]')).toBeNull();
+    });
+
+    it('marks no item when the current project could not be read', async () => {
+      const realFetch = backend.fetch.bind(backend);
+      backend.fetch = async (input, init) => {
+        if (String(input) === '/api/current-project' && (init?.method ?? 'GET') === 'GET') {
+          return new Response(JSON.stringify({ error: { code: 'CONFIG_READ_FAILED', message: 'boom' } }), {
+            status: 500
+          });
+        }
+        return realFetch(input, init);
+      };
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const user = userEvent.setup();
+      render(<App />);
+      await screen.findByText(i18n.t('projectSwitcher.loadFailed'));
+
+      await user.click(screen.getByRole('button', { name: i18n.t('projectSwitcher.noProject') }));
+      await waitFor(() => expect(menuItem(beta)).toBeInTheDocument());
+      expect(menuItem(alpha)).not.toHaveAttribute('aria-current');
+      expect(menuItem(beta)).not.toHaveAttribute('aria-current');
+      expect(popup()!.querySelector('[aria-current]')).toBeNull();
+    });
+
+    it('hides the check mark of every item from assistive technology, keeping the item names', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+
+      for (const p of [alpha, beta]) {
+        const icon = menuItem(p).querySelector('svg');
+        expect(icon).not.toBeNull();
+        expect(icon).toHaveAttribute('aria-hidden', 'true');
+      }
+      // The check mark's color, the only visual cue, is unchanged.
+      expect(menuItem(alpha).querySelector('svg')).toHaveClass('text-blue-600');
+      expect(menuItem(beta).querySelector('svg')).toHaveClass('text-transparent');
     });
   });
 });

@@ -1056,22 +1056,37 @@ export const App: React.FC = () => {
                     {projects.length === 0 && (
                       <div className="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">{t('projectSwitcher.empty')}</div>
                     )}
-                    {projects.map(p => (
-                      <button
-                        key={p.id}
-                        onClick={() => switchToProject(p)}
-                        className="w-full text-left px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 text-slate-700 dark:text-slate-300"
-                      >
-                        <Check className={`w-3.5 h-3.5 shrink-0 ${p.id === currentProject?.id ? 'text-blue-600 dark:text-blue-400' : 'text-transparent'}`} />
-                        <span className="truncate">{p.name}</span>
-                        <span className="ml-auto flex items-center gap-2 shrink-0">
-                          {pendingApprovalCounts[p.id] > 0 && (
-                            <PendingApprovalBadge count={pendingApprovalCounts[p.id]} />
-                          )}
-                          <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">{p.prefix}</span>
-                        </span>
-                      </button>
-                    ))}
+                    {projects.map(p => {
+                      // DFLT-00158: the check mark shows the current project
+                      // by color alone, so the item also carries
+                      // aria-current and the icon is hidden from assistive
+                      // technology. Not menuitemradio/aria-checked: the popup
+                      // is a dialog of Tab-reachable buttons, not an ARIA
+                      // menu. The attribute is left out (undefined, never
+                      // false, which React would render as "false") on every
+                      // other item.
+                      const isCurrent = p.id === currentProject?.id;
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => switchToProject(p)}
+                          aria-current={isCurrent ? 'true' : undefined}
+                          className="w-full text-left px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 text-slate-700 dark:text-slate-300"
+                        >
+                          <Check
+                            aria-hidden="true"
+                            className={`w-3.5 h-3.5 shrink-0 ${isCurrent ? 'text-blue-600 dark:text-blue-400' : 'text-transparent'}`}
+                          />
+                          <span className="truncate">{p.name}</span>
+                          <span className="ml-auto flex items-center gap-2 shrink-0">
+                            {pendingApprovalCounts[p.id] > 0 && (
+                              <PendingApprovalBadge count={pendingApprovalCounts[p.id]} />
+                            )}
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">{p.prefix}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
                     <div className="border-t border-slate-100 dark:border-slate-800 mt-1 pt-1">
                       <button
                         onClick={() => {
