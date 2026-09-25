@@ -347,7 +347,10 @@
         "createTicket": "create-ticket",
         "refineTicket": "refine-ticket",
         "processTicket": "process-ticket",
-        "onboarding": "onboarding"
+        "onboarding": "onboarding",
+        "autopilotTicket": "autopilot-ticket (autopilot, single ticket)",
+        "autopilotTree": "autopilot-tree (autopilot, ticket tree)",
+        "autopilotWorker": "autopilot-worker (autopilot child session)"
       }
     },
     "reportTemplate": {

@@ -347,7 +347,10 @@
         "createTicket": "create-ticket（チケット作成）",
         "refineTicket": "refine-ticket（チケット精緻化）",
         "processTicket": "process-ticket（チケット処理）",
-        "onboarding": "onboarding（初回セットアップ）"
+        "onboarding": "onboarding（初回セットアップ）",
+        "autopilotTicket": "autopilot-ticket（オートパイロット・単一）",
+        "autopilotTree": "autopilot-tree（オートパイロット・ツリー）",
+        "autopilotWorker": "autopilot-worker（オートパイロットの子セッション）"
       }
     },
     "reportTemplate": {

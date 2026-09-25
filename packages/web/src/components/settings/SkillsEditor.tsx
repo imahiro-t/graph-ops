@@ -23,7 +23,10 @@ const skillNameKeys: Record<string, string> = {
   'create-ticket': 'settings.skills.names.createTicket',
   'refine-ticket': 'settings.skills.names.refineTicket',
   'process-ticket': 'settings.skills.names.processTicket',
-  onboarding: 'settings.skills.names.onboarding'
+  onboarding: 'settings.skills.names.onboarding',
+  'autopilot-ticket': 'settings.skills.names.autopilotTicket',
+  'autopilot-tree': 'settings.skills.names.autopilotTree',
+  'autopilot-worker': 'settings.skills.names.autopilotWorker'
 };
 
 export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
