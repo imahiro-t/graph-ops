@@ -446,6 +446,35 @@ Commands:
                                            Local values are edited in the Web UI's settings (PUT
                                            /api/projects/{id}/autopilot-settings); there is no CLI to write
                                            them. The project is resolved like list-labels')
+  autopilot start <ticketId> --mode ticket|tree [--run <runId>]
+                                          (starts an autopilot run from the ticket, or takes over the latest
+                                           interrupted/stopped run with the same root and mode; --run adopts a
+                                           run the Web UI reserved. Refuses AUTOPILOT_ALREADY_RUNNING when an
+                                           active run overlaps the tree, AUTOPILOT_ROOT_FINISHED for a new run
+                                           from a DONE/CLOSED ticket. Runs are kept in
+                                           $HOME/.graph-ops/autopilot/<projectId>/runs/)
+  autopilot next <runId>                 (the one next action as JSON: launch / wait / merge-up / done /
+                                           stopped, with the command that carries it out)
+  autopilot launch <runId> <ticketId> [--role work|merge-up|finalize]
+                                          (creates or reuses <localPath>/.claude/worktrees/<ticketId> on branch
+                                           worktree-<ticketId> and opens a child claude session there with the
+                                           project's --permission-mode; PROJECT_LOCAL_PATH_NOT_SET without a
+                                           local path)
+  autopilot wait <runId> <ticketId> [--timeout <duration>]
+                                          (blocks until the session reports; exits 0 with its result, or 2 on
+                                           timeout (default 10m) with {"state":"waiting"|"awaiting_human",...};
+                                           fails a session with no activity for stallTimeoutMinutes as
+                                           unresponsive and exits 0)
+  autopilot merge-up <runId> <ticketId>  (fast-forwards a done ticket's branch into its merge target's;
+                                           {"result":"needs_merge_session"} when that is not possible)
+  autopilot worker-context|record-decision|attach-decisions|touch|report|merge-into-parent ...
+                                          (used by the autopilot-worker child session: its context, automatic
+                                           decisions, activity, its result (report --result done|failed|blocked
+                                           [--reason <code>] --summary <text|->), and the fast-forward of its
+                                           branch into its merge target)
+  autopilot summary <runId>              (the run's summary as Markdown; also saved on the root ticket's
+                                           release node as autopilot-tree-summary)
+  autopilot status [--project <id>]      (the project's runs, newest first)
   get-workflow-catalog [--language <code>]
                                           (plugin default -> user -> team workflow.yaml/config.yaml merge;
                                            --language previews the merge as if it resolved to that code,
