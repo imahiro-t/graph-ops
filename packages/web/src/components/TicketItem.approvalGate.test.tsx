@@ -345,6 +345,174 @@ describe('TicketItem reject prompt focus and announcements', () => {
     expectNoAnnouncement();
   });
 
+  // DFLT-00174: Escape in the prompt does what Cancel does.
+  describe('Escape', () => {
+    const expectCancelled = () => {
+      expect(reasonInput()).toBeNull();
+      expect(document.activeElement).toBe(rejectButton());
+      expectNoAnnouncement();
+      // The draft is gone: reopening starts empty.
+      expect(openPrompt().value).toBe('');
+    };
+
+    it.each([
+      ['the reason field', () => reasonInput() as HTMLElement],
+      ['the confirm button', () => confirmRejectButton() as HTMLElement],
+      ['the Cancel button', () => cancelButton()]
+    ])('closes the prompt like Cancel from %s', (_label, target) => {
+      renderTicket('IN REVIEW');
+      const input = openPrompt();
+      fireEvent.change(input, { target: { value: '理由' } });
+      const el = target();
+      el.focus();
+
+      const notCancelled = fireEvent.keyDown(el, { key: 'Escape' });
+
+      expect(notCancelled).toBe(false);
+      expectCancelled();
+    });
+
+    it('does not reach document-level listeners', () => {
+      renderTicket('IN REVIEW');
+      const input = openPrompt();
+      const documentListener = vi.fn();
+      document.addEventListener('keydown', documentListener);
+      let notCancelled: boolean;
+      try {
+        notCancelled = fireEvent.keyDown(input, { key: 'Escape' });
+      } finally {
+        document.removeEventListener('keydown', documentListener);
+      }
+      expect(documentListener).not.toHaveBeenCalled();
+      expect(notCancelled).toBe(false);
+      expect(reasonInput()).toBeNull();
+    });
+
+    it('stops at the prompt for React handlers of its ancestors', () => {
+      const onKeyDown = vi.fn();
+      render(
+        <div onKeyDown={onKeyDown}>
+          {ticketElement(makeTicket('IN REVIEW'))}
+        </div>
+      );
+      const input = openPrompt();
+
+      fireEvent.keyDown(input, { key: 'Escape' });
+      expect(onKeyDown).not.toHaveBeenCalled();
+      expect(reasonInput()).toBeNull();
+
+      // Other keys still bubble as before.
+      const reopened = openPrompt();
+      fireEvent.keyDown(reopened, { key: 'a' });
+      expect(onKeyDown).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['isComposing', { isComposing: true }],
+      ['keyCode 229', { keyCode: 229 }]
+    ])('does not close while an IME composition is in progress (%s)', (_label, init) => {
+      renderTicket('IN REVIEW');
+      const input = openPrompt();
+      fireEvent.change(input, { target: { value: '理由' } });
+
+      const notCancelled = fireEvent.keyDown(input, { key: 'Escape', ...init });
+
+      expect(notCancelled).toBe(true);
+      expect(reasonInput()).toBe(input);
+      expect(input.value).toBe('理由');
+      expect(document.activeElement).toBe(input);
+    });
+
+    it('does not close while the rejection is being submitted', async () => {
+      const respond = stubHeldCompletes();
+      renderTicket('IN REVIEW');
+      rejectWithReason(GATE_ID);
+      const input = reasonInput() as HTMLInputElement;
+      input.focus();
+
+      const notCancelled = fireEvent.keyDown(input, { key: 'Escape' });
+
+      expect(notCancelled).toBe(true);
+      expect(reasonInput()).toBe(input);
+      expect(input.value).toBe('理由');
+
+      await respond(GATE_ID, new Response('{}', { status: 200 }));
+      await waitFor(() => expect(reasonInput()).toBeNull());
+    });
+  });
+
+  // DFLT-00174: a failed rejection leaves the prompt up; focus goes back to
+  // its reason field unless the user moved elsewhere meanwhile.
+  describe('when the rejection fails', () => {
+    const failure = () =>
+      new Response(JSON.stringify({ error: { code: 'INVALID_NODE_STATE', message: 'refused' } }), { status: 409 });
+    const errorShown = () => expect(screen.getByText(i18n.t('errors.INVALID_NODE_STATE'))).not.toBeNull();
+
+    it('brings focus back to the reason field when it fell to <body>', async () => {
+      const respond = stubHeldCompletes();
+      renderTicket('IN REVIEW');
+      rejectWithReason(GATE_ID);
+      // Some browsers drop focus from the button that turned disabled.
+      (document.activeElement as HTMLElement).blur();
+      expect(document.activeElement).toBe(document.body);
+
+      await respond(GATE_ID, failure());
+
+      const input = reasonInput() as HTMLInputElement;
+      await waitFor(() => expect(document.activeElement).toBe(input));
+      expect(input.value).toBe('理由');
+      expect(confirmRejectButton()).toHaveProperty('disabled', false);
+      errorShown();
+      expectNoAnnouncement();
+    });
+
+    it('moves focus from the confirm button to the reason field', async () => {
+      const respond = stubHeldCompletes();
+      renderTicket('IN REVIEW');
+      const input = openPrompt();
+      fireEvent.change(input, { target: { value: '理由' } });
+      // Clicking the button focuses it; jsdom keeps focus there once it
+      // turns disabled.
+      const confirm = confirmRejectButton() as HTMLElement;
+      confirm.focus();
+      fireEvent.click(confirm);
+      expect(document.activeElement).toBe(confirm);
+
+      await respond(GATE_ID, failure());
+
+      await waitFor(() => expect(document.activeElement).toBe(reasonInput()));
+      expect((reasonInput() as HTMLInputElement).value).toBe('理由');
+      errorShown();
+    });
+
+    it('leaves focus on a control the user moved to during the submit', async () => {
+      const respond = stubHeldCompletes();
+      renderTicket('IN REVIEW');
+      rejectWithReason(GATE_ID);
+      const elsewhere = screen.getByTestId('ticket-copy-id');
+      elsewhere.focus();
+
+      await respond(GATE_ID, failure());
+
+      await waitFor(() => expect(confirmRejectButton()).toHaveProperty('disabled', false));
+      expect(reasonInput()).not.toBeNull();
+      expect(document.activeElement).toBe(elsewhere);
+    });
+
+    it('can then be cancelled with Escape', async () => {
+      const respond = stubHeldCompletes();
+      renderTicket('IN REVIEW');
+      rejectWithReason(GATE_ID);
+      await respond(GATE_ID, failure());
+      await waitFor(() => expect(document.activeElement).toBe(reasonInput()));
+
+      fireEvent.keyDown(reasonInput() as HTMLElement, { key: 'Escape' });
+
+      expect(reasonInput()).toBeNull();
+      expect(document.activeElement).toBe(rejectButton());
+    });
+  });
+
   it('announces the rejection once when a poll removes the prompt before the POST responds, and leaves nothing behind', async () => {
     let respond: (res: Response) => void = () => {};
     stubComplete(() => new Promise<Response>(resolve => (respond = resolve)));

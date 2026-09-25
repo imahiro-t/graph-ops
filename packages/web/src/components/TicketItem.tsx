@@ -194,15 +194,53 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
 }) => {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
     const container = containerRef.current;
     onMount(nodeId);
     return () => onUnmount(nodeId, container?.contains(document.activeElement) ?? false);
   }, [nodeId, onMount, onUnmount]);
 
+  // DFLT-00174: a submit that ends while this prompt is still mounted has
+  // failed -- a successful rejection closes the prompt before its submitting
+  // state is cleared, so this component is gone by then. The confirm button
+  // turning disabled mid-submit may have dropped focus to <body> (browser
+  // dependent), so bring it back to the reason field, where the user can fix
+  // the reason or retry. Only when focus is nowhere or still inside the
+  // prompt: a user who moved elsewhere during the submit is left there.
+  const wasSubmittingRef = useRef(isSubmitting);
+  useEffect(() => {
+    const submitEnded = wasSubmittingRef.current && !isSubmitting;
+    wasSubmittingRef.current = isSubmitting;
+    if (!submitEnded) return;
+    const active = document.activeElement;
+    const focusIsNowhere = active === null || active === document.body;
+    if (focusIsNowhere || containerRef.current?.contains(active)) inputRef.current?.focus();
+  }, [isSubmitting]);
+
+  // DFLT-00174: Escape anywhere in the prompt does what the Cancel button
+  // does (close, drop the draft, focus back to the Reject button). Not while
+  // submitting -- Cancel is disabled then -- nor while an IME composition is
+  // in progress (the Escape belongs to the IME). A handled Escape goes no
+  // further: stopPropagation for React ancestors, preventDefault for the
+  // document-level listeners (App, useModalDialog) that skip defaultPrevented
+  // events.
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Escape' || e.nativeEvent.isComposing || e.keyCode === 229 || isSubmitting) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onCancel();
+  };
+
   return (
-    <div ref={containerRef} className="px-3 pb-3 -mt-1 flex items-center gap-2" onClick={e => e.stopPropagation()}>
+    <div
+      ref={containerRef}
+      className="px-3 pb-3 -mt-1 flex items-center gap-2"
+      onClick={e => e.stopPropagation()}
+      onKeyDown={handleKeyDown}
+    >
       <input
+        ref={inputRef}
         type="text"
         autoFocus
         value={draft}
