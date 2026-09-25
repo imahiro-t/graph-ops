@@ -240,16 +240,17 @@ export const App: React.FC = () => {
   // Escape another handler already took, or one that cancels an IME
   // composition, is left alone -- the same rules as useModalDialog.
   //
-  // Focus anywhere else is left alone too: the menu stays open when Tab
-  // moves focus past it, so a modal can be opened from the next header
-  // button on top of it. The menu's listener was registered first and so
-  // runs before the modal's (useModalDialog), and taking that Escape would
-  // leave the modal open with focus pulled out of it behind it. Focus inside
-  // the modal is not the only case: clicking the modal's backdrop drops
-  // focus to <body>, which on its own counts as "on the switcher" below. So
-  // while any modal dialog (aria-modal="true" -- every modal in the app,
-  // dialog or alertdialog; the menu itself is non-modal) is open, the menu
-  // leaves Escape to it wherever focus is.
+  // Focus anywhere else is left alone too. Tab past the button and the menu
+  // closes the menu (DFLT-00159, handleProjectSwitcherBlur below), but a
+  // click or blur() that drops focus to <body> leaves it open, so a modal
+  // can still end up open on top of it. The menu's listener was registered
+  // first and so runs before the modal's (useModalDialog), and taking that
+  // Escape would leave the modal open with focus pulled out of it behind it.
+  // Clicking the modal's backdrop also drops focus to <body>, which on its
+  // own counts as "on the switcher" below. So, as a defense, while any modal
+  // dialog (aria-modal="true" -- every modal in the app, dialog or
+  // alertdialog; the menu itself is non-modal) is open, the menu leaves
+  // Escape to it wherever focus is.
   useEffect(() => {
     if (!isProjectMenuOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -272,6 +273,38 @@ export const App: React.FC = () => {
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [isProjectMenuOpen]);
+  // DFLT-00159: the menu closes when keyboard focus leaves the button and the
+  // menu. Whether a focusout came from Tab is recorded on keydown (Tab, or
+  // Shift+Tab, without Ctrl/Meta/Alt, which switch tabs or apps) and
+  // consumed by the very next focusout; any other key or a pointerdown
+  // clears it, so a record left behind by a Tab that moved no focus never
+  // outlives the next interaction.
+  const tabLeavingRef = useRef(false);
+  const handleProjectSwitcherKeyDown = (e: React.KeyboardEvent) => {
+    tabLeavingRef.current =
+      e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.nativeEvent.isComposing;
+  };
+  const handleProjectSwitcherPointerDown = () => {
+    tabLeavingRef.current = false;
+  };
+  const handleProjectSwitcherBlur = (e: React.FocusEvent) => {
+    const viaTab = tabLeavingRef.current;
+    tabLeavingRef.current = false;
+    if (!isProjectMenuOpen) return;
+    const next = e.relatedTarget;
+    if (
+      next instanceof Node &&
+      (projectMenuButtonRef.current?.contains(next) || projectMenuRef.current?.contains(next))
+    ) {
+      return; // Moving between the button and the menu's items.
+    }
+    // No next element: focus left the page (Tab out of the first element, a
+    // window or tab switch) or fell to <body> (a click on something
+    // unfocusable, blur()). Only Tab closes here; closing on a click would
+    // unmount the menu before the click on an item or the backdrop lands.
+    if (next === null && !viaTab) return;
+    setIsProjectMenuOpen(false);
+  };
   // The directory `graph-engine ui` asked a project to be set up for (see
   // the newProject query effect below), or '' when the dialog was opened
   // from the header's "New project..." entry.
@@ -1013,13 +1046,20 @@ export const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="relative">
+            <div
+              className="relative"
+              onKeyDown={handleProjectSwitcherKeyDown}
+              onPointerDown={handleProjectSwitcherPointerDown}
+              onBlur={handleProjectSwitcherBlur}
+            >
               {/* aria-haspopup="dialog", not "menu" (DFLT-00155): the popup
                   is a plain non-modal group of buttons walked with Tab, so it
                   is a role="dialog". "menu" would promise the WAI-ARIA menu
                   button pattern (menuitems, arrow-key focus, Tab closes),
-                  which this popup does not implement. aria-controls only
-                  while open: the popup is not rendered while closed. */}
+                  which this popup does not implement. Like one, though, it
+                  closes when keyboard focus leaves the button and the popup
+                  (DFLT-00159). aria-controls only while open: the popup is
+                  not rendered while closed. */}
               <button
                 ref={projectMenuButtonRef}
                 type="button"

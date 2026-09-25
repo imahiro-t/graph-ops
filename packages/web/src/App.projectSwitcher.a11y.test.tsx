@@ -3,12 +3,19 @@
 // (aria-haspopup="dialog", matching the popup's role="dialog"), and Escape
 // closes the open popup and puts focus back on the button.
 //
+// DFLT-00159: the open menu closes when keyboard focus (Tab / Shift+Tab)
+// leaves the button and the menu -- to another element on the page, or off
+// the page from the first element. Moving between the button and the items
+// keeps it open, and so does focus falling to <body> or off the page by a
+// click, blur() or a window switch, so the click on an item or the backdrop
+// is never lost.
+//
 // DFLT-00158: the menu marks the current project's item with
 // aria-current="true" (and on no other item), and hides the decorative check
 // mark from assistive technology.
 //
 // fetch is served by test/fakeBackend.ts.
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
@@ -216,23 +223,30 @@ describe('project switcher accessibility', () => {
       expect(popup()).not.toBeNull();
     });
 
-    // QA round 1: the menu stays open when Tab moves focus past it, so a
-    // modal can be opened from the next header button on top of it. Its
-    // Escape belongs to the modal, not to the menu behind it.
+    // Leaves the menu open with focus outside it: Tab past the menu would
+    // close it (DFLT-00159), so drop focus to <body> first (a blur with no
+    // next element, which leaves the menu open) and move on from there. The
+    // move from <body> to the target is no focusout of the switcher, so the
+    // menu stays open behind it. jsdom has no hit testing, which lets the
+    // click reach the target despite the menu's backdrop.
+    async function leaveOpenMenuFor(user: ReturnType<typeof userEvent.setup>, target: HTMLElement) {
+      await user.click(switcher());
+      act(() => (document.activeElement as HTMLElement | null)?.blur());
+      expect(document.body).toHaveFocus();
+      expect(popup()).not.toBeNull();
+      await user.click(target);
+    }
+
+    // QA round 1: a modal opened from another header button while the menu is
+    // still open behind it (focus fell to <body> first). Its Escape belongs
+    // to the modal, not to the menu behind it.
     it('lets a modal opened over the open menu take Escape, keeping focus in the modal until it closes', async () => {
       const user = await renderApp();
-      await user.click(switcher());
-      switcher().focus();
-      // Button -> Alpha -> Beta -> "New project..." -> "Launch Claude".
-      await user.tab();
-      await user.tab();
-      await user.tab();
-      await user.tab();
       const launch = screen.getByRole('button', { name: i18n.t('header.launchClaude') });
-      expect(launch).toHaveFocus();
+      await leaveOpenMenuFor(user, launch);
       expect(popup()).not.toBeNull();
+      expect(switcher()).toHaveAttribute('aria-expanded', 'true');
 
-      await user.keyboard('{Enter}');
       const modal = await screen.findByRole('dialog', { name: i18n.t('claudeRunnerModal.title') });
       expect(modal).toHaveAttribute('aria-modal', 'true');
       expect(modal).toContainElement(document.activeElement as HTMLElement);
@@ -243,6 +257,8 @@ describe('project switcher accessibility', () => {
       expect(screen.queryByRole('dialog', { name: i18n.t('claudeRunnerModal.title') })).toBeNull();
       expect(launch).toHaveFocus();
       expect(switcher()).not.toHaveFocus();
+      expect(popup()).not.toBeNull();
+      expect(switcher()).toHaveAttribute('aria-expanded', 'true');
     });
 
     // Accessibility review round 2: clicking the modal's backdrop drops focus
@@ -250,16 +266,9 @@ describe('project switcher accessibility', () => {
     // still owns that Escape.
     it('lets a modal opened over the open menu take Escape when focus has fallen to <body>', async () => {
       const user = await renderApp();
-      await user.click(switcher());
-      switcher().focus();
-      await user.tab();
-      await user.tab();
-      await user.tab();
-      await user.tab();
       const launch = screen.getByRole('button', { name: i18n.t('header.launchClaude') });
-      expect(launch).toHaveFocus();
+      await leaveOpenMenuFor(user, launch);
 
-      await user.keyboard('{Enter}');
       await screen.findByRole('dialog', { name: i18n.t('claudeRunnerModal.title') });
       (document.activeElement as HTMLElement | null)?.blur();
       expect(document.body).toHaveFocus();
@@ -302,8 +311,11 @@ describe('project switcher accessibility', () => {
     it('leaves the menu and the event alone when focus is outside the button and the menu', async () => {
       const user = await renderApp();
       await user.click(switcher());
+      // Via <body>, so no focusout of the switcher closes the menu first.
+      act(() => (document.activeElement as HTMLElement | null)?.blur());
       const launch = screen.getByRole('button', { name: i18n.t('header.launchClaude') });
       launch.focus();
+      expect(popup()).not.toBeNull();
 
       const notCancelled = fireEvent.keyDown(launch, { key: 'Escape' });
       expect(notCancelled).toBe(true);
@@ -323,6 +335,177 @@ describe('project switcher accessibility', () => {
       await user.click(switcher());
       expect(popup()).not.toBeNull();
       await waitFor(() => expect(pendingRequests()).toBe(2));
+    });
+  });
+
+  describe('focus leaving the switcher', () => {
+    function launch() {
+      return screen.getByRole('button', { name: i18n.t('header.launchClaude') });
+    }
+
+    function createNewItem() {
+      return within(popup()!).getByRole('button', { name: i18n.t('projectSwitcher.createNew') });
+    }
+
+    function expectClosed() {
+      expect(popup()).toBeNull();
+      expect(switcher()).toHaveAttribute('aria-expanded', 'false');
+      expect(switcher()).not.toHaveAttribute('aria-controls');
+    }
+
+    function expectOpen() {
+      expect(popup()).not.toBeNull();
+      expect(switcher()).toHaveAttribute('aria-expanded', 'true');
+    }
+
+    it('closes the menu when Tab moves focus from its last item to the next header button', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+      switcher().focus();
+      // Button -> Alpha -> Beta -> "New project..."
+      await user.tab();
+      await user.tab();
+      await user.tab();
+      expect(createNewItem()).toHaveFocus();
+      expectOpen();
+
+      await user.tab();
+      expect(launch()).toHaveFocus();
+      expectClosed();
+    });
+
+    it('closes the menu when Shift+Tab moves focus from the button to an element before it', async () => {
+      const outside = document.createElement('button');
+      outside.textContent = 'before the app';
+      document.body.insertBefore(outside, document.body.firstChild);
+      try {
+        const user = await renderApp();
+        await user.click(switcher());
+        switcher().focus();
+
+        await user.tab({ shift: true });
+        expect(outside).toHaveFocus();
+        expectClosed();
+      } finally {
+        outside.remove();
+      }
+    });
+
+    it('closes the menu when Shift+Tab moves focus off the page from the button', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+      switcher().focus();
+
+      // The button is the page's first focusable element: jsdom moves focus
+      // to <body> (a browser to its own UI), a focusout with no next element.
+      await user.tab({ shift: true });
+      expect(document.body).toHaveFocus();
+      expectClosed();
+    });
+
+    it('keeps the menu open while focus moves between the button and its items', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+      switcher().focus();
+
+      for (const expected of [() => menuItem(alpha), () => menuItem(beta), createNewItem]) {
+        await user.tab();
+        expect(expected()).toHaveFocus();
+        expectOpen();
+      }
+      for (const expected of [() => menuItem(beta), () => menuItem(alpha), () => switcher()]) {
+        await user.tab({ shift: true });
+        expect(expected()).toHaveFocus();
+        expectOpen();
+      }
+    });
+
+    it('keeps the menu open when focus falls to <body>, and the backdrop still closes it', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+      act(() => (document.activeElement as HTMLElement | null)?.blur());
+      expect(document.body).toHaveFocus();
+      expectOpen();
+
+      await user.click(screen.getByTestId('project-switcher-overlay'));
+      expectClosed();
+    });
+
+    it('still switches projects on an item click after focus fell to <body>', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+      menuItem(beta).focus();
+      act(() => menuItem(beta).blur());
+      expect(document.body).toHaveFocus();
+      expectOpen();
+
+      await user.click(menuItem(beta));
+      await screen.findByText('BBB-00001');
+      expect(popup()).toBeNull();
+      expect(switcher(beta.name)).toHaveAttribute('aria-expanded', 'false');
+    });
+
+    it('returns focus to the button, with the menu closed, when the new-project modal opened from the menu closes', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+      switcher().focus();
+      await user.tab();
+      await user.tab();
+      await user.tab();
+      expect(createNewItem()).toHaveFocus();
+
+      await user.keyboard('{Enter}');
+      const modal = await screen.findByRole('dialog', { name: i18n.t('createProjectModal.title') });
+      expect(modal).toHaveAttribute('aria-modal', 'true');
+      expectClosed();
+
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('dialog', { name: i18n.t('createProjectModal.title') })).toBeNull();
+      expect(switcher()).toHaveFocus();
+      expectClosed();
+    });
+
+    it('still refetches the pending-approval counts when the menu reopens after Tab closed it', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+      await waitFor(() => expect(pendingRequests()).toBe(1));
+      switcher().focus();
+      await user.tab();
+      await user.tab();
+      await user.tab();
+      await user.tab();
+      expect(launch()).toHaveFocus();
+      expectClosed();
+
+      await user.click(switcher());
+      expectOpen();
+      await waitFor(() => expect(pendingRequests()).toBe(2));
+    });
+
+    it('does not take a Tab with Ctrl, Meta or Alt, or one followed by a pointerdown, as leaving by keyboard', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+
+      for (const modifier of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }]) {
+        switcher().focus();
+        fireEvent.keyDown(switcher(), { key: 'Tab', ...modifier });
+        act(() => switcher().blur());
+        expect(document.body).toHaveFocus();
+        expectOpen();
+      }
+
+      // A plain Tab's record does not carry over to a later click.
+      switcher().focus();
+      fireEvent.keyDown(switcher(), { key: 'Tab' });
+      fireEvent.pointerDown(switcher());
+      act(() => switcher().blur());
+      expectOpen();
+
+      // Control: a plain Tab straight before the same focusout does close it.
+      switcher().focus();
+      fireEvent.keyDown(switcher(), { key: 'Tab' });
+      act(() => switcher().blur());
+      expectClosed();
     });
   });
 
