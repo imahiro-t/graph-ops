@@ -8,8 +8,9 @@
 // the page from the first element. Moving between the button and the items
 // keeps it open, and so does focus falling to <body> or off the page by a
 // click, blur() or a window switch, so the click on an item or the backdrop
-// is never lost. A Tab pressed with Ctrl, Meta or Alt, or one that confirms
-// an IME composition, is not taken as keyboard focus leaving (DFLT-00160).
+// is never lost. A Tab pressed with Ctrl, Meta or Alt, or one pressed during
+// an IME composition, is not taken as keyboard focus leaving (the IME case is
+// pinned by a test since DFLT-00160).
 //
 // DFLT-00158: the menu marks the current project's item with
 // aria-current="true" (and on no other item), and hides the decorative check
@@ -509,7 +510,7 @@ describe('project switcher accessibility', () => {
       expectClosed();
     });
 
-    it('does not take a Tab that confirms an IME composition as leaving by keyboard', async () => {
+    it('does not take a Tab pressed during an IME composition as leaving by keyboard', async () => {
       const user = await renderApp();
       await user.click(switcher());
 
