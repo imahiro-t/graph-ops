@@ -241,6 +241,60 @@ describe('project switcher accessibility', () => {
       expect(switcher()).not.toHaveFocus();
     });
 
+    // Accessibility review round 2: clicking the modal's backdrop drops focus
+    // to <body>, which alone would count as "on the switcher". The modal
+    // still owns that Escape.
+    it('lets a modal opened over the open menu take Escape when focus has fallen to <body>', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+      switcher().focus();
+      await user.tab();
+      await user.tab();
+      await user.tab();
+      await user.tab();
+      const launch = screen.getByRole('button', { name: i18n.t('header.launchClaude') });
+      expect(launch).toHaveFocus();
+
+      await user.keyboard('{Enter}');
+      await screen.findByRole('dialog', { name: i18n.t('claudeRunnerModal.title') });
+      (document.activeElement as HTMLElement | null)?.blur();
+      expect(document.body).toHaveFocus();
+
+      await user.keyboard('{Escape}');
+      // The modal closes and focus goes back to its opener; the menu behind
+      // it is untouched and focus does not jump to the switcher button.
+      expect(screen.queryByRole('dialog', { name: i18n.t('claudeRunnerModal.title') })).toBeNull();
+      expect(popup()).not.toBeNull();
+      expect(switcher()).toHaveAttribute('aria-expanded', 'true');
+      expect(launch).toHaveFocus();
+      expect(switcher()).not.toHaveFocus();
+    });
+
+    it('leaves Escape alone while any aria-modal dialog is open, whatever has focus', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+      // A stand-in for any modal (e.g. ConfirmDialog's alertdialog) that has
+      // no Escape handler of its own, so the event reaches only the menu.
+      const modal = document.createElement('div');
+      modal.setAttribute('role', 'alertdialog');
+      modal.setAttribute('aria-modal', 'true');
+      document.body.appendChild(modal);
+      try {
+        for (const target of [document.body, switcher(), menuItem(beta)]) {
+          const notCancelled = fireEvent.keyDown(target, { key: 'Escape' });
+          expect(notCancelled).toBe(true);
+          expect(popup()).not.toBeNull();
+          expect(switcher()).toHaveAttribute('aria-expanded', 'true');
+        }
+      } finally {
+        modal.remove();
+      }
+      // Once the modal is gone, Escape closes the menu again.
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+      expect(popup()).toBeNull();
+      expect(switcher()).toHaveFocus();
+    });
+
     it('leaves the menu and the event alone when focus is outside the button and the menu', async () => {
       const user = await renderApp();
       await user.click(switcher());

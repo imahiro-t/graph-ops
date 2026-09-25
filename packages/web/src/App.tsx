@@ -244,12 +244,18 @@ export const App: React.FC = () => {
   // moves focus past it, so a modal can be opened from the next header
   // button on top of it. The menu's listener was registered first and so
   // runs before the modal's (useModalDialog), and taking that Escape would
-  // leave the modal open with focus pulled out of it behind it.
+  // leave the modal open with focus pulled out of it behind it. Focus inside
+  // the modal is not the only case: clicking the modal's backdrop drops
+  // focus to <body>, which on its own counts as "on the switcher" below. So
+  // while any modal dialog (aria-modal="true" -- every modal in the app,
+  // dialog or alertdialog; the menu itself is non-modal) is open, the menu
+  // leaves Escape to it wherever focus is.
   useEffect(() => {
     if (!isProjectMenuOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.key !== 'Escape') return;
       if (e.isComposing || e.keyCode === 229) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
       const target = e.target;
       const focusIsOnSwitcher =
         !(target instanceof Node) ||
