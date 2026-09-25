@@ -16,7 +16,8 @@ import {
   MonitorCog,
   Languages
 } from 'lucide-react';
-import { Label, TicketDetail, TicketGraph, TicketStatus, TicketPriority, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
+import { AutopilotRun, Label, TicketDetail, TicketGraph, TicketStatus, TicketPriority, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
+import { descendantsIndex, fetchAutopilotRuns, ticketAutopilotView } from './lib/autopilotApi';
 import { getStatusMeta, matchesStatusFilter } from './statusMeta';
 import { getPriorityMeta, matchesPriorityFilter } from './priorityMeta';
 import { matchesLabelFilter } from './labelMeta';
@@ -72,6 +73,7 @@ interface ProjectScoped<T> {
 
 const NO_LABELS: Label[] = [];
 const NO_TICKETS: TicketDetail[] = [];
+const NO_RUNS: AutopilotRun[] = [];
 
 // How often the dashboard re-reads the ticket list. Unchanged by DFLT-00112
 // (that ticket cut the number of requests per round, not their frequency);
@@ -293,6 +295,43 @@ export const App: React.FC = () => {
   useEffect(() => {
     refreshProjectLabels(currentProject?.id ?? '');
   }, [currentProject?.id, refreshProjectLabels]);
+
+  // The current project's autopilot runs (DFLT-00142 phase 5): what the
+  // badges and the autopilot buttons' enabled state are derived from.
+  // Refreshed like the labels -- on a project switch, with every ticket
+  // (re)fetch (so the regular poll moves the badges along), and right after
+  // a start from a ticket -- and tagged with the project for the same
+  // reason.
+  const [runList, setRunList] = useState<ProjectScoped<AutopilotRun[]> | null>(null);
+  const autopilotRuns = useMemo(
+    () => (currentProjectId && runList?.projectId === currentProjectId ? runList.value : NO_RUNS),
+    [currentProjectId, runList]
+  );
+  const refreshAutopilotRuns = useCallback(
+    async (projectId: string = currentProjectIdRef.current) => {
+      if (!projectId) {
+        setRunList(null);
+        return;
+      }
+      try {
+        const runs = await fetchAutopilotRuns(tRef.current, projectId);
+        if (projectId === currentProjectIdRef.current) setRunList({ projectId, value: runs });
+      } catch (e) {
+        // Keep the previous runs: the server still refuses a duplicate.
+        console.error('Failed to load autopilot runs', e);
+      }
+    },
+    [currentProjectIdRef, tRef]
+  );
+  useEffect(() => {
+    refreshAutopilotRuns(currentProject?.id ?? '');
+  }, [currentProject?.id, refreshAutopilotRuns]);
+  const handleAutopilotChanged = useCallback(() => {
+    void refreshAutopilotRuns();
+  }, [refreshAutopilotRuns]);
+  // Every ticket's descendants, from the whole list's parent_ticket_id: a
+  // tree start is refused when an active run roots below the ticket.
+  const descendantsOf = useMemo(() => descendantsIndex(tickets), [tickets]);
   // A selected label that no longer exists in the current project (deleted,
   // or left behind by a project switch) is dropped from the selection, so
   // the filter never narrows by a label the panel can't show.
@@ -334,6 +373,10 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (lastFetchedAt) refreshProjectLabels();
   }, [lastFetchedAt, refreshProjectLabels]);
+  // The autopilot runs follow every ticket fetch the same way (DFLT-00142).
+  useEffect(() => {
+    if (lastFetchedAt) void refreshAutopilotRuns();
+  }, [lastFetchedAt, refreshAutopilotRuns]);
 
   // Modals
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -1176,6 +1219,8 @@ export const App: React.FC = () => {
                   onRefresh={refreshTickets}
                   myName={myName}
                   projectLabels={projectLabels}
+                  autopilot={ticketAutopilotView(autopilotRuns, ticket.id, descendantsOf)}
+                  onAutopilotChanged={handleAutopilotChanged}
                 />
               ))}
 

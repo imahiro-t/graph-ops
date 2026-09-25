@@ -429,9 +429,12 @@ func TestFlow_FinalizeFailureStopsAndRetriesOnlyFinalize(t *testing.T) {
 				t.Fatalf("again = %+v", again)
 			}
 			next, _ := h.svc.Next(run.RunID)
-			if next.Action.Action != autopilot.ActionLaunch || next.Role != autopilot.RoleFinalize || next.Ticket != r ||
-				next.Worktree != h.st(run.RunID, r).Worktree {
+			if next.Action.Action != autopilot.ActionLaunch || next.Role != autopilot.RoleFinalize || next.Ticket != r {
 				t.Fatalf("next = %+v", next)
+			}
+			// finalize runs in the root's worktree.
+			if lr, err := h.svc.Launch(run.RunID, r, autopilot.RoleFinalize); err != nil || lr.Worktree != h.st(run.RunID, r).Worktree {
+				t.Fatalf("launch = %+v, %v", lr, err)
 			}
 			h.drive(run.RunID, nil)
 			if len(h.workLaunches()) != workBefore || h.run(run.RunID).State != autopilot.RunFinished {

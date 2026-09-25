@@ -69,6 +69,9 @@ type harness struct {
 	// behave overrides the default worker per ticket (and role, keyed
 	// "<ticket>/<role>").
 	behave map[string]worker
+	// launchWorker, when set, handles every launch instead of behave and
+	// the default worker (the scale test's tree-growing worker).
+	launchWorker worker
 	// launchErr makes the launcher fail.
 	launchErr error
 	// actions is every action next returned, as "action ticket role".
@@ -217,6 +220,10 @@ func (h *harness) launch(workDir string, args []string, prompt string) error {
 	h.mu.Lock()
 	h.launches = append(h.launches, call)
 	h.mu.Unlock()
+	if h.launchWorker != nil {
+		h.launchWorker(&workerCall{h: h, launchCall: call})
+		return nil
+	}
 	w := h.behave[call.Ticket+"/"+call.Role]
 	if w == nil {
 		w = h.behave[call.Ticket]

@@ -101,6 +101,46 @@
     "cancel": "Cancel",
     "submit": "Create"
   },
+  "autopilot": {
+    "buttons": {
+      "ticket": "Autopilot (single)",
+      "tree": "Autopilot (tree)"
+    },
+    "modes": {
+      "ticket": "single",
+      "tree": "tree"
+    },
+    "confirm": {
+      "ticket": "Process ticket {{id}} with the autopilot (single)? Claude Code starts in another terminal and takes it from refinement to release without asking anyone.",
+      "tree": "Process ticket {{id}} and its descendants with the autopilot (tree)? Claude Code starts in another terminal and takes each ticket from refinement to release, one after another, without asking anyone.",
+      "resume": "Resume the stopped or interrupted autopilot ({{mode}}) of ticket {{id}} from where it stopped?"
+    },
+    "started": "The autopilot started ({{runId}}). The work begins in another terminal.",
+    "resumed": "The stopped or interrupted autopilot was resumed ({{runId}}). The work continues in another terminal.",
+    "failed": "Could not start the autopilot: {{message}}",
+    "blocked": "An autopilot run started from {{root}} is running, so none can be started from this ticket.",
+    "blockedDescendant": "An autopilot run started from the descendant {{root}} is running, so a tree run cannot be started here.",
+    "finished": "An autopilot cannot be started from a DONE or CLOSED ticket.",
+    "badges": {
+      "running": "Autopilot running",
+      "processing": "Processing",
+      "awaitingHuman": "Waiting for a person",
+      "waiting": "Waiting",
+      "awaitingTitle": "Waiting for a person: {{what}}"
+    },
+    "decisions": {
+      "title": "Automatic decisions ({{count}})",
+      "open": "Open {{name}} in a new tab",
+      "kinds": {
+        "refine": "Refinement decision",
+        "approval": "Approval gate decision",
+        "iteration": "Iteration limit decision",
+        "release": "Release decision",
+        "handoff": "Hand-off decision",
+        "treeSummary": "Tree summary"
+      }
+    }
+  },
   "ticketItem": {
     "selfAssign": {
       "assign": "Assign to me",
@@ -598,7 +638,13 @@
     "UNKNOWN": "An unexpected error occurred. Please try again.",
     "HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED": "The saved token cannot be used for a different endpoint URL. Enter the token again after changing the URL.",
     "HOME_CONFIG_UNAVAILABLE": "Your home directory could not be resolved, so there is no config file to save to and nothing was saved. Settings are only ever read from $HOME/.graph-ops/config.json and environment variables.",
-    "AUTOPILOT_SETTING_LOCKED": "Settings fixed by the team settings cannot be saved. Save again without changing them."
+    "AUTOPILOT_SETTING_LOCKED": "Settings fixed by the team settings cannot be saved. Save again without changing them.",
+    "AUTOPILOT_ALREADY_RUNNING": "An autopilot run is already running on a tree that includes this ticket. Wait for it to finish, or start again once it has stopped.",
+    "AUTOPILOT_ROOT_FINISHED": "This ticket is DONE or CLOSED, so no autopilot can be started from it. To process an unfinished descendant, start from that ticket.",
+    "PROJECT_LOCAL_PATH_NOT_SET": "This project has no local path in this environment. Set it in the project settings, then start again.",
+    "AUTOPILOT_RUN_NOT_FOUND": "The autopilot run was not found.",
+    "AUTOPILOT_INVALID_STATE": "The autopilot run is in a state that does not accept this operation. Reload the page and try again.",
+    "AUTOPILOT_REGISTRY_LOCKED": "The autopilot's run records are busy. Wait a moment and try again."
   },
   "labels": {
     "colors": {

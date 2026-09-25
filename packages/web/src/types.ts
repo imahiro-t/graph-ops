@@ -604,3 +604,45 @@ export interface AutopilotSettingsResponse {
 // A PUT body: only the keys to change. A value stores it locally; null
 // removes the local value (back to the inherited one).
 export type AutopilotSettingsPatch = Partial<Record<AutopilotSettingKey, AutopilotSettingValue | null>>;
+
+// DFLT-00142 phase 5: the autopilot runs the Web UI starts and shows.
+export type AutopilotMode = 'ticket' | 'tree';
+
+// One run in GET /api/autopilot/runs?project_id=<id> (newest first: the
+// active runs plus a few recent inactive ones).
+export interface AutopilotRun {
+  run_id: string;
+  project_id: string;
+  mode: AutopilotMode;
+  root: string;
+  // starting (reserved by the Web UI, not yet adopted by its orchestrator) /
+  // running / finalizing / finished / stopped.
+  state: string;
+  // Not finished/stopped and its heartbeat is recent: the only runs that
+  // block a start and get badges.
+  active: boolean;
+  heartbeat: string;
+  // The ticket whose child session is running, its role, and what it waits
+  // for a person on (absent when it does not).
+  current?: string;
+  current_role?: string;
+  awaiting_human?: string;
+  stop_reason?: string;
+  // Every ticket the run has reached so far, with its state in the run
+  // (queued / launched / done / failed / blocked / skipped).
+  tickets: Record<string, string>;
+  // For an active run: the tickets it owns (the root and, for a tree run,
+  // all its descendants, reached or not). Empty for an inactive run.
+  members: string[];
+}
+
+// POST /api/tickets/{id}/autopilot's answer.
+export interface AutopilotStartResponse {
+  run_id: string;
+  mode: AutopilotMode;
+  root: string;
+  state: string;
+  created: boolean;
+  // An interrupted or stopped run of the same root and mode was taken over.
+  resumed: boolean;
+}

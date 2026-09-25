@@ -11,7 +11,20 @@
 // Mutating `backend.tickets` / `backend.labels` / `backend.currentProjectId`
 // between renders is the intended way to simulate a change on the server.
 import { vi } from 'vitest';
-import { ArtifactType, LabelColor, NodeStatus, NodeType, Project, TicketPriority, TicketStatus } from '../types';
+import {
+  ArtifactType,
+  AutopilotMode,
+  AutopilotRun,
+  LabelColor,
+  NodeStatus,
+  NodeType,
+  Project,
+  TicketPriority,
+  TicketStatus
+} from '../types';
+
+// Answers POST /api/tickets/{id}/autopilot: an HTTP status and body.
+export type FakeAutopilotStart = (ticketId: string, mode: AutopilotMode) => { status: number; body: unknown };
 
 export interface FakeLabel {
   id: string;
@@ -72,6 +85,11 @@ export interface FakeBackendSeed {
   // GET /api/settings/app's effective paginationPageSize, i.e. how many
   // tickets a page of the list holds. Defaults to the app's own default.
   paginationPageSize?: number;
+  // DFLT-00142: GET /api/autopilot/runs answers these (filtered by
+  // project_id); POST /api/tickets/{id}/autopilot answers with
+  // autopilotStart, by default a fresh reservation.
+  autopilotRuns?: AutopilotRun[];
+  autopilotStart?: FakeAutopilotStart;
 }
 
 export interface FakeBackend extends Required<FakeBackendSeed> {
@@ -160,6 +178,13 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
     tickets: seed.tickets,
     currentProjectId: seed.currentProjectId,
     paginationPageSize: seed.paginationPageSize ?? 10,
+    autopilotRuns: seed.autopilotRuns ?? [],
+    autopilotStart:
+      seed.autopilotStart ??
+      ((ticketId, mode) => ({
+        status: 200,
+        body: { run_id: 'run-1', mode, root: ticketId, state: 'starting', created: true, resumed: false }
+      })),
 
     async fetch(input, init) {
       const url = String(input);
@@ -233,6 +258,14 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
       // immediately; nothing is created here. It is answered so a test can
       // drive that flow and watch the refetch it triggers afterwards.
       if (url === '/api/claude/launch' && method === 'POST') return respond(200, { success: true });
+      if (url.split('?')[0] === '/api/autopilot/runs' && method === 'GET') {
+        const projectId = new URLSearchParams(url.split('?')[1] ?? '').get('project_id') ?? '';
+        return respond(200, backend.autopilotRuns.filter(r => r.project_id === projectId));
+      }
+      if ((m = url.match(/^\/api\/tickets\/([^/?]+)\/autopilot$/)) && method === 'POST') {
+        const res = backend.autopilotStart(decodeURIComponent(m[1]), body?.mode);
+        return respond(res.status, res.body);
+      }
       return respond(404, { error: { code: 'NOT_FOUND', message: url } });
     }
   };

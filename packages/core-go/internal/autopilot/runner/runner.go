@@ -366,8 +366,13 @@ func (s *Service) CancelReservation(runID string) error {
 
 // NextResult is `autopilot next`'s output: the planner's action plus where
 // and how to carry it out.
+//
+// RunID is not printed: the orchestrator already holds it (it passed it to
+// next), and command carries it. The orchestrator reads a next line two or
+// three times per ticket, so the ~45 bytes add up over a 20-ticket tree
+// (completion criterion 4, the scale test's 1KB-a-ticket budget).
 type NextResult struct {
-	RunID string `json:"run_id"`
+	RunID string `json:"-"`
 	autopilot.Action
 	Worktree string `json:"worktree,omitempty"`
 	Command  string `json:"command,omitempty"`
@@ -405,12 +410,15 @@ func (s *Service) Next(runID string) (NextResult, error) {
 }
 
 // describe returns the worktree an action happens in and the command that
-// carries it out.
+// carries it out. A launch action carries no worktree: the launch itself
+// prints the one it prepared a moment later, and the path -- often the
+// longest thing in the line -- would otherwise be read twice for every
+// ticket (the scale test's 1KB-a-ticket budget). A wait keeps it: that is
+// where a resumed orchestrator's person can look at the running session.
 func (s *Service) describe(run *autopilot.Run, a autopilot.Action) (worktree, command string) {
 	switch a.Action {
 	case autopilot.ActionLaunch:
 		command = fmt.Sprintf("graph-engine autopilot launch %s %s --role %s", run.ID, a.Ticket, a.Role)
-		worktree = s.sessionWorktree(run, a.Ticket, a.Role)
 	case autopilot.ActionWait:
 		command = fmt.Sprintf("graph-engine autopilot wait %s %s", run.ID, a.Ticket)
 		worktree = s.sessionWorktree(run, a.Ticket, a.Role)
@@ -749,7 +757,9 @@ type MergeResult struct {
 	Branch       string `json:"branch"`
 	TargetBranch string `json:"target_branch"`
 	Reason       string `json:"reason,omitempty"`
-	Next         string `json:"next,omitempty"`
+	// No "next" hint: after merge-up the orchestrator always runs next
+	// (the skill says so), and every byte here is read once per merged
+	// ticket.
 }
 
 func (s *Service) mergeBranches(run *autopilot.Run, st *autopilot.TicketState) (repo, source, target string, err error) {
@@ -785,7 +795,7 @@ func (s *Service) MergeUp(runID, ticketID string) (MergeResult, error) {
 			return err
 		}
 		run.Heartbeat = s.now()
-		out = MergeResult{Ticket: ticketID, Branch: source, TargetBranch: target, Next: "graph-engine autopilot next " + run.ID}
+		out = MergeResult{Ticket: ticketID, Branch: source, TargetBranch: target}
 		moved, err := s.Git.FastForward(repo, source, target)
 		if err != nil {
 			var apiErr *domain.APIError

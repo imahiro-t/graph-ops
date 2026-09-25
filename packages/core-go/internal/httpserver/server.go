@@ -13,6 +13,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/graph-ops/core-go/internal/autopilot"
+	"github.com/graph-ops/core-go/internal/autopilot/runner"
 	"github.com/graph-ops/core-go/internal/config"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
@@ -66,6 +68,11 @@ type Config struct {
 	// future caller that forgets to still gets stderr output instead of
 	// silence.
 	Logger *slog.Logger
+	// AutopilotLauncher opens the orchestrator's terminal for POST
+	// /api/tickets/{id}/autopilot (DFLT-00142). nil -- what `serve` passes --
+	// means the real one (internal/terminal with TerminalCommand and
+	// ClaudeBinary); tests pass a fake so that no terminal is opened.
+	AutopilotLauncher runner.Launcher
 }
 
 type Server struct {
@@ -114,6 +121,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("DELETE /api/labels/{id}", s.handleDeleteLabel)
 
 	mux.HandleFunc("POST /api/tickets/{id}/refine", s.handleRefine)
+	mux.HandleFunc("POST /api/tickets/{id}/autopilot", s.handleStartAutopilot)
+	mux.HandleFunc("GET /api/autopilot/runs", s.handleListAutopilotRuns)
 	mux.HandleFunc("POST /api/tickets/{id}/close", s.handleCloseTicket)
 	mux.HandleFunc("POST /api/tickets/{id}/reopen", s.handleReopenTicket)
 	mux.HandleFunc("POST /api/tickets/{id}/artifacts", s.handleCreateArtifact)
@@ -622,6 +631,18 @@ func statusForError(err error, fallback int) int {
 		// (DFLT-00102).
 		case domain.ErrCodeInvalidNodeState:
 			return http.StatusConflict
+		// The autopilot (DFLT-00142): a start that collides with another
+		// run or with the root's state is a conflict with the current
+		// state, like INVALID_NODE_STATE; a project with no local path is
+		// the request's precondition not being met, a 400 like the
+		// validation errors above.
+		case autopilot.ErrCodeAlreadyRunning, autopilot.ErrCodeRootFinished,
+			autopilot.ErrCodeInvalidRunState, autopilot.ErrCodeRegistryLockTimed:
+			return http.StatusConflict
+		case autopilot.ErrCodeLocalPathNotSet:
+			return http.StatusBadRequest
+		case autopilot.ErrCodeRunNotFound:
+			return http.StatusNotFound
 		}
 	}
 	return fallback

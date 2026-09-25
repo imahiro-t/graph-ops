@@ -291,9 +291,13 @@ func TestMergeUp_NeedsASessionWhenNotFastForward(t *testing.T) {
 				t.Fatalf("merge-up = %+v, %v", mr, err)
 			}
 			next, _ := h.svc.Next(run.RunID)
-			if next.Action.Action != autopilot.ActionLaunch || next.Role != autopilot.RoleMergeUp || next.Ticket != c ||
-				next.Worktree != h.st(run.RunID, p).Worktree {
+			if next.Action.Action != autopilot.ActionLaunch || next.Role != autopilot.RoleMergeUp || next.Ticket != c {
 				t.Fatalf("next = %+v", next)
+			}
+			// The merge-up session runs in the target's (P's) worktree.
+			lr, err := h.svc.Launch(run.RunID, c, autopilot.RoleMergeUp)
+			if err != nil || lr.Worktree != h.st(run.RunID, p).Worktree {
+				t.Fatalf("launch = %+v, %v", lr, err)
 			}
 			res := h.drive(run.RunID, nil)
 			s := h.st(run.RunID, c)
