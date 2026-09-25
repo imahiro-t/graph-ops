@@ -5,7 +5,7 @@ description: Decides the execution graph's shape based on the ticket's content (
 
 # process-ticket Skill
 
-Builds and executes the ticket's execution graph based on the nature of the ticket. **All node work must be done by subagents (the Agent tool, `graph-node-agent` subagent type -- see step 3 below) -- this session itself never does the work directly.** Artifacts must always be saved to the DB, and context sharing between subagents happens exclusively through the DB.
+Builds and executes the ticket's execution graph based on the nature of the ticket. **All node work must be done by subagents (the Agent tool, `graph-node-agent` subagent type -- see step 3 below) -- this session itself never does the work directly.** Artifacts must always be saved to the DB, and context sharing between subagents happens exclusively through the DB. When this skill is followed by an autopilot child session (the `autopilot-worker` skill), that skill's override rules take precedence wherever this one waits for a person (approval gates, iteration limits, the release node).
 
 ## 0. Check for user/team customization of this skill, and resolve the session's language
 

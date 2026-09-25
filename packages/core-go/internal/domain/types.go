@@ -294,6 +294,36 @@ type Ticket struct {
 	// On store.GraphRepository.CreateTicket's input only each element's ID
 	// is read (the labels to attach); Name/Color/etc. are ignored there.
 	Labels []Label `json:"labels"`
+	// ParentTicketID is the ticket this one was derived from (DFLT-00142),
+	// or nil for a ticket with no parent. It is set only at creation time
+	// (engine.CreateTicketWithOptions checks that the parent exists and is
+	// in the same project) and never changed afterwards; deleting the
+	// parent turns it back into nil on SQLite/MySQL (ON DELETE SET NULL).
+	// Always serialized, as null when there is no parent.
+	ParentTicketID *string `json:"parent_ticket_id"`
+}
+
+// TicketRef is the short form of a related ticket (DFLT-00142) that
+// TicketDetailWithFamily lists as a ticket's parent and children.
+type TicketRef struct {
+	ID     string       `json:"id"`
+	Title  string       `json:"title"`
+	Status TicketStatus `json:"status"`
+}
+
+// TicketDetailWithFamily is what get-ticket and GET /api/tickets/{id} return
+// (DFLT-00142): the ticket's detail plus its parent and its children in
+// creation order. The engine assembles it (GetTicketDetailWithFamily) from
+// the stored parent_ticket_id; no backend stores or sends it, which is why it
+// is a separate type from TicketDetail -- the HTTP data source protocol's
+// getTicketDetail response stays exactly as it was.
+//
+// Parent is null when the ticket has no parent (or the parent can no longer
+// be read); Children is always an array, [] when there are none.
+type TicketDetailWithFamily struct {
+	TicketDetail
+	Parent   *TicketRef  `json:"parent"`
+	Children []TicketRef `json:"children"`
 }
 
 // LabelColor is one of the fixed palette keys a label can use (DFLT-00084).

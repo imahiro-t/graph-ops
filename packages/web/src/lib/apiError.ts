@@ -4,9 +4,12 @@ import { TFunction } from 'i18next';
 // packages/core-go/internal/httpserver/server.go's writeError / APIError):
 // {"error": {"code": "TICKET_NOT_FOUND", "message": "<English, dev-facing>"}}.
 // `code` is what we localize; `message` is never shown to the end user.
+// `details` is optional structured context some errors carry, e.g.
+// {"keys": ["maxTickets"]} for AUTOPILOT_SETTING_LOCKED (DFLT-00142).
 export interface ApiErrorPayload {
   code: string;
   message: string;
+  details?: Record<string, unknown>;
 }
 
 // Reads {"error": {...}} out of a fetch Response body (or `{}` if the body
@@ -15,9 +18,13 @@ export async function parseApiError(response: Response): Promise<ApiErrorPayload
   try {
     const data = await response.json();
     if (data && typeof data === 'object' && data.error && typeof data.error === 'object') {
-      const { code, message } = data.error as Partial<ApiErrorPayload>;
+      const { code, message, details } = data.error as Partial<ApiErrorPayload>;
       if (typeof code === 'string') {
-        return { code, message: typeof message === 'string' ? message : '' };
+        const payload: ApiErrorPayload = { code, message: typeof message === 'string' ? message : '' };
+        if (details && typeof details === 'object' && !Array.isArray(details)) {
+          payload.details = details;
+        }
+        return payload;
       }
     }
   } catch {

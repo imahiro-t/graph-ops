@@ -31,6 +31,11 @@ import { PrioritySelect } from './PrioritySelect';
 import { LabelChip } from './LabelChip';
 import { LabelSelect } from './LabelSelect';
 import { StatusLiveRegion } from './StatusLiveRegion';
+import { TicketFamily } from './TicketFamily';
+import { AutopilotBadges } from './AutopilotBadges';
+import { AutopilotControls } from './AutopilotControls';
+import { AutopilotDecisions } from './AutopilotDecisions';
+import { NO_AUTOPILOT, TicketAutopilotView } from '../lib/autopilotApi';
 import { useClaudeLaunch } from '../hooks/useClaudeLaunch';
 import { formatDateTime, formatTime } from '../i18n/formatDate';
 import { localizedApiErrorMessage, errorMessage } from '../lib/apiError';
@@ -41,6 +46,9 @@ interface Props {
   ticket: TicketDetail;
   isExpanded: boolean;
   onToggleExpand: () => void;
+  // Opens another ticket of the list (DFLT-00142): used by the parent/
+  // children links. Optional so a caller without a list can omit it.
+  onOpenTicket?: (id: string) => void;
   onRefresh: () => void | Promise<void>;
   // The viewer's own display name (from "アプリ設定", GET /api/settings/app's
   // "myName"). Powers the "assign to me"/"unassign" action buttons below; an
@@ -53,6 +61,12 @@ interface Props {
   // detail view's label picker. Omitted/empty makes the picker point the
   // user to Settings instead.
   projectLabels?: Label[];
+  // This ticket's autopilot state (DFLT-00142 phase 5), derived from the
+  // project's runs: its badges and whether the autopilot buttons can start
+  // a run. Omitted means no run concerns it.
+  autopilot?: TicketAutopilotView;
+  // Called when an autopilot start settles, to refresh the runs at once.
+  onAutopilotChanged?: () => void | Promise<void>;
 }
 
 // How many label chips the collapsed header row shows before folding the
@@ -63,9 +77,12 @@ export const TicketItem: React.FC<Props> = ({
   ticket,
   isExpanded,
   onToggleExpand,
+  onOpenTicket,
   onRefresh,
   myName,
-  projectLabels = []
+  projectLabels = [],
+  autopilot = NO_AUTOPILOT,
+  onAutopilotChanged
 }) => {
   const { t, i18n } = useTranslation();
   const [promptText, setPromptText] = useState('');
@@ -542,7 +559,7 @@ export const TicketItem: React.FC<Props> = ({
   const hiddenLabelCount = ticketLabels.length - headerLabels.length;
 
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs transition-all overflow-clip mb-4">
+    <div id={`ticket-${ticket.id}`} tabIndex={-1} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs transition-all overflow-clip mb-4">
       {/* Header Row. gap-4 keeps a fixed space between the left group and
           the right-hand group (DFLT-00141): justify-between alone leaves no
           space once a long title stretches the flex-1 left group all the way
@@ -643,6 +660,11 @@ export const TicketItem: React.FC<Props> = ({
               </span>
             </span>
           )}
+
+          {/* Autopilot (DFLT-00142): running / processing / waiting for a
+              person / not reached yet. In the header row so the list shows
+              it too, not only the expanded detail. */}
+          <AutopilotBadges view={autopilot} />
         </div>
 
         {/* Right Info: Self-assign chip, Progress Pill. shrink-0 keeps this whole
@@ -872,6 +894,13 @@ export const TicketItem: React.FC<Props> = ({
               </div>
             )}
           </div>
+
+          {/* Parent and children (DFLT-00142); nothing when there are none. */}
+          <TicketFamily parent={ticket.parent} childTickets={ticket.children} onOpenTicket={onOpenTicket} />
+
+          {/* What the autopilot decided instead of a person, and its tree
+              summary (DFLT-00142); nothing when it never ran here. */}
+          <AutopilotDecisions artifacts={ticket.artifacts} nodes={ticket.nodes} />
 
           {/* Description Card -- always visible (not tabbed) so the ticket's
               description has a permanent place to be checked. */}
@@ -1518,6 +1547,17 @@ export const TicketItem: React.FC<Props> = ({
                   {t('ticketItem.actions.run')}
                 </button>
               </div>
+            </div>
+
+            {/* Autopilot starts (DFLT-00142): refine through release without
+                a person, in terminals of their own. */}
+            <div className="mb-3">
+              <AutopilotControls
+                ticketId={ticket.id}
+                status={ticket.status}
+                view={autopilot}
+                onSettled={onAutopilotChanged}
+              />
             </div>
 
             {/* Custom Prompt Box */}

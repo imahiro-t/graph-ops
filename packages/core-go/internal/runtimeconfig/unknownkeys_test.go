@@ -24,7 +24,7 @@ import (
 // and \u003c \u0026 escapes that must not become raw characters (also one
 // level down). It is a fragment of object members, to be spliced into a file
 // next to known keys.
-const unknownKeysJSON = `"autopilotSettings": {"proj-1": {"mode": "auto", "maxParallel": 2}},
+const unknownKeysJSON = `"addedLaterSettings": {"proj-1": {"mode": "auto", "maxParallel": 2}},
 	"futureList": [1, "two", {"three": 3}],
 	"futureBigInt": 9007199254740993,
 	"futureNull": null,
@@ -34,11 +34,11 @@ const unknownKeysJSON = `"autopilotSettings": {"proj-1": {"mode": "auto", "maxPa
 	"futureNested": {"cmd": "x && y > z", "esc": "\u003ctag\u003e"}`
 
 var unknownKeyNames = []string{
-	"autopilotSettings", "futureList", "futureBigInt", "futureNull",
+	"addedLaterSettings", "futureList", "futureBigInt", "futureNull",
 	"futureFloat", "futureRawChars", "futureEscaped", "futureNested",
 }
 
-const autopilotOnlyJSON = `"autopilotSettings": {"proj-1": {"mode": "auto", "maxParallel": 2}}`
+const addedLaterOnlyJSON = `"addedLaterSettings": {"proj-1": {"mode": "auto", "maxParallel": 2}}`
 
 func topLevel(t *testing.T, raw []byte) map[string]json.RawMessage {
 	t.Helper()
@@ -188,7 +188,7 @@ var _ func(string, func(*FileConfig) error) (FileConfig, string, error) = Update
 
 func TestUpdateHome_CallersDoNotSeeUnknownKeys(t *testing.T) {
 	home := t.TempDir()
-	before := []byte(`{` + autopilotOnlyJSON + `}`)
+	before := []byte(`{` + addedLaterOnlyJSON + `}`)
 	writeHomeConfig(t, home, string(before))
 
 	after := update(t, home, func(cfg *FileConfig) { cfg.MyName = "bob" })
@@ -196,14 +196,14 @@ func TestUpdateHome_CallersDoNotSeeUnknownKeys(t *testing.T) {
 	if got := string(topLevel(t, after)["myName"]); got != `"bob"` {
 		t.Errorf("myName = %s, want \"bob\"", got)
 	}
-	assertValuesUnchanged(t, before, after, []string{"autopilotSettings"})
+	assertValuesUnchanged(t, before, after, []string{"addedLaterSettings"})
 }
 
 // --- 2. known keys behave as before ----------------------------------------
 
 func TestUpdateHome_EmptiedKnownKeyIsRemoved(t *testing.T) {
 	home := t.TempDir()
-	before := []byte(`{"myName": "alice", ` + autopilotOnlyJSON + `}`)
+	before := []byte(`{"myName": "alice", ` + addedLaterOnlyJSON + `}`)
 	writeHomeConfig(t, home, string(before))
 
 	after := update(t, home, func(cfg *FileConfig) { cfg.MyName = "" })
@@ -211,7 +211,7 @@ func TestUpdateHome_EmptiedKnownKeyIsRemoved(t *testing.T) {
 	if v, ok := topLevel(t, after)["myName"]; ok {
 		t.Errorf("myName = %s, want the key gone", v)
 	}
-	assertValuesUnchanged(t, before, after, []string{"autopilotSettings"})
+	assertValuesUnchanged(t, before, after, []string{"addedLaterSettings"})
 }
 
 func TestUpdateHome_CurrentProjectIDNilAndEmptyStayDistinct(t *testing.T) {
@@ -227,7 +227,7 @@ func TestUpdateHome_CurrentProjectIDNilAndEmptyStayDistinct(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
-			before := []byte(`{"currentProjectId": "proj-old", ` + autopilotOnlyJSON + `}`)
+			before := []byte(`{"currentProjectId": "proj-old", ` + addedLaterOnlyJSON + `}`)
 			writeHomeConfig(t, home, string(before))
 
 			after := update(t, home, func(cfg *FileConfig) { cfg.CurrentProjectID = tc.set })
@@ -239,14 +239,14 @@ func TestUpdateHome_CurrentProjectIDNilAndEmptyStayDistinct(t *testing.T) {
 			case tc.wantRaw != "" && string(v) != tc.wantRaw:
 				t.Errorf("currentProjectId = %s (present %v), want %s", v, ok, tc.wantRaw)
 			}
-			assertValuesUnchanged(t, before, after, []string{"autopilotSettings"})
+			assertValuesUnchanged(t, before, after, []string{"addedLaterSettings"})
 		})
 	}
 }
 
 func TestUpdateHome_KnownKeysAreEscapedAsBefore(t *testing.T) {
 	home := t.TempDir()
-	writeHomeConfig(t, home, `{`+autopilotOnlyJSON+`}`)
+	writeHomeConfig(t, home, `{`+addedLaterOnlyJSON+`}`)
 	const cmd = "open -a Terminal <dir> && echo ok"
 
 	after := update(t, home, func(cfg *FileConfig) { cfg.TerminalCommand = cmd })
@@ -384,7 +384,7 @@ func TestUpdateHome_NullFileIsAnEmptyObject(t *testing.T) {
 
 func TestUpdateHome_FnErrorLeavesFileWithUnknownKeysAlone(t *testing.T) {
 	home := t.TempDir()
-	original := `{"dbBackend": "sqlite", ` + autopilotOnlyJSON + `}`
+	original := `{"dbBackend": "sqlite", ` + addedLaterOnlyJSON + `}`
 	path := writeHomeConfig(t, home, original)
 	sentinel := errors.New("stop")
 
@@ -402,7 +402,7 @@ func TestUpdateHome_FnErrorLeavesFileWithUnknownKeysAlone(t *testing.T) {
 
 func TestUpdateHome_UnreadableFileIsNotWritten(t *testing.T) {
 	for name, original := range map[string]string{
-		"broken syntax":   `{"dbBackend": "sqlite", ` + autopilotOnlyJSON,
+		"broken syntax":   `{"dbBackend": "sqlite", ` + addedLaterOnlyJSON,
 		"top-level array": `[{"dbBackend": "sqlite"}]`,
 	} {
 		t.Run(name, func(t *testing.T) {

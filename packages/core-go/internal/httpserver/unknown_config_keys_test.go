@@ -16,7 +16,7 @@ import (
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 )
 
-const autopilotSettingsJSON = `{"proj-1": {"mode": "auto", "maxParallel": 2}}`
+const addedLaterSettingsJSON = `{"proj-1": {"mode": "auto", "maxParallel": 2}}`
 
 func writeRawHomeConfig(t *testing.T, homeDir, raw string) {
 	t.Helper()
@@ -44,25 +44,25 @@ func readRawHomeConfig(t *testing.T, homeDir string) map[string]json.RawMessage 
 
 func assertAutopilotSettingsKept(t *testing.T, doc map[string]json.RawMessage) {
 	t.Helper()
-	got, ok := doc["autopilotSettings"]
+	got, ok := doc["addedLaterSettings"]
 	if !ok {
-		t.Fatal("autopilotSettings was dropped from the home config")
+		t.Fatal("addedLaterSettings was dropped from the home config")
 	}
 	var want, have bytes.Buffer
-	if err := json.Compact(&want, []byte(autopilotSettingsJSON)); err != nil {
+	if err := json.Compact(&want, []byte(addedLaterSettingsJSON)); err != nil {
 		t.Fatal(err)
 	}
 	if err := json.Compact(&have, got); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(want.Bytes(), have.Bytes()) {
-		t.Errorf("autopilotSettings = %s, want %s", have.Bytes(), want.Bytes())
+		t.Errorf("addedLaterSettings = %s, want %s", have.Bytes(), want.Bytes())
 	}
 }
 
 func TestAppSettings_PutKeepsUnknownConfigKeys(t *testing.T) {
 	s, _, homeDir := newAppSettingsTestServer(t)
-	writeRawHomeConfig(t, homeDir, `{"autopilotSettings": `+autopilotSettingsJSON+`}`)
+	writeRawHomeConfig(t, homeDir, `{"addedLaterSettings": `+addedLaterSettingsJSON+`}`)
 
 	rec := doJSON(t, s, http.MethodPut, "/api/settings/app", map[string]any{"myName": "alice", "paginationPageSize": 10})
 	if rec.Code != http.StatusOK {
@@ -85,7 +85,7 @@ func TestHandleDeleteProject_CleanupKeepsUnknownConfigKeys(t *testing.T) {
 	writeRawHomeConfig(t, s.cfg.HomeDir, `{
 		"projectPaths": {"`+alpha.ID+`": "/work/alpha"},
 		"currentProjectId": "`+alpha.ID+`",
-		"autopilotSettings": `+autopilotSettingsJSON+`
+		"addedLaterSettings": `+addedLaterSettingsJSON+`
 	}`)
 
 	if rec := doJSON(t, s, http.MethodDelete, "/api/projects/"+alpha.ID, nil); rec.Code != http.StatusOK {

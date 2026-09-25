@@ -111,7 +111,7 @@ graph-engine use-project jira-GOPS
 | Project | An existing Jira project (never created by the plugin). The project name and label definitions live in the `graphops.project` issue property of a per-project **metadata issue** (summary "GraphOps metadata (do not delete)", Jira label `graphops-meta`). | `jira-<KEY>`, e.g. `jira-GOPS`; the prefix is `<KEY>` |
 | List of registered projects | The plugin's **local state file** (`GRAPHOPS_STATE_FILE`): each registered project key with its metadata issue key, in registration order. | - |
 | Current project | The same local state file (`current_project_id`). | the project ID |
-| Ticket | A Jira issue of type `JIRA_ISSUE_TYPE` with the Jira label `graphops`. Every GraphOps field (title, Markdown description, status, priority, assignee, blocked, label IDs, timestamps, ...) lives in the `graphops.ticket` issue property. The issue summary and description mirror the title and description (converted to ADF paragraphs) for people reading Jira. | the issue key, e.g. `GOPS-12` |
+| Ticket | A Jira issue of type `JIRA_ISSUE_TYPE` with the Jira label `graphops`. Every GraphOps field (title, Markdown description, status, priority, assignee, blocked, label IDs, timestamps, parent ticket, ...) lives in the `graphops.ticket` issue property. The issue summary and description mirror the title and description (converted to ADF paragraphs) for people reading Jira. | the issue key, e.g. `GOPS-12` |
 | Node | A **sub-task of the ticket's issue** (issue type `JIRA_SUBTASK_ISSUE_TYPE`) with the summary `<node name> [<node type>]` (the first line of the name, shortened so the summary stays within Jira's 255 characters), a fixed description saying it is a GraphOps node, and exactly one `graphops-status-<status>` label. The node's data (name, type, status, iteration count, gate criteria, ..., and the IDs of its artifact comments, `artifact_comment_ids`) lives in the sub-task's `graphops.node` issue property. | `<ticket key>-n<sub-task number>`, e.g. `GOPS-12-n15` for sub-task `GOPS-15` of ticket `GOPS-12` |
 | Edge | An entry in the `graphops.edges` issue property of the ticket's issue (`edge_seq` and a compact list of edges: ID, from, to, condition -- omitted when it is `always` -- and creation time). | the ID graph-engine proposes |
 | Artifact | A comment on **its node's sub-task** (never on the ticket's issue): a readable summary (name, type, node, and the content in a code block) plus the `graphops.artifact` comment property with the metadata. text/gherkin/json content up to 16 KiB is kept inline in that property; larger content and every html/image artifact is uploaded as an attachment of the same sub-task that the property points to (images are stored as their decoded bytes). The comment's ID is also added to the node's `artifact_comment_ids`. | `<node ID>-c<comment id>`, e.g. `GOPS-12-n15-c10023` |
@@ -220,6 +220,15 @@ they cannot deadlock.
   label `graphops`, the `graphops.ticket` property and an empty
   `graphops.edges` property in one request. The ticket's issue itself is
   never moved through the workflow.
+  A parent ticket (`parent_ticket_id`, protocol 1.1) is stored in
+  `graphops.ticket` as the parent's issue key; it must be a GraphOps ticket
+  of the same Jira project (`VALIDATION_ERROR` otherwise -- a plain Jira
+  issue or a node sub-task is refused). Jira's own `parent` field is not
+  used: the node sub-tasks already hang off the ticket through it, and a
+  standard issue's parent can only be an Epic in team-managed projects. No
+  issue link is created either. Deleting the parent does not rewrite its
+  children, so a child can keep the key of a deleted parent; graph-engine
+  then shows it with no parent.
 - **Update ticket**: rewrites `graphops.ticket`; if the title or description
   changed, also updates the issue summary/description. Ticket statuses are
   not synchronized with the Jira workflow (only node sub-tasks are, see

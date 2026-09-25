@@ -70,7 +70,8 @@ func TestSettingsSkills_ListReflectsOverrides(t *testing.T) {
 		} `json:"skills"`
 	}
 	mustDecode(t, rec, &body)
-	wantNames := []string{"create-ticket", "refine-ticket", "process-ticket", "onboarding"}
+	wantNames := []string{"create-ticket", "refine-ticket", "process-ticket", "onboarding",
+		"autopilot-ticket", "autopilot-tree", "autopilot-worker"}
 	if len(body.Skills) != len(wantNames) {
 		t.Fatalf("skills = %+v, want %d entries", body.Skills, len(wantNames))
 	}

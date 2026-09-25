@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: GraphOps HTTP data source protocol
-  version: "1.0"
+  version: "1.1"
   license:
     name: MIT
     identifier: MIT
@@ -27,6 +27,15 @@ info:
     server speaks 2.0, graph-engine requires 1.x"). A different MINOR is
     accepted: minor versions only add optional things. graph-engine sends its
     own version on every request in the `GraphOps-Protocol-Version` header.
+
+    Minor versions so far:
+
+    - 1.1 adds the optional `parent_ticket_id` to `Ticket` (the parent
+      ticket, set only when the ticket is created). graph-engine sends it on
+      `createTicket` only when the ticket has a parent, and refuses such a
+      creation with `PARENT_TICKET_UNSUPPORTED` before sending anything when
+      the plugin reports 1.0. A ticket's children are derived by graph-engine
+      from `listTicketsByProject`; there is no endpoint for them.
 
     ## Transport and authentication
 
@@ -183,6 +192,10 @@ paths:
         belongs to another project fails the whole call with `LABEL_NOT_FOUND`
         and creates nothing. An empty `priority` means `MEDIUM`. A missing
         project is `PROJECT_NOT_FOUND`.
+        `parent_ticket_id` (1.1), when present, must be stored and returned
+        as given; graph-engine has already checked that the parent exists
+        and is in the same project. A plugin may refuse a parent it does not
+        manage with `VALIDATION_ERROR`.
       requestBody:
         required: true
         content:
@@ -873,6 +886,9 @@ components:
         assignee: { type: string }
         graph_expanded_at: { $ref: "#/components/schemas/Timestamp" }
         priority: { $ref: "#/components/schemas/TicketPriority" }
+        parent_ticket_id:
+          type: [string, "null"]
+          description: "Since 1.1. The parent ticket's ID, set only at creation (absent or null: no parent). A 1.0 plugin may omit it."
         labels:
           type: array
           description: Sorted by name case-insensitively. Always an array (never null). On createTicket only each element's id is read.

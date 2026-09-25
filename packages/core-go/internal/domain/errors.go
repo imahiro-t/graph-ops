@@ -166,14 +166,32 @@ const (
 	// TICKET_NOT_FOUND, which is about a missing row rather than a missing
 	// route.
 	ErrCodeRouteNotFound ErrorCode = "ROUTE_NOT_FOUND"
+	// ErrCodeParentTicketUnsupported: a ticket was to be created with a
+	// parent (DFLT-00142) on an HTTP data source that speaks protocol 1.0,
+	// which has no parent_ticket_id. It is raised before anything is sent,
+	// so the parent is never silently dropped. Returned with a 400.
+	ErrCodeParentTicketUnsupported ErrorCode = "PARENT_TICKET_UNSUPPORTED"
+	// ErrCodeAutopilotSettingLocked: a PUT of a project's autopilot settings
+	// (DFLT-00142) named at least one key the team settings file
+	// (<teamExtensionsDir>/autopilot.yaml) fixes for that project. The whole
+	// request is refused and nothing is saved -- even when the submitted
+	// value equals the team's -- so a caller never mistakes "ignored" or
+	// "saved but not in effect" for "saved". Details carries "keys", the
+	// sorted list of offending keys. Returned with a 400.
+	ErrCodeAutopilotSettingLocked ErrorCode = "AUTOPILOT_SETTING_LOCKED"
 )
 
 // APIError pairs a machine-readable Code with a developer-facing English
 // Message. The message is for logs/debugging only -- it is never shown to
 // end users directly; the frontend looks up a localized string using Code.
+//
+// Details is optional structured context for the caller (e.g. {"keys": [...]}
+// for AUTOPILOT_SETTING_LOCKED or a per-key VALIDATION_ERROR). The HTTP API
+// sends it as the error payload's "details" object, omitted when nil.
 type APIError struct {
 	Code    ErrorCode
 	Message string
+	Details map[string]any
 }
 
 func (e *APIError) Error() string {
@@ -183,4 +201,10 @@ func (e *APIError) Error() string {
 // NewAPIError builds an *APIError, formatting Message like fmt.Errorf.
 func NewAPIError(code ErrorCode, format string, args ...any) *APIError {
 	return &APIError{Code: code, Message: fmt.Sprintf(format, args...)}
+}
+
+// WithDetails sets Details and returns e, for chaining onto NewAPIError.
+func (e *APIError) WithDetails(details map[string]any) *APIError {
+	e.Details = details
+	return e
 }

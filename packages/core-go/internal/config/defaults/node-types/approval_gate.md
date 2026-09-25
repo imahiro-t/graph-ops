@@ -63,3 +63,7 @@ artifact on the same `POST /api/nodes/{id}/complete` request.
   twice. With no session waiting, a Web UI decision just sits in the DB -- a
   rejection stays blocked -- until process-ticket is invoked on the ticket
   again.
+- When an autopilot child session (the `autopilot-worker` skill) processes
+  the ticket, that skill's override rules take precedence over this file:
+  with the project's autopilot setting for gates on, the session itself
+  judges the gate and records its reasons instead of waiting for a human.

@@ -161,4 +161,22 @@ describe('SkillsEditor', () => {
       expect(screen.getByDisplayValue('refine-ticket-tier-text more')).toBeInTheDocument();
     });
   });
+
+  // DFLT-00142: the three autopilot skills are listed with translated names.
+  it.each(['ja', 'en'])('lists the autopilot skills with translated names (%s)', async (lang) => {
+    await i18n.changeLanguage(lang);
+    mockedFetchSkills.mockResolvedValue([
+      { name: 'process-ticket', has_user_override: false },
+      { name: 'autopilot-ticket', has_user_override: false },
+      { name: 'autopilot-tree', has_user_override: false },
+      { name: 'autopilot-worker', has_user_override: false }
+    ]);
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+
+    for (const key of ['autopilotTicket', 'autopilotTree', 'autopilotWorker']) {
+      const label = i18n.t(`settings.skills.names.${key}`);
+      expect(label).not.toBe(`settings.skills.names.${key}`);
+      expect(await screen.findByRole('button', { name: label })).toBeInTheDocument();
+    }
+  });
 });

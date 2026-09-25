@@ -16,12 +16,14 @@ import {
   MonitorCog,
   Languages
 } from 'lucide-react';
-import { Label, TicketDetail, TicketGraph, TicketStatus, TicketPriority, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
+import { AutopilotRun, Label, TicketDetail, TicketGraph, TicketStatus, TicketPriority, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
+import { descendantsIndex, fetchAutopilotRuns, ticketAutopilotView } from './lib/autopilotApi';
 import { getStatusMeta, matchesStatusFilter } from './statusMeta';
 import { getPriorityMeta, matchesPriorityFilter } from './priorityMeta';
 import { matchesLabelFilter } from './labelMeta';
 import { assigneeFilterOptions, isUnassignedOption, matchesAssigneeFilter } from './assigneeFilter';
 import { TicketItem } from './components/TicketItem';
+import { StatusLiveRegion } from './components/StatusLiveRegion';
 import { LabelFilter } from './components/LabelFilter';
 import { MultiSelectFilter } from './components/MultiSelectFilter';
 import { fetchLabels } from './lib/labelsApi';
@@ -72,6 +74,7 @@ interface ProjectScoped<T> {
 
 const NO_LABELS: Label[] = [];
 const NO_TICKETS: TicketDetail[] = [];
+const NO_RUNS: AutopilotRun[] = [];
 
 // How often the dashboard re-reads the ticket list. Unchanged by DFLT-00112
 // (that ticket cut the number of requests per round, not their frequency);
@@ -87,9 +90,19 @@ export const POLL_INTERVAL_MS = 15000;
 // that ticket's own detail request resolved. A ticket the response no longer
 // lists simply falls out; a newly listed one starts with no artifacts until
 // it is expanded.
+//
+// The parent/children (DFLT-00142) are detail-only too and are carried over
+// the same way, so the expanded ticket's family section does not blink out
+// between the list response and its detail response.
 export function mergeTicketSummaries(prev: TicketDetail[], summaries: TicketGraph[]): TicketDetail[] {
-  const artifactsById = new Map(prev.map(t => [t.id, t.artifacts]));
-  return summaries.map(summary => ({ ...summary, artifacts: artifactsById.get(summary.id) ?? [] }));
+  const prevById = new Map(prev.map(t => [t.id, t]));
+  return summaries.map(summary => {
+    const before = prevById.get(summary.id);
+    const merged: TicketDetail = { ...summary, artifacts: before?.artifacts ?? [] };
+    if (before?.parent !== undefined) merged.parent = before.parent;
+    if (before?.children !== undefined) merged.children = before.children;
+    return merged;
+  });
 }
 
 export const App: React.FC = () => {
@@ -283,6 +296,43 @@ export const App: React.FC = () => {
   useEffect(() => {
     refreshProjectLabels(currentProject?.id ?? '');
   }, [currentProject?.id, refreshProjectLabels]);
+
+  // The current project's autopilot runs (DFLT-00142 phase 5): what the
+  // badges and the autopilot buttons' enabled state are derived from.
+  // Refreshed like the labels -- on a project switch, with every ticket
+  // (re)fetch (so the regular poll moves the badges along), and right after
+  // a start from a ticket -- and tagged with the project for the same
+  // reason.
+  const [runList, setRunList] = useState<ProjectScoped<AutopilotRun[]> | null>(null);
+  const autopilotRuns = useMemo(
+    () => (currentProjectId && runList?.projectId === currentProjectId ? runList.value : NO_RUNS),
+    [currentProjectId, runList]
+  );
+  const refreshAutopilotRuns = useCallback(
+    async (projectId: string = currentProjectIdRef.current) => {
+      if (!projectId) {
+        setRunList(null);
+        return;
+      }
+      try {
+        const runs = await fetchAutopilotRuns(tRef.current, projectId);
+        if (projectId === currentProjectIdRef.current) setRunList({ projectId, value: runs });
+      } catch (e) {
+        // Keep the previous runs: the server still refuses a duplicate.
+        console.error('Failed to load autopilot runs', e);
+      }
+    },
+    [currentProjectIdRef, tRef]
+  );
+  useEffect(() => {
+    refreshAutopilotRuns(currentProject?.id ?? '');
+  }, [currentProject?.id, refreshAutopilotRuns]);
+  // Returns the refresh so a start's buttons wait for the new runs before
+  // they leave their "starting" state (AutopilotControls, DFLT-00147).
+  const handleAutopilotChanged = useCallback(() => refreshAutopilotRuns(), [refreshAutopilotRuns]);
+  // Every ticket's descendants, from the whole list's parent_ticket_id: a
+  // tree start is refused when an active run roots below the ticket.
+  const descendantsOf = useMemo(() => descendantsIndex(tickets), [tickets]);
   // A selected label that no longer exists in the current project (deleted,
   // or left behind by a project switch) is dropped from the selection, so
   // the filter never narrows by a label the panel can't show.
@@ -324,6 +374,10 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (lastFetchedAt) refreshProjectLabels();
   }, [lastFetchedAt, refreshProjectLabels]);
+  // The autopilot runs follow every ticket fetch the same way (DFLT-00142).
+  useEffect(() => {
+    if (lastFetchedAt) void refreshAutopilotRuns();
+  }, [lastFetchedAt, refreshAutopilotRuns]);
 
   // Modals
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -733,6 +787,66 @@ export const App: React.FC = () => {
     if (isExpanding) void fetchTicketDetail(id);
   };
 
+  // Opens a related ticket from a ticket's parent/children section
+  // (DFLT-00142): expands it, brings it onto the current page -- clearing
+  // the filters first if they hide it, since a link that silently goes
+  // nowhere would be worse -- and scrolls it into view once rendered.
+  const [focusTicketId, setFocusTicketId] = useState<string | null>(null);
+  // The live announcement of what opening a related ticket changed (the
+  // filters it cleared), cleared after a while so the same message can be
+  // announced again.
+  const [openNotice, setOpenNotice] = useState('');
+  const openNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const announceOpenNotice = (message: string) => {
+    if (openNoticeTimer.current !== null) clearTimeout(openNoticeTimer.current);
+    setOpenNotice(message);
+    openNoticeTimer.current = setTimeout(() => {
+      openNoticeTimer.current = null;
+      setOpenNotice('');
+    }, 5000);
+  };
+  useEffect(
+    () => () => {
+      if (openNoticeTimer.current !== null) clearTimeout(openNoticeTimer.current);
+    },
+    []
+  );
+  const handleOpenTicket = (id: string) => {
+    // Every ticket of the current project is loaded (paging is client-side),
+    // so a ticket missing here is gone or in another project: nothing to open.
+    if (!tickets.some(t => t.id === id)) return;
+    let visible = filteredTickets;
+    if (!visible.some(t => t.id === id)) {
+      setFilterQuery('');
+      setFilterStatuses([]);
+      setFilterAssignees([]);
+      setFilterPriorities([]);
+      setFilterLabelIds([]);
+      visible = tickets;
+      // Say so: the filters changed without the person touching them.
+      announceOpenNotice(t('ticketItem.family.filtersCleared', { id }));
+    }
+    const index = visible.findIndex(t => t.id === id);
+    if (index >= 0) setPage(Math.floor(index / ticketsPerPage) + 1);
+    if (!expandedTicketIds.has(id)) {
+      setExpandedTicketIds(prev => new Set(prev).add(id));
+      void fetchTicketDetail(id);
+    }
+    setFocusTicketId(id);
+  };
+  // Runs after the render that applied handleOpenTicket's page/filter/expand
+  // updates (React batches them with setFocusTicketId), so the card exists.
+  useEffect(() => {
+    if (!focusTicketId) return;
+    const el = document.getElementById(`ticket-${focusTicketId}`);
+    if (el) {
+      const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+      el.scrollIntoView?.({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' });
+      el.focus({ preventScroll: true });
+    }
+    setFocusTicketId(null);
+  }, [focusTicketId]);
+
   // Ticket creation goes through the create-ticket skill (opened in an
   // external, interactive terminal via /api/claude/launch) rather than
   // POSTing to /api/tickets directly, so it's always the skill - not a raw
@@ -1070,6 +1184,7 @@ export const App: React.FC = () => {
               "a project is selected" cannot both hold. Once a project is
               selected, its list not having arrived yet is "loading" too --
               not the empty state, and never the previous project's list. */}
+          <StatusLiveRegion message={openNotice} />
           {!isCurrentProjectResolved ? (
             <div
               className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm"
@@ -1124,9 +1239,12 @@ export const App: React.FC = () => {
                   ticket={ticket}
                   isExpanded={expandedTicketIds.has(ticket.id)}
                   onToggleExpand={() => handleToggleExpand(ticket.id)}
+                  onOpenTicket={handleOpenTicket}
                   onRefresh={refreshTickets}
                   myName={myName}
                   projectLabels={projectLabels}
+                  autopilot={ticketAutopilotView(autopilotRuns, ticket.id, descendantsOf)}
+                  onAutopilotChanged={handleAutopilotChanged}
                 />
               ))}
 

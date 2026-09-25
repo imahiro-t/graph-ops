@@ -107,6 +107,19 @@ export interface Ticket {
   // hand-built fixture) without the key is still a valid Ticket -- read it
   // as `ticket.labels ?? []`.
   labels?: Label[];
+  // The ticket this one was derived from (DFLT-00142), set only at creation
+  // (create-ticket --parent, or POST /api/tickets' parent_ticket_id); null
+  // when there is none. Optional so an older graph-engine's response stays
+  // a valid Ticket.
+  parent_ticket_id?: string | null;
+}
+
+// A related ticket in its short form (DFLT-00142): what GET
+// /api/tickets/{id} lists as `parent` and `children`.
+export interface TicketRef {
+  id: string;
+  title: string;
+  status: TicketStatus;
 }
 
 // A label's color is one of a fixed palette (DFLT-00084). The backend stores
@@ -225,6 +238,12 @@ export interface TicketGraph extends Ticket {
 // -- see App.tsx's mergeTicketSummaries.
 export interface TicketDetail extends TicketGraph {
   artifacts: Artifact[];
+  // DFLT-00142: the parent (null when none) and the children in creation
+  // order. Only GET /api/tickets/{id} sends them, so like `artifacts` they
+  // are absent for a ticket whose detail has not been fetched yet, and
+  // mergeTicketSummaries carries them over between polls.
+  parent?: TicketRef | null;
+  children?: TicketRef[];
 }
 
 // A project scopes a set of tickets to one prefix-based ID namespace (see
@@ -506,4 +525,129 @@ export interface AppSettingsResponse {
 export interface TestMySQLConnectionResult {
   ok: boolean;
   error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Autopilot settings (DFLT-00142) -- GET/PUT
+// /api/projects/{id}/autopilot-settings. See
+// packages/core-go/internal/autopilot/settings.go for the resolution rules:
+// per key, team projects.<id> > team defaults > local > built-in default.
+// ---------------------------------------------------------------------------
+
+export const AUTOPILOT_SETTING_KEYS = [
+  'mainReflection',
+  'permissionMode',
+  'autoApproveGates',
+  'autoCreateTickets',
+  'maxTickets',
+  'maxDepth',
+  'onFailure',
+  'stallTimeoutMinutes'
+] as const;
+
+export type AutopilotSettingKey = (typeof AUTOPILOT_SETTING_KEYS)[number];
+
+export type AutopilotSettingValue = string | number | boolean;
+
+export interface AutopilotSettings {
+  mainReflection: 'branch' | 'pull_request' | 'merge';
+  permissionMode: 'acceptEdits' | 'auto' | 'dontAsk' | 'bypassPermissions';
+  autoApproveGates: boolean;
+  autoCreateTickets: boolean;
+  maxTickets: number;
+  maxDepth: number;
+  onFailure: 'stop' | 'continue';
+  stallTimeoutMinutes: number;
+}
+
+// Where an effective value came from.
+export type AutopilotSource = 'default' | 'local' | 'team_defaults' | 'team_project';
+
+export interface AutopilotSettingItem {
+  key: AutopilotSettingKey;
+  value: AutopilotSettingValue;
+  source: AutopilotSource;
+  // True when a team tier supplies the value: the UI shows it read-only and
+  // never sends the key in a PUT (the server would refuse the whole request
+  // with AUTOPILOT_SETTING_LOCKED).
+  locked: boolean;
+  // The valid local value, or null. Still reported while locked -- a value
+  // saved before the team fixed the key comes back once it stops doing so.
+  local: AutopilotSettingValue | null;
+  team: AutopilotSettingValue | null;
+  default: AutopilotSettingValue;
+}
+
+// A warning from resolving the settings. Each known code has a
+// settings.autopilot.warnings.<code> message in the translation catalogues;
+// the English `message` is for logs only.
+export interface AutopilotWarning {
+  code: string;
+  source?: AutopilotSource;
+  key?: string;
+  // The offending value rendered as JSON (or the file path for
+  // AUTOPILOT_TEAM_FILE_INVALID).
+  value?: string;
+  message: string;
+}
+
+export interface AutopilotSettingsResponse {
+  project_id: string;
+  settings: AutopilotSettings;
+  items: AutopilotSettingItem[];
+  warnings: AutopilotWarning[];
+  // The team settings file's path when a team tier is configured (whether or
+  // not the file exists), else ''.
+  team_file: string;
+}
+
+// A PUT body: only the keys to change. A value stores it locally; null
+// removes the local value (back to the inherited one).
+export type AutopilotSettingsPatch = Partial<Record<AutopilotSettingKey, AutopilotSettingValue | null>>;
+
+// DFLT-00142 phase 5: the autopilot runs the Web UI starts and shows.
+export type AutopilotMode = 'ticket' | 'tree';
+
+// One run in GET /api/autopilot/runs?project_id=<id> (newest first: the
+// active runs plus a few recent inactive ones).
+export interface AutopilotRun {
+  run_id: string;
+  project_id: string;
+  mode: AutopilotMode;
+  root: string;
+  // starting (reserved by the Web UI, not yet adopted by its orchestrator) /
+  // running / finalizing / finished / stopped.
+  state: string;
+  // Not finished/stopped and its heartbeat is recent: the only runs that
+  // block a start and get badges.
+  active: boolean;
+  heartbeat: string;
+  // The ticket whose child session is running, its role, and what it waits
+  // for a person on (absent when it does not).
+  current?: string;
+  current_role?: string;
+  awaiting_human?: string;
+  stop_reason?: string;
+  // Every ticket the run has reached so far, with its state in the run
+  // (queued / launched / done / failed / blocked / skipped).
+  tickets: Record<string, string>;
+  // For an active run: the tickets it owns (the root and, for a tree run,
+  // all its descendants, reached or not). Empty for an inactive run.
+  members: string[];
+  // For an active run: the members it may still launch as work -- what the
+  // "waiting" badge shows. DONE/CLOSED tickets and subtrees the run will not
+  // enter (beyond maxDepth/maxTickets, under a ticket in progress elsewhere
+  // or a failed one) are left out. Empty for an inactive run.
+  pending: string[];
+}
+
+// POST /api/tickets/{id}/autopilot's answer.
+export interface AutopilotStartResponse {
+  run_id: string;
+  mode: AutopilotMode;
+  root: string;
+  state: string;
+  created: boolean;
+  // An interrupted or stopped run of the same root and mode was taken over.
+  resumed: boolean;
 }

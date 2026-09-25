@@ -19,7 +19,7 @@ import (
 
 // unknownKeysJSON: see the runtimeconfig package's test of the same name --
 // values any decode-and-re-encode would change.
-const unknownKeysJSON = `"autopilotSettings": {"proj-1": {"mode": "auto", "maxParallel": 2}},
+const unknownKeysJSON = `"addedLaterSettings": {"proj-1": {"mode": "auto", "maxParallel": 2}},
 	"futureList": [1, "two", {"three": 3}],
 	"futureBigInt": 9007199254740993,
 	"futureNull": null,
@@ -29,7 +29,7 @@ const unknownKeysJSON = `"autopilotSettings": {"proj-1": {"mode": "auto", "maxPa
 	"futureNested": {"cmd": "x && y > z", "esc": "\u003ctag\u003e"}`
 
 var unknownKeyNames = []string{
-	"autopilotSettings", "futureList", "futureBigInt", "futureNull",
+	"addedLaterSettings", "futureList", "futureBigInt", "futureNull",
 	"futureFloat", "futureRawChars", "futureEscaped", "futureNested",
 }
 

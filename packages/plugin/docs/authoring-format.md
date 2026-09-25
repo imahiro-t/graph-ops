@@ -16,7 +16,7 @@ In scope -- every file below must conform:
 | Group | Files |
 |---|---|
 | Node types | `packages/plugin/defaults/node-types/*.md` (11 files) |
-| Skills | `packages/plugin/skills/*/SKILL.md` (4 files) |
+| Skills | `packages/plugin/skills/*/SKILL.md` (7 files) |
 
 The file name matches the node type in every case except `report`, whose
 default content lives in `deliverable.md` (see `nodeTypeDefaultFile` in
@@ -280,7 +280,7 @@ Every skill starts with:
 ## 0. Check for user/team customization of this skill
 ```
 
-All four skills already perform this check; the heading text is what is being
+Every skill already performs this check; the heading text is what is being
 standardized. When promoting an existing step 0 from a list item to an H2,
 move the wording across unchanged -- promoting the heading must not alter what
 the step tells the agent to do.

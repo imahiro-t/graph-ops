@@ -30,8 +30,12 @@ var builtinNodeTypes = []string{
 // instructions via ResolveSkillContext (packages/plugin/skills/*). Unlike
 // node types there is no "custom skill" concept a team workflow.yaml could
 // introduce, so this list is exhaustive -- ListKnownSkills always returns
-// exactly these four, in this order.
-var builtinSkills = []string{"create-ticket", "refine-ticket", "process-ticket", "onboarding"}
+// exactly these, in this order. The three autopilot skills (DFLT-00142) come
+// last: the two orchestrators, then the worker their child sessions run.
+var builtinSkills = []string{
+	"create-ticket", "refine-ticket", "process-ticket", "onboarding",
+	"autopilot-ticket", "autopilot-tree", "autopilot-worker",
+}
 
 // ListKnownSkills returns the fixed list of skill names the settings UI's
 // skill picker should offer, in builtinSkills' order.
