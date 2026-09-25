@@ -7,7 +7,7 @@
 //
 // jsdom computes no colors, so these tests pin the Tailwind classes that
 // produce them, and check that the existing hover/disabled classes are kept.
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { GraphNode, TicketDetail, TicketStatus } from '../types';
@@ -63,13 +63,9 @@ const expectContrastColors = (el: HTMLElement) => {
   expect(el).not.toHaveClass('dark:text-slate-500');
 };
 
-// The chevron <button> has no accessible name, so it is found by position:
-// the first button in the header row.
-const headerChevron = () => {
-  const button = screen.getByTestId('ticket-header-row').querySelector('button');
-  expect(button).not.toBeNull();
-  return button as HTMLElement;
-};
+// The chevron is found by its accessible name (DFLT-00152).
+const headerChevron = () =>
+  screen.getByRole('button', { name: i18n.t('ticketItem.toggleTicket', { id: TICKET_ID }) });
 
 // TicketItem measures its graph panel with a ResizeObserver when expanded,
 // which jsdom does not implement (same stub as TicketItem.labels.test.tsx).
@@ -118,12 +114,7 @@ describe('TicketItem icon button contrast (WCAG 1.4.11)', () => {
 
   it('uses the higher-contrast resting color on the node-row chevron in the expanded panel', () => {
     renderItem(makeTicket('IN PROGRESS', [NODE]), true);
-    // The node row is the clickable row that contains the node ID; its
-    // chevron is the first button in it.
-    const nodeIdEl = screen.getByText(NODE.id);
-    const row = nodeIdEl.closest('.cursor-pointer') as HTMLElement | null;
-    expect(row).not.toBeNull();
-    const chevron = within(row as HTMLElement).getAllByRole('button')[0];
+    const chevron = screen.getByRole('button', { name: i18n.t('ticketItem.toggleNode', { id: NODE.id }) });
     expectContrastColors(chevron);
   });
 });

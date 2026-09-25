@@ -713,8 +713,22 @@ export const TicketItem: React.FC<Props> = ({
         className="p-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition select-none"
       >
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <button className="text-slate-500 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 shrink-0">
-            {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+          {/* The chevron is the row's keyboard / assistive-technology entry
+              point: a named button whose aria-expanded mirrors the row
+              (DFLT-00152). It deliberately has no onClick of its own -- the
+              toggle lives only in handleHeaderClick, which the chevron's
+              click (mouse, or Enter/Space with detail 0) bubbles up to, so
+              every activation toggles the row exactly once. */}
+          <button
+            type="button"
+            aria-expanded={isExpanded}
+            aria-label={t('ticketItem.toggleTicket', { id: ticket.id })}
+            data-testid="ticket-toggle-expand"
+            className="text-slate-500 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 shrink-0"
+          >
+            {isExpanded
+              ? <ChevronDown className="w-5 h-5" aria-hidden="true" />
+              : <ChevronRight className="w-5 h-5" aria-hidden="true" />}
           </button>
 
           {/* The ID and the title are the only selectable text in the row
@@ -1384,8 +1398,20 @@ export const TicketItem: React.FC<Props> = ({
                                 row is shrink-0 so the id/type/retry/manual/
                                 artifact badges never wrap. */}
                             <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                              <button className="text-slate-500 dark:text-slate-400 shrink-0">
-                                {isNodeExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                              {/* Named toggle for the node row (DFLT-00152).
+                                  No onClick of its own: its click bubbles to
+                                  the row's toggleNodeExpand, so it toggles
+                                  exactly once. */}
+                              <button
+                                type="button"
+                                aria-expanded={isNodeExpanded}
+                                aria-label={t('ticketItem.toggleNode', { id: node.id })}
+                                data-testid={`node-toggle-expand-${node.id}`}
+                                className="text-slate-500 dark:text-slate-400 shrink-0"
+                              >
+                                {isNodeExpanded
+                                  ? <ChevronDown className="w-4 h-4" aria-hidden="true" />
+                                  : <ChevronRight className="w-4 h-4" aria-hidden="true" />}
                               </button>
                               <span className="font-mono text-slate-400 dark:text-slate-500 w-4 shrink-0">{index + 1}</span>
                               <span className="font-mono font-bold text-slate-600 dark:text-slate-400 shrink-0 whitespace-nowrap">

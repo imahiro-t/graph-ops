@@ -146,6 +146,8 @@
     }
   },
   "ticketItem": {
+    "toggleTicket": "Toggle details for {{id}}",
+    "toggleNode": "Toggle details for node {{id}}",
     "copyId": {
       "button": "Copy {{id}}",
       "copied": "Copied {{id}}",

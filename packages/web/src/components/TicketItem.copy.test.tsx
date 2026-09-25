@@ -155,7 +155,7 @@ describe('TicketItem header text selection', () => {
     // parts, so after copying the title the row must still open and close.
     const { headerRow, titleEl, onToggleExpand } = renderItem();
     window.getSelection()!.selectAllChildren(titleEl);
-    const chevron = headerRow.querySelector('button')!;
+    const chevron = screen.getByTestId('ticket-toggle-expand');
     const status = headerRow.querySelector('.rounded-full')!;
 
     fireEvent.mouseDown(chevron, { detail: 1 });
@@ -185,9 +185,9 @@ describe('TicketItem header text selection', () => {
   });
 
   it('always toggles on a keyboard click of the chevron (detail 0), even with a selection in the row', () => {
-    const { headerRow, titleEl, onToggleExpand } = renderItem();
+    const { titleEl, onToggleExpand } = renderItem();
     window.getSelection()!.selectAllChildren(titleEl);
-    const chevron = headerRow.querySelector('button')!;
+    const chevron = screen.getByTestId('ticket-toggle-expand');
     fireEvent.click(chevron, { detail: 0 });
     expect(onToggleExpand).toHaveBeenCalledTimes(1);
     fireEvent.click(chevron, { detail: 0 });

@@ -146,6 +146,8 @@
     }
   },
   "ticketItem": {
+    "toggleTicket": "{{id}} の詳細を開閉",
+    "toggleNode": "ノード {{id}} の詳細を開閉",
     "copyId": {
       "button": "{{id}} をコピー",
       "copied": "{{id}} をコピーしました",
