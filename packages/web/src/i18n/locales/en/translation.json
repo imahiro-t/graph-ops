@@ -58,6 +58,7 @@
     "pageOf": "{{page}} / {{total}}"
   },
   "projectSwitcher": {
+    "menuLabel": "Switch project",
     "noProject": "Select a project",
     "empty": "No projects yet",
     "createNew": "New project...",

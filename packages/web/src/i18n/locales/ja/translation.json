@@ -58,6 +58,7 @@
     "pageOf": "{{page}} / {{total}}"
   },
   "projectSwitcher": {
+    "menuLabel": "プロジェクトの切り替え",
     "noProject": "プロジェクトを選択",
     "empty": "プロジェクトがありません",
     "createNew": "新規プロジェクト...",

@@ -77,6 +77,8 @@ interface ProjectScoped<T> {
 const NO_LABELS: Label[] = [];
 const NO_TICKETS: TicketDetail[] = [];
 const NO_RUNS: AutopilotRun[] = [];
+// The header project switcher's popup, referenced by its button's aria-controls.
+const PROJECT_MENU_ID = 'project-switcher-menu';
 
 // How often the dashboard re-reads the ticket list. Unchanged by DFLT-00112
 // (that ticket cut the number of requests per round, not their frequency);
@@ -230,6 +232,24 @@ export const App: React.FC = () => {
     setIsProjectMenuOpen(true);
     void refreshPendingApprovalCounts();
   };
+  // Escape closes the open switcher menu and puts focus back on its button
+  // (DFLT-00155), wherever focus is: the button, a menu item, or <body>
+  // (Safari does not focus a button on click). The listener only exists
+  // while the menu is open, so Escape elsewhere is untouched when it is
+  // closed. An Escape another handler already took, or one that cancels an
+  // IME composition, is left alone -- the same rules as useModalDialog.
+  useEffect(() => {
+    if (!isProjectMenuOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.key !== 'Escape') return;
+      if (e.isComposing || e.keyCode === 229) return;
+      e.preventDefault();
+      setIsProjectMenuOpen(false);
+      projectMenuButtonRef.current?.focus();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isProjectMenuOpen]);
   // The directory `graph-engine ui` asked a project to be set up for (see
   // the newProject query effect below), or '' when the dialog was opened
   // from the header's "New project..." entry.
@@ -972,9 +992,19 @@ export const App: React.FC = () => {
 
           <div className="flex items-center gap-3">
             <div className="relative">
+              {/* aria-haspopup="dialog", not "menu" (DFLT-00155): the popup
+                  is a plain non-modal group of buttons walked with Tab, so it
+                  is a role="dialog". "menu" would promise the WAI-ARIA menu
+                  button pattern (menuitems, arrow-key focus, Tab closes),
+                  which this popup does not implement. aria-controls only
+                  while open: the popup is not rendered while closed. */}
               <button
                 ref={projectMenuButtonRef}
+                type="button"
                 onClick={toggleProjectMenu}
+                aria-expanded={isProjectMenuOpen}
+                aria-haspopup="dialog"
+                aria-controls={isProjectMenuOpen ? PROJECT_MENU_ID : undefined}
                 className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 shadow-xs transition max-w-[14rem]"
                 title={currentProject ? currentProject.local_path || t('settings.appSettings.projects.notSet') : undefined}
               >
@@ -987,8 +1017,19 @@ export const App: React.FC = () => {
 
               {isProjectMenuOpen && (
                 <>
-                  <div className="fixed inset-0 z-40" onClick={() => setIsProjectMenuOpen(false)} />
-                  <div className="absolute left-0 mt-1.5 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-sm">
+                  {/* data-testid: jsdom has no hit testing, so tests click
+                      this backdrop directly to close the menu. */}
+                  <div
+                    className="fixed inset-0 z-40"
+                    data-testid="project-switcher-overlay"
+                    onClick={() => setIsProjectMenuOpen(false)}
+                  />
+                  <div
+                    id={PROJECT_MENU_ID}
+                    role="dialog"
+                    aria-label={t('projectSwitcher.menuLabel')}
+                    className="absolute left-0 mt-1.5 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-sm"
+                  >
                     {projects.length === 0 && (
                       <div className="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">{t('projectSwitcher.empty')}</div>
                     )}
