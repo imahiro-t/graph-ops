@@ -577,18 +577,20 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 	if err != nil {
 		return LaunchResult{}, err
 	}
-	repo, err := s.localPath(projectID)
-	if err != nil {
-		return LaunchResult{}, err
-	}
-
-	// A ticket ID that cannot name a worktree is refused by EnsureWorktree
-	// below, as a launch failure: counted, and recorded as launch_failed
-	// once it repeats, rather than handed back by next forever.
+	// A project with no local path in this environment, like a ticket ID
+	// that cannot name a worktree (refused by EnsureWorktree below), is a
+	// launch failure: counted, and recorded as launch_failed once it
+	// repeats, rather than handed back by next forever. So the local path
+	// error is held until the record below has been made, and launchFailed
+	// puts that record back.
+	repo, repoErr := s.localPath(projectID)
 
 	// Read before the lock: the branch a ticket with no merge target starts
 	// from.
-	defaultBranch := s.Git.DefaultBranch(repo)
+	defaultBranch := ""
+	if repoErr == nil {
+		defaultBranch = s.Git.DefaultBranch(repo)
+	}
 
 	var (
 		snapshot                          autopilot.Run
@@ -681,6 +683,9 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 
 	// Outside the lock: git and the terminal can take seconds.
 	launchErr := func() error {
+		if repoErr != nil {
+			return repoErr
+		}
 		path, _, _, err := s.Git.EnsureWorktree(repo, gitTicket, gitBase)
 		if err != nil {
 			return err

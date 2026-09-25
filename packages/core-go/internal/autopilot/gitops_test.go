@@ -2,6 +2,7 @@ package autopilot
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -214,5 +215,65 @@ func TestGit_WorktreeFingerprintChangesWithWork(t *testing.T) {
 	}
 	if g.WorktreeFingerprint(filepath.Join(repo, "missing")) != "" {
 		t.Fatal("a missing worktree should give an empty fingerprint")
+	}
+}
+
+// DFLT-00142 iteration 2 (F-1): the autopilot polls a child session's
+// worktree with `git status` (the activity fingerprint) while the session
+// is committing in it. That status must not take index.lock, or the
+// session's git add / commit fails with "Unable to create .../index.lock:
+// File exists". Without GIT_OPTIONAL_LOCKS=0 about a third of the commits
+// failed in the reproduction.
+func TestGit_WorktreeFingerprintDoesNotLockOutConcurrentCommits(t *testing.T) {
+	repo := newGitRepo(t)
+	g := Git{}
+	wt, _, _, err := g.EnsureWorktree(repo, "T", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	polled := make(chan int)
+	go func() {
+		n := 0
+		defer func() { polled <- n }()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			g.WorktreeFingerprint(wt)
+			n++
+		}
+	}()
+	git := func(args ...string) error {
+		cmd := exec.Command("git", append([]string{"-C", wt, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return errors.New(strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	const commits = 120
+	var failures []string
+	for i := 0; i < commits; i++ {
+		name := fmt.Sprintf("work-%03d.txt", i)
+		if err := os.WriteFile(filepath.Join(wt, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := git("add", name)
+		if err == nil {
+			err = git("commit", "-q", "-m", name)
+		}
+		if err != nil {
+			failures = append(failures, err.Error())
+			_ = git("reset", "-q")
+		}
+	}
+	close(stop)
+	if n := <-polled; n == 0 {
+		t.Fatal("the fingerprint never ran alongside the commits")
+	}
+	if len(failures) != 0 {
+		t.Fatalf("%d of %d commits failed while the fingerprint polled; first: %s", len(failures), commits, failures[0])
 	}
 }

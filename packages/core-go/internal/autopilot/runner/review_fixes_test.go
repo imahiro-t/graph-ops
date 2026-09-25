@@ -85,6 +85,31 @@ func TestLaunch_RepeatedFailureIsRecordedAndStopsTheRun(t *testing.T) {
 	}
 }
 
+// DFLT-00142 iteration 2 (QA carry-over A): a project whose local path is
+// no longer set is a launch failure like any other -- counted, and recorded
+// as launch_failed on the second one in a row, so the run stops with the
+// reason in the summary instead of staying running.
+func TestLaunch_MissingLocalPathIsCountedAndRecordedAsLaunchFailed(t *testing.T) {
+	h := newHarness(t)
+	h.settings.OnFailure = autopilot.OnFailureStop
+	c := h.ticket("C", "")
+	run := h.start(c, autopilot.ModeTicket)
+	h.gitRepo = ""
+	res, failures := h.driveTolerant(run.RunID)
+	if failures != MaxLaunchAttempts || len(h.launches) != 0 {
+		t.Fatalf("launch failures = %d, launches = %d", failures, len(h.launches))
+	}
+	s := h.st(run.RunID, c)
+	if res.Action.Action != autopilot.ActionStopped || s.Status != autopilot.TicketFailed || s.Reason != autopilot.ReasonLaunchFailed ||
+		!strings.Contains(s.Detail, string(autopilot.ErrCodeLocalPathNotSet)) || s.LaunchFailures != 0 {
+		t.Fatalf("res = %+v, C = %+v", res, s)
+	}
+	sum, _ := h.svc.Summary(run.RunID)
+	if !strings.Contains(sum.Markdown, autopilot.ReasonLaunchFailed) || !strings.Contains(sum.Markdown, autopilot.StopTicketFailed) {
+		t.Fatalf("summary:\n%s", sum.Markdown)
+	}
+}
+
 func TestLaunch_RepeatedFailureContinuesWithTheRestOfTheTree(t *testing.T) {
 	h := newHarness(t)
 	h.settings.OnFailure = autopilot.OnFailureContinue

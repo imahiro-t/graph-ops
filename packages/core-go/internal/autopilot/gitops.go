@@ -91,7 +91,13 @@ func (g Git) run(dir string, args ...string) (string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, append([]string{"-C", dir}, args...)...)
 	// Never prompt (credentials, editors): nobody is there to answer.
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_EDITOR=true", "GIT_MERGE_AUTOEDIT=no")
+	// GIT_OPTIONAL_LOCKS=0: the activity fingerprint and the dirty check run
+	// `git status` in a worktree a child session is working in, while it
+	// works; without this, status takes index.lock to refresh the index and
+	// the session's own git add / commit / merge fails on it ("Unable to
+	// create .../index.lock: File exists"). Only optional locks are skipped:
+	// commands that must write the index or refs still lock as usual.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_EDITOR=true", "GIT_MERGE_AUTOEDIT=no", "GIT_OPTIONAL_LOCKS=0")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
