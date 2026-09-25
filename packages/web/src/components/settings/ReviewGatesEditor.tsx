@@ -309,7 +309,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 text-xs py-8 justify-center">
+      <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
         <Loader2 className="w-4 h-4 animate-spin" /> {t('settings.common.loading')}
       </div>
     );
@@ -361,7 +361,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
       <div className="flex-1 min-h-0 overflow-auto space-y-3">
         {gates.length === 0 && (
-          <div className="text-center text-slate-400 dark:text-slate-500 text-xs py-8 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
+          <div className="text-center text-slate-500 dark:text-slate-400 text-xs py-8 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
             {t('settings.reviewGates.tableEmpty')}
           </div>
         )}
@@ -481,7 +481,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                     </div>
                   </div>
                 ) : (
-                  <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">{t('settings.reviewGates.previewUnavailableHint')}</p>
+                  <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.previewUnavailableHint')}</p>
                 )
               )}
             </div>

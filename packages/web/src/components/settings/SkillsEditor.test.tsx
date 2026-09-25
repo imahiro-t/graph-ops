@@ -55,6 +55,19 @@ describe('SkillsEditor', () => {
     expect(await screen.findByDisplayValue('create-ticket-tier-text')).toBeInTheDocument();
   });
 
+  // DFLT-00162: the hint is secondary text on the white / slate-900 pane, so
+  // it uses text-slate-500 / dark:text-slate-400 (4.76:1 / 6.96:1) to meet
+  // WCAG 1.4.3's 4.5:1. jsdom computes no colors, so the classes are pinned.
+  it('draws the empty-override hint in slate-500 / dark:slate-400', async () => {
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('create-ticket-tier-text');
+
+    const hint = screen.getByText(i18n.t('settings.skills.emptyOverrideHint'));
+    expect(hint).toHaveClass('text-slate-500', 'dark:text-slate-400', 'text-[10px]');
+    expect(hint).not.toHaveClass('text-slate-400');
+    expect(hint).not.toHaveClass('dark:text-slate-500');
+  });
+
   // DFLT-00074
   it('labels the tier text textarea', async () => {
     render(<SkillsEditor onDirtyChange={vi.fn()} />);

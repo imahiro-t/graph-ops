@@ -105,7 +105,7 @@ export const ArtifactPreviewPage: React.FC = () => {
               {t('artifactPreview.loadError', { message: error })}
             </div>
           ) : content === null ? (
-            <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 text-sm p-4">
+            <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-sm p-4">
               <Loader2 className="w-4 h-4 animate-spin" />
               {t('artifactPreview.loading')}
             </div>

@@ -1094,7 +1094,7 @@ export const App: React.FC = () => {
                     className="absolute left-0 mt-1.5 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-sm"
                   >
                     {projects.length === 0 && (
-                      <div className="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">{t('projectSwitcher.empty')}</div>
+                      <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">{t('projectSwitcher.empty')}</div>
                     )}
                     {projects.map(p => {
                       // DFLT-00158: the check mark shows the current project
@@ -1344,7 +1344,7 @@ export const App: React.FC = () => {
           <StatusLiveRegion message={openNotice} />
           {!isCurrentProjectResolved ? (
             <div
-              className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm"
+              className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm"
               aria-busy="true"
             >
               {t('emptyState.loadingTickets')}
@@ -1364,7 +1364,7 @@ export const App: React.FC = () => {
               </button>
             </div>
           ) : !currentProject ? (
-            <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm space-y-3">
+            <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm space-y-3">
               <p>{t('projectSwitcher.noProjectYet')}</p>
               <button
                 onClick={() => {
@@ -1379,13 +1379,13 @@ export const App: React.FC = () => {
             </div>
           ) : isTicketListPending ? (
             <div
-              className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm"
+              className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm"
               aria-busy="true"
             >
               {t('emptyState.loadingTickets')}
             </div>
           ) : filteredTickets.length === 0 ? (
-            <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm">
+            <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm">
               {t('emptyState.noTicketsMatch')}
             </div>
           ) : (

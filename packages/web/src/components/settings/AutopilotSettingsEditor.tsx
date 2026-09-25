@@ -253,7 +253,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
       )}
 
       {loading && !data ? (
-        <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 text-xs py-8 justify-center">
+        <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
           <Loader2 className="w-4 h-4 motion-safe:animate-spin" aria-hidden="true" /> {t('settings.common.loading')}
         </div>
       ) : (

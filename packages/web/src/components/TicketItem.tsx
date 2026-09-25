@@ -1109,7 +1109,7 @@ export const TicketItem: React.FC<Props> = ({
               </span>
               <div className="flex items-center gap-3">
                 {ticket.refined_at && (
-                  <span className="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
                     <History className="w-3 h-3" />
                     {t('ticketItem.description.refinedAt', { time: formatDateTime(ticket.refined_at, i18n.language) })}
                   </span>
@@ -1127,7 +1127,7 @@ export const TicketItem: React.FC<Props> = ({
             </div>
 
             {description.length === 0 ? (
-              <div className="text-slate-400 dark:text-slate-500 italic text-xs">{t('ticketItem.description.empty')}</div>
+              <div className="text-slate-500 dark:text-slate-400 italic text-xs">{t('ticketItem.description.empty')}</div>
             ) : (
               <div className={isDescriptionExpanded ? '' : 'max-h-56 overflow-y-auto'}>
                 <MarkdownViewer content={description} />
@@ -1416,7 +1416,13 @@ export const TicketItem: React.FC<Props> = ({
                                   ? <ChevronDown className="w-4 h-4" aria-hidden="true" />
                                   : <ChevronRight className="w-4 h-4" aria-hidden="true" />}
                               </button>
-                              <span className="font-mono text-slate-400 dark:text-slate-500 w-4 shrink-0">{index + 1}</span>
+                              {/* DFLT-00162: this row's hover background is
+                                  slate-100 / slate-700, where slate-500 /
+                                  slate-400 text drops to 4.34:1 / 4.04:1, so
+                                  the sequence number (and the update time
+                                  below) use slate-600 / slate-300 to keep
+                                  WCAG 1.4.3's 4.5:1 in both states. */}
+                              <span className="font-mono text-slate-600 dark:text-slate-300 w-4 shrink-0">{index + 1}</span>
                               <span className="font-mono font-bold text-slate-600 dark:text-slate-400 shrink-0 whitespace-nowrap">
                                 {node.id}
                               </span>
@@ -1480,7 +1486,8 @@ export const TicketItem: React.FC<Props> = ({
                                 </div>
                               )}
                               {getNodeBadge(getDisplayStatus(node))}
-                              <span className="text-[11px] text-slate-400 dark:text-slate-500 font-mono">
+                              {/* slate-600 / slate-300 for the hover background (DFLT-00162, see the sequence number above). */}
+                              <span className="text-[11px] text-slate-600 dark:text-slate-300 font-mono">
                                 {formatTime(node.updated_at, i18n.language)}
                               </span>
                             </div>
@@ -1540,7 +1547,7 @@ export const TicketItem: React.FC<Props> = ({
                           {isNodeExpanded && (
                             <div className="border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 space-y-3">
                               {nodeArtifacts.length === 0 ? (
-                                <div className="text-slate-400 dark:text-slate-500 italic text-[11px]">
+                                <div className="text-slate-500 dark:text-slate-400 italic text-[11px]">
                                   {t('ticketItem.noArtifactsForNode')}
                                 </div>
                               ) : (
@@ -1610,7 +1617,7 @@ export const TicketItem: React.FC<Props> = ({
                 {activeTab === 'gherkin' && (
                   <div className="space-y-4">
                     {gherkinArtifacts.length === 0 ? (
-                      <div className="text-slate-400 dark:text-slate-500 text-center py-8 text-xs">{t('ticketItem.noGherkinYet')}</div>
+                      <div className="text-slate-500 dark:text-slate-400 text-center py-8 text-xs">{t('ticketItem.noGherkinYet')}</div>
                     ) : (
                       gherkinArtifacts.map(g => (
                         <div key={g.id} className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50/40 dark:bg-amber-950/20 p-4">
@@ -1638,7 +1645,7 @@ export const TicketItem: React.FC<Props> = ({
                 {activeTab === 'html' && (
                   <div className="space-y-4">
                     {htmlArtifacts.length === 0 ? (
-                      <div className="text-slate-400 dark:text-slate-500 text-center py-8 text-xs">{t('ticketItem.noHtmlYet')}</div>
+                      <div className="text-slate-500 dark:text-slate-400 text-center py-8 text-xs">{t('ticketItem.noHtmlYet')}</div>
                     ) : (
                       htmlArtifacts.map(h => (
                         <div key={h.id} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 bg-white dark:bg-slate-800 shadow-xs">
@@ -1669,7 +1676,7 @@ export const TicketItem: React.FC<Props> = ({
                 {activeTab === 'artifacts' && (
                   <div className="space-y-2">
                     {ticket.artifacts.length === 0 ? (
-                      <div className="text-slate-400 dark:text-slate-500 text-center py-8 text-xs">{t('ticketItem.noArtifactsYet')}</div>
+                      <div className="text-slate-500 dark:text-slate-400 text-center py-8 text-xs">{t('ticketItem.noArtifactsYet')}</div>
                     ) : (
                       ticket.artifacts.map(a => (
                         <div
