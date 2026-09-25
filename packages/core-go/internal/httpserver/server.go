@@ -103,6 +103,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/projects/{id}", s.handleGetProject)
 	mux.HandleFunc("PATCH /api/projects/{id}", s.handleUpdateProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", s.handleDeleteProject)
+	mux.HandleFunc("GET /api/projects/{id}/autopilot-settings", s.handleGetAutopilotSettings)
+	mux.HandleFunc("PUT /api/projects/{id}/autopilot-settings", s.handlePutAutopilotSettings)
 	mux.HandleFunc("GET /api/current-project", s.handleGetCurrentProject)
 	mux.HandleFunc("PUT /api/current-project", s.handleSetCurrentProject)
 
@@ -529,9 +531,13 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // {"error": {"code": "...", "message": "..."}}. Code is machine-readable and
 // is what the frontend uses to resolve a localized (ja/en) message; Message
 // is a developer-facing English string for logs/debugging only.
+//
+// Details is present only when the error carries structured context (see
+// domain.APIError.Details), e.g. {"keys": ["maxTickets"]}.
 type apiErrorPayload struct {
 	Code    domain.ErrorCode `json:"code"`
 	Message string           `json:"message"`
+	Details map[string]any   `json:"details,omitempty"`
 }
 
 // writeError writes a structured error response. If err is (or wraps) a
@@ -554,9 +560,11 @@ func writeError(w http.ResponseWriter, status int, err error) {
 		code = domain.ErrCodeTicketNotFound
 	}
 
+	var details map[string]any
 	var apiErr *domain.APIError
 	if errors.As(err, &apiErr) {
 		code = apiErr.Code
+		details = apiErr.Details
 	}
 
 	var maxBytesErr *http.MaxBytesError
@@ -566,7 +574,7 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	}
 
 	writeJSON(w, status, map[string]apiErrorPayload{
-		"error": {Code: code, Message: err.Error()},
+		"error": {Code: code, Message: err.Error(), Details: details},
 	})
 }
 
@@ -603,7 +611,7 @@ func statusForError(err error, fallback int) int {
 			domain.ErrCodeCatalogDuplicateNode, domain.ErrCodeCatalogInvalidDocument, domain.ErrCodeInvalidMaxIterations,
 			domain.ErrCodeInvalidReportTemplate,
 			domain.ErrCodeInvalidLabelName, domain.ErrCodeInvalidLabelColor, domain.ErrCodeLabelNameTaken,
-			domain.ErrCodeParentTicketUnsupported:
+			domain.ErrCodeParentTicketUnsupported, domain.ErrCodeAutopilotSettingLocked:
 			return http.StatusBadRequest
 		case domain.ErrCodeProjectNotFound, domain.ErrCodeTicketNotFound, domain.ErrCodeNodeNotFound, domain.ErrCodeArtifactNotFound,
 			domain.ErrCodeLabelNotFound:

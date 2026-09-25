@@ -10,6 +10,8 @@ import { TFunction } from 'i18next';
 import {
   AppSettingsFile,
   AppSettingsResponse,
+  AutopilotSettingsPatch,
+  AutopilotSettingsResponse,
   SettingsCatalogResponse,
   SettingsDocument,
   SettingsNodeTypeInfo,
@@ -21,7 +23,7 @@ import {
   TestMySQLConnectionResult
 } from '../types';
 import { apiFetch } from './apiFetch';
-import { localizedApiErrorMessage } from './apiError';
+import { localizedApiErrorMessage, parseApiError, translateErrorCode } from './apiError';
 
 // Every endpoint in this module answers the same way: a JSON body on success,
 // and on failure a status outside 2xx with the backend's {"error": {...}}
@@ -168,6 +170,43 @@ export async function fetchSettingsReviewTemplate(
   t: TFunction
 ): Promise<SettingsTemplateTextResponse> {
   return requestJSON(t, '/api/settings/review-template');
+}
+
+// GET/PUT /api/projects/{id}/autopilot-settings -- the "オートパイロット"
+// tab (DFLT-00142). Unlike every endpoint above these are per project: the
+// local values live in the home config's autopilotSettings.<projectId>.
+export async function fetchAutopilotSettings(
+  t: TFunction,
+  projectId: string
+): Promise<AutopilotSettingsResponse> {
+  return requestJSON(t, `/api/projects/${encodeURIComponent(projectId)}/autopilot-settings`);
+}
+
+// A refused save names the offending keys in details.keys (a key the team
+// settings fix, or a value that failed validation); the thrown message adds
+// their localized labels to the translated error so the user can tell which
+// field to look at.
+export async function saveAutopilotSettings(
+  t: TFunction,
+  projectId: string,
+  patch: AutopilotSettingsPatch
+): Promise<AutopilotSettingsResponse> {
+  const res = await apiFetch(
+    `/api/projects/${encodeURIComponent(projectId)}/autopilot-settings`,
+    jsonBody('PUT', patch)
+  );
+  if (res.ok) return res.json() as Promise<AutopilotSettingsResponse>;
+  const payload = await parseApiError(res);
+  if (!payload) throw new Error(t('errors.UNKNOWN'));
+  const message = translateErrorCode(t, payload.code);
+  const keys = payload.details?.keys;
+  if (Array.isArray(keys) && keys.length > 0) {
+    const labels = keys
+      .map(k => t(`settings.autopilot.keys.${String(k)}.label`, { defaultValue: String(k) }))
+      .join(', ');
+    throw new Error(t('settings.autopilot.errorWithKeys', { message, keys: labels }));
+  }
+  throw new Error(message);
 }
 
 export async function saveSettingsReviewTemplate(

@@ -271,6 +271,7 @@
       "reviewGates": "レビューゲート",
       "skills": "スキル",
       "templates": "テンプレート",
+      "autopilot": "オートパイロット",
       "appSettings": "アプリ設定",
       "labels": "ラベル"
     },
@@ -481,6 +482,83 @@
       "projectLabel": "プロジェクト",
       "projectPlaceholder": "プロジェクトを選択",
       "noProjects": "プロジェクトがまだありません。先にプロジェクトを作成してください。"
+    },
+    "autopilot": {
+      "title": "オートパイロット設定（{{project}}）",
+      "description": "このプロジェクトでオートパイロット（autopilot-ticket / autopilot-tree）を実行するときの設定です。ここで保存した値はこの環境のローカル設定（~/.graph-ops/config.json）に保存されます。チーム設定（チーム拡張ディレクトリの autopilot.yaml）で指定された項目はそちらが優先され、ここでは変更できません。",
+      "teamFile": "チーム設定ファイル: {{path}}",
+      "noProject": "プロジェクトが選択されていません。オートパイロット設定はプロジェクトごとに保存されるため、先にプロジェクトを選択してください。",
+      "clearLocal": "ローカル値を削除して既定値に戻す",
+      "clearLocalFor": "{{key}}のローカル値を削除",
+      "lockedWithLocal": "{{source}}（ローカル値: {{value}}）",
+      "errorWithKeys": "{{message}}（対象: {{keys}}）",
+      "bypassWarning": "bypassPermissions を選ぶと、オートパイロットの子セッションはツールの実行（ファイルの変更やコマンドの実行を含む）を一切確認せずに行います。信頼できるリポジトリと環境でのみ使用してください。この値はチーム設定からは受け付けられません。",
+      "source": {
+        "default": "既定値",
+        "local": "ローカル設定",
+        "team_defaults": "チーム設定で固定（共通の既定）",
+        "team_project": "チーム設定で固定（このプロジェクト）"
+      },
+      "warningSource": {
+        "local": "ローカル設定",
+        "team_defaults": "チーム設定の defaults",
+        "team_project": "チーム設定の projects"
+      },
+      "warnings": {
+        "AUTOPILOT_TEAM_FILE_INVALID": "チーム設定ファイル {{value}} を読み込めなかったため、無視しています。",
+        "AUTOPILOT_TEAM_BYPASS_PERMISSIONS_IGNORED": "{{source}}の権限モード bypassPermissions は受け付けないため、無視しています。",
+        "AUTOPILOT_INVALID_VALUE": "{{source}}の「{{key}}」の値 {{value}} は不正なため、無視しています。",
+        "AUTOPILOT_UNKNOWN_KEY": "{{source}}の不明な項目「{{key}}」を無視しています。"
+      },
+      "keys": {
+        "mainReflection": {
+          "label": "main への反映方法",
+          "hint": "ルートチケット（単一モードではそのチケット）の成果を main にどう反映するか。",
+          "options": {
+            "branch": "ブランチを残すだけ",
+            "pull_request": "PR 作成まで",
+            "merge": "自動マージ"
+          }
+        },
+        "permissionMode": {
+          "label": "子セッションの権限モード",
+          "hint": "チケットごとに起動する子セッション（claude --permission-mode）の権限モード。",
+          "options": {
+            "acceptEdits": "acceptEdits（編集を自動承認）",
+            "auto": "auto",
+            "dontAsk": "dontAsk",
+            "bypassPermissions": "bypassPermissions（確認なし）"
+          }
+        },
+        "autoApproveGates": {
+          "label": "承認ゲートの自動判断",
+          "hint": "OFF にすると approval_gate では通常どおり人の判断を待ちます。"
+        },
+        "autoCreateTickets": {
+          "label": "派生チケットの自動作成",
+          "hint": "OFF にすると申し送りをチケットにするかどうかは人が判断します。"
+        },
+        "maxTickets": {
+          "label": "処理するチケット数の上限",
+          "hint": "1 回の実行で処理するチケット数（ルートを含む）。1〜100。"
+        },
+        "maxDepth": {
+          "label": "派生の深さの上限",
+          "hint": "処理対象とする派生の深さ（ルートを 0 とする）。0〜10。"
+        },
+        "onFailure": {
+          "label": "失敗・ブロック時の挙動",
+          "hint": "失敗・ブロックしたときに全体を止めるか、そのチケットの部分木だけ飛ばして続けるか。",
+          "options": {
+            "stop": "全体を止める",
+            "continue": "そのチケットだけ止めて続ける"
+          }
+        },
+        "stallTimeoutMinutes": {
+          "label": "無応答とみなすまでの時間（分）",
+          "hint": "子セッションに活動の兆候が見られない状態がこの時間続いたら失敗扱いにします。15〜1440。"
+        }
+      }
     }
   },
   "errors": {
@@ -516,7 +594,8 @@
     "ROUTE_NOT_FOUND": "このアドレスはこのサーバーでは提供されなくなりました。保存したリンクやブックマークからではなく、Web UI から開き直してください。",
     "UNKNOWN": "予期しないエラーが発生しました。再度お試しください。",
     "HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED": "保存済みのトークンは別のエンドポイント URL には使用できません。URL を変更した場合はトークンを再入力してください。",
-    "HOME_CONFIG_UNAVAILABLE": "ホームディレクトリを解決できないため、保存先の設定ファイルがなく、何も保存されていません。設定は $HOME/.graph-ops/config.json と環境変数からのみ読まれます。"
+    "HOME_CONFIG_UNAVAILABLE": "ホームディレクトリを解決できないため、保存先の設定ファイルがなく、何も保存されていません。設定は $HOME/.graph-ops/config.json と環境変数からのみ読まれます。",
+    "AUTOPILOT_SETTING_LOCKED": "チーム設定で固定されている項目は保存できません。その項目を変更せずに保存し直してください。"
   },
   "labels": {
     "colors": {

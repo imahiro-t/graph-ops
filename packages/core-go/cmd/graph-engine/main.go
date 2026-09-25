@@ -133,6 +133,8 @@ func run(cmd string, args []string) error {
 		return cmdGetLanguageSettings(rc, args)
 	case "ui":
 		return cmdUI(rc, args)
+	case "autopilot":
+		return cmdAutopilot(repo, rc, args)
 	default:
 		printUsage()
 		os.Exit(1)
@@ -433,6 +435,17 @@ Commands:
                                            instead, to create a new project or pick an existing one. Fails only if starting the UI server itself
                                            fails; a browser-launch failure is a warning with the URL printed
                                            for you to open by hand.)
+  autopilot settings [--project <id>]    (read-only: prints the project's effective autopilot settings as
+                                           JSON -- "settings" (the values in effect), "items" (per key: value,
+                                           source default|local|team_defaults|team_project, locked, local,
+                                           team, default) and "warnings". Resolution is per key: the team
+                                           file <teamExtensionsDir>/autopilot.yaml's projects.<id>, then its
+                                           defaults, then the local value (autopilotSettings.<id> in the home
+                                           config), then the built-in default. A key the team sets is locked;
+                                           permissionMode bypassPermissions is never taken from the team file.
+                                           Local values are edited in the Web UI's settings (PUT
+                                           /api/projects/{id}/autopilot-settings); there is no CLI to write
+                                           them. The project is resolved like list-labels')
   get-workflow-catalog [--language <code>]
                                           (plugin default -> user -> team workflow.yaml/config.yaml merge;
                                            --language previews the merge as if it resolved to that code,

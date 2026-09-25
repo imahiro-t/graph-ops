@@ -526,3 +526,81 @@ export interface TestMySQLConnectionResult {
   ok: boolean;
   error?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Autopilot settings (DFLT-00142) -- GET/PUT
+// /api/projects/{id}/autopilot-settings. See
+// packages/core-go/internal/autopilot/settings.go for the resolution rules:
+// per key, team projects.<id> > team defaults > local > built-in default.
+// ---------------------------------------------------------------------------
+
+export const AUTOPILOT_SETTING_KEYS = [
+  'mainReflection',
+  'permissionMode',
+  'autoApproveGates',
+  'autoCreateTickets',
+  'maxTickets',
+  'maxDepth',
+  'onFailure',
+  'stallTimeoutMinutes'
+] as const;
+
+export type AutopilotSettingKey = (typeof AUTOPILOT_SETTING_KEYS)[number];
+
+export type AutopilotSettingValue = string | number | boolean;
+
+export interface AutopilotSettings {
+  mainReflection: 'branch' | 'pull_request' | 'merge';
+  permissionMode: 'acceptEdits' | 'auto' | 'dontAsk' | 'bypassPermissions';
+  autoApproveGates: boolean;
+  autoCreateTickets: boolean;
+  maxTickets: number;
+  maxDepth: number;
+  onFailure: 'stop' | 'continue';
+  stallTimeoutMinutes: number;
+}
+
+// Where an effective value came from.
+export type AutopilotSource = 'default' | 'local' | 'team_defaults' | 'team_project';
+
+export interface AutopilotSettingItem {
+  key: AutopilotSettingKey;
+  value: AutopilotSettingValue;
+  source: AutopilotSource;
+  // True when a team tier supplies the value: the UI shows it read-only and
+  // never sends the key in a PUT (the server would refuse the whole request
+  // with AUTOPILOT_SETTING_LOCKED).
+  locked: boolean;
+  // The valid local value, or null. Still reported while locked -- a value
+  // saved before the team fixed the key comes back once it stops doing so.
+  local: AutopilotSettingValue | null;
+  team: AutopilotSettingValue | null;
+  default: AutopilotSettingValue;
+}
+
+// A warning from resolving the settings. Each known code has a
+// settings.autopilot.warnings.<code> message in the translation catalogues;
+// the English `message` is for logs only.
+export interface AutopilotWarning {
+  code: string;
+  source?: AutopilotSource;
+  key?: string;
+  // The offending value rendered as JSON (or the file path for
+  // AUTOPILOT_TEAM_FILE_INVALID).
+  value?: string;
+  message: string;
+}
+
+export interface AutopilotSettingsResponse {
+  project_id: string;
+  settings: AutopilotSettings;
+  items: AutopilotSettingItem[];
+  warnings: AutopilotWarning[];
+  // The team settings file's path when a team tier is configured (whether or
+  // not the file exists), else ''.
+  team_file: string;
+}
+
+// A PUT body: only the keys to change. A value stores it locally; null
+// removes the local value (back to the inherited one).
+export type AutopilotSettingsPatch = Partial<Record<AutopilotSettingKey, AutopilotSettingValue | null>>;

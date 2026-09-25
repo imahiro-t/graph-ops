@@ -271,6 +271,7 @@
       "reviewGates": "Review Gates",
       "skills": "Skills",
       "templates": "Templates",
+      "autopilot": "Autopilot",
       "appSettings": "App Settings",
       "labels": "Labels"
     },
@@ -481,6 +482,83 @@
       "projectLabel": "Project",
       "projectPlaceholder": "Select a project",
       "noProjects": "There are no projects yet. Create one before adding labels."
+    },
+    "autopilot": {
+      "title": "Autopilot settings ({{project}})",
+      "description": "Settings used when autopilot (autopilot-ticket / autopilot-tree) runs in this project. Values saved here go to this environment's local settings (~/.graph-ops/config.json). Keys set by the team settings (autopilot.yaml in the team extensions directory) take precedence and cannot be changed here.",
+      "teamFile": "Team settings file: {{path}}",
+      "noProject": "No project is selected. Autopilot settings are saved per project, so select a project first.",
+      "clearLocal": "Remove the local value and use the inherited one",
+      "clearLocalFor": "Remove the local value of {{key}}",
+      "lockedWithLocal": "{{source}} (local value: {{value}})",
+      "errorWithKeys": "{{message}} (settings: {{keys}})",
+      "bypassWarning": "With bypassPermissions, autopilot child sessions run every tool -- including file changes and commands -- without asking for confirmation. Use it only with repositories and environments you trust. This value is never accepted from the team settings.",
+      "source": {
+        "default": "Default",
+        "local": "Local setting",
+        "team_defaults": "Fixed by team settings (shared default)",
+        "team_project": "Fixed by team settings (this project)"
+      },
+      "warningSource": {
+        "local": "the local settings",
+        "team_defaults": "the team settings' defaults",
+        "team_project": "the team settings' projects entry"
+      },
+      "warnings": {
+        "AUTOPILOT_TEAM_FILE_INVALID": "The team settings file {{value}} could not be read and is ignored.",
+        "AUTOPILOT_TEAM_BYPASS_PERMISSIONS_IGNORED": "Permission mode bypassPermissions in {{source}} is not accepted and is ignored.",
+        "AUTOPILOT_INVALID_VALUE": "The value {{value}} of \"{{key}}\" in {{source}} is invalid and is ignored.",
+        "AUTOPILOT_UNKNOWN_KEY": "Unknown setting \"{{key}}\" in {{source}} is ignored."
+      },
+      "keys": {
+        "mainReflection": {
+          "label": "How to bring results into main",
+          "hint": "How the root ticket's work (in single mode, that ticket's) reaches main.",
+          "options": {
+            "branch": "Leave the branch",
+            "pull_request": "Open a pull request",
+            "merge": "Merge automatically"
+          }
+        },
+        "permissionMode": {
+          "label": "Child session permission mode",
+          "hint": "The permission mode (claude --permission-mode) of the child session started for each ticket.",
+          "options": {
+            "acceptEdits": "acceptEdits (auto-accept edits)",
+            "auto": "auto",
+            "dontAsk": "dontAsk",
+            "bypassPermissions": "bypassPermissions (no confirmation)"
+          }
+        },
+        "autoApproveGates": {
+          "label": "Decide approval gates automatically",
+          "hint": "When off, approval gates wait for a person as usual."
+        },
+        "autoCreateTickets": {
+          "label": "Create follow-up tickets automatically",
+          "hint": "When off, a person decides whether handoff items become tickets."
+        },
+        "maxTickets": {
+          "label": "Maximum tickets per run",
+          "hint": "Tickets processed in one run, including the root. 1-100."
+        },
+        "maxDepth": {
+          "label": "Maximum derivation depth",
+          "hint": "How deep derived tickets are processed (the root is 0). 0-10."
+        },
+        "onFailure": {
+          "label": "On failure or block",
+          "hint": "Stop the whole run, or skip only that ticket's subtree and continue.",
+          "options": {
+            "stop": "Stop the whole run",
+            "continue": "Skip that ticket and continue"
+          }
+        },
+        "stallTimeoutMinutes": {
+          "label": "Minutes until unresponsive",
+          "hint": "A child session with no sign of activity for this long is treated as failed. 15-1440."
+        }
+      }
     }
   },
   "errors": {
@@ -516,7 +594,8 @@
     "ROUTE_NOT_FOUND": "That address is no longer served by this server. Open what you were looking for from the Web UI rather than from a saved link or bookmark.",
     "UNKNOWN": "An unexpected error occurred. Please try again.",
     "HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED": "The saved token cannot be used for a different endpoint URL. Enter the token again after changing the URL.",
-    "HOME_CONFIG_UNAVAILABLE": "Your home directory could not be resolved, so there is no config file to save to and nothing was saved. Settings are only ever read from $HOME/.graph-ops/config.json and environment variables."
+    "HOME_CONFIG_UNAVAILABLE": "Your home directory could not be resolved, so there is no config file to save to and nothing was saved. Settings are only ever read from $HOME/.graph-ops/config.json and environment variables.",
+    "AUTOPILOT_SETTING_LOCKED": "Settings fixed by the team settings cannot be saved. Save again without changing them."
   },
   "labels": {
     "colors": {
