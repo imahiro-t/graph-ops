@@ -138,7 +138,7 @@ When `autoApproveGates` or `autoCreateTickets` is off, a child terminal asks you
 
 ### Team settings and precedence
 
-A team can set autopilot settings in `autopilot.yaml` at the root of the shared directory `teamExtensionsDir` points at (next to `workflow.yaml`):
+A team can set autopilot settings in `autopilot.yaml` at the root of the shared directory `teamExtensionsDir` points at (next to `workflow.yaml`). Each person points at that directory with Settings > App Settings > "Team Settings Directory" (saved as `teamExtensionsDir` in `$HOME/.graph-ops/config.json`; the environment variable `GRAPH_TEAM_EXTENSIONS_DIR` takes precedence when set, and a change takes effect after the UI server restarts). When it is not set, or names your own settings directory, there is no team tier and no team file is read. The file looks like this:
 
 ```yaml
 version: 1
