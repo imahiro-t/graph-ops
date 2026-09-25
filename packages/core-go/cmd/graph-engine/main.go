@@ -490,9 +490,9 @@ Commands:
   get-language-settings                  ({"resolved","source":"user"|"none","supported_locales"} --
                                            whether a persistent language setting exists in the user tier
                                            (the language is personal; a team tier's is ignored with a
-                                           warning on stderr) and what it resolves to, so onboarding/process-ticket can
-                                           tell that apart from "nothing set yet, decide one for this
-                                           session" without parsing prose)
+                                           warning on stderr) and what it resolves to, so
+                                           onboarding/process-ticket can tell that apart from "nothing
+                                           set yet, decide one for this session" without parsing prose)
   serve [--port N] [--host ADDR]
                                           (--host omitted -> GRAPH_HOST / the home config's "host" /
                                            127.0.0.1. This API has no authentication, so it listens on

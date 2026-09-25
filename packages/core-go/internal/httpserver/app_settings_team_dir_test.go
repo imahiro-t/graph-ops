@@ -83,6 +83,34 @@ func TestAppSettings_PutEmptyTeamExtensionsDirRemovesOnlyThatKey(t *testing.T) {
 	}
 }
 
+// TestAppSettings_PutWithoutTeamExtensionsDirKeepsIt: a body that leaves the
+// field out altogether (a client from before DFLT-00153, which never sends
+// it) keeps the saved value -- only an explicit "" removes it -- while the
+// other owned fields in the body are still saved.
+func TestAppSettings_PutWithoutTeamExtensionsDirKeepsIt(t *testing.T) {
+	s, _, homeDir := newAppSettingsTestServer(t)
+	homePath := runtimeconfig.HomeConfigPath(homeDir)
+	team := filepath.Join(homeDir, "old-team")
+	writeConfigJSON(t, homePath, runtimeconfig.FileConfig{
+		DBPath:            "/tmp/before.db",
+		TeamExtensionsDir: team,
+	})
+
+	body := teamDirBody(nil, nil)
+	delete(body, "teamExtensionsDir")
+	rec := doJSON(t, s, http.MethodPut, "/api/settings/app", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	cfg := readConfigJSON(t, homePath)
+	if cfg.TeamExtensionsDir != team {
+		t.Errorf("config.json teamExtensionsDir = %q, want the stored %q kept", cfg.TeamExtensionsDir, team)
+	}
+	if cfg.DBPath != "/tmp/graph.db" {
+		t.Errorf("config.json dbPath = %q, want the submitted /tmp/graph.db", cfg.DBPath)
+	}
+}
+
 // TestAppSettings_PutNeverWritesUserExtensionsDir: userExtensionsDir is not
 // an owned field any more -- a body that still carries one (an older client)
 // neither changes nor clears the stored value.

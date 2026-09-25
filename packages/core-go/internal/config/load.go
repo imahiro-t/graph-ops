@@ -182,9 +182,11 @@ func ResolveRoots(userDirOverride, teamDirOverride string) Roots {
 }
 
 // Load resolves and merges the config layers (plugin default -> user ->
-// team, team winning -- except for the language, which is personal) into a single Catalog with no overrides at all -- so
+// team, team winning) into a single Catalog with no overrides at all -- so
 // the user tier is $HOME/.graph-ops and there is no team tier (see
 // ResolveRoots) -- and no explicit language override (see LoadWithRoots).
+// The language is the one exception to "team winning": it is personal, so a
+// team tier's language is ignored (see LoadWithRoots).
 func Load() (Catalog, error) {
 	return LoadWithRoots("", "", "")
 }
