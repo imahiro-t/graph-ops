@@ -78,20 +78,45 @@ const MAX_HEADER_LABELS = 3;
 // back to idle (DFLT-00143).
 const COPY_FEEDBACK_MS = 1500;
 
-// Whether a click on the header row is part of a text selection rather than
-// a plain "toggle the row" click (DFLT-00143): the second and later clicks
-// of a double/triple click (which select a word/the element), or any click
-// while a non-empty selection overlaps the row (e.g. the click that ends a
-// drag selection over the ID or title). A selection that lies entirely
-// outside the row does not stop the toggle. Range.intersectsNode(row) is true
-// when a selected range even partly covers the row (including a drag that
-// starts outside the row and ends inside it). It is used instead of
-// Selection.containsNode(row, true), whose partial-containment result jsdom
-// gets wrong (true for a selection entirely after the row). The anchor/focus
-// checks are a fallback in case intersectsNode is missing.
-function isSelectionClick(event: React.MouseEvent, row: HTMLElement | null): boolean {
-  if (event.detail >= 2) return true;
-  if (!row || typeof window.getSelection !== 'function') return false;
+// A snapshot of the document selection, taken on mousedown on the header row
+// so the following click can tell whether the selection changed in between
+// (DFLT-00143). null means there is no (non-empty) selection.
+type SelectionSnapshot = {
+  anchorNode: Node | null;
+  anchorOffset: number;
+  focusNode: Node | null;
+  focusOffset: number;
+  text: string;
+} | null;
+
+function takeSelectionSnapshot(): SelectionSnapshot {
+  if (typeof window.getSelection !== 'function') return null;
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+  return {
+    anchorNode: sel.anchorNode,
+    anchorOffset: sel.anchorOffset,
+    focusNode: sel.focusNode,
+    focusOffset: sel.focusOffset,
+    text: sel.toString()
+  };
+}
+
+function sameSelection(a: SelectionSnapshot, b: SelectionSnapshot): boolean {
+  if (a === null || b === null) return a === b;
+  return a.anchorNode === b.anchorNode && a.anchorOffset === b.anchorOffset
+    && a.focusNode === b.focusNode && a.focusOffset === b.focusOffset && a.text === b.text;
+}
+
+// Whether a non-empty selection overlaps the row. Range.intersectsNode(row)
+// is true when a selected range even partly covers the row (including a
+// drag that starts outside the row and ends inside it). It is used instead
+// of Selection.containsNode(row, true), whose partial-containment result
+// jsdom gets wrong (true for a selection entirely after the row). The
+// anchor/focus check is always applied as well, as an extra safety net for
+// ranges intersectsNode does not report.
+function selectionOverlapsRow(row: HTMLElement): boolean {
+  if (typeof window.getSelection !== 'function') return false;
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
   for (let i = 0; i < sel.rangeCount; i++) {
@@ -99,6 +124,33 @@ function isSelectionClick(event: React.MouseEvent, row: HTMLElement | null): boo
     if (typeof range.intersectsNode === 'function' && range.intersectsNode(row)) return true;
   }
   return (!!sel.anchorNode && row.contains(sel.anchorNode)) || (!!sel.focusNode && row.contains(sel.focusNode));
+}
+
+// Whether a click on the header row is part of a text selection rather than
+// a plain "toggle the row" click (DFLT-00143):
+// - A keyboard-generated click (detail 0, e.g. Enter/Space on the chevron)
+//   is never a selection click.
+// - The second and later clicks of a double/triple click (which select a
+//   word/the element) always are.
+// - Otherwise it is one only if a non-empty selection overlaps the row now
+//   AND the selection changed since this click's mousedown -- i.e. the
+//   press/release made or changed it (the click that ends a drag over the
+//   ID or title). A selection left over from before (Chromium does not
+//   clear it on a mousedown over the row's select-none parts, nor before
+//   the click when the press lands inside the selection) does not stop the
+//   toggle. `pressSnapshot` is undefined when no mousedown on the row was
+//   seen for this click (e.g. a synthetic click); then any overlapping
+//   selection counts.
+function isSelectionClick(
+  event: React.MouseEvent,
+  row: HTMLElement | null,
+  pressSnapshot: SelectionSnapshot | undefined
+): boolean {
+  if (event.detail === 0) return false;
+  if (event.detail >= 2) return true;
+  if (!row || !selectionOverlapsRow(row)) return false;
+  if (pressSnapshot === undefined) return true;
+  return !sameSelection(pressSnapshot, takeSelectionSnapshot());
 }
 
 export const TicketItem: React.FC<Props> = ({
@@ -185,21 +237,36 @@ export const TicketItem: React.FC<Props> = ({
     }
   };
 
-  // Priority (DFLT-00048): changed from the ticket header via PATCH
-  // /api/tickets/{id}'s "priority" field. Always one of the three levels --
-  // a priority can't be cleared (DFLT-00083; the backend rejects null).
   // Header row text selection and the ID copy button (DFLT-00143).
   const headerRowRef = useRef<HTMLDivElement>(null);
+  // The selection as it was on the latest mousedown on the row; consumed
+  // (reset to undefined) by the click that follows it.
+  const pressSnapshotRef = useRef<SelectionSnapshot | undefined>(undefined);
+  const handleHeaderMouseDown = (e: React.MouseEvent) => {
+    pressSnapshotRef.current = e.button === 0 ? takeSelectionSnapshot() : undefined;
+  };
   const handleHeaderClick = (e: React.MouseEvent) => {
-    if (isSelectionClick(e, headerRowRef.current)) return;
+    const pressSnapshot = pressSnapshotRef.current;
+    pressSnapshotRef.current = undefined;
+    if (isSelectionClick(e, headerRowRef.current, pressSnapshot)) return;
     onToggleExpand();
   };
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+  // Guards showCopyResult against a writeText that settles after the row
+  // unmounted (a list refresh or a filter change), which would otherwise
+  // start a timer no cleanup would ever clear.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = null;
+    };
   }, []);
   const showCopyResult = (state: 'copied' | 'failed') => {
+    if (!mountedRef.current) return;
     if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
     setCopyState(state);
     copyTimerRef.current = setTimeout(() => {
@@ -229,6 +296,9 @@ export const TicketItem: React.FC<Props> = ({
         : t('ticketItem.copyId.button', { id: ticket.id });
   const copyIdStatus = copyState === 'idle' ? '' : copyIdLabel;
 
+  // Priority (DFLT-00048): changed from the ticket header via PATCH
+  // /api/tickets/{id}'s "priority" field. Always one of the three levels --
+  // a priority can't be cleared (DFLT-00083; the backend rejects null).
   const [prioritySaving, setPrioritySaving] = useState(false);
   const [priorityError, setPriorityError] = useState('');
 
@@ -637,6 +707,7 @@ export const TicketItem: React.FC<Props> = ({
           assignee chip/button or the node progress). */}
       <div
         ref={headerRowRef}
+        onMouseDown={handleHeaderMouseDown}
         onClick={handleHeaderClick}
         data-testid="ticket-header-row"
         className="p-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition select-none"
@@ -668,12 +739,12 @@ export const TicketItem: React.FC<Props> = ({
             aria-label={copyIdLabel}
             title={copyIdLabel}
             data-testid="ticket-copy-id"
-            className={`-ml-2 p-1 rounded shrink-0 transition ${
+            className={`-ml-1 w-6 h-6 inline-flex items-center justify-center rounded shrink-0 transition ${
               copyState === 'copied'
                 ? 'text-emerald-600 dark:text-emerald-400'
                 : copyState === 'failed'
                   ? 'text-red-600 dark:text-red-400'
-                  : 'text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
             }`}
           >
             {copyState === 'copied' ? (

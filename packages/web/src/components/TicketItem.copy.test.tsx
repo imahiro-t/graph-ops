@@ -89,7 +89,7 @@ describe('TicketItem header text selection', () => {
     expect(onToggleExpand).toHaveBeenCalledTimes(2);
   });
 
-  it('does not toggle when the title is selected', () => {
+  it('does not toggle when the title is selected (a click with no mousedown seen on the row)', () => {
     const { titleEl, idEl, onToggleExpand } = renderItem();
     window.getSelection()!.selectAllChildren(titleEl);
     fireEvent.click(titleEl, { detail: 1 });
@@ -132,6 +132,65 @@ describe('TicketItem header text selection', () => {
 
     window.getSelection()!.selectAllChildren(before);
     fireEvent.click(titleEl, { detail: 1 });
+    expect(onToggleExpand).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not toggle when a press/release on the row makes the selection (mousedown, then select, then click)', () => {
+    const { titleEl, idEl, onToggleExpand } = renderItem();
+    fireEvent.mouseDown(titleEl, { detail: 1 });
+    window.getSelection()!.selectAllChildren(titleEl);
+    fireEvent.click(titleEl, { detail: 1 });
+    expect(onToggleExpand).not.toHaveBeenCalled();
+
+    // Re-selecting something else (the ID) over an existing selection also
+    // counts as a selection change.
+    fireEvent.mouseDown(idEl, { detail: 1 });
+    window.getSelection()!.selectAllChildren(idEl);
+    fireEvent.click(idEl, { detail: 1 });
+    expect(onToggleExpand).not.toHaveBeenCalled();
+  });
+
+  it('toggles on a click outside the selectable text while an earlier selection is still there', () => {
+    // Chromium keeps the selection on a mousedown over the row's select-none
+    // parts, so after copying the title the row must still open and close.
+    const { headerRow, titleEl, onToggleExpand } = renderItem();
+    window.getSelection()!.selectAllChildren(titleEl);
+    const chevron = headerRow.querySelector('button')!;
+    const status = headerRow.querySelector('.rounded-full')!;
+
+    fireEvent.mouseDown(chevron, { detail: 1 });
+    fireEvent.click(chevron, { detail: 1 });
+    expect(onToggleExpand).toHaveBeenCalledTimes(1);
+
+    fireEvent.mouseDown(status, { detail: 1 });
+    fireEvent.click(status, { detail: 1 });
+    expect(onToggleExpand).toHaveBeenCalledTimes(2);
+
+    fireEvent.mouseDown(headerRow, { detail: 1 });
+    fireEvent.click(headerRow, { detail: 1 });
+    expect(onToggleExpand).toHaveBeenCalledTimes(3);
+
+    // The selection is still there throughout (jsdom, like Chromium, keeps it).
+    expect(window.getSelection()!.isCollapsed).toBe(false);
+  });
+
+  it('toggles on a plain click inside an existing selection that the click does not change', () => {
+    // Chromium clears a selection only after the click when the press lands
+    // inside it, so the click still sees the unchanged selection.
+    const { titleEl, onToggleExpand } = renderItem();
+    window.getSelection()!.selectAllChildren(titleEl);
+    fireEvent.mouseDown(titleEl, { detail: 1 });
+    fireEvent.click(titleEl, { detail: 1 });
+    expect(onToggleExpand).toHaveBeenCalledTimes(1);
+  });
+
+  it('always toggles on a keyboard click of the chevron (detail 0), even with a selection in the row', () => {
+    const { headerRow, titleEl, onToggleExpand } = renderItem();
+    window.getSelection()!.selectAllChildren(titleEl);
+    const chevron = headerRow.querySelector('button')!;
+    fireEvent.click(chevron, { detail: 0 });
+    expect(onToggleExpand).toHaveBeenCalledTimes(1);
+    fireEvent.click(chevron, { detail: 0 });
     expect(onToggleExpand).toHaveBeenCalledTimes(2);
   });
 
@@ -184,6 +243,29 @@ describe('TicketItem ID copy button', () => {
     });
     expect(copyButton).toHaveAttribute('aria-label', i18n.t('ticketItem.copyId.button', { id: TICKET_ID }));
     expect(copyStatus(headerRow)).toBeEmptyDOMElement();
+  });
+
+  it('meets the contrast and target size fixes (slate-500 icon, 24x24px button)', () => {
+    setClipboard({ writeText });
+    const { copyButton } = renderItem();
+    expect(copyButton).toHaveClass('w-6', 'h-6', 'text-slate-500');
+    expect(copyButton).not.toHaveClass('text-slate-400');
+  });
+
+  it('leaves no timer behind when the row unmounts while writeText is pending', async () => {
+    vi.useFakeTimers();
+    let resolveWrite: () => void = () => {};
+    writeText.mockImplementation(() => new Promise<void>(resolve => { resolveWrite = resolve; }));
+    setClipboard({ writeText });
+    const { copyButton, unmount } = renderItem();
+
+    fireEvent.click(copyButton);
+    expect(writeText).toHaveBeenCalledWith(TICKET_ID);
+    unmount();
+    await act(async () => {
+      resolveWrite();
+    });
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('shows the failed state when writeText rejects', async () => {
