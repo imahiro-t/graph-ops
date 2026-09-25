@@ -265,6 +265,13 @@ export interface Project {
   updated_at: string;
 }
 
+// GET /api/projects/pending-approvals's counts (DFLT-00144): project ID ->
+// the number of that project's tickets awaiting approval (a reached
+// approval_gate still at TODO; CLOSED tickets are not counted). A project
+// with none has no key, and the project switcher reads "no key" as "no
+// badge".
+export type PendingApprovalCounts = Record<string, number>;
+
 // --- Settings UI (workflow/node-type/review-gate configuration) ---
 // Mirrors packages/core-go/internal/config's Document/NodeDef/ReviewGateDef/
 // Catalog shapes (see GET/PUT /api/settings/catalog,

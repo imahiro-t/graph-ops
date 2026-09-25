@@ -16,7 +16,7 @@ import {
   MonitorCog,
   Languages
 } from 'lucide-react';
-import { AutopilotRun, Label, TicketDetail, TicketGraph, TicketStatus, TicketPriority, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
+import { AutopilotRun, Label, TicketDetail, TicketGraph, TicketStatus, TicketPriority, PendingApprovalCounts, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
 import { descendantsIndex, fetchAutopilotRuns, ticketAutopilotView } from './lib/autopilotApi';
 import { getStatusMeta, matchesStatusFilter } from './statusMeta';
 import { getPriorityMeta, matchesPriorityFilter } from './priorityMeta';
@@ -31,11 +31,13 @@ import { ClaudeRunnerModal } from './components/ClaudeRunnerModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ProjectSetupModal } from './components/ProjectSetupModal';
 import { CreateTicketModal } from './components/CreateTicketModal';
+import { PendingApprovalBadge } from './components/PendingApprovalBadge';
 import { useClaudeLaunch } from './hooks/useClaudeLaunch';
 import { useTheme, ThemePreference } from './hooks/useTheme';
 import { formatTime } from './i18n/formatDate';
 import { localizedApiErrorMessage } from './lib/apiError';
 import { apiFetch } from './lib/apiFetch';
+import { fetchPendingApprovalCounts } from './lib/pendingApprovals';
 import { fetchAppSettings } from './lib/settingsApi';
 import { useLatest } from './hooks/useLatest';
 
@@ -201,6 +203,33 @@ export const App: React.FC = () => {
   // focus on close when the element that opened it is gone (the menu item
   // unmounts with the menu) or the dialog opened by itself (?newProject=1).
   const projectMenuButtonRef = useRef<HTMLButtonElement>(null);
+  // Per-project count of tickets awaiting approval, badged on the switcher's
+  // menu items (DFLT-00144). Refetched every time the menu opens; empty
+  // while that fetch is in flight and after it fails, so the menu never
+  // shows a stale count and never depends on this request to be usable.
+  const [pendingApprovalCounts, setPendingApprovalCounts] = useState<PendingApprovalCounts>({});
+  // Only the latest open's answer is applied: an earlier, slower response
+  // arriving after a quick close-and-reopen would otherwise overwrite the
+  // fresh counts with old ones.
+  const pendingApprovalsSeqRef = useRef(0);
+  const refreshPendingApprovalCounts = async () => {
+    const seq = ++pendingApprovalsSeqRef.current;
+    setPendingApprovalCounts({});
+    try {
+      const counts = await fetchPendingApprovalCounts();
+      if (seq === pendingApprovalsSeqRef.current) setPendingApprovalCounts(counts);
+    } catch (e) {
+      console.error('Failed to load pending approval counts', e);
+    }
+  };
+  const toggleProjectMenu = () => {
+    if (isProjectMenuOpen) {
+      setIsProjectMenuOpen(false);
+      return;
+    }
+    setIsProjectMenuOpen(true);
+    void refreshPendingApprovalCounts();
+  };
   // The directory `graph-engine ui` asked a project to be set up for (see
   // the newProject query effect below), or '' when the dialog was opened
   // from the header's "New project..." entry.
@@ -945,7 +974,7 @@ export const App: React.FC = () => {
             <div className="relative">
               <button
                 ref={projectMenuButtonRef}
-                onClick={() => setIsProjectMenuOpen(v => !v)}
+                onClick={toggleProjectMenu}
                 className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 shadow-xs transition max-w-[14rem]"
                 title={currentProject ? currentProject.local_path || t('settings.appSettings.projects.notSet') : undefined}
               >
@@ -971,7 +1000,12 @@ export const App: React.FC = () => {
                       >
                         <Check className={`w-3.5 h-3.5 shrink-0 ${p.id === currentProject?.id ? 'text-blue-600 dark:text-blue-400' : 'text-transparent'}`} />
                         <span className="truncate">{p.name}</span>
-                        <span className="ml-auto text-[10px] text-slate-400 dark:text-slate-500 font-mono">{p.prefix}</span>
+                        <span className="ml-auto flex items-center gap-2 shrink-0">
+                          {pendingApprovalCounts[p.id] > 0 && (
+                            <PendingApprovalBadge count={pendingApprovalCounts[p.id]} />
+                          )}
+                          <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">{p.prefix}</span>
+                        </span>
                       </button>
                     ))}
                     <div className="border-t border-slate-100 dark:border-slate-800 mt-1 pt-1">

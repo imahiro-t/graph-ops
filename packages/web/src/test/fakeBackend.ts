@@ -90,7 +90,20 @@ export interface FakeBackendSeed {
   // autopilotStart, by default a fresh reservation.
   autopilotRuns?: AutopilotRun[];
   autopilotStart?: FakeAutopilotStart;
+  // DFLT-00144: GET /api/projects/pending-approvals answers with this, by
+  // default {"counts": {}}. A test changes the answer (a status other than
+  // 200, a malformed body, a network error by throwing, a response that
+  // never settles) by replacing backend.pendingApprovals.
+  pendingApprovals?: FakePendingApprovals;
 }
+
+// Answers GET /api/projects/pending-approvals. Returning a Response (or a
+// promise of one) gives full control -- a delayed or never-settling answer, a
+// body that is not JSON; throwing is a network error.
+export type FakePendingApprovals = () =>
+  | { status: number; body: unknown }
+  | Response
+  | Promise<Response>;
 
 export interface FakeBackend extends Required<FakeBackendSeed> {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
@@ -185,6 +198,7 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
         status: 200,
         body: { run_id: 'run-1', mode, root: ticketId, state: 'starting', created: true, resumed: false }
       })),
+    pendingApprovals: seed.pendingApprovals ?? (() => ({ status: 200, body: { counts: {} } })),
 
     async fetch(input, init) {
       const url = String(input);
@@ -210,6 +224,11 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
         const id = decodeURIComponent(m[1]);
         const tk = backend.tickets.find(x => x.id === id);
         return tk ? respond(200, ticketDetailJSON(tk)) : respond(404, { error: { code: 'TICKET_NOT_FOUND', message: '' } });
+      }
+      if (url === '/api/projects/pending-approvals' && method === 'GET') {
+        const res = backend.pendingApprovals();
+        if (res instanceof Response || res instanceof Promise) return res;
+        return respond(res.status, res.body);
       }
       if (url === '/api/projects' && method === 'GET') return respond(200, backend.projects);
       if (url === '/api/current-project' && method === 'GET') {

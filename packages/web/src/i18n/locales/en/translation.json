@@ -64,7 +64,9 @@
     "selectFirst": "Create or select a project first",
     "noProjectYet": "No project has been created yet. Create one to start managing tickets.",
     "loadFailed": "Could not load the current project setting. Check your home config file (~/.graph-ops/config.json) and try again.",
-    "retry": "Retry"
+    "retry": "Retry",
+    "pendingApprovals_one": "{{count}} ticket awaiting approval",
+    "pendingApprovals_other": "{{count}} tickets awaiting approval"
   },
   "createProjectModal": {
     "title": "Create New Project",

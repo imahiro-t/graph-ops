@@ -578,7 +578,10 @@ export const TicketItem: React.FC<Props> = ({
   // currently stuck on is the same prerequisite check the engine itself
   // uses to decide what's executable (see GetExecutableNodes in
   // packages/core-go/internal/engine/engine.go): every non-loop edge
-  // feeding into it must come from a DONE node.
+  // feeding into it must come from a DONE node. The server's own copy of
+  // this "awaiting approval" definition is engine.HasPendingApproval, which
+  // drives both the ticket's IN REVIEW status and the project switcher's
+  // pending-approval counts (DFLT-00144); keep the two in step.
   const nodeById = new Map(ticket.nodes.map(n => [n.id, n]));
   const isNodeReached = (nodeId: string) =>
     ticket.edges.every(e => {
