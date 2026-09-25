@@ -454,8 +454,8 @@ func TestHTTPRepository_EveryOperationMapsToItsRequest(t *testing.T) {
 			if got := req.Header.Get("Authorization"); got != "Bearer "+testToken {
 				t.Errorf("Authorization = %q", got)
 			}
-			if got := req.Header.Get(HTTPDataSourceProtocolHeader); got != "1.0" {
-				t.Errorf("%s = %q, want 1.0", HTTPDataSourceProtocolHeader, got)
+			if got := req.Header.Get(HTTPDataSourceProtocolHeader); got != HTTPDataSourceProtocolVersion {
+				t.Errorf("%s = %q, want %s", HTTPDataSourceProtocolHeader, got, HTTPDataSourceProtocolVersion)
 			}
 		})
 	}

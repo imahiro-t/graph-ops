@@ -31,7 +31,7 @@ const (
 	// (MAJOR.MINOR). It is also openapi.yaml's info.version -- a test keeps the
 	// two equal. A plugin whose MAJOR differs is refused at startup; a
 	// different MINOR is accepted (minor versions only add optional things).
-	HTTPDataSourceProtocolVersion = "1.0"
+	HTTPDataSourceProtocolVersion = "1.1"
 	// HTTPDataSourceProtocolHeader carries HTTPDataSourceProtocolVersion on
 	// every request, so a plugin can adapt to (or refuse) an older client.
 	HTTPDataSourceProtocolHeader = "GraphOps-Protocol-Version"
@@ -145,6 +145,10 @@ type HTTPRepository struct {
 	token            string
 	client           *http.Client
 	maxResponseBytes int64
+	// serverMinor is the MINOR of the protocol version the plugin reported
+	// in the handshake. Features added in a minor version are only used
+	// against a plugin that speaks it (e.g. parent_ticket_id needs 1.1).
+	serverMinor int
 }
 
 var _ GraphRepository = (*HTTPRepository)(nil)
@@ -221,6 +225,7 @@ func (r *HTTPRepository) handshake() error {
 	if !ok || major != httpDataSourceMajor {
 		return fmt.Errorf("incompatible data source protocol: server speaks %s, graph-engine requires %d.x", info.Version, httpDataSourceMajor)
 	}
+	r.serverMinor = protocolMinor(info.Version)
 	return nil
 }
 
@@ -235,6 +240,25 @@ func protocolMajor(version string) (int, bool) {
 	}
 	return major, true
 }
+
+// protocolMinor is the MINOR of a "MAJOR.MINOR" version, 0 when it cannot be
+// read (the handshake has already checked the MAJOR, so an unreadable MINOR
+// is treated as the oldest one rather than as an error).
+func protocolMinor(version string) int {
+	_, minorStr, ok := strings.Cut(version, ".")
+	if !ok {
+		return 0
+	}
+	minor, err := strconv.Atoi(minorStr)
+	if err != nil || minor < 0 {
+		return 0
+	}
+	return minor
+}
+
+// httpDataSourceParentMinor is the protocol minor version that added
+// Ticket.parent_ticket_id (DFLT-00142).
+const httpDataSourceParentMinor = 1
 
 // errHTTPDataSourceUnauthorized marks a 401/403 answer: the plugin rejected
 // the bearer token.
@@ -513,12 +537,29 @@ func (r *HTTPRepository) Init() error {
 	return r.do(http.MethodPost, "/init", map[string]any{}, nil)
 }
 
+// createTicketBody is createTicket's request body: the ticket, with
+// parent_ticket_id sent only when there is a parent (the outer field shadows
+// the embedded Ticket's always-serialized one). A plugin speaking 1.0 thus
+// sees exactly the body it always did.
+type createTicketBody struct {
+	domain.Ticket
+	ParentTicketID *string `json:"parent_ticket_id,omitempty"`
+}
+
+// CreateTicket refuses a ticket with a parent before sending anything when
+// the plugin speaks protocol 1.0, which has no parent_ticket_id: the plugin
+// would otherwise create the ticket and silently drop the parent.
 func (r *HTTPRepository) CreateTicket(projectID string, t domain.Ticket) (domain.Ticket, error) {
+	if t.ParentTicketID != nil && r.serverMinor < httpDataSourceParentMinor {
+		return domain.Ticket{}, domain.NewAPIError(domain.ErrCodeParentTicketUnsupported,
+			"PARENT_TICKET_UNSUPPORTED: the HTTP data source speaks protocol %d.%d, which cannot store a parent ticket (1.%d or later is required)",
+			httpDataSourceMajor, r.serverMinor, httpDataSourceParentMinor)
+	}
 	if t.Labels == nil {
 		t.Labels = []domain.Label{}
 	}
 	var out domain.Ticket
-	if err := r.do(http.MethodPost, "/projects/"+esc(projectID)+"/tickets", t, &out); err != nil {
+	if err := r.do(http.MethodPost, "/projects/"+esc(projectID)+"/tickets", createTicketBody{Ticket: t, ParentTicketID: t.ParentTicketID}, &out); err != nil {
 		return domain.Ticket{}, err
 	}
 	normalizeTicket(&out)

@@ -108,7 +108,7 @@ func run(cmd string, args []string) error {
 	case "update-ticket":
 		return cmdUpdateTicket(repo, args)
 	case "get-ticket":
-		return cmdGetTicket(repo, args)
+		return cmdGetTicket(eng, args)
 	case "list-tickets":
 		return cmdListTickets(repo)
 	case "get-executable":
@@ -214,7 +214,7 @@ Commands:
                                            that one needs an explicit ?project_id= or ?all=true.
                                            create-ticket uses it only as a fallback when the cwd matches
                                            no project's local path)
-  create-ticket <title> [description|-] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...
+  create-ticket <title> [description|-] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]... [--parent <ticketId>]
                                           (description "-" -> read from stdin and saved byte for byte;
                                            prefer it for long Markdown or text with quotes, $ or
                                            backquotes, e.g. a quoted heredoc (<<'EOF'). Use "-" only
@@ -239,6 +239,13 @@ Commands:
                                            name is an error and no ticket is created. See the registered
                                            ones with list-labels; register a new one with create-label or
                                            in the Web UI's settings (renaming and deleting are Web UI only).
+                                           --parent <ticketId> makes the new ticket a child of that ticket
+                                           (set at creation only; it cannot be changed later). With
+                                           --project omitted the parent's project is used (nothing on
+                                           stderr); a --project other than the parent's is VALIDATION_ERROR
+                                           and an unknown parent TICKET_NOT_FOUND, and no ticket is created.
+                                           On an HTTP data source speaking protocol 1.0 it is
+                                           PARENT_TICKET_UNSUPPORTED. get-ticket shows "parent" and "children".
                                            Tickets start unassigned; use the Web UI's assign button)
   list-labels [--project <id>]           (prints the project's registered labels as a JSON array, sorted by
                                            name case-insensitively, each with "id", "project_id", "name",
@@ -318,7 +325,9 @@ Commands:
                                            HIGH/MEDIUM/LOW, an empty title, an unknown flag (e.g. --assignee)
                                            or an unknown id (TICKET_NOT_FOUND) is an error and changes
                                            nothing. Prints the updated ticket JSON)
-  get-ticket <ticketId>
+  get-ticket <ticketId>                  (the ticket with its nodes, edges and artifacts, plus
+                                           "parent_ticket_id", "parent" ({id,title,status} or null) and
+                                           "children" (the same shape, in creation order, [] if none))
   list-tickets
   get-executable <ticketId> [--language <code>]
                                           (auto-seeds the graph's plan/plan_review nodes on first call;
@@ -472,7 +481,7 @@ func printJSON(v any) error {
 // a const inside each command) so tests can strip the exact usage from an
 // error and check that both commands report the same description error.
 const (
-	createTicketUsageLine = `usage: graph-engine create-ticket <title> [description|-] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...`
+	createTicketUsageLine = `usage: graph-engine create-ticket <title> [description|-] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]... [--parent <ticketId>]`
 	refineTicketUsageLine = `usage: graph-engine refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...`
 )
 
@@ -584,12 +593,26 @@ func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc run
 	const usage = createTicketUsageLine
 
 	var projectFlag, priorityFlag string
+	var parentFlag *string
 	var labelNames []string
 	var positional []string
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "--project" && i+1 < len(args):
 			projectFlag = args[i+1]
+			i++
+		case args[i] == "--parent":
+			// Like --label, a missing or empty value is a usage error rather
+			// than a positional: `--parent ""` would otherwise quietly
+			// create a ticket with no parent.
+			if i+1 >= len(args) || args[i+1] == "" {
+				return fmt.Errorf("%s: --parent requires a ticket id", usage)
+			}
+			if parentFlag != nil {
+				return fmt.Errorf("%s: --parent given more than once", usage)
+			}
+			v := args[i+1]
+			parentFlag = &v
 			i++
 		case args[i] == "--priority" && i+1 < len(args):
 			priorityFlag = args[i+1]
@@ -628,11 +651,28 @@ func cmdCreateTicket(eng *engine.GraphEngine, repo store.GraphRepository, rc run
 		}
 	}
 
-	projectID, notice, err := resolveCLIProject(repo, rc, projectFlag)
-	if err != nil {
-		return err
+	// With --parent and no --project, the ticket goes to the parent's
+	// project (DFLT-00142) -- not to whatever the cwd or current project
+	// would pick, which could only ever be refused as a cross-project
+	// parent. An explicit --project is kept as given and checked against
+	// the parent's by the engine (VALIDATION_ERROR on a mismatch).
+	var projectID, notice string
+	if parentFlag != nil && projectFlag == "" {
+		parent, err := repo.GetTicket(*parentFlag)
+		if err != nil {
+			return err
+		}
+		if parent == nil {
+			return domain.NewAPIError(domain.ErrCodeTicketNotFound, "TICKET_NOT_FOUND: parent ticket %s not found", *parentFlag)
+		}
+		projectID = parent.ProjectID
+	} else {
+		var err error
+		if projectID, notice, err = resolveCLIProject(repo, rc, projectFlag); err != nil {
+			return err
+		}
 	}
-	opts := engine.CreateTicketOptions{Priority: priority, LabelNames: labelNames}
+	opts := engine.CreateTicketOptions{Priority: priority, LabelNames: labelNames, ParentTicketID: parentFlag}
 	ticket, err := eng.CreateTicketWithOptions(projectID, title, description, opts)
 	if err != nil {
 		return err
@@ -1162,11 +1202,13 @@ func cmdUpdateTicket(repo store.GraphRepository, args []string) error {
 	return printJSON(ticket)
 }
 
-func cmdGetTicket(repo store.GraphRepository, args []string) error {
+// cmdGetTicket prints the ticket's detail plus its parent and children
+// (DFLT-00142, see engine.GetTicketDetailWithFamily).
+func cmdGetTicket(eng *engine.GraphEngine, args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: graph-engine get-ticket <ticketId>")
 	}
-	detail, err := repo.GetTicketDetail(args[0])
+	detail, err := eng.GetTicketDetailWithFamily(args[0])
 	if err != nil {
 		return err
 	}

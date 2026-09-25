@@ -602,7 +602,8 @@ func statusForError(err error, fallback int) int {
 			domain.ErrCodeCatalogCycleDetected, domain.ErrCodeCatalogUnknownReference,
 			domain.ErrCodeCatalogDuplicateNode, domain.ErrCodeCatalogInvalidDocument, domain.ErrCodeInvalidMaxIterations,
 			domain.ErrCodeInvalidReportTemplate,
-			domain.ErrCodeInvalidLabelName, domain.ErrCodeInvalidLabelColor, domain.ErrCodeLabelNameTaken:
+			domain.ErrCodeInvalidLabelName, domain.ErrCodeInvalidLabelColor, domain.ErrCodeLabelNameTaken,
+			domain.ErrCodeParentTicketUnsupported:
 			return http.StatusBadRequest
 		case domain.ErrCodeProjectNotFound, domain.ErrCodeTicketNotFound, domain.ErrCodeNodeNotFound, domain.ErrCodeArtifactNotFound,
 			domain.ErrCodeLabelNotFound:

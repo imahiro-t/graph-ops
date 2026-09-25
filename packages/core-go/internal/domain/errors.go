@@ -166,6 +166,11 @@ const (
 	// TICKET_NOT_FOUND, which is about a missing row rather than a missing
 	// route.
 	ErrCodeRouteNotFound ErrorCode = "ROUTE_NOT_FOUND"
+	// ErrCodeParentTicketUnsupported: a ticket was to be created with a
+	// parent (DFLT-00142) on an HTTP data source that speaks protocol 1.0,
+	// which has no parent_ticket_id. It is raised before anything is sent,
+	// so the parent is never silently dropped. Returned with a 400.
+	ErrCodeParentTicketUnsupported ErrorCode = "PARENT_TICKET_UNSUPPORTED"
 )
 
 // APIError pairs a machine-readable Code with a developer-facing English

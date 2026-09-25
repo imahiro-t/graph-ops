@@ -59,6 +59,9 @@ export interface FakeTicket {
   nodes?: FakeNode[];
   edges?: FakeEdge[];
   artifacts?: FakeArtifact[];
+  // DFLT-00142: the parent ticket's id. Children are derived from it, in
+  // seed order (standing in for creation order).
+  parentId?: string;
 }
 
 export interface FakeBackendSeed {
@@ -131,6 +134,7 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     priority: tk.priority,
+    parent_ticket_id: tk.parentId ?? null,
     labels: backend.labels
       .filter(l => tk.labelIds.includes(l.id))
       .map(labelJSON)
@@ -139,11 +143,15 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
     edges: (tk.edges ?? []).map(e => edgeJSON(tk, e))
   });
 
+  const refJSON = (tk: FakeTicket | undefined) => (tk ? { id: tk.id, title: tk.title, status: tk.status } : null);
+
   // GET /api/tickets/{id}'s response (domain.TicketDetail): the same thing
-  // plus the artifacts, bodies included.
+  // plus the artifacts, bodies included, and (DFLT-00142) parent/children.
   const ticketDetailJSON = (tk: FakeTicket) => ({
     ...ticketListJSON(tk),
-    artifacts: (tk.artifacts ?? []).map(a => artifactJSON(tk, a))
+    artifacts: (tk.artifacts ?? []).map(a => artifactJSON(tk, a)),
+    parent: refJSON(backend.tickets.find(p => p.id === tk.parentId)),
+    children: backend.tickets.filter(c => c.parentId === tk.id).map(c => refJSON(c))
   });
 
   const backend: FakeBackend = {

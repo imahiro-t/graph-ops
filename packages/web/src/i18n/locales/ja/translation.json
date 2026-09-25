@@ -113,6 +113,11 @@
     "nodeCount": "ノード数",
     "loopEdges": "差し戻し・戻りの辺: {{count}}本 (左側の破線で表示)",
     "createdAt": "作成日時",
+    "family": {
+      "parent": "親チケット",
+      "children": "子チケット（{{count}}件）",
+      "open": "{{id}} を開く"
+    },
     "description": {
       "title": "説明",
       "empty": "説明はまだありません",
@@ -481,6 +486,7 @@
   "errors": {
     "TITLE_REQUIRED": "タイトルは必須です。",
     "TICKET_NOT_FOUND": "対象のチケットが見つかりませんでした。",
+    "PARENT_TICKET_UNSUPPORTED": "使用中のデータソースは親チケットを保存できません。HTTP データソースのプラグインをプロトコル 1.1 以降に更新してください。",
     "NODE_NOT_FOUND": "対象のノードが見つかりませんでした。",
     "INVALID_NODE_STATE": "このノードは現在の状態では完了できません。すでに完了しているか、まだ開始していない可能性があります。画面を再読み込みして最新の状態をご確認ください。",
     "VALIDATION_ERROR": "入力内容に誤りがあります。ご確認のうえ再度お試しください。",

@@ -113,6 +113,11 @@
     "nodeCount": "Nodes",
     "loopEdges": "Loop-back edges: {{count}} (shown as dashed lines on the left)",
     "createdAt": "Created",
+    "family": {
+      "parent": "Parent ticket",
+      "children": "Child tickets ({{count}})",
+      "open": "Open {{id}}"
+    },
     "description": {
       "title": "Description",
       "empty": "No description yet",
@@ -481,6 +486,7 @@
   "errors": {
     "TITLE_REQUIRED": "A title is required.",
     "TICKET_NOT_FOUND": "That ticket could not be found.",
+    "PARENT_TICKET_UNSUPPORTED": "The data source in use cannot store a parent ticket. Update the HTTP data source plugin to protocol 1.1 or later.",
     "NODE_NOT_FOUND": "That node could not be found.",
     "INVALID_NODE_STATE": "This node cannot be completed while it is in its current state - it may already be finished, or may not have started yet. Reload the page to see where it stands now.",
     "VALIDATION_ERROR": "The request was invalid. Please check your input and try again.",

@@ -87,9 +87,19 @@ export const POLL_INTERVAL_MS = 15000;
 // that ticket's own detail request resolved. A ticket the response no longer
 // lists simply falls out; a newly listed one starts with no artifacts until
 // it is expanded.
+//
+// The parent/children (DFLT-00142) are detail-only too and are carried over
+// the same way, so the expanded ticket's family section does not blink out
+// between the list response and its detail response.
 export function mergeTicketSummaries(prev: TicketDetail[], summaries: TicketGraph[]): TicketDetail[] {
-  const artifactsById = new Map(prev.map(t => [t.id, t.artifacts]));
-  return summaries.map(summary => ({ ...summary, artifacts: artifactsById.get(summary.id) ?? [] }));
+  const prevById = new Map(prev.map(t => [t.id, t]));
+  return summaries.map(summary => {
+    const before = prevById.get(summary.id);
+    const merged: TicketDetail = { ...summary, artifacts: before?.artifacts ?? [] };
+    if (before?.parent !== undefined) merged.parent = before.parent;
+    if (before?.children !== undefined) merged.children = before.children;
+    return merged;
+  });
 }
 
 export const App: React.FC = () => {
@@ -733,6 +743,44 @@ export const App: React.FC = () => {
     if (isExpanding) void fetchTicketDetail(id);
   };
 
+  // Opens a related ticket from a ticket's parent/children section
+  // (DFLT-00142): expands it, brings it onto the current page -- clearing
+  // the filters first if they hide it, since a link that silently goes
+  // nowhere would be worse -- and scrolls it into view once rendered.
+  const [focusTicketId, setFocusTicketId] = useState<string | null>(null);
+  const handleOpenTicket = (id: string) => {
+    // Every ticket of the current project is loaded (paging is client-side),
+    // so a ticket missing here is gone or in another project: nothing to open.
+    if (!tickets.some(t => t.id === id)) return;
+    let visible = filteredTickets;
+    if (!visible.some(t => t.id === id)) {
+      setFilterQuery('');
+      setFilterStatuses([]);
+      setFilterAssignees([]);
+      setFilterPriorities([]);
+      setFilterLabelIds([]);
+      visible = tickets;
+    }
+    const index = visible.findIndex(t => t.id === id);
+    if (index >= 0) setPage(Math.floor(index / ticketsPerPage) + 1);
+    if (!expandedTicketIds.has(id)) {
+      setExpandedTicketIds(prev => new Set(prev).add(id));
+      void fetchTicketDetail(id);
+    }
+    setFocusTicketId(id);
+  };
+  // Runs after the render that applied handleOpenTicket's page/filter/expand
+  // updates (React batches them with setFocusTicketId), so the card exists.
+  useEffect(() => {
+    if (!focusTicketId) return;
+    const el = document.getElementById(`ticket-${focusTicketId}`);
+    if (el) {
+      el.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+      el.focus({ preventScroll: true });
+    }
+    setFocusTicketId(null);
+  }, [focusTicketId]);
+
   // Ticket creation goes through the create-ticket skill (opened in an
   // external, interactive terminal via /api/claude/launch) rather than
   // POSTing to /api/tickets directly, so it's always the skill - not a raw
@@ -1124,6 +1172,7 @@ export const App: React.FC = () => {
                   ticket={ticket}
                   isExpanded={expandedTicketIds.has(ticket.id)}
                   onToggleExpand={() => handleToggleExpand(ticket.id)}
+                  onOpenTicket={handleOpenTicket}
                   onRefresh={refreshTickets}
                   myName={myName}
                   projectLabels={projectLabels}

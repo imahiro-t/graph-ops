@@ -107,6 +107,19 @@ export interface Ticket {
   // hand-built fixture) without the key is still a valid Ticket -- read it
   // as `ticket.labels ?? []`.
   labels?: Label[];
+  // The ticket this one was derived from (DFLT-00142), set only at creation
+  // (create-ticket --parent, or POST /api/tickets' parent_ticket_id); null
+  // when there is none. Optional so an older graph-engine's response stays
+  // a valid Ticket.
+  parent_ticket_id?: string | null;
+}
+
+// A related ticket in its short form (DFLT-00142): what GET
+// /api/tickets/{id} lists as `parent` and `children`.
+export interface TicketRef {
+  id: string;
+  title: string;
+  status: TicketStatus;
 }
 
 // A label's color is one of a fixed palette (DFLT-00084). The backend stores
@@ -225,6 +238,12 @@ export interface TicketGraph extends Ticket {
 // -- see App.tsx's mergeTicketSummaries.
 export interface TicketDetail extends TicketGraph {
   artifacts: Artifact[];
+  // DFLT-00142: the parent (null when none) and the children in creation
+  // order. Only GET /api/tickets/{id} sends them, so like `artifacts` they
+  // are absent for a ticket whose detail has not been fetched yet, and
+  // mergeTicketSummaries carries them over between polls.
+  parent?: TicketRef | null;
+  children?: TicketRef[];
 }
 
 // A project scopes a set of tickets to one prefix-based ID namespace (see

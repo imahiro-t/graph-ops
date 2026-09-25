@@ -1,6 +1,6 @@
 // Package httpdatasourcetest is an in-memory reference implementation of the
 // HTTP custom data source protocol (docs/http-datasource/openapi.yaml,
-// protocol version 1.0), for tests. It is an http.Handler: wrap it in an
+// protocol version 1.1), for tests. It is an http.Handler: wrap it in an
 // httptest.Server and point store.Open at that server's URL.
 //
 // It deliberately lives in a regular (non-_test.go) internal package and
@@ -36,7 +36,7 @@ const (
 	// and store.HTTPDataSourceProtocolVersion (restated here because this
 	// package must not import internal/store).
 	ProtocolName   = "graph-ops-datasource"
-	DefaultVersion = "1.0"
+	DefaultVersion = "1.1"
 )
 
 // RecordedRequest is one request the plugin received, for assertions.
@@ -750,6 +750,12 @@ func (p *Plugin) removeTicket(id string) {
 	for _, t := range p.tickets {
 		if t.ID != id {
 			tickets = append(tickets, t)
+		}
+	}
+	// Like the SQL backends' ON DELETE SET NULL (DFLT-00142).
+	for _, t := range tickets {
+		if t.ParentTicketID != nil && *t.ParentTicketID == id {
+			t.ParentTicketID = nil
 		}
 	}
 	p.tickets = tickets
