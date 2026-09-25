@@ -327,9 +327,9 @@ export const App: React.FC = () => {
   useEffect(() => {
     refreshAutopilotRuns(currentProject?.id ?? '');
   }, [currentProject?.id, refreshAutopilotRuns]);
-  const handleAutopilotChanged = useCallback(() => {
-    void refreshAutopilotRuns();
-  }, [refreshAutopilotRuns]);
+  // Returns the refresh so a start's buttons wait for the new runs before
+  // they leave their "starting" state (AutopilotControls, DFLT-00147).
+  const handleAutopilotChanged = useCallback(() => refreshAutopilotRuns(), [refreshAutopilotRuns]);
   // Every ticket's descendants, from the whole list's parent_ticket_id: a
   // tree start is refused when an active run roots below the ticket.
   const descendantsOf = useMemo(() => descendantsIndex(tickets), [tickets]);

@@ -1,6 +1,7 @@
 // DFLT-00142 accessibility review (iteration 1): unique ids per section,
 // label-in-name, decorative icons, and what a sighted keyboard user can read.
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import i18n from '../i18n';
 import { Artifact } from '../types';
@@ -77,5 +78,36 @@ describe('autopilot accessibility', () => {
     expect(screen.getByTestId('autopilot-awaiting')).toHaveTextContent(
       i18n.t('autopilot.badges.awaitingTitle', { what: '計画承認の判断待ち' })
     );
+  });
+
+  // DFLT-00147: the start confirmation is an in-app modal dialog.
+  it('confirms a start in a labelled, described modal dialog that starts on cancel, in both languages', async () => {
+    for (const lang of ['ja', 'en']) {
+      await i18n.changeLanguage(lang);
+      const user = userEvent.setup();
+      const { unmount } = render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
+      const button = screen.getByTestId('autopilot-start-tree');
+      await user.click(button);
+
+      const dialog = screen.getByRole('dialog', { name: i18n.t('autopilot.confirm.title') });
+      expect(dialog).toHaveAttribute('aria-modal', 'true');
+      expect(dialog).toHaveAccessibleDescription(i18n.t('autopilot.confirm.tree', { id: 'T' }));
+      const cancel = within(dialog).getByRole('button', { name: i18n.t('autopilot.confirm.cancel') });
+      expect(cancel).toHaveFocus();
+      expect(within(dialog).getByRole('button', { name: i18n.t('autopilot.confirm.start') })).toBeInTheDocument();
+      // The start buttons stay enabled while it is open (see
+      // AutopilotControls); the overlay keeps them out of reach.
+      expect(button).toBeEnabled();
+
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(button).toHaveFocus();
+      unmount();
+    }
+  });
+
+  it('keeps the focus fallback of the controls out of the Tab order', () => {
+    render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
+    expect(screen.getByTestId('autopilot-controls')).toHaveAttribute('tabindex', '-1');
   });
 });

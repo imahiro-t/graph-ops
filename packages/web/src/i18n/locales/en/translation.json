@@ -111,6 +111,10 @@
       "tree": "tree"
     },
     "confirm": {
+      "title": "Start autopilot",
+      "resumeTitle": "Resume autopilot",
+      "start": "Start",
+      "cancel": "Cancel",
       "ticket": "Process ticket {{id}} with the autopilot (single)? Claude Code starts in another terminal and takes it from refinement to release without asking anyone.",
       "tree": "Process ticket {{id}} and its descendants with the autopilot (tree)? Claude Code starts in another terminal and takes each ticket from refinement to release, one after another, without asking anyone.",
       "resume": "Resume the stopped or interrupted autopilot ({{mode}}) of ticket {{id}} from where it stopped?"
