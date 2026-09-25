@@ -406,16 +406,31 @@ export const TicketItem: React.FC<Props> = ({
   // approval_gate approve/reject (DFLT-00012). Keyed by node id (rather than
   // one flat flag) so an in-flight decision on one approval_gate node
   // doesn't disable the buttons on another one in the same ticket.
-  const [approvalPendingNodeId, setApprovalPendingNodeId] = useState<string | null>(null);
+  // DFLT-00173: a set, not a single id -- decisions on different gates can be
+  // in flight at the same time, and one finishing must not make another,
+  // still in flight, look idle (and clickable again). Always updated
+  // functionally, and only for the gate in question.
+  const [submittingApprovalNodeIds, setSubmittingApprovalNodeIds] = useState<ReadonlySet<string>>(() => new Set());
+  // The same set, readable synchronously: handleApprovalDecision refuses a
+  // second decision on a gate whose first one is still in flight, without
+  // relying on the buttons' disabled state having been rendered yet.
+  const approvalsInFlightRef = useRef<Set<string>>(new Set());
   const [approvalErrors, setApprovalErrors] = useState<Record<string, string>>({});
   // DFLT-00016: rejecting an approval_gate now requires a free-text reason
   // (no more window.confirm -- the reason input itself, plus a distinctly
-  // labeled confirm button, is the confirmation step). rejectingNodeId
-  // tracks which node's reason prompt is currently open; at most one at a
-  // time keeps this simple and matches approvalPendingNodeId's one-in-flight
-  // assumption.
-  const [rejectingNodeId, setRejectingNodeId] = useState<string | null>(null);
-  const [rejectReasonDraft, setRejectReasonDraft] = useState('');
+  // labeled confirm button, is the confirmation step). rejectPrompt tracks
+  // which node's reason prompt is currently open, together with its draft;
+  // at most one at a time keeps this simple. DFLT-00173: the draft belongs
+  // to that one prompt, so closing the prompt and dropping the draft are a
+  // single update -- a decision on some other gate finishing can never wipe
+  // what is being typed here.
+  const [rejectPrompt, setRejectPrompt] = useState<{ nodeId: string; draft: string } | null>(null);
+  const rejectingNodeId = rejectPrompt?.nodeId ?? null;
+  const rejectReasonDraft = rejectPrompt?.draft ?? '';
+  const setRejectReasonDraft = useCallback(
+    (draft: string) => setRejectPrompt(prev => (prev ? { ...prev, draft } : prev)),
+    []
+  );
 
   // DFLT-00172: where focus goes when the reject prompt unmounts, and what
   // gets announced. Unmounting the prompt while focus is inside it would
@@ -443,7 +458,7 @@ export const TicketItem: React.FC<Props> = ({
   // id, and the response decides whether it was our rejection or the gate
   // being judged elsewhere. Keyed per node because rejects on different
   // gates can be in flight at the same time (approval decisions are only
-  // serialised per gate -- see approvalPendingNodeId), and one gate's
+  // serialised per gate -- see submittingApprovalNodeIds), and one gate's
   // response must never clear or settle another gate's state.
   const rejectsInFlightRef = useRef<Set<string>>(new Set());
   const deferredClosuresRef = useRef<Map<string, { hadFocus: boolean }>>(new Map());
@@ -628,7 +643,11 @@ export const TicketItem: React.FC<Props> = ({
   // button is disabled while empty, see the reason-prompt JSX below) rather
   // than here, so this function has one job: send the request.
   const handleApprovalDecision = async (nodeId: string, passed: boolean, reason?: string) => {
-    setApprovalPendingNodeId(nodeId);
+    // One decision per gate at a time (DFLT-00173). Checked before anything
+    // else, so a refused second call leaves the first one's state alone.
+    if (approvalsInFlightRef.current.has(nodeId)) return;
+    approvalsInFlightRef.current.add(nodeId);
+    setSubmittingApprovalNodeIds(prev => new Set(prev).add(nodeId));
     if (!passed) rejectsInFlightRef.current.add(nodeId);
     setApprovalErrors(prev => {
       if (!(nodeId in prev)) return prev;
@@ -654,7 +673,7 @@ export const TicketItem: React.FC<Props> = ({
         // depends on whether its prompt is still on screen.
         const deferred = deferredClosuresRef.current.get(nodeId);
         if (mountedPromptNodeRef.current === nodeId) {
-          // Still mounted: the setRejectingNodeId below unmounts it in the
+          // Still mounted: the setRejectPrompt below unmounts it in the
           // next commit, and the layout effect settles it then.
           closeReasonRef.current = { nodeId, reason: 'submitted' };
         } else if (deferred) {
@@ -667,8 +686,9 @@ export const TicketItem: React.FC<Props> = ({
           announceRejected(nodeId);
         }
       }
-      setRejectingNodeId(prev => (prev === nodeId ? null : prev));
-      setRejectReasonDraft('');
+      // Close this gate's prompt (and drop its draft) only if it is the one
+      // open: another gate's prompt may be open with a draft in progress.
+      setRejectPrompt(prev => (prev?.nodeId === nodeId ? null : prev));
       await onRefresh();
     } catch (err) {
       setApprovalErrors(prev => ({ ...prev, [nodeId]: errorMessage(err, t('errors.UNKNOWN')) }));
@@ -683,7 +703,12 @@ export const TicketItem: React.FC<Props> = ({
         rejectsInFlightRef.current.delete(nodeId);
         deferredClosuresRef.current.delete(nodeId);
       }
-      setApprovalPendingNodeId(null);
+      approvalsInFlightRef.current.delete(nodeId);
+      setSubmittingApprovalNodeIds(prev => {
+        const next = new Set(prev);
+        next.delete(nodeId);
+        return next;
+      });
     }
   };
 
@@ -698,13 +723,11 @@ export const TicketItem: React.FC<Props> = ({
       closeReasonRef.current = { nodeId: openPromptNodeId, reason: 'switched' };
     }
     setApprovalAnnouncement('');
-    setRejectingNodeId(nodeId);
-    setRejectReasonDraft('');
+    setRejectPrompt({ nodeId, draft: '' });
   };
   const cancelRejecting = () => {
     if (rejectingNodeId !== null) closeReasonRef.current = { nodeId: rejectingNodeId, reason: 'cancelled' };
-    setRejectingNodeId(null);
-    setRejectReasonDraft('');
+    setRejectPrompt(null);
   };
 
   const toggleNodeExpand = (nodeId: string) => {
@@ -861,10 +884,7 @@ export const TicketItem: React.FC<Props> = ({
   // away from whatever the user was doing.
   const rejectingGateNoLongerPending = rejectingNodeId !== null && !pendingApprovalNodeIds.has(rejectingNodeId);
   useEffect(() => {
-    if (rejectingGateNoLongerPending) {
-      setRejectingNodeId(null);
-      setRejectReasonDraft('');
-    }
+    if (rejectingGateNoLongerPending) setRejectPrompt(null);
   }, [rejectingGateNoLongerPending]);
   // DFLT-00016: a REJECTED approval_gate is a materially different state
   // from a never-judged one -- it's not waiting on a human clicking
@@ -1743,10 +1763,11 @@ export const TicketItem: React.FC<Props> = ({
                                   <button
                                     type="button"
                                     onClick={() => handleApprovalDecision(node.id, true)}
-                                    disabled={approvalPendingNodeId === node.id}
+                                    disabled={submittingApprovalNodeIds.has(node.id)}
+                                    data-testid={`node-approve-${node.id}`}
                                     className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition"
                                   >
-                                    {approvalPendingNodeId === node.id ? (
+                                    {submittingApprovalNodeIds.has(node.id) ? (
                                       <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
                                     ) : (
                                       <Check aria-hidden="true" className="w-3 h-3" />
@@ -1756,7 +1777,7 @@ export const TicketItem: React.FC<Props> = ({
                                   <button
                                     type="button"
                                     onClick={() => startRejecting(node.id)}
-                                    disabled={approvalPendingNodeId === node.id}
+                                    disabled={submittingApprovalNodeIds.has(node.id)}
                                     data-testid={`node-reject-${node.id}`}
                                     className="px-2 py-1 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50 disabled:cursor-not-allowed text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800 rounded text-[11px] font-bold flex items-center gap-1 transition"
                                   >
@@ -1791,7 +1812,7 @@ export const TicketItem: React.FC<Props> = ({
                               onDraftChange={setRejectReasonDraft}
                               onConfirm={() => handleApprovalDecision(node.id, false, rejectReasonDraft)}
                               onCancel={cancelRejecting}
-                              isSubmitting={approvalPendingNodeId === node.id}
+                              isSubmitting={submittingApprovalNodeIds.has(node.id)}
                               onMount={handlePromptMount}
                               onUnmount={handlePromptUnmount}
                             />

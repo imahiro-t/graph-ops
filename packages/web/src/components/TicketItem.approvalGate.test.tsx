@@ -500,4 +500,106 @@ describe('TicketItem reject prompt focus and announcements', () => {
     expect(screen.queryByText(noLongerPendingText(GATE_B_NAME))).toBeNull();
     expect(document.activeElement).toBe(toggleOf(GATE_B_ID));
   });
+
+  // DFLT-00173: decisions on two gates in flight at once. One finishing must
+  // neither wipe the reason being typed in another gate's prompt nor make a
+  // gate whose own decision is still in flight look idle and clickable again.
+  const approveOf = (nodeId: string) => screen.getByTestId(`node-approve-${nodeId}`) as HTMLButtonElement;
+  const completeCalls = (nodeId: string) =>
+    vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith(`/nodes/${nodeId}/complete`)).length;
+  const isSpinning = (button: HTMLElement) => button.querySelector('.animate-spin') !== null;
+
+  it("keeps the draft in another gate's reject prompt when an approval on one gate succeeds", async () => {
+    const respond = stubHeldCompletes();
+    renderTicket('IN REVIEW', { ticket: twoGateTicket('IN REVIEW') });
+    fireEvent.click(approveOf(GATE_ID));
+    fireEvent.click(screen.getByTestId(`node-reject-${GATE_B_ID}`));
+    const inputB = reasonInput() as HTMLInputElement;
+    fireEvent.change(inputB, { target: { value: '書きかけの理由' } });
+
+    await respond(GATE_ID, new Response('{}', { status: 200 }));
+
+    await waitFor(() => expect(isSpinning(approveOf(GATE_ID))).toBe(false));
+    expect(reasonInput()).toBe(inputB);
+    expect(inputB.value).toBe('書きかけの理由');
+    expect(document.activeElement).toBe(inputB);
+    expect(confirmRejectButton()).toHaveProperty('disabled', false);
+  });
+
+  it("keeps the draft in another gate's reject prompt when a rejection on one gate succeeds", async () => {
+    const respond = stubHeldCompletes();
+    renderTicket('IN REVIEW', { ticket: twoGateTicket('IN REVIEW') });
+    rejectWithReason(GATE_ID);
+    // While A's reject is in flight, start typing a reason for B.
+    fireEvent.click(screen.getByTestId(`node-reject-${GATE_B_ID}`));
+    const inputB = reasonInput() as HTMLInputElement;
+    fireEvent.change(inputB, { target: { value: '書きかけの理由' } });
+
+    await respond(GATE_ID, new Response('{}', { status: 200 }));
+
+    await waitFor(() => expect(announcement(rejectedText())).toHaveLength(1));
+    expect(reasonInput()).toBe(inputB);
+    expect(inputB.value).toBe('書きかけの理由');
+    expect(document.activeElement).toBe(inputB);
+  });
+
+  it('keeps a gate whose approval is still in flight disabled and spinning when another gate finishes first', async () => {
+    const respond = stubHeldCompletes();
+    renderTicket('IN REVIEW', { ticket: twoGateTicket('IN REVIEW') });
+    fireEvent.click(approveOf(GATE_ID));
+    fireEvent.click(approveOf(GATE_B_ID));
+    expect(approveOf(GATE_ID).disabled).toBe(true);
+    expect(approveOf(GATE_B_ID).disabled).toBe(true);
+
+    await respond(GATE_ID, new Response('{}', { status: 200 }));
+
+    // A is done; B is still in flight.
+    await waitFor(() => expect(approveOf(GATE_ID).disabled).toBe(false));
+    expect(approveOf(GATE_B_ID).disabled).toBe(true);
+    expect(isSpinning(approveOf(GATE_B_ID))).toBe(true);
+    expect((screen.getByTestId(`node-reject-${GATE_B_ID}`) as HTMLButtonElement).disabled).toBe(true);
+
+    await respond(GATE_B_ID, new Response('{}', { status: 200 }));
+    await waitFor(() => expect(approveOf(GATE_B_ID).disabled).toBe(false));
+    expect(isSpinning(approveOf(GATE_B_ID))).toBe(false);
+  });
+
+  it("keeps a gate's reject confirm button disabled while its reject is in flight and another gate finishes first", async () => {
+    const respond = stubHeldCompletes();
+    renderTicket('IN REVIEW', { ticket: twoGateTicket('IN REVIEW') });
+    fireEvent.click(approveOf(GATE_ID));
+    rejectWithReason(GATE_B_ID);
+    expect(confirmRejectButton()).toHaveProperty('disabled', true);
+
+    await respond(GATE_ID, new Response('{}', { status: 200 }));
+
+    await waitFor(() => expect(approveOf(GATE_ID).disabled).toBe(false));
+    // B's prompt is still open with its reason, and still submitting.
+    expect((reasonInput() as HTMLInputElement).value).toBe('理由');
+    const confirmB = confirmRejectButton() as HTMLButtonElement;
+    expect(confirmB.disabled).toBe(true);
+    expect(isSpinning(confirmB)).toBe(true);
+    expect(screen.getByRole('button', { name: i18n.t('ticketItem.approvalGate.cancelReject') })).toHaveProperty(
+      'disabled',
+      true
+    );
+  });
+
+  it('does not send a second decision for a gate whose first one is still in flight', async () => {
+    const respond = stubHeldCompletes();
+    renderTicket('IN REVIEW', { ticket: twoGateTicket('IN REVIEW') });
+    fireEvent.click(approveOf(GATE_ID));
+    fireEvent.click(approveOf(GATE_B_ID));
+
+    await respond(GATE_B_ID, new Response('{}', { status: 200 }));
+    await waitFor(() => expect(approveOf(GATE_B_ID).disabled).toBe(false));
+
+    // A is still in flight: clicking it again must not post again.
+    fireEvent.click(approveOf(GATE_ID));
+    expect(completeCalls(GATE_ID)).toBe(1);
+
+    await respond(GATE_ID, new Response('{}', { status: 200 }));
+    await waitFor(() => expect(approveOf(GATE_ID).disabled).toBe(false));
+    expect(completeCalls(GATE_ID)).toBe(1);
+  });
 });
