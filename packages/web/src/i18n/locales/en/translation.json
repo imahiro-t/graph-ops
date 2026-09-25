@@ -146,6 +146,11 @@
     }
   },
   "ticketItem": {
+    "copyId": {
+      "button": "Copy {{id}}",
+      "copied": "Copied {{id}}",
+      "failed": "Could not copy {{id}}"
+    },
     "selfAssign": {
       "assign": "Assign to me",
       "unassign": "Unassign",

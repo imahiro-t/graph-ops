@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronDown,
@@ -15,6 +15,7 @@ import {
   Layers,
   ClipboardEdit,
   Check,
+  Copy,
   X,
   Trash2,
   History,
@@ -72,6 +73,33 @@ interface Props {
 // How many label chips the collapsed header row shows before folding the
 // rest into "+N" -- the row already carries id/status/priority/title/assignee.
 const MAX_HEADER_LABELS = 3;
+
+// How long the ID copy button shows its "copied"/"failed" state before going
+// back to idle (DFLT-00143).
+const COPY_FEEDBACK_MS = 1500;
+
+// Whether a click on the header row is part of a text selection rather than
+// a plain "toggle the row" click (DFLT-00143): the second and later clicks
+// of a double/triple click (which select a word/the element), or any click
+// while a non-empty selection overlaps the row (e.g. the click that ends a
+// drag selection over the ID or title). A selection that lies entirely
+// outside the row does not stop the toggle. Range.intersectsNode(row) is true
+// when a selected range even partly covers the row (including a drag that
+// starts outside the row and ends inside it). It is used instead of
+// Selection.containsNode(row, true), whose partial-containment result jsdom
+// gets wrong (true for a selection entirely after the row). The anchor/focus
+// checks are a fallback in case intersectsNode is missing.
+function isSelectionClick(event: React.MouseEvent, row: HTMLElement | null): boolean {
+  if (event.detail >= 2) return true;
+  if (!row || typeof window.getSelection !== 'function') return false;
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
+  for (let i = 0; i < sel.rangeCount; i++) {
+    const range = sel.getRangeAt(i);
+    if (typeof range.intersectsNode === 'function' && range.intersectsNode(row)) return true;
+  }
+  return (!!sel.anchorNode && row.contains(sel.anchorNode)) || (!!sel.focusNode && row.contains(sel.focusNode));
+}
 
 export const TicketItem: React.FC<Props> = ({
   ticket,
@@ -160,6 +188,47 @@ export const TicketItem: React.FC<Props> = ({
   // Priority (DFLT-00048): changed from the ticket header via PATCH
   // /api/tickets/{id}'s "priority" field. Always one of the three levels --
   // a priority can't be cleared (DFLT-00083; the backend rejects null).
+  // Header row text selection and the ID copy button (DFLT-00143).
+  const headerRowRef = useRef<HTMLDivElement>(null);
+  const handleHeaderClick = (e: React.MouseEvent) => {
+    if (isSelectionClick(e, headerRowRef.current)) return;
+    onToggleExpand();
+  };
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+  }, []);
+  const showCopyResult = (state: 'copied' | 'failed') => {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    setCopyState(state);
+    copyTimerRef.current = setTimeout(() => {
+      copyTimerRef.current = null;
+      setCopyState('idle');
+    }, COPY_FEEDBACK_MS);
+  };
+  // No document.execCommand('copy') fallback: it is deprecated. Without the
+  // Clipboard API (e.g. plain HTTP outside localhost) the button just shows
+  // the "failed" state; the ID text itself can still be selected and copied.
+  const handleCopyId = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
+      if (!clipboard || typeof clipboard.writeText !== 'function') throw new Error('Clipboard API unavailable');
+      await clipboard.writeText(ticket.id);
+      showCopyResult('copied');
+    } catch {
+      showCopyResult('failed');
+    }
+  };
+  const copyIdLabel =
+    copyState === 'copied'
+      ? t('ticketItem.copyId.copied', { id: ticket.id })
+      : copyState === 'failed'
+        ? t('ticketItem.copyId.failed', { id: ticket.id })
+        : t('ticketItem.copyId.button', { id: ticket.id });
+  const copyIdStatus = copyState === 'idle' ? '' : copyIdLabel;
+
   const [prioritySaving, setPrioritySaving] = useState(false);
   const [priorityError, setPriorityError] = useState('');
 
@@ -567,7 +636,8 @@ export const TicketItem: React.FC<Props> = ({
           badge or the title) would touch the first item on the right (the
           assignee chip/button or the node progress). */}
       <div
-        onClick={onToggleExpand}
+        ref={headerRowRef}
+        onClick={handleHeaderClick}
         data-testid="ticket-header-row"
         className="p-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition select-none"
       >
@@ -576,9 +646,45 @@ export const TicketItem: React.FC<Props> = ({
             {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
           </button>
 
-          <span className="font-mono text-xs font-bold px-2 py-1 rounded bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0 whitespace-nowrap">
+          {/* The ID and the title are the only selectable text in the row
+              (select-text over the row's select-none, DFLT-00143), so they
+              can be dragged/double-clicked and copied without also picking
+              up the chevron or the badges. handleHeaderClick keeps such a
+              selection from toggling the row. */}
+          <span
+            data-testid="ticket-header-id"
+            className="font-mono text-xs font-bold px-2 py-1 rounded bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0 whitespace-nowrap select-text cursor-text"
+          >
             {ticket.id}
           </span>
+
+          {/* Copies the ticket ID (DFLT-00143). The name includes the ID
+              since every row has one; the always-mounted live region beside
+              it announces the result (the one in the expanded panel is not
+              rendered while the row is collapsed). */}
+          <button
+            type="button"
+            onClick={handleCopyId}
+            aria-label={copyIdLabel}
+            title={copyIdLabel}
+            data-testid="ticket-copy-id"
+            className={`-ml-2 p-1 rounded shrink-0 transition ${
+              copyState === 'copied'
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : copyState === 'failed'
+                  ? 'text-red-600 dark:text-red-400'
+                  : 'text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
+            }`}
+          >
+            {copyState === 'copied' ? (
+              <Check className="w-3.5 h-3.5" aria-hidden="true" />
+            ) : copyState === 'failed' ? (
+              <X className="w-3.5 h-3.5" aria-hidden="true" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+            )}
+          </button>
+          <StatusLiveRegion message={copyIdStatus} />
 
           {/* Label/colors shared with the node badge via statusMeta.ts
               (DFLT-00030). No `uppercase`/`tracking-wider`: English labels
@@ -610,7 +716,10 @@ export const TicketItem: React.FC<Props> = ({
               it, a long title would instead push the id/status badges (and
               the right-hand action area) to wrap/overflow. This is the one
               element in the row meant to give up space first. */}
-          <span className="font-bold text-slate-900 dark:text-slate-100 text-sm truncate min-w-0">
+          <span
+            data-testid="ticket-header-title"
+            className="font-bold text-slate-900 dark:text-slate-100 text-sm truncate min-w-0 select-text cursor-text"
+          >
             {ticket.title}
           </span>
 

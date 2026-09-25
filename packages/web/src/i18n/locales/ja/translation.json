@@ -146,6 +146,11 @@
     }
   },
   "ticketItem": {
+    "copyId": {
+      "button": "{{id}} をコピー",
+      "copied": "{{id}} をコピーしました",
+      "failed": "{{id}} をコピーできませんでした"
+    },
     "selfAssign": {
       "assign": "担当する",
       "unassign": "担当を外す",
