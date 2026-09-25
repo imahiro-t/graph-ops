@@ -55,7 +55,9 @@
   },
   "pagination": {
     "range": "{{total}}件中 {{from}}〜{{to}}件を表示",
-    "pageOf": "{{page}} / {{total}}"
+    "pageOf": "{{page}} / {{total}}",
+    "previous": "前のページ",
+    "next": "次のページ"
   },
   "projectSwitcher": {
     "menuLabel": "プロジェクトの切り替え",

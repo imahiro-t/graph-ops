@@ -150,7 +150,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
         {error && <div className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900">{error}</div>}
         {loading ? (
           <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
-            <Loader2 className="w-4 h-4 animate-spin" /> {t('settings.common.loading')}
+            <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> {t('settings.common.loading')}
           </div>
         ) : (
           <>
@@ -174,7 +174,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
             <div className="flex justify-end items-center gap-2">
               {savedFlash && (
                 <span className="text-emerald-600 text-xs flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}
+                  <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}
                 </span>
               )}
               <button
@@ -182,7 +182,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 disabled={saving || !isDirty}
                 className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
               >
-                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                {saving ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Save aria-hidden="true" className="w-3.5 h-3.5" />}
                 {saving ? t('settings.common.saving') : t('settings.common.save')}
               </button>
             </div>

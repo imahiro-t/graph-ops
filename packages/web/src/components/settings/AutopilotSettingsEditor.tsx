@@ -320,7 +320,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
             <StatusLiveRegion message={savedFlash ? t('settings.common.saveSuccess') : ''} />
             {savedFlash && (
               <span aria-hidden="true" className="text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}
+                <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}
               </span>
             )}
             <button

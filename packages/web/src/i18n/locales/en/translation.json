@@ -55,7 +55,9 @@
   },
   "pagination": {
     "range": "Showing {{from}}-{{to}} of {{total}}",
-    "pageOf": "{{page}} / {{total}}"
+    "pageOf": "{{page}} / {{total}}",
+    "previous": "Previous page",
+    "next": "Next page"
   },
   "projectSwitcher": {
     "menuLabel": "Switch project",

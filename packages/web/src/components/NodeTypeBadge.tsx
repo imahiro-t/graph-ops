@@ -30,7 +30,7 @@ export const NodeTypeBadge: React.FC<Props> = ({ type, theme, className }) => {
       title={label}
       className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wide ${colors.bg} ${colors.text} ${colors.border} ${className || ''}`}
     >
-      <Icon className="w-3 h-3 shrink-0" />
+      <Icon aria-hidden="true" className="w-3 h-3 shrink-0" />
       <span className="truncate">{label}</span>
     </span>
   );

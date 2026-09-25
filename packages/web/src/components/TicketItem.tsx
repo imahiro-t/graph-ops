@@ -514,7 +514,7 @@ export const TicketItem: React.FC<Props> = ({
         rel="noreferrer"
         className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 text-[11px]"
       >
-        <ExternalLink className="w-3 h-3" />
+        <ExternalLink aria-hidden="true" className="w-3 h-3" />
         {t('ticketItem.openInNewTab')}
       </a>
     );
@@ -537,7 +537,7 @@ export const TicketItem: React.FC<Props> = ({
         href={`/api/artifacts/${artifact.id}/content?download=1`}
         className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1 text-[11px]"
       >
-        <Download className="w-3 h-3" />
+        <Download aria-hidden="true" className="w-3 h-3" />
         {t('ticketItem.download')}
       </a>
     );
@@ -849,7 +849,7 @@ export const TicketItem: React.FC<Props> = ({
               onClick={e => e.stopPropagation()}
               title={t('ticketItem.approvalGate.rejectedHint')}
             >
-              <X className="w-3 h-3 shrink-0" />
+              <X aria-hidden="true" className="w-3 h-3 shrink-0" />
               <span className="truncate max-w-[12rem]">
                 {rejectedApprovalNodes.length === 1
                   ? t('ticketItem.approvalGate.rejectedBadgeOne', { name: rejectedApprovalNodes[0].name })
@@ -892,7 +892,7 @@ export const TicketItem: React.FC<Props> = ({
                     title={t('ticketItem.selfAssign.unassign')}
                     className="p-0.5 text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-200 disabled:opacity-50 rounded-full"
                   >
-                    {assignToMeSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
+                    {assignToMeSaving ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <X aria-hidden="true" className="w-3 h-3" />}
                   </button>
                 </span>
               ) : ticket.assignee ? (
@@ -916,7 +916,7 @@ export const TicketItem: React.FC<Props> = ({
                   disabled={assignToMeSaving}
                   className="px-2 py-0.5 rounded-full border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 disabled:opacity-50 text-[11px] font-semibold flex items-center gap-1 transition"
                 >
-                  {assignToMeSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3 h-3" />}
+                  {assignToMeSaving ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <UserPlus aria-hidden="true" className="w-3 h-3" />}
                   {t('ticketItem.selfAssign.assign')}
                 </button>
               ) : null}
@@ -982,7 +982,7 @@ export const TicketItem: React.FC<Props> = ({
               title={t('ticketItem.reopen.button')}
               className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
             >
-              {isReopeningTicket ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+              {isReopeningTicket ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <RotateCcw aria-hidden="true" className="w-4 h-4" />}
             </button>
           ) : (
             <button
@@ -994,7 +994,7 @@ export const TicketItem: React.FC<Props> = ({
               title={t('ticketItem.close.button')}
               className="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition p-1 -m-1 rounded"
             >
-              <Archive className="w-4 h-4" />
+              <Archive aria-hidden="true" className="w-4 h-4" />
             </button>
           )}
 
@@ -1011,7 +1011,7 @@ export const TicketItem: React.FC<Props> = ({
             title={t('ticketItem.delete.button')}
             className="text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
           >
-            {isDeletingTicket ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+            {isDeletingTicket ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <Trash2 aria-hidden="true" className="w-4 h-4" />}
           </button>
         </div>
       </div>
@@ -1041,7 +1041,7 @@ export const TicketItem: React.FC<Props> = ({
             disabled={isClosingTicket}
             className="px-2 py-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-xs font-bold flex items-center gap-1 transition shrink-0"
           >
-            {isClosingTicket ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />}
+            {isClosingTicket ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Archive aria-hidden="true" className="w-3.5 h-3.5" />}
             {t('ticketItem.close.confirm')}
           </button>
           <button
@@ -1086,7 +1086,7 @@ export const TicketItem: React.FC<Props> = ({
             </div>
             {ticket.closed_reason && (
               <div className="flex items-center gap-1 text-slate-700 dark:text-slate-300">
-                <Archive className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                <Archive aria-hidden="true" className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
                 {t('ticketItem.close.reasonLabel')}: <span className="font-medium">{ticket.closed_reason}</span>
               </div>
             )}
@@ -1104,13 +1104,13 @@ export const TicketItem: React.FC<Props> = ({
           <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                <FileText className="w-3.5 h-3.5 text-indigo-500" />
+                <FileText aria-hidden="true" className="w-3.5 h-3.5 text-indigo-500" />
                 {t('ticketItem.description.title')}
               </span>
               <div className="flex items-center gap-3">
                 {ticket.refined_at && (
                   <span className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                    <History className="w-3 h-3" />
+                    <History aria-hidden="true" className="w-3 h-3" />
                     {t('ticketItem.description.refinedAt', { time: formatDateTime(ticket.refined_at, i18n.language) })}
                   </span>
                 )}
@@ -1290,7 +1290,7 @@ export const TicketItem: React.FC<Props> = ({
               </svg>
               {hasParallelRows && (
                 <div className="w-full mt-2 text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold flex items-center gap-1 shrink-0">
-                  <Layers className="w-3 h-3" />
+                  <Layers aria-hidden="true" className="w-3 h-3" />
                   {t('ticketItem.parallelHint')}
                 </div>
               )}
@@ -1329,7 +1329,7 @@ export const TicketItem: React.FC<Props> = ({
                       : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                 >
-                  <GitBranch className="w-4 h-4" />
+                  <GitBranch aria-hidden="true" className="w-4 h-4" />
                   {t('ticketItem.tabs.nodes', { count: totalNodes })}
                 </button>
                 <button
@@ -1340,7 +1340,7 @@ export const TicketItem: React.FC<Props> = ({
                       : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                 >
-                  <FileCode className="w-4 h-4 text-amber-500" />
+                  <FileCode aria-hidden="true" className="w-4 h-4 text-amber-500" />
                   {t('ticketItem.tabs.gherkin', { count: gherkinArtifacts.length })}
                 </button>
                 <button
@@ -1351,7 +1351,7 @@ export const TicketItem: React.FC<Props> = ({
                       : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                 >
-                  <Globe className="w-4 h-4 text-cyan-500" />
+                  <Globe aria-hidden="true" className="w-4 h-4 text-cyan-500" />
                   {t('ticketItem.tabs.html', { count: htmlArtifacts.length })}
                 </button>
                 <button
@@ -1362,7 +1362,7 @@ export const TicketItem: React.FC<Props> = ({
                       : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                 >
-                  <FileText className="w-4 h-4 text-emerald-500" />
+                  <FileText aria-hidden="true" className="w-4 h-4 text-emerald-500" />
                   {t('ticketItem.tabs.artifacts', { count: ticket.artifacts.length })}
                 </button>
               </div>
@@ -1372,7 +1372,7 @@ export const TicketItem: React.FC<Props> = ({
                   className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:border-indigo-400 dark:hover:border-indigo-500 transition"
                   title={t('ticketItem.downloadAllArtifacts')}
                 >
-                  <Download className="w-3.5 h-3.5" />
+                  <Download aria-hidden="true" className="w-3.5 h-3.5" />
                   {t('ticketItem.downloadAllArtifacts')}
                 </a>
               )}
@@ -1449,7 +1449,7 @@ export const TicketItem: React.FC<Props> = ({
                               )}
                               {nodeArtifacts.length > 0 && (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold border border-indigo-200 dark:border-indigo-800 flex items-center gap-1 shrink-0 whitespace-nowrap">
-                                  <Layers className="w-3 h-3" />
+                                  <Layers aria-hidden="true" className="w-3 h-3" />
                                   {t('ticketItem.artifactsCount', { count: nodeArtifacts.length })}
                                 </span>
                               )}
@@ -1470,9 +1470,9 @@ export const TicketItem: React.FC<Props> = ({
                                     className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition"
                                   >
                                     {approvalPendingNodeId === node.id ? (
-                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                      <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
                                     ) : (
-                                      <Check className="w-3 h-3" />
+                                      <Check aria-hidden="true" className="w-3 h-3" />
                                     )}
                                     {t('ticketItem.approvalGate.approve')}
                                   </button>
@@ -1482,7 +1482,7 @@ export const TicketItem: React.FC<Props> = ({
                                     disabled={approvalPendingNodeId === node.id}
                                     className="px-2 py-1 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50 disabled:cursor-not-allowed text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800 rounded text-[11px] font-bold flex items-center gap-1 transition"
                                   >
-                                    <X className="w-3 h-3" />
+                                    <X aria-hidden="true" className="w-3 h-3" />
                                     {t('ticketItem.approvalGate.reject')}
                                   </button>
                                 </div>
@@ -1519,9 +1519,9 @@ export const TicketItem: React.FC<Props> = ({
                                 className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition shrink-0"
                               >
                                 {approvalPendingNodeId === node.id ? (
-                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
                                 ) : (
-                                  <X className="w-3 h-3" />
+                                  <X aria-hidden="true" className="w-3 h-3" />
                                 )}
                                 {t('ticketItem.approvalGate.confirmReject')}
                               </button>
@@ -1557,9 +1557,9 @@ export const TicketItem: React.FC<Props> = ({
                                   <div key={art.id} className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 space-y-2">
                                     <div className="flex items-center justify-between font-bold text-slate-700 dark:text-slate-300 text-xs">
                                       <span className="flex items-center gap-1.5">
-                                        {art.type === 'gherkin' && <FileCode className="w-3.5 h-3.5 text-amber-500" />}
-                                        {art.type === 'html' && <Globe className="w-3.5 h-3.5 text-cyan-500" />}
-                                        {art.type === 'text' && <FileText className="w-3.5 h-3.5 text-indigo-500" />}
+                                        {art.type === 'gherkin' && <FileCode aria-hidden="true" className="w-3.5 h-3.5 text-amber-500" />}
+                                        {art.type === 'html' && <Globe aria-hidden="true" className="w-3.5 h-3.5 text-cyan-500" />}
+                                        {art.type === 'text' && <FileText aria-hidden="true" className="w-3.5 h-3.5 text-indigo-500" />}
                                         {art.name}
                                       </span>
                                       <span className="flex items-center gap-2">
@@ -1687,7 +1687,7 @@ export const TicketItem: React.FC<Props> = ({
                         >
                           <div className="flex items-center justify-between font-semibold text-slate-800 dark:text-slate-200 mb-1">
                             <span className="flex items-center gap-2">
-                              <FileText className="w-4 h-4 text-indigo-500" />
+                              <FileText aria-hidden="true" className="w-4 h-4 text-indigo-500" />
                               {a.name}
                             </span>
                             <span className="flex items-center gap-2">
@@ -1753,7 +1753,7 @@ export const TicketItem: React.FC<Props> = ({
                   disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
                   className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
                 >
-                  {isRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ClipboardEdit className="w-3.5 h-3.5 text-indigo-600" />}
+                  {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 text-indigo-600" />}
                   {t('ticketItem.actions.refine')}
                 </button>
                 <button
@@ -1761,7 +1761,7 @@ export const TicketItem: React.FC<Props> = ({
                   disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
                   className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
                 >
-                  {isRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                  {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5" />}
                   {t('ticketItem.actions.run')}
                 </button>
               </div>
@@ -1798,7 +1798,7 @@ export const TicketItem: React.FC<Props> = ({
                 disabled={isRunning || !promptText.trim()}
                 className="px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition"
               >
-                {isRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {isRunning ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <Send aria-hidden="true" className="w-4 h-4" />}
                 {t('ticketItem.send')}
               </button>
             </div>

@@ -1070,11 +1070,11 @@ export const App: React.FC = () => {
                 className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 shadow-xs transition max-w-[14rem]"
                 title={currentProject ? currentProject.local_path || t('settings.appSettings.projects.notSet') : undefined}
               >
-                <FolderOpen className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
+                <FolderOpen aria-hidden="true" className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
                 <span className="truncate">
                   {currentProject ? currentProject.name : t('projectSwitcher.noProject')}
                 </span>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <ChevronDown aria-hidden="true" className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               </button>
 
               {isProjectMenuOpen && (
@@ -1140,7 +1140,7 @@ export const App: React.FC = () => {
                         }}
                         className="w-full text-left px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 text-blue-700 dark:text-blue-400 font-medium"
                       >
-                        <Plus className="w-3.5 h-3.5" />
+                        <Plus aria-hidden="true" className="w-3.5 h-3.5" />
                         {t('projectSwitcher.createNew')}
                       </button>
                     </div>
@@ -1153,7 +1153,7 @@ export const App: React.FC = () => {
               onClick={() => setIsClaudeGlobalOpen(true)}
               className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-700 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 shadow-xs transition"
             >
-              <Terminal className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <Terminal aria-hidden="true" className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
               {t('header.launchClaude')}
             </button>
 
@@ -1162,7 +1162,7 @@ export const App: React.FC = () => {
               title={t('header.language.toggleTitle', { lang: t(`header.language.${currentLanguage}`) })}
               className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs transition flex items-center gap-1.5"
             >
-              <Languages className="w-4 h-4" />
+              <Languages aria-hidden="true" className="w-4 h-4" />
               <span className="text-xs font-semibold">{t(`header.language.${currentLanguage}`)}</span>
             </button>
 
@@ -1171,7 +1171,7 @@ export const App: React.FC = () => {
               title={t('header.theme.toggleTitle', { mode: t(`header.theme.${themePreference}`) })}
               className="p-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs transition"
             >
-              <ThemeIcon className="w-4 h-4" />
+              <ThemeIcon aria-hidden="true" className="w-4 h-4" />
             </button>
 
             <button
@@ -1179,7 +1179,7 @@ export const App: React.FC = () => {
               title={t('header.settings')}
               className="p-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs transition"
             >
-              <SettingsIcon className="w-4 h-4" />
+              <SettingsIcon aria-hidden="true" className="w-4 h-4" />
             </button>
 
             <button
@@ -1196,7 +1196,7 @@ export const App: React.FC = () => {
               title={currentProject ? undefined : t('projectSwitcher.selectFirst')}
               className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
             >
-              <Plus className="w-4 h-4" />
+              <Plus aria-hidden="true" className="w-4 h-4" />
               {t('header.newTicket')}
             </button>
           </div>
@@ -1206,7 +1206,7 @@ export const App: React.FC = () => {
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+              <Search aria-hidden="true" className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
               <input
                 type="text"
                 value={filterQuery}
@@ -1281,7 +1281,7 @@ export const App: React.FC = () => {
               className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition"
               title={t('toolbar.refreshTitle')}
             >
-              <RotateCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <RotateCw aria-hidden="true" className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <span>
               {t('toolbar.updatedAt', {
@@ -1363,7 +1363,7 @@ export const App: React.FC = () => {
                 onClick={retryCurrentProject}
                 className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold inline-flex items-center gap-1.5 transition"
               >
-                <RotateCw className="w-4 h-4" />
+                <RotateCw aria-hidden="true" className="w-4 h-4" />
                 {t('projectSwitcher.retry')}
               </button>
             </div>
@@ -1377,7 +1377,7 @@ export const App: React.FC = () => {
                 }}
                 className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-xs transition"
               >
-                <Plus className="w-4 h-4" />
+                <Plus aria-hidden="true" className="w-4 h-4" />
                 {t('projectSwitcher.createNew')}
               </button>
             </div>
@@ -1421,20 +1421,22 @@ export const App: React.FC = () => {
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => setPage(p => Math.max(1, p - 1))}
+                      aria-label={t('pagination.previous')}
                       disabled={currentPage <= 1}
                       className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-white dark:disabled:hover:bg-slate-900 transition"
                     >
-                      <ChevronLeft className="w-3.5 h-3.5" />
+                      <ChevronLeft aria-hidden="true" className="w-3.5 h-3.5" />
                     </button>
                     <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">
                       {t('pagination.pageOf', { page: currentPage, total: totalPages })}
                     </span>
                     <button
                       onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                      aria-label={t('pagination.next')}
                       disabled={currentPage >= totalPages}
                       className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-white dark:disabled:hover:bg-slate-900 transition"
                     >
-                      <ChevronRight className="w-3.5 h-3.5" />
+                      <ChevronRight aria-hidden="true" className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>

@@ -131,7 +131,7 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
               disabled={isLaunching || !prompt.trim()}
               className="self-end px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg flex items-center gap-2 shadow-sm transition"
             >
-              {isLaunching ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
+              {isLaunching ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <ExternalLink aria-hidden="true" className="w-4 h-4" />}
               {t('claudeRunnerModal.launch')}
             </button>
           </div>

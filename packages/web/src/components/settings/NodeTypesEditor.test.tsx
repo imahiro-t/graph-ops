@@ -266,3 +266,44 @@ describe('NodeTypesEditor', () => {
     });
   });
 });
+
+// DFLT-00166: the list's icons are decorative and aria-hidden; the icon-only
+// buttons (delete, and the yes/no of the add row) are named by their title.
+describe('NodeTypesEditor icon accessibility', () => {
+  beforeEach(() => {
+    mockedFetchTypes.mockReset();
+    mockedFetchType.mockReset();
+    mockedFetchTypes.mockResolvedValue([...TYPES, { type: 'security_scan', has_default: false, has_user_override: true }]);
+    stubFetchType();
+  });
+
+  const expectAllIconsHidden = (root: Element) => {
+    const icons = root.querySelectorAll('svg.lucide');
+    expect(icons.length).toBeGreaterThan(0);
+    icons.forEach(icon => expect(icon).toHaveAttribute('aria-hidden', 'true'));
+  };
+
+  it('hides the type icons and names the icon-only buttons', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    // Every icon on screen -- including the per-type icon drawn from
+    // nodeTypeMeta through a variable -- is hidden.
+    expectAllIconsHidden(container);
+
+    // The custom type's delete button is found by its title-derived name.
+    const del = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.deleteType') });
+    expect(del).toBeEnabled();
+    expectAllIconsHidden(del);
+    // Default types' delete buttons are named with the reason they are disabled.
+    expect(screen.getAllByRole('button', { name: i18n.t('settings.nodeTypes.cannotDeleteDefaultHint') })).toHaveLength(2);
+
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') }));
+    const yes = screen.getByRole('button', { name: i18n.t('settings.common.yes') });
+    const no = screen.getByRole('button', { name: i18n.t('settings.common.no') });
+    expectAllIconsHidden(yes);
+    expectAllIconsHidden(no);
+    expectAllIconsHidden(container);
+  });
+});
