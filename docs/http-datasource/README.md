@@ -5,7 +5,7 @@ a system of their own choosing -- an issue tracker, a document database, an
 internal service -- instead of the built-in SQLite or MySQL backends.
 
 - **Protocol specification:** [`openapi.yaml`](openapi.yaml) (OpenAPI 3.1,
-  protocol version `1.0`). It is the normative contract; this manual explains
+  protocol version `1.1`). It is the normative contract; this manual explains
   it and how to work with it.
 - **Sample plugin:** [`examples/jira-datasource`](../../examples/jira-datasource/README.md),
   a complete plugin that stores everything in Jira Cloud.
@@ -236,10 +236,10 @@ spaces); decode them before use.
 ### Handshake and versioning
 
 `info.version` in the spec is the protocol version, `MAJOR.MINOR` (currently
-`1.0`). `GET /protocol` must answer:
+`1.1`). `GET /protocol` must answer:
 
 ```json
-{ "protocol": "graph-ops-datasource", "version": "1.0" }
+{ "protocol": "graph-ops-datasource", "version": "1.1" }
 ```
 
 graph-engine stops at startup with a clear error if `protocol` is anything
@@ -248,6 +248,13 @@ version differs from its own (for example "incompatible data source protocol:
 server speaks 2.0, graph-engine requires 1.x"). A different MINOR is accepted,
 because minor versions only add optional things. graph-engine sends its own
 version on every request in the `GraphOps-Protocol-Version` header.
+
+What each minor version added:
+
+| Version | Added |
+|---|---|
+| 1.0 | The initial protocol. |
+| 1.1 | `Ticket.parent_ticket_id` (optional, nullable): the ticket a ticket was derived from, set only by `createTicket`. graph-engine sends the key only when there is a parent, and when the plugin reports `1.0` it refuses a ticket with a parent with `PARENT_TICKET_UNSUPPORTED` before sending anything, so the parent is never silently dropped. Tickets without a parent work exactly as before on a 1.0 plugin. There is no children endpoint: graph-engine derives a ticket's children from `listTicketsByProject`, so on a large project `get-ticket` costs one project listing more. A plugin must keep the value as given (graph-engine has already checked that the parent exists and is in the same project) and may answer `VALIDATION_ERROR` for a parent it does not manage. |
 
 ### Errors
 
@@ -386,7 +393,7 @@ export GRAPHOPS_DATASOURCE_TOKEN="$(openssl rand -hex 32)"
 # start your plugin so that it listens on 127.0.0.1:8787 and expects that token
 
 curl -s -H "Authorization: Bearer $GRAPHOPS_DATASOURCE_TOKEN" http://127.0.0.1:8787/protocol
-# {"protocol":"graph-ops-datasource","version":"1.0"}
+# {"protocol":"graph-ops-datasource","version":"1.1"}
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8787/protocol
 # 401
 ```

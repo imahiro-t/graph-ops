@@ -51,3 +51,7 @@ deployment itself.
   by silently doing less work here.
 - Going beyond the confirmed scope is not a decision this node gets to make
   unilaterally.
+- When an autopilot child session (the `autopilot-worker` skill) processes
+  the ticket, that skill's override rules take precedence over this file: the
+  scope comes from the project's autopilot settings instead of a question to
+  the user.

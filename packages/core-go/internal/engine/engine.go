@@ -56,6 +56,10 @@ type CreateTicketOptions struct {
 	// labels (see resolveLabelNames); any unregistered name fails the call
 	// before the ticket is created.
 	LabelNames []string
+	// ParentTicketID (DFLT-00142), when non-nil, makes the new ticket a
+	// child of that ticket. The parent must exist (TICKET_NOT_FOUND) and be
+	// in projectID (VALIDATION_ERROR); either failure creates nothing.
+	ParentTicketID *string
 }
 
 // CreateTicketWithOptions is CreateTicketWithPriority plus labels given by
@@ -69,6 +73,22 @@ func (e *GraphEngine) CreateTicketWithOptions(projectID, title, description stri
 			return domain.Ticket{}, err
 		}
 		value = parsed
+	}
+	var parentID *string
+	if opts.ParentTicketID != nil {
+		parent, err := e.repo.GetTicket(*opts.ParentTicketID)
+		if err != nil {
+			return domain.Ticket{}, err
+		}
+		if parent == nil {
+			return domain.Ticket{}, domain.NewAPIError(domain.ErrCodeTicketNotFound, "TICKET_NOT_FOUND: parent ticket %s not found", *opts.ParentTicketID)
+		}
+		if parent.ProjectID != projectID {
+			return domain.Ticket{}, domain.NewAPIError(domain.ErrCodeValidation,
+				"VALIDATION_ERROR: parent ticket %s is in project %s, not %s; a child ticket must be in its parent's project", parent.ID, parent.ProjectID, projectID)
+		}
+		id := parent.ID
+		parentID = &id
 	}
 	var labels []domain.Label
 	if len(opts.LabelNames) > 0 {
@@ -88,7 +108,41 @@ func (e *GraphEngine) CreateTicketWithOptions(projectID, title, description stri
 		Blocked:        false,
 		Priority:       value,
 		Labels:         labels,
+		ParentTicketID: parentID,
 	})
+}
+
+// GetTicketDetailWithFamily is the repository's GetTicketDetail plus the
+// ticket's parent and children (DFLT-00142) -- what get-ticket and
+// GET /api/tickets/{id} return. It returns nil, nil for a missing ticket,
+// like GetTicketDetail. Children come from store.ListChildTickets (one
+// indexed query on SQLite/MySQL, a filtered project listing on the HTTP
+// data source). A parent that can no longer be read (only possible on a
+// backend without ON DELETE SET NULL) is reported as no parent rather than
+// as an error.
+func (e *GraphEngine) GetTicketDetailWithFamily(id string) (*domain.TicketDetailWithFamily, error) {
+	detail, err := e.repo.GetTicketDetail(id)
+	if err != nil || detail == nil {
+		return nil, err
+	}
+	out := &domain.TicketDetailWithFamily{TicketDetail: *detail, Children: []domain.TicketRef{}}
+	if pid := detail.ParentTicketID; pid != nil {
+		parent, err := e.repo.GetTicket(*pid)
+		if err != nil {
+			return nil, err
+		}
+		if parent != nil {
+			out.Parent = &domain.TicketRef{ID: parent.ID, Title: parent.Title, Status: parent.Status}
+		}
+	}
+	children, err := store.ListChildTickets(e.repo, detail.Ticket)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range children {
+		out.Children = append(out.Children, domain.TicketRef{ID: c.ID, Title: c.Title, Status: c.Status})
+	}
+	return out, nil
 }
 
 // resolveLabelNames maps label names to the IDs of projectID's registered

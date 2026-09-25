@@ -13,7 +13,8 @@
 // only ticket requests would let a per-ticket fan-out reappear elsewhere
 // without any test noticing. That label request is one fixed request no
 // matter how many tickets exist, which is what "the count does not depend on
-// the number of tickets" means here.
+// the number of tickets" means here. Since DFLT-00142 a round also refreshes
+// the project's autopilot runs (the badges), another single fixed request.
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
@@ -34,6 +35,7 @@ const LABELS_URL = `/api/projects/${project.id}/labels`;
 // Since DFLT-00106 the list request always names the header's project; a
 // bare GET /api/tickets returns an empty list.
 const LIST_URL = `/api/tickets?project_id=${project.id}`;
+const RUNS_URL = `/api/autopilot/runs?project_id=${project.id}`;
 
 // A ticket with a three-node graph (one of them done) and two artifacts,
 // i.e. everything a collapsed card and an expanded panel each read.
@@ -160,9 +162,10 @@ describe('polling cost', () => {
     await advanceOneRound();
     const urls = urlsSince(mark);
 
-    expect(urls).toHaveLength(2);
+    expect(urls).toHaveLength(3);
     expect(countOf(urls, LIST_URL)).toBe(1);
     expect(countOf(urls, LABELS_URL)).toBe(1);
+    expect(countOf(urls, RUNS_URL)).toBe(1);
     expect(detailRequests(urls)).toEqual([]);
   });
 
@@ -179,9 +182,10 @@ describe('polling cost', () => {
     await advanceOneRound();
     const urls = urlsSince(mark);
 
-    expect(urls).toHaveLength(3);
+    expect(urls).toHaveLength(4);
     expect(countOf(urls, LIST_URL)).toBe(1);
     expect(countOf(urls, LABELS_URL)).toBe(1);
+    expect(countOf(urls, RUNS_URL)).toBe(1);
     expect(detailRequests(urls)).toEqual(['/api/tickets/DFLT-00002']);
   });
 

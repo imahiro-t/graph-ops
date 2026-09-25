@@ -101,6 +101,50 @@
     "cancel": "キャンセル",
     "submit": "作成"
   },
+  "autopilot": {
+    "buttons": {
+      "ticket": "オートパイロット（単一）",
+      "tree": "オートパイロット（ツリー）"
+    },
+    "modes": {
+      "ticket": "単一",
+      "tree": "ツリー"
+    },
+    "confirm": {
+      "title": "オートパイロットを起動",
+      "resumeTitle": "オートパイロットを再開",
+      "start": "起動する",
+      "cancel": "キャンセル",
+      "ticket": "チケット {{id}} をオートパイロット（単一）で処理します。別のターミナルで Claude Code が起動し、リファインからリリースまでを人の確認なしで進めます。起動しますか？",
+      "tree": "チケット {{id}} とその子孫をオートパイロット（ツリー）で処理します。別のターミナルで Claude Code が起動し、各チケットのリファインからリリースまでを人の確認なしで順に進めます。起動しますか？",
+      "resume": "チケット {{id}} で停止・中断したオートパイロット（{{mode}}）を、止まったところから再開します。起動しますか？"
+    },
+    "started": "オートパイロットを起動しました（{{runId}}）。別のターミナルで処理が始まります。",
+    "resumed": "停止・中断していたオートパイロットを再開しました（{{runId}}）。別のターミナルで処理が始まります。",
+    "failed": "オートパイロットを起動できませんでした: {{message}}",
+    "blocked": "{{root}} を起点とするオートパイロットの実行中は、このチケットから起動できません。",
+    "blockedDescendant": "子孫の {{root}} を起点とするオートパイロットの実行中は、ツリーでは起動できません。",
+    "finished": "完了（DONE）またはクローズ済みのチケットからは起動できません。",
+    "badges": {
+      "running": "オートパイロット実行中",
+      "processing": "処理中",
+      "awaitingHuman": "人の判断待ち",
+      "waiting": "待機中",
+      "awaitingTitle": "人の判断待ち: {{what}}"
+    },
+    "decisions": {
+      "title": "自動判断（{{count}}件）",
+      "open": "{{name}} を別タブで開く",
+      "kinds": {
+        "refine": "リファインの判断",
+        "approval": "承認ゲートの判断",
+        "iteration": "反復上限の判断",
+        "release": "リリースの判断",
+        "handoff": "申し送りの判断",
+        "treeSummary": "ツリーのサマリ"
+      }
+    }
+  },
   "ticketItem": {
     "selfAssign": {
       "assign": "担当する",
@@ -113,6 +157,12 @@
     "nodeCount": "ノード数",
     "loopEdges": "差し戻し・戻りの辺: {{count}}本 (左側の破線で表示)",
     "createdAt": "作成日時",
+    "family": {
+      "parent": "親チケット",
+      "children": "子チケット（{{count}}件）",
+      "open": "{{id}} を開く",
+      "filtersCleared": "{{id}} を表示するためにフィルタを解除しました。"
+    },
     "description": {
       "title": "説明",
       "empty": "説明はまだありません",
@@ -266,6 +316,7 @@
       "reviewGates": "レビューゲート",
       "skills": "スキル",
       "templates": "テンプレート",
+      "autopilot": "オートパイロット",
       "appSettings": "アプリ設定",
       "labels": "ラベル"
     },
@@ -341,7 +392,10 @@
         "createTicket": "create-ticket（チケット作成）",
         "refineTicket": "refine-ticket（チケット精緻化）",
         "processTicket": "process-ticket（チケット処理）",
-        "onboarding": "onboarding（初回セットアップ）"
+        "onboarding": "onboarding（初回セットアップ）",
+        "autopilotTicket": "autopilot-ticket（オートパイロット・単一）",
+        "autopilotTree": "autopilot-tree（オートパイロット・ツリー）",
+        "autopilotWorker": "autopilot-worker（オートパイロットの子セッション）"
       }
     },
     "reportTemplate": {
@@ -476,11 +530,89 @@
       "projectLabel": "プロジェクト",
       "projectPlaceholder": "プロジェクトを選択",
       "noProjects": "プロジェクトがまだありません。先にプロジェクトを作成してください。"
+    },
+    "autopilot": {
+      "title": "オートパイロット設定（{{project}}）",
+      "description": "このプロジェクトでオートパイロット（autopilot-ticket / autopilot-tree）を実行するときの設定です。ここで保存した値はこの環境のローカル設定（~/.graph-ops/config.json）に保存されます。チーム設定（チーム拡張ディレクトリの autopilot.yaml）で指定された項目はそちらが優先され、ここでは変更できません。",
+      "teamFile": "チーム設定ファイル: {{path}}",
+      "noProject": "プロジェクトが選択されていません。オートパイロット設定はプロジェクトごとに保存されるため、先にプロジェクトを選択してください。",
+      "clearLocal": "ローカル値を削除して既定値に戻す",
+      "clearLocalFor": "{{key}}のローカル値を削除",
+      "lockedWithLocal": "{{source}}（ローカル値: {{value}}）",
+      "errorWithKeys": "{{message}}（対象: {{keys}}）",
+      "bypassWarning": "bypassPermissions を選ぶと、オートパイロットの子セッションはツールの実行（ファイルの変更やコマンドの実行を含む）を一切確認せずに行います。信頼できるリポジトリと環境でのみ使用してください。この値はチーム設定からは受け付けられません。",
+      "source": {
+        "default": "既定値",
+        "local": "ローカル設定",
+        "team_defaults": "チーム設定で固定（共通の既定）",
+        "team_project": "チーム設定で固定（このプロジェクト）"
+      },
+      "warningSource": {
+        "local": "ローカル設定",
+        "team_defaults": "チーム設定の defaults",
+        "team_project": "チーム設定の projects"
+      },
+      "warnings": {
+        "AUTOPILOT_TEAM_FILE_INVALID": "チーム設定ファイル {{value}} を読み込めなかったため、無視しています。",
+        "AUTOPILOT_TEAM_BYPASS_PERMISSIONS_IGNORED": "{{source}}の権限モード bypassPermissions は受け付けないため、無視しています。",
+        "AUTOPILOT_INVALID_VALUE": "{{source}}の「{{key}}」の値 {{value}} は不正なため、無視しています。",
+        "AUTOPILOT_UNKNOWN_KEY": "{{source}}の不明な項目「{{key}}」を無視しています。"
+      },
+      "keys": {
+        "mainReflection": {
+          "label": "main への反映方法",
+          "hint": "ルートチケット（単一モードではそのチケット）の成果を main にどう反映するか。",
+          "options": {
+            "branch": "ブランチを残すだけ",
+            "pull_request": "PR 作成まで",
+            "merge": "自動マージ"
+          }
+        },
+        "permissionMode": {
+          "label": "子セッションの権限モード",
+          "hint": "チケットごとに起動する子セッション（claude --permission-mode）の権限モード。",
+          "options": {
+            "acceptEdits": "acceptEdits（編集を自動承認）",
+            "auto": "auto",
+            "dontAsk": "dontAsk",
+            "bypassPermissions": "bypassPermissions（確認なし）"
+          }
+        },
+        "autoApproveGates": {
+          "label": "承認ゲートの自動判断",
+          "hint": "OFF にすると approval_gate では通常どおり人の判断を待ちます。"
+        },
+        "autoCreateTickets": {
+          "label": "派生チケットの自動作成",
+          "hint": "OFF にすると申し送りをチケットにするかどうかは人が判断します。"
+        },
+        "maxTickets": {
+          "label": "処理するチケット数の上限",
+          "hint": "1 回の実行で処理するチケット数（ルートを含む）。1〜100。"
+        },
+        "maxDepth": {
+          "label": "派生の深さの上限",
+          "hint": "処理対象とする派生の深さ（ルートを 0 とする）。0〜10。"
+        },
+        "onFailure": {
+          "label": "失敗・ブロック時の挙動",
+          "hint": "失敗・ブロックしたときに全体を止めるか、そのチケットの部分木だけ飛ばして続けるか。",
+          "options": {
+            "stop": "全体を止める",
+            "continue": "そのチケットだけ止めて続ける"
+          }
+        },
+        "stallTimeoutMinutes": {
+          "label": "無応答とみなすまでの時間（分）",
+          "hint": "子セッションに活動の兆候が見られない状態がこの時間続いたら失敗扱いにします。15〜1440。"
+        }
+      }
     }
   },
   "errors": {
     "TITLE_REQUIRED": "タイトルは必須です。",
     "TICKET_NOT_FOUND": "対象のチケットが見つかりませんでした。",
+    "PARENT_TICKET_UNSUPPORTED": "使用中のデータソースは親チケットを保存できません。HTTP データソースのプラグインをプロトコル 1.1 以降に更新してください。",
     "NODE_NOT_FOUND": "対象のノードが見つかりませんでした。",
     "INVALID_NODE_STATE": "このノードは現在の状態では完了できません。すでに完了しているか、まだ開始していない可能性があります。画面を再読み込みして最新の状態をご確認ください。",
     "VALIDATION_ERROR": "入力内容に誤りがあります。ご確認のうえ再度お試しください。",
@@ -510,7 +642,15 @@
     "ROUTE_NOT_FOUND": "このアドレスはこのサーバーでは提供されなくなりました。保存したリンクやブックマークからではなく、Web UI から開き直してください。",
     "UNKNOWN": "予期しないエラーが発生しました。再度お試しください。",
     "HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED": "保存済みのトークンは別のエンドポイント URL には使用できません。URL を変更した場合はトークンを再入力してください。",
-    "HOME_CONFIG_UNAVAILABLE": "ホームディレクトリを解決できないため、保存先の設定ファイルがなく、何も保存されていません。設定は $HOME/.graph-ops/config.json と環境変数からのみ読まれます。"
+    "HOME_CONFIG_UNAVAILABLE": "ホームディレクトリを解決できないため、保存先の設定ファイルがなく、何も保存されていません。設定は $HOME/.graph-ops/config.json と環境変数からのみ読まれます。",
+    "AUTOPILOT_SETTING_LOCKED": "チーム設定で固定されている項目は保存できません。その項目を変更せずに保存し直してください。",
+    "AUTOPILOT_ALREADY_RUNNING": "このチケットを含むツリーでオートパイロットがすでに実行中です。終わるまで待つか、実行中のものが止まってから起動し直してください。",
+    "AUTOPILOT_ROOT_FINISHED": "このチケットは完了またはクローズ済みのため、オートパイロットを起動できません。終わっていない子孫を処理するときは、そのチケットから起動してください。",
+    "PROJECT_LOCAL_PATH_NOT_SET": "このプロジェクトのローカルパスがこの環境で設定されていません。設定画面のプロジェクト設定でローカルパスを設定してから起動してください。",
+    "AUTOPILOT_RUN_NOT_FOUND": "指定したオートパイロットの実行記録が見つかりません。",
+    "AUTOPILOT_INVALID_STATE": "オートパイロットの実行記録が、この操作を受け付けられない状態です。画面を更新してから再度お試しください。",
+    "AUTOPILOT_REGISTRY_LOCKED": "オートパイロットの実行記録がほかの処理で使用中です。少し待ってから再度お試しください。",
+    "AUTOPILOT_REGISTRY_CORRUPT": "オートパイロットの実行記録の一部が読み取れないため、二重起動にならないかを判定できません。サーバーのログに出ているファイル（~/.graph-ops/autopilot 配下）を修正または削除してから、再度お試しください。"
   },
   "labels": {
     "colors": {

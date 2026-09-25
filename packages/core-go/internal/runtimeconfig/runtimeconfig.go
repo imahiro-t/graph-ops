@@ -29,6 +29,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/graph-ops/core-go/internal/autopilot"
 )
 
 // FileConfig is the home config file's shape on disk (see HomeConfigPath).
@@ -148,6 +150,48 @@ type FileConfig struct {
 	// Read and write it through internal/currentproject, never directly, so
 	// that distinction is applied in exactly one place.
 	CurrentProjectID *string `json:"currentProjectId,omitempty"`
+
+	// AutopilotSettings maps a project ID to this environment's local
+	// autopilot settings for it (DFLT-00142) -- only the keys set locally,
+	// unset ones absent. They are the third tier of autopilot.Resolve: the
+	// team file (<teamExtensionsDir>/autopilot.yaml) wins over them key by
+	// key, and they win over the built-in defaults. Values are kept as
+	// decoded, not validated on load (see autopilot.LocalSettings for why);
+	// write through SetAutopilotSettings, which only stores validated ones.
+	AutopilotSettings map[string]autopilot.LocalSettings `json:"autopilotSettings,omitempty"`
+}
+
+// AutopilotLocal returns projectID's local autopilot settings, or nil when
+// none are stored.
+func (c FileConfig) AutopilotLocal(projectID string) autopilot.LocalSettings {
+	return c.AutopilotSettings[projectID]
+}
+
+// UpdateAutopilotSettings applies patch to projectID's local autopilot
+// settings in the home config file, through UpdateHome (so every other field
+// is preserved and in-process writers are serialized). A project left with no
+// keys loses its entry, and an emptied map is dropped. An empty patch writes
+// nothing. Returns the saved file's contents.
+func UpdateAutopilotSettings(home, projectID string, patch autopilot.Patch) (FileConfig, error) {
+	if patch.Empty() {
+		return LoadHomeConfig(home)
+	}
+	cfg, _, err := UpdateHome(home, func(cfg *FileConfig) error {
+		next := patch.Apply(cfg.AutopilotSettings[projectID])
+		if next == nil {
+			delete(cfg.AutopilotSettings, projectID)
+			if len(cfg.AutopilotSettings) == 0 {
+				cfg.AutopilotSettings = nil
+			}
+			return nil
+		}
+		if cfg.AutopilotSettings == nil {
+			cfg.AutopilotSettings = map[string]autopilot.LocalSettings{}
+		}
+		cfg.AutopilotSettings[projectID] = next
+		return nil
+	})
+	return cfg, err
 }
 
 // DefaultHost is the interface `serve` binds to when nothing overrides it:

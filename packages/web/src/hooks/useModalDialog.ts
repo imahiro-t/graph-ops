@@ -12,7 +12,11 @@ import { useLatest } from './useLatest';
 //   onEscape.
 // - On close (isOpen -> false, or unmount for conditionally mounted modals):
 //   put focus back on the remembered element, or on returnFocusFallbackRef
-//   when that element is gone (removed from the DOM, or it was <body>).
+//   when that element is gone (removed from the DOM, or it was <body>) or
+//   cannot take focus any more (DFLT-00147: for example the opener button
+//   was disabled in the same render that closed the dialog, as the
+//   autopilot's start buttons are while the start request runs -- focus()
+//   on it does nothing, and focus would otherwise fall to <body>).
 //
 // Assumptions / contracts:
 //
@@ -33,7 +37,14 @@ import { useLatest } from './useLatest';
 //   the second run records that same element again before moving focus back
 //   into the dialog, so the end state is unchanged. Keep the cleanup's
 //   "restore focus" and the effect's "remember activeElement" symmetric if
-//   either is changed.
+//   either is changed. One asymmetric case: if the remembered element cannot
+//   take focus at that intermediate cleanup (say, a caller disables its
+//   opener while the dialog is open), the cleanup moves focus to the
+//   fallback and the second run then remembers the fallback, so in a
+//   development build focus returns there on close rather than to the
+//   opener. Production builds and tests do not run the effect twice. Callers
+//   avoid this by keeping the opener enabled while the dialog is open (the
+//   overlay and the Tab wrap already keep the page behind it out of reach).
 
 export interface UseModalDialogOptions {
   // Defaults to true for modals that are mounted only while open.
@@ -181,6 +192,10 @@ export function useModalDialog<T extends HTMLElement = HTMLDivElement>({
       document.removeEventListener('keydown', handleKeyDown);
       if (previouslyFocused && previouslyFocused.isConnected && previouslyFocused !== document.body) {
         previouslyFocused.focus();
+        // focus() is a silent no-op on an element that cannot take focus
+        // (disabled, or hidden by then); fall back rather than leave focus
+        // on the dialog element being removed, i.e. on <body>.
+        if (document.activeElement !== previouslyFocused) focusRefTarget(returnFocusFallbackRef);
       } else {
         focusRefTarget(returnFocusFallbackRef);
       }

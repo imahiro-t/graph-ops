@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS tickets (
 	assignee_name TEXT,
 	graph_expanded_at TEXT,
 	priority TEXT,
+	parent_ticket_id TEXT REFERENCES tickets(id) ON DELETE SET NULL,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
@@ -235,6 +236,9 @@ func (r *SQLiteRepository) Init() error {
 	if err := r.dropLegacyProjectsWorkDir(); err != nil {
 		return err
 	}
+	if err := r.addTicketParentColumn(); err != nil {
+		return err
+	}
 	// DFLT-00083 migration: tickets whose priority is NULL become MEDIUM.
 	return backfillNullTicketPriority(r.db)
 }
@@ -256,15 +260,42 @@ func (r *SQLiteRepository) dropLegacyProjectsWorkDir() error {
 	})
 }
 
+// addTicketParentColumn is the DFLT-00142 migration: a DB created before
+// that ticket has no tickets.parent_ticket_id, which schemaDDL's CREATE TABLE
+// IF NOT EXISTS does not add. SQLite accepts ADD COLUMN with a REFERENCES
+// clause while foreign keys are on as long as the column's default is NULL,
+// which it is. The index is created here rather than in schemaDDL because on
+// an old DB schemaDDL runs before the column exists. Idempotent.
+func (r *SQLiteRepository) addTicketParentColumn() error {
+	if err := ensureTicketParentColumn("sqlite", func() (bool, error) {
+		return r.sqliteColumnExists("tickets", "parent_ticket_id")
+	}, func() error {
+		_, err := r.db.Exec(`ALTER TABLE tickets ADD COLUMN parent_ticket_id TEXT REFERENCES tickets(id) ON DELETE SET NULL`)
+		return err
+	}); err != nil {
+		return err
+	}
+	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tickets_parent ON tickets(parent_ticket_id)`); err != nil {
+		return fmt.Errorf("creating idx_tickets_parent: %w", err)
+	}
+	return nil
+}
+
 // projectsHasWorkDir reports whether the projects table still has the legacy
 // work_dir column (PRAGMA table_info).
 func (r *SQLiteRepository) projectsHasWorkDir() (bool, error) {
-	rows, err := r.db.Query(`PRAGMA table_info(projects)`)
+	return r.sqliteColumnExists("projects", "work_dir")
+}
+
+// sqliteColumnExists reports whether table has column (PRAGMA table_info).
+// table is always a constant of this package, never user input.
+func (r *SQLiteRepository) sqliteColumnExists(table, column string) (bool, error) {
+	rows, err := r.db.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
 		return false, err
 	}
 	defer rows.Close()
-	hasWorkDir := false
+	found := false
 	for rows.Next() {
 		var (
 			cid        int
@@ -276,14 +307,14 @@ func (r *SQLiteRepository) projectsHasWorkDir() (bool, error) {
 		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &primaryKey); err != nil {
 			return false, err
 		}
-		if name == "work_dir" {
-			hasWorkDir = true
+		if name == column {
+			found = true
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return false, err
 	}
-	return hasWorkDir, nil
+	return found, nil
 }
 
 func shortUUID() string {
@@ -319,7 +350,7 @@ func boolToInt(b bool) int {
 
 // --- Tickets ---
 
-const ticketSelectCols = `id, project_id, title, description, status, auto_executable, blocked, refined_at, closed_reason, assignee_name, graph_expanded_at, priority, created_at, updated_at`
+const ticketSelectCols = `id, project_id, title, description, status, auto_executable, blocked, refined_at, closed_reason, assignee_name, graph_expanded_at, priority, parent_ticket_id, created_at, updated_at`
 
 // CreateTicket mints projectID's next ticket ID (<prefix>-<seq:05d>) and
 // inserts t under it, all inside one *sql.Tx so the read-increment-write of
@@ -350,10 +381,10 @@ func (r *SQLiteRepository) CreateTicket(projectID string, t domain.Ticket) (doma
 	id := fmt.Sprintf("%s-%05d", prefix, seq)
 
 	_, err = tx.Exec(
-		`INSERT INTO tickets (id, project_id, title, description, status, auto_executable, blocked, node_seq, assignee_name, priority, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+		`INSERT INTO tickets (id, project_id, title, description, status, auto_executable, blocked, node_seq, assignee_name, priority, parent_ticket_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
 		id, projectID, t.Title, t.Description, t.Status,
-		boolToInt(t.AutoExecutable), boolToInt(t.Blocked), nullableString(t.Assignee), ticketPriorityOrDefault(t.Priority), now, now,
+		boolToInt(t.AutoExecutable), boolToInt(t.Blocked), nullableString(t.Assignee), ticketPriorityOrDefault(t.Priority), nullableString(t.ParentTicketID), now, now,
 	)
 	if err != nil {
 		return domain.Ticket{}, fmt.Errorf("inserting ticket: %w", err)
@@ -377,11 +408,14 @@ func scanTicket(row interface {
 	Scan(dest ...any) error
 }) (*domain.Ticket, error) {
 	var t domain.Ticket
-	var projectID, refinedAt, closedReason, assigneeName, graphExpandedAt, priority sql.NullString
+	var projectID, refinedAt, closedReason, assigneeName, graphExpandedAt, priority, parentTicketID sql.NullString
 	var autoExec, blocked int
 	if err := row.Scan(&t.ID, &projectID, &t.Title, &t.Description, &t.Status,
-		&autoExec, &blocked, &refinedAt, &closedReason, &assigneeName, &graphExpandedAt, &priority, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		&autoExec, &blocked, &refinedAt, &closedReason, &assigneeName, &graphExpandedAt, &priority, &parentTicketID, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return nil, err
+	}
+	if parentTicketID.Valid {
+		t.ParentTicketID = &parentTicketID.String
 	}
 	if projectID.Valid {
 		t.ProjectID = projectID.String
@@ -445,6 +479,11 @@ func (r *SQLiteRepository) ListTicketsByProject(projectID string) ([]domain.Tick
 	return listTicketsWithLabels(r.db,
 		`SELECT `+ticketSelectCols+` FROM tickets WHERE project_id = ? ORDER BY created_at DESC`, []any{projectID},
 		`JOIN tickets t ON t.id = tl.ticket_id WHERE t.project_id = ?`, []any{projectID})
+}
+
+// ListChildTickets: see TicketChildLister.
+func (r *SQLiteRepository) ListChildTickets(parentID string) ([]domain.Ticket, error) {
+	return listChildTickets(r.db, parentID)
 }
 
 // UpdateTicket: see updateTicket (labels.go).

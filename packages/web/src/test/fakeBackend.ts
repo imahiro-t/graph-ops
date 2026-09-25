@@ -11,7 +11,20 @@
 // Mutating `backend.tickets` / `backend.labels` / `backend.currentProjectId`
 // between renders is the intended way to simulate a change on the server.
 import { vi } from 'vitest';
-import { ArtifactType, LabelColor, NodeStatus, NodeType, Project, TicketPriority, TicketStatus } from '../types';
+import {
+  ArtifactType,
+  AutopilotMode,
+  AutopilotRun,
+  LabelColor,
+  NodeStatus,
+  NodeType,
+  Project,
+  TicketPriority,
+  TicketStatus
+} from '../types';
+
+// Answers POST /api/tickets/{id}/autopilot: an HTTP status and body.
+export type FakeAutopilotStart = (ticketId: string, mode: AutopilotMode) => { status: number; body: unknown };
 
 export interface FakeLabel {
   id: string;
@@ -59,6 +72,9 @@ export interface FakeTicket {
   nodes?: FakeNode[];
   edges?: FakeEdge[];
   artifacts?: FakeArtifact[];
+  // DFLT-00142: the parent ticket's id. Children are derived from it, in
+  // seed order (standing in for creation order).
+  parentId?: string;
 }
 
 export interface FakeBackendSeed {
@@ -69,6 +85,11 @@ export interface FakeBackendSeed {
   // GET /api/settings/app's effective paginationPageSize, i.e. how many
   // tickets a page of the list holds. Defaults to the app's own default.
   paginationPageSize?: number;
+  // DFLT-00142: GET /api/autopilot/runs answers these (filtered by
+  // project_id); POST /api/tickets/{id}/autopilot answers with
+  // autopilotStart, by default a fresh reservation.
+  autopilotRuns?: AutopilotRun[];
+  autopilotStart?: FakeAutopilotStart;
 }
 
 export interface FakeBackend extends Required<FakeBackendSeed> {
@@ -131,6 +152,7 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     priority: tk.priority,
+    parent_ticket_id: tk.parentId ?? null,
     labels: backend.labels
       .filter(l => tk.labelIds.includes(l.id))
       .map(labelJSON)
@@ -139,11 +161,15 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
     edges: (tk.edges ?? []).map(e => edgeJSON(tk, e))
   });
 
+  const refJSON = (tk: FakeTicket | undefined) => (tk ? { id: tk.id, title: tk.title, status: tk.status } : null);
+
   // GET /api/tickets/{id}'s response (domain.TicketDetail): the same thing
-  // plus the artifacts, bodies included.
+  // plus the artifacts, bodies included, and (DFLT-00142) parent/children.
   const ticketDetailJSON = (tk: FakeTicket) => ({
     ...ticketListJSON(tk),
-    artifacts: (tk.artifacts ?? []).map(a => artifactJSON(tk, a))
+    artifacts: (tk.artifacts ?? []).map(a => artifactJSON(tk, a)),
+    parent: refJSON(backend.tickets.find(p => p.id === tk.parentId)),
+    children: backend.tickets.filter(c => c.parentId === tk.id).map(c => refJSON(c))
   });
 
   const backend: FakeBackend = {
@@ -152,6 +178,13 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
     tickets: seed.tickets,
     currentProjectId: seed.currentProjectId,
     paginationPageSize: seed.paginationPageSize ?? 10,
+    autopilotRuns: seed.autopilotRuns ?? [],
+    autopilotStart:
+      seed.autopilotStart ??
+      ((ticketId, mode) => ({
+        status: 200,
+        body: { run_id: 'run-1', mode, root: ticketId, state: 'starting', created: true, resumed: false }
+      })),
 
     async fetch(input, init) {
       const url = String(input);
@@ -225,6 +258,14 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
       // immediately; nothing is created here. It is answered so a test can
       // drive that flow and watch the refetch it triggers afterwards.
       if (url === '/api/claude/launch' && method === 'POST') return respond(200, { success: true });
+      if (url.split('?')[0] === '/api/autopilot/runs' && method === 'GET') {
+        const projectId = new URLSearchParams(url.split('?')[1] ?? '').get('project_id') ?? '';
+        return respond(200, backend.autopilotRuns.filter(r => r.project_id === projectId));
+      }
+      if ((m = url.match(/^\/api\/tickets\/([^/?]+)\/autopilot$/)) && method === 'POST') {
+        const res = backend.autopilotStart(decodeURIComponent(m[1]), body?.mode);
+        return respond(res.status, res.body);
+      }
       return respond(404, { error: { code: 'NOT_FOUND', message: url } });
     }
   };

@@ -5,13 +5,13 @@ import (
 	"net/http"
 )
 
-// Protocol entity shapes (docs/http-datasource/openapi.yaml, protocol 1.0).
+// Protocol entity shapes (docs/http-datasource/openapi.yaml, protocol 1.1).
 // A plugin is an independent program, so these are defined here rather than
 // imported from graph-engine's internal packages.
 
 const (
 	protocolName    = "graph-ops-datasource"
-	protocolVersion = "1.0"
+	protocolVersion = "1.1"
 )
 
 type Label struct {
@@ -52,6 +52,9 @@ type Ticket struct {
 	GraphExpandedAt *string `json:"graph_expanded_at,omitempty"`
 	Priority        string  `json:"priority"`
 	Labels          []Label `json:"labels"`
+	// ParentTicketID (protocol 1.1) is kept in the graphops.ticket property,
+	// not in Jira's own parent field (see ticketProp).
+	ParentTicketID *string `json:"parent_ticket_id"`
 }
 
 type GraphNode struct {

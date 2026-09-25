@@ -25,6 +25,7 @@ import { SkillsEditor } from './settings/SkillsEditor';
 import { TemplatesEditor } from './settings/TemplatesEditor';
 import { AppSettingsEditor } from './settings/AppSettingsEditor';
 import { LabelsEditor } from './settings/LabelsEditor';
+import { AutopilotSettingsEditor } from './settings/AutopilotSettingsEditor';
 
 interface Props {
   isOpen: boolean;
@@ -43,7 +44,7 @@ interface Props {
   onLabelsChanged?: () => void;
 }
 
-type Tab = 'nodeTypes' | 'reviewGates' | 'skills' | 'templates' | 'labels' | 'appSettings';
+type Tab = 'nodeTypes' | 'reviewGates' | 'skills' | 'templates' | 'labels' | 'autopilot' | 'appSettings';
 
 export const SettingsModal: React.FC<Props> = ({
   isOpen,
@@ -99,6 +100,7 @@ export const SettingsModal: React.FC<Props> = ({
     { key: 'skills', labelKey: 'settings.tabs.skills' },
     { key: 'templates', labelKey: 'settings.tabs.templates' },
     { key: 'labels', labelKey: 'settings.tabs.labels' },
+    { key: 'autopilot', labelKey: 'settings.tabs.autopilot' },
     { key: 'appSettings', labelKey: 'settings.tabs.appSettings' }
   ];
 
@@ -160,6 +162,17 @@ export const SettingsModal: React.FC<Props> = ({
               projects={projects}
               initialProjectId={currentProject?.id ?? ''}
               onLabelsChanged={onLabelsChanged}
+            />
+          )}
+          {/* Autopilot settings (DFLT-00142) are per project too, but are
+              local to this environment (the home config's
+              autopilotSettings.<projectId>); the tab edits the project the
+              app has selected. */}
+          {tab === 'autopilot' && (
+            <AutopilotSettingsEditor
+              projectId={currentProject?.id ?? ''}
+              projectName={currentProject?.name}
+              onDirtyChange={setDirty}
             />
           )}
           {tab === 'appSettings' && (

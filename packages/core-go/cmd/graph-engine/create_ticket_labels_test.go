@@ -228,7 +228,7 @@ func TestCmdGetTicketAndListTickets_IncludeLabels(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := cmdGetTicket(repo, []string{a1.ID}); err != nil {
+		if err := cmdGetTicket(engine.New(repo), []string{a1.ID}); err != nil {
 			t.Fatalf("cmdGetTicket: %v", err)
 		}
 	})
@@ -250,7 +250,7 @@ func TestCmdGetTicketAndListTickets_IncludeLabels(t *testing.T) {
 	}
 
 	out = captureStdout(t, func() {
-		if err := cmdGetTicket(repo, []string{a2.ID}); err != nil {
+		if err := cmdGetTicket(engine.New(repo), []string{a2.ID}); err != nil {
 			t.Fatalf("cmdGetTicket: %v", err)
 		}
 	})
@@ -269,7 +269,7 @@ func TestCmdGetTicketAndListTickets_IncludeLabels(t *testing.T) {
 		}
 	}
 	out = captureStdout(t, func() {
-		if err := cmdGetTicket(repo, []string{a1.ID}); err != nil {
+		if err := cmdGetTicket(engine.New(repo), []string{a1.ID}); err != nil {
 			t.Fatalf("cmdGetTicket: %v", err)
 		}
 	})

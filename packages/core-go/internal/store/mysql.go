@@ -88,10 +88,13 @@ var mysqlSchemaStatements = []string{
 	assignee_name VARCHAR(191),
 	graph_expanded_at VARCHAR(64),
 	priority VARCHAR(16),
+	parent_ticket_id VARCHAR(191),
 	created_at VARCHAR(64) NOT NULL,
 	updated_at VARCHAR(64) NOT NULL,
 	KEY idx_tickets_project (project_id),
-	CONSTRAINT fk_tickets_project FOREIGN KEY (project_id) REFERENCES projects(id)
+	KEY idx_tickets_parent (parent_ticket_id),
+	CONSTRAINT fk_tickets_project FOREIGN KEY (project_id) REFERENCES projects(id),
+	CONSTRAINT fk_tickets_parent FOREIGN KEY (parent_ticket_id) REFERENCES tickets(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
 
 	`CREATE TABLE IF NOT EXISTS nodes (
@@ -501,8 +504,82 @@ func (r *MySQLRepository) Init() error {
 	}); err != nil {
 		return err
 	}
+	if err := r.addTicketParentColumn(); err != nil {
+		return err
+	}
 	// DFLT-00083 migration: tickets whose priority is NULL become MEDIUM.
 	return backfillNullTicketPriority(r.db)
+}
+
+// addTicketParentColumn is the DFLT-00142 migration for a DB created before
+// tickets.parent_ticket_id existed: the column, idx_tickets_parent and
+// fk_tickets_parent (ON DELETE SET NULL) are each added only when
+// INFORMATION_SCHEMA says they are missing, so Init stays idempotent. Each
+// ALTER that loses a race with another member's concurrent Init is not an
+// error as long as the object exists afterwards.
+func (r *MySQLRepository) addTicketParentColumn() error {
+	if err := ensureTicketParentColumn("mysql", func() (bool, error) {
+		return r.mysqlColumnExists("tickets", "parent_ticket_id")
+	}, func() error {
+		_, err := r.db.Exec(`ALTER TABLE tickets ADD COLUMN parent_ticket_id VARCHAR(191) NULL AFTER priority`)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := ensureMySQLSchemaObject("index idx_tickets_parent", func() (bool, error) {
+		return r.mysqlIndexExists("tickets", "idx_tickets_parent")
+	}, `ALTER TABLE tickets ADD KEY idx_tickets_parent (parent_ticket_id)`, r.db); err != nil {
+		return err
+	}
+	return ensureMySQLSchemaObject("foreign key fk_tickets_parent", func() (bool, error) {
+		return r.mysqlForeignKeyExists("tickets", "fk_tickets_parent")
+	}, `ALTER TABLE tickets ADD CONSTRAINT fk_tickets_parent FOREIGN KEY (parent_ticket_id) REFERENCES tickets(id) ON DELETE SET NULL`, r.db)
+}
+
+// ensureMySQLSchemaObject runs ddl unless exists reports the object is
+// already there; a failed ddl is forgiven when the object exists afterwards
+// (a concurrent Init created it).
+func ensureMySQLSchemaObject(what string, exists func() (bool, error), ddl string, db *sql.DB) error {
+	has, err := exists()
+	if err != nil {
+		return fmt.Errorf("inspecting %s: %w", what, err)
+	}
+	if has {
+		return nil
+	}
+	if _, ddlErr := db.Exec(ddl); ddlErr != nil {
+		nowHas, checkErr := exists()
+		if checkErr != nil || !nowHas {
+			return fmt.Errorf("adding %s: %w", what, ddlErr)
+		}
+	}
+	return nil
+}
+
+// mysqlIndexExists checks INFORMATION_SCHEMA.STATISTICS for an index of the
+// current database's table.
+func (r *MySQLRepository) mysqlIndexExists(table, index string) (bool, error) {
+	var count int
+	if err := r.db.QueryRow(
+		`SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`,
+		table, index,
+	).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// mysqlForeignKeyExists checks INFORMATION_SCHEMA.TABLE_CONSTRAINTS for a
+// FOREIGN KEY constraint of the current database's table.
+func (r *MySQLRepository) mysqlForeignKeyExists(table, constraint string) (bool, error) {
+	var count int
+	if err := r.db.QueryRow(
+		`SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ? AND CONSTRAINT_TYPE = 'FOREIGN KEY'`,
+		table, constraint,
+	).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 // mysqlColumnExists checks INFORMATION_SCHEMA.COLUMNS for the current
@@ -551,10 +628,10 @@ func (r *MySQLRepository) CreateTicket(projectID string, t domain.Ticket) (domai
 	id := fmt.Sprintf("%s-%05d", prefix, seq)
 
 	_, err = tx.Exec(
-		`INSERT INTO tickets (id, project_id, title, description, status, auto_executable, blocked, node_seq, assignee_name, priority, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+		`INSERT INTO tickets (id, project_id, title, description, status, auto_executable, blocked, node_seq, assignee_name, priority, parent_ticket_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
 		id, projectID, t.Title, t.Description, t.Status,
-		boolToInt(t.AutoExecutable), boolToInt(t.Blocked), nullableString(t.Assignee), ticketPriorityOrDefault(t.Priority), now, now,
+		boolToInt(t.AutoExecutable), boolToInt(t.Blocked), nullableString(t.Assignee), ticketPriorityOrDefault(t.Priority), nullableString(t.ParentTicketID), now, now,
 	)
 	if err != nil {
 		return domain.Ticket{}, fmt.Errorf("inserting ticket: %w", err)
@@ -610,6 +687,11 @@ func (r *MySQLRepository) ListTicketsByProject(projectID string) ([]domain.Ticke
 	return listTicketsWithLabels(r.db,
 		`SELECT `+ticketSelectCols+` FROM tickets WHERE project_id = ? ORDER BY created_at DESC`, []any{projectID},
 		`JOIN tickets t ON t.id = tl.ticket_id WHERE t.project_id = ?`, []any{projectID})
+}
+
+// ListChildTickets: see TicketChildLister.
+func (r *MySQLRepository) ListChildTickets(parentID string) ([]domain.Ticket, error) {
+	return listChildTickets(r.db, parentID)
 }
 
 // UpdateTicket: see updateTicket (labels.go).

@@ -90,6 +90,11 @@ type ticketProp struct {
 	LabelIDs        []string `json:"label_ids"`
 	CreatedAt       string   `json:"created_at"`
 	UpdatedAt       string   `json:"updated_at"`
+	// ParentTicketID (protocol 1.1) is the parent ticket's issue key. It lives
+	// here rather than in Jira's native "parent" field: tickets are standard
+	// issues whose node sub-tasks already use Jira's parent link, and a
+	// standard issue's parent can only be an Epic in team-managed projects.
+	ParentTicketID *string `json:"parent_ticket_id,omitempty"`
 }
 
 type projectProp struct {
@@ -844,6 +849,7 @@ func ticketFrom(issueKey string, tp ticketProp, labels map[string]Label) Ticket 
 		CreatedAt: tp.CreatedAt, UpdatedAt: tp.UpdatedAt,
 		RefinedAt: tp.RefinedAt, ClosedReason: tp.ClosedReason, Assignee: tp.Assignee,
 		GraphExpandedAt: tp.GraphExpandedAt, Priority: tp.Priority, Labels: []Label{},
+		ParentTicketID: tp.ParentTicketID,
 	}
 	if t.Priority == "" {
 		t.Priority = "MEDIUM"
@@ -899,11 +905,16 @@ func (s *Store) CreateTicket(ctx context.Context, projectID string, in Ticket) (
 	if err != nil {
 		return Ticket{}, err
 	}
+	parentID, err := s.validateParentTicket(ctx, reg.Key, in.ParentTicketID)
+	if err != nil {
+		return Ticket{}, err
+	}
 	now := s.now()
 	tp := ticketProp{
 		Title: in.Title, Description: in.Description, Status: in.Status,
 		AutoExecutable: in.AutoExecutable, Blocked: in.Blocked, Assignee: in.Assignee,
 		Priority: in.Priority, LabelIDs: labelIDs, CreatedAt: now, UpdatedAt: now,
+		ParentTicketID: parentID,
 	}
 	if tp.Priority == "" {
 		tp.Priority = "MEDIUM"
@@ -927,6 +938,31 @@ func (s *Store) CreateTicket(ctx context.Context, projectID string, in Ticket) (
 		return Ticket{}, jiraFailure(err)
 	}
 	return ticketFrom(key, tp, labels), nil
+}
+
+// validateParentTicket checks a createTicket's parent_ticket_id (protocol
+// 1.1): nil or "" means no parent; otherwise it must be a GraphOps-managed
+// ticket issue of the same Jira project, or the call is VALIDATION_ERROR (an
+// ordinary Jira issue, a node sub-task or a metadata issue is never a
+// parent). graph-engine checks existence and project too; this is the
+// plugin's own guard for any other client.
+func (s *Store) validateParentTicket(ctx context.Context, projectKey string, parentID *string) (*string, error) {
+	if parentID == nil || *parentID == "" {
+		return nil, nil
+	}
+	issue, _, err := s.readTicket(ctx, *parentID)
+	if err != nil {
+		var apiErr *apiError
+		if errors.As(err, &apiErr) && apiErr.Code == "TICKET_NOT_FOUND" {
+			return nil, validationError("parent %s is not a GraphOps ticket", *parentID)
+		}
+		return nil, err
+	}
+	if projectKeyOfIssue(issue.Key) != projectKey {
+		return nil, validationError("parent %s is in another project than %s", issue.Key, projectKey)
+	}
+	key := issue.Key
+	return &key, nil
 }
 
 func (s *Store) GetTicket(ctx context.Context, id string) (Ticket, error) {

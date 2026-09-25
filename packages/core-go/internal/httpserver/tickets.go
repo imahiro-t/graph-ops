@@ -239,6 +239,11 @@ func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		Description string  `json:"description"`
 		ProjectID   string  `json:"project_id"`
 		Priority    *string `json:"priority"`
+		// ParentTicketID (DFLT-00142): omitted, null or "" -> no parent.
+		// With no project_id the ticket goes to the parent's project, like
+		// create-ticket --parent; an explicit project_id other than the
+		// parent's is 400 VALIDATION_ERROR (checked by the engine).
+		ParentTicketID *string `json:"parent_ticket_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -259,7 +264,24 @@ func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		priority = &parsed
 	}
 
+	var parentID *string
+	if body.ParentTicketID != nil && *body.ParentTicketID != "" {
+		parentID = body.ParentTicketID
+	}
+
 	projectID := body.ProjectID
+	if projectID == "" && parentID != nil {
+		parent, err := s.repo.GetTicket(*parentID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if parent == nil {
+			writeError(w, http.StatusNotFound, domain.NewAPIError(domain.ErrCodeTicketNotFound, "parent ticket %s not found", *parentID))
+			return
+		}
+		projectID = parent.ProjectID
+	}
 	if projectID == "" {
 		var err error
 		projectID, err = s.currentProjectID()
@@ -283,7 +305,8 @@ func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ticket, err := s.engine.CreateTicketWithPriority(projectID, body.Title, body.Description, priority)
+	ticket, err := s.engine.CreateTicketWithOptions(projectID, body.Title, body.Description,
+		engine.CreateTicketOptions{Priority: priority, ParentTicketID: parentID})
 	if err != nil {
 		writeError(w, statusForError(err, http.StatusInternalServerError), err)
 		return
@@ -291,9 +314,11 @@ func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, ticket)
 }
 
+// handleGetTicket returns the ticket's detail plus "parent" and "children"
+// (DFLT-00142, engine.GetTicketDetailWithFamily).
 func (s *Server) handleGetTicket(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	detail, err := s.repo.GetTicketDetail(id)
+	detail, err := s.engine.GetTicketDetailWithFamily(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

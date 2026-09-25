@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/graph-ops/core-go/internal/domain"
+	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/store"
 	"github.com/graph-ops/core-go/internal/store/httpdatasourcetest"
 )
@@ -267,7 +268,7 @@ func TestCmdDeleteTicket_DeletesTicketAndEverythingItOwns(t *testing.T) {
 			t.Errorf("GetTicketDetail(T1) = %v, %v; want nil, nil", detail, err)
 		}
 		var getErr error
-		captureStdout(t, func() { getErr = cmdGetTicket(repo, []string{f.t1.ID}) })
+		captureStdout(t, func() { getErr = cmdGetTicket(engine.New(repo), []string{f.t1.ID}) })
 		if getErr == nil || !strings.Contains(getErr.Error(), "not found") {
 			t.Errorf("get-ticket after delete = %v, want a not-found error", getErr)
 		}

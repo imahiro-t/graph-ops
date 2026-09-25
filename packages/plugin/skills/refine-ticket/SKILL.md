@@ -5,7 +5,7 @@ description: Nails down a ticket's completion criteria and Why (background/purpo
 
 # refine-ticket Skill
 
-Nails down a ticket's "completion criteria" and "Why (background/purpose)", then rewrites the ticket's description around them. **This skill never creates an execution graph (nodes)** -- graph construction happens automatically on the `process-ticket` side.
+Nails down a ticket's "completion criteria" and "Why (background/purpose)", then rewrites the ticket's description around them. **This skill never creates an execution graph (nodes)** -- graph construction happens automatically on the `process-ticket` side. When this skill is followed by an autopilot child session (the `autopilot-worker` skill), that skill's override rules take precedence: it adopts its own recommendation without asking the user and never creates labels.
 
 ## 0. Check for user/team customization of this skill
 
