@@ -1,11 +1,15 @@
 package runtimeconfig
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
 )
 
 // WorkDirConfigFileName is the name of the graph-config.json that used to be
@@ -220,6 +224,25 @@ func LoadHomeConfig(home string) (FileConfig, error) {
 // no-op: there is no file to write, and a save that quietly went nowhere is
 // exactly what the caller must not report as success (completion criterion
 // 10).
+//
+// Top-level keys FileConfig does not know are kept, value bytes unchanged
+// (DFLT-00145). The same file is written by every graph-engine on the machine
+// -- a UI server still running from before an upgrade, a CLI from another
+// plugin version -- and before this, whichever of them saved last silently
+// dropped every setting its version did not have: a v0.9.0 UI server
+// switching projects erased the v0.10.0 autopilotSettings. fn still only ever
+// sees FileConfig; the keys it cannot see are carried over from the file as it
+// was read (see saveTo), in every save path, without any caller having to know
+// they exist.
+//
+// Only the TOP level is preserved this way. A known key's value is rebuilt
+// from FileConfig, so an unknown sub-key inside it survives only because the
+// field's Go type keeps it -- which is why a new setting must be a new
+// top-level key or live inside a key whose type keeps unknown sub-keys (such
+// as map[string]any), and why FileConfig must never gain a field holding a
+// struct or a type with its own JSON/text conversion.
+// TestFileConfigFieldsKeepUnknownSubkeys fails if it does; see the rule
+// written above FileConfig.
 func UpdateHome(home string, fn func(cfg *FileConfig) error) (FileConfig, string, error) {
 	path := HomeConfigPath(home)
 	if path == "" {
@@ -229,7 +252,7 @@ func UpdateHome(home string, fn func(cfg *FileConfig) error) (FileConfig, string
 	fileMu.Lock()
 	defer fileMu.Unlock()
 
-	cfg, err := loadFrom(path)
+	cfg, doc, err := loadDocFrom(path)
 	if err != nil {
 		// A HomeConfigReadError, not a bare one: a home config that cannot
 		// be parsed makes every save fail, for as long as the file stays
@@ -240,7 +263,7 @@ func UpdateHome(home string, fn func(cfg *FileConfig) error) (FileConfig, string
 	if err := fn(&cfg); err != nil {
 		return cfg, path, err
 	}
-	if err := saveTo(path, cfg); err != nil {
+	if err := saveTo(path, cfg, doc); err != nil {
 		return cfg, path, err
 	}
 	return cfg, path, nil
@@ -251,18 +274,83 @@ func UpdateHome(home string, fn func(cfg *FileConfig) error) (FileConfig, string
 // returned FileConfig is then always the zero value rather than a partial
 // decode (DFLT-00023 C-5).
 func loadFrom(path string) (FileConfig, error) {
+	cfg, _, err := loadDocFrom(path)
+	return cfg, err
+}
+
+// loadDocFrom is loadFrom plus the file's top-level object exactly as read:
+// every key, known or not, mapped to its value's raw bytes. UpdateHome hands
+// that object back to saveTo so the keys FileConfig does not know can be
+// written out again untouched (DFLT-00145). The map is nil when the file does
+// not exist or holds a bare null; on an error both results are zero values.
+func loadDocFrom(path string) (FileConfig, map[string]json.RawMessage, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return FileConfig{}, nil
+			return FileConfig{}, nil, nil
 		}
-		return FileConfig{}, err
+		return FileConfig{}, nil, err
 	}
 	var cfg FileConfig
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return FileConfig{}, err
+		return FileConfig{}, nil, err
 	}
-	return cfg, nil
+	// Decoding into FileConfig having succeeded, raw is a JSON object or
+	// null, so this cannot fail in practice; it is checked rather than
+	// assumed.
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return FileConfig{}, nil, err
+	}
+	return cfg, doc, nil
+}
+
+// fileConfigKeys is every top-level key FileConfig reads and writes, in field
+// order. It is derived from the struct rather than listed by hand, so a new
+// field becomes a known key -- and stops being carried over as an unknown
+// one -- the moment it is added.
+var fileConfigKeys = jsonKeyNames(reflect.TypeOf(FileConfig{}))
+
+// jsonKeyNames returns the JSON object keys encoding/json uses for the fields
+// of struct type t, in field order, by the same rules: unexported fields and
+// `json:"-"` are skipped, `json:"-,"` is the key "-", and an empty tag name
+// (no tag, or options only such as `json:",omitempty"`) means the field's own
+// name. Embedded fields are not expanded; FileConfig must not have any, which
+// TestFileConfigFieldsKeepUnknownSubkeys enforces.
+func jsonKeyNames(t reflect.Type) []string {
+	var keys []string
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if !f.IsExported() || f.Anonymous {
+			continue
+		}
+		tag := f.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if name == "" {
+			name = f.Name
+		}
+		keys = append(keys, name)
+	}
+	return keys
+}
+
+// isFileConfigKey reports whether key is one of FileConfig's keys, ignoring
+// case the way encoding/json does when it decodes. A key such as "DBBackend"
+// has already been read INTO the DBBackend field, so it is not unknown: kept
+// next to the correctly spelled key saveTo writes, it would be decoded again
+// on the next load and could overwrite the newer value. (A future version
+// that named a new key like an existing one but for case would lose it here;
+// do not name keys that way.)
+func isFileConfigKey(key string) bool {
+	for _, k := range fileConfigKeys {
+		if strings.EqualFold(k, key) {
+			return true
+		}
+	}
+	return false
 }
 
 // saveTo writes cfg to one specific config file, creating its parent
@@ -271,13 +359,64 @@ func loadFrom(path string) (FileConfig, error) {
 // user-only, and the file itself is 0o600 (writeFileAtomic) because it can
 // hold a MySQL password. Whichever of the three runs first in a fresh
 // environment sets the mode, so they are kept in step.
-func saveTo(path string, cfg FileConfig) error {
+//
+// doc is the file's top-level object as it was read (loadDocFrom). Its keys
+// that FileConfig does not know are written after cfg's own keys, sorted by
+// name, with their values' bytes copied as they are -- never decoded and
+// re-encoded, so a big integer, a 1.0, or a "<" spelled either raw or as
+// \u003c comes back exactly as written (DFLT-00145). The known keys are cfg's
+// json.Marshal output, unchanged. The whole object is then indented by
+// json.Indent, which only rewrites whitespace; with no unknown keys the result
+// is byte-for-byte what json.MarshalIndent(cfg, "", "  ") wrote before, since
+// MarshalIndent is Marshal followed by that same indentation.
+func saveTo(path string, cfg FileConfig, doc map[string]json.RawMessage) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	raw, err := json.MarshalIndent(cfg, "", "  ")
+	raw, err := marshalWithUnknownKeys(cfg, doc)
 	if err != nil {
 		return err
 	}
 	return writeFileAtomic(path, raw)
+}
+
+// marshalWithUnknownKeys builds the bytes saveTo writes; see saveTo.
+func marshalWithUnknownKeys(cfg FileConfig, doc map[string]json.RawMessage) ([]byte, error) {
+	known, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+	var unknown []string
+	for k := range doc {
+		if !isFileConfigKey(k) {
+			unknown = append(unknown, k)
+		}
+	}
+	sort.Strings(unknown)
+
+	// known is one JSON object, "{...}": reopen it, append the unknown
+	// members, and close it again.
+	var buf bytes.Buffer
+	buf.Write(known[:len(known)-1])
+	first := len(known) == len("{}")
+	for _, k := range unknown {
+		if !first {
+			buf.WriteByte(',')
+		}
+		first = false
+		name, err := json.Marshal(k)
+		if err != nil {
+			return nil, err
+		}
+		buf.Write(name)
+		buf.WriteByte(':')
+		buf.Write(doc[k])
+	}
+	buf.WriteByte('}')
+
+	var out bytes.Buffer
+	if err := json.Indent(&out, buf.Bytes(), "", "  "); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }

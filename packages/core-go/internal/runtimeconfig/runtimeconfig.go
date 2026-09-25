@@ -37,6 +37,19 @@ import (
 // thing in the precedence chain" -- an env var, then a hardcoded default --
 // see cmd/graph-engine/runtime_config.go's loadRuntimeConfig, which is the
 // only place that actually applies that chain.
+//
+// Rule for adding a setting (DFLT-00145): make it a new top-level key, or put
+// it inside a key whose type keeps sub-keys it does not know (such as
+// map[string]any). Never add a field whose value is a struct -- directly or
+// as the element of a pointer, map, slice or array -- or a type with its own
+// JSON/text conversion, and never an embedded or untagged field. The reason
+// is that this file is also saved by other versions of graph-engine (an older
+// UI server still running after an upgrade, a CLI from another plugin
+// version): UpdateHome carries over every top-level key this version does not
+// know, but it rebuilds each known key's value from this struct, so anything
+// inside that value the Go type cannot hold would be erased on every save.
+// TestFileConfigFieldsKeepUnknownSubkeys fails on a field that breaks this
+// rule.
 type FileConfig struct {
 	// DBBackend selects which store.GraphRepository implementation is used:
 	// "" or "sqlite" (the default, for backward compatibility), "mysql", or
