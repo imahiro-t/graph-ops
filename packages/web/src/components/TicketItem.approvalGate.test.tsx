@@ -130,6 +130,39 @@ describe('TicketItem approval gate on a CLOSED ticket', () => {
     expect(approveButton()).toBeNull();
     expect(rejectButton()).toBeNull();
   });
+
+  it('does not bring the reject prompt (or its draft) back when the ticket is reopened', () => {
+    const { rerender } = renderTicket('IN REVIEW');
+    fireEvent.click(rejectButton() as HTMLElement);
+    const reasonInput = screen.getByPlaceholderText(i18n.t('ticketItem.approvalGate.reasonPlaceholder'));
+    fireEvent.change(reasonInput, { target: { value: '途中まで書いた理由' } });
+
+    const renderWith = (status: TicketStatus) =>
+      rerender(
+        <TicketItem
+          ticket={makeTicket(status)}
+          isExpanded
+          onToggleExpand={vi.fn()}
+          onRefresh={vi.fn()}
+          myName=""
+          projectLabels={[]}
+        />
+      );
+    renderWith('CLOSED');
+    renderWith('IN REVIEW');
+
+    // The gate is pending again, so it offers approve/reject afresh -- the
+    // autoFocus reason input must not remount on its own and steal focus.
+    expect(screen.queryByPlaceholderText(i18n.t('ticketItem.approvalGate.reasonPlaceholder'))).toBeNull();
+    expect(screen.queryByDisplayValue('途中まで書いた理由')).toBeNull();
+    expect(confirmRejectButton()).toBeNull();
+    expect(approveButton()).not.toBeNull();
+    expect(rejectButton()).not.toBeNull();
+
+    // Opening the prompt again starts from an empty draft.
+    fireEvent.click(rejectButton() as HTMLElement);
+    expect(screen.getByPlaceholderText(i18n.t('ticketItem.approvalGate.reasonPlaceholder'))).toHaveProperty('value', '');
+  });
 });
 
 describe.each<TicketStatus>(['IN REVIEW', 'DONE'])('TicketItem approval gate on a %s ticket', status => {

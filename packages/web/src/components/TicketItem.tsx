@@ -605,6 +605,19 @@ export const TicketItem: React.FC<Props> = ({
           .filter(n => n.type === 'approval_gate' && n.status === 'TODO' && isNodeReached(n.id))
           .map(n => n.id)
   );
+  // DFLT-00157: once the gate an open reject prompt belongs to stops being
+  // pending (the ticket turned CLOSED, or the gate was judged elsewhere),
+  // actually close the prompt and drop its draft rather than just hiding it.
+  // Otherwise reopening the ticket (or the gate going back to TODO) would
+  // remount the autoFocus reason input with the stale draft and pull focus
+  // away from whatever the user was doing.
+  const rejectingGateNoLongerPending = rejectingNodeId !== null && !pendingApprovalNodeIds.has(rejectingNodeId);
+  useEffect(() => {
+    if (rejectingGateNoLongerPending) {
+      setRejectingNodeId(null);
+      setRejectReasonDraft('');
+    }
+  }, [rejectingGateNoLongerPending]);
   // DFLT-00016: a REJECTED approval_gate is a materially different state
   // from a never-judged one -- it's not waiting on a human clicking
   // approve/reject here, it's waiting on process-ticket's triage (deciding
