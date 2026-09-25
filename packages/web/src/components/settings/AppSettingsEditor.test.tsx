@@ -472,6 +472,14 @@ describe('AppSettingsEditor team settings directory', () => {
     const hint = i18n.t('settings.appSettings.teamExtensionsDir.notAbsolute');
     expect(input).toHaveAttribute('aria-invalid', 'true');
     expect(input).toHaveAccessibleDescription(expect.stringContaining(hint));
+    // The inline warning is a polite status message, so a screen reader
+    // announces it as it appears while typing (WCAG 2.2 SC 4.1.3).
+    const inlineWarning = screen
+      .getAllByRole('status')
+      .find((el) => el.id.endsWith('-team-extensions-dir-invalid'));
+    expect(inlineWarning).toBeDefined();
+    expect(inlineWarning).toHaveTextContent(hint);
+    expect(inlineWarning).toHaveAttribute('aria-live', 'polite');
     const saveButton = screen.getByRole('button', { name: i18n.t('settings.common.save') });
     expect(saveButton).toHaveAttribute('aria-disabled', 'true');
     expect(document.getElementById('save-blocked-reason')).toHaveTextContent(hint);

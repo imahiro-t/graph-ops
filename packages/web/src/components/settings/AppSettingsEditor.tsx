@@ -873,7 +873,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
           className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
         />
         {teamDirInvalid && (
-          <p id={`${fieldId}-team-extensions-dir-invalid`} className="text-[10px] text-red-600 dark:text-red-400 mt-0.5">
+          <p id={`${fieldId}-team-extensions-dir-invalid`} role="status" aria-live="polite" className="text-[10px] text-red-600 dark:text-red-400 mt-0.5">
             {t('settings.appSettings.teamExtensionsDir.notAbsolute')}
           </p>
         )}
