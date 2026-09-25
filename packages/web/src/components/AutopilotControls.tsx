@@ -5,6 +5,7 @@ import { AutopilotMode, TicketStatus } from '../types';
 import { startAutopilot, TicketAutopilotView } from '../lib/autopilotApi';
 import { errorMessage } from '../lib/apiError';
 import { StatusLiveRegion } from './StatusLiveRegion';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface Props {
   ticketId: string;
@@ -12,8 +13,10 @@ interface Props {
   view: TicketAutopilotView;
   // Called once a start request settles (success or failure), so the caller
   // can refresh the runs (and the badges) right away rather than at the
-  // next poll.
-  onSettled?: () => void;
+  // next poll. A returned promise is awaited before the buttons leave their
+  // "starting" state, so they come back with the refreshed view (and focus
+  // goes back to a button only if that view still leaves it enabled).
+  onSettled?: () => void | Promise<void>;
 }
 
 // How long the result of a start stays on screen.
@@ -26,6 +29,29 @@ const MODES: AutopilotMode[] = ['ticket', 'tree'];
 // /api/tickets/{id}/autopilot, which reserves the run and opens the
 // orchestrator's terminal.
 //
+// The confirmation is an in-app ConfirmDialog, not window.confirm
+// (DFLT-00147), so browser automation and tests can drive it:
+//
+// - Its title and text are fixed when it opens (resume or fresh start, from
+//   the view at that moment); a poll changing `resumable` while it is open
+//   does not swap the text under the reader. The server decides whether the
+//   run is actually resumed, and the result message follows its answer.
+// - If a poll shows the start would now be refused (the button gets a
+//   disabled reason), the dialog closes by itself without starting; the
+//   reason appears next to the buttons as usual. A start confirmed before the
+//   poll caught up still gets the server's 409, shown translated.
+// - The buttons stay enabled while the dialog is open (its overlay and Tab
+//   wrap keep them out of reach; handleClick ignores a click anyway). A
+//   button disabled while the dialog is open would, under React.StrictMode
+//   in development, make useModalDialog remember the fallback instead of the
+//   button (see its notes).
+// - Focus: cancelling returns it to the clicked button. Confirming disables
+//   the buttons while the request runs, so it goes to this component's root
+//   (tabIndex={-1}) instead of falling to <body>, and back to the clicked
+//   button once the request settles -- only if focus is still on the root
+//   and the button is enabled in the refreshed view (a successful start
+//   usually disables it: the new run owns the ticket).
+//
 // A button is disabled -- with the reason shown as text next to the buttons
 // and tied to it with aria-describedby, and as its tooltip -- when the start
 // would be refused anyway: an active run owns the ticket (or, for a tree
@@ -37,8 +63,14 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
   const { t } = useTranslation();
   const [starting, setStarting] = useState<AutopilotMode | null>(null);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+  const [pending, setPending] = useState<{ mode: AutopilotMode; title: string; message: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reasonIdBase = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRefs = useRef<Partial<Record<AutopilotMode, HTMLButtonElement | null>>>({});
+  // The mode whose start is in flight, to put focus back on its button once
+  // `starting` returns to null.
+  const lastStarted = useRef<AutopilotMode | null>(null);
 
   useEffect(
     () => () => {
@@ -62,6 +94,26 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
   // One line per distinct reason (the two buttons usually share it).
   const distinctReasons = reasons.filter((r, i) => r && reasons.indexOf(r) === i);
 
+  // Close the dialog, without starting, once the view says the start would
+  // be refused. Checked only while it is open, so the confirm path (which
+  // sets pending to null itself) never runs into it.
+  const pendingReason = pending ? reasonFor(pending.mode) : '';
+  useEffect(() => {
+    if (pending && pendingReason) setPending(null);
+  }, [pending, pendingReason]);
+
+  // Once a start settles: back to the clicked button, if focus is still where
+  // the dialog left it (the root) and the button is enabled. Otherwise focus
+  // stays where it is -- never taken from wherever the user moved it.
+  useEffect(() => {
+    if (starting !== null) return;
+    const mode = lastStarted.current;
+    if (mode === null) return;
+    lastStarted.current = null;
+    const button = buttonRefs.current[mode];
+    if (button && !button.disabled && document.activeElement === rootRef.current) button.focus();
+  }, [starting]);
+
   const show = (text: string, error: boolean) => {
     if (timer.current !== null) clearTimeout(timer.current);
     setMessage({ text, error });
@@ -71,11 +123,21 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
     }, MESSAGE_CLEAR_MS);
   };
 
-  const handleStart = async (mode: AutopilotMode) => {
-    const confirmText = view.resumable[mode]
-      ? t('autopilot.confirm.resume', { id: ticketId, mode: t(`autopilot.modes.${mode}`) })
-      : t(`autopilot.confirm.${mode}`, { id: ticketId });
-    if (!window.confirm(confirmText)) return;
+  // Opens the confirmation, with its text fixed from the view as it is now.
+  const handleClick = (mode: AutopilotMode) => {
+    if (pending !== null || starting !== null) return;
+    const resume = view.resumable[mode];
+    setPending({
+      mode,
+      title: t(resume ? 'autopilot.confirm.resumeTitle' : 'autopilot.confirm.title'),
+      message: resume
+        ? t('autopilot.confirm.resume', { id: ticketId, mode: t(`autopilot.modes.${mode}`) })
+        : t(`autopilot.confirm.${mode}`, { id: ticketId })
+    });
+  };
+
+  const runStart = async (mode: AutopilotMode) => {
+    lastStarted.current = mode;
     setStarting(mode);
     try {
       const res = await startAutopilot(t, ticketId, mode);
@@ -83,13 +145,35 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
     } catch (e) {
       show(t('autopilot.failed', { message: errorMessage(e, t('errors.UNKNOWN')) }), true);
     } finally {
+      try {
+        await onSettled?.();
+      } catch (e) {
+        // The next poll refreshes the runs anyway.
+        console.error('Failed to refresh after an autopilot start', e);
+      }
       setStarting(null);
-      onSettled?.();
     }
   };
 
+  const handleConfirm = () => {
+    if (!pending) return;
+    const { mode } = pending;
+    // Closed in the same render that disables the buttons: the dialog's
+    // focus return then finds the button disabled and uses rootRef.
+    setPending(null);
+    void runStart(mode);
+  };
+
   return (
-    <div className="flex flex-col gap-1.5" data-testid="autopilot-controls">
+    // tabIndex={-1}: the focus fallback while a confirmed start runs (see
+    // above). Not a Tab stop; the ring shows when it gets focus that way
+    // after keyboard use.
+    <div
+      ref={rootRef}
+      tabIndex={-1}
+      data-testid="autopilot-controls"
+      className="flex flex-col gap-1.5 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
+    >
       <div className="flex flex-wrap items-center gap-2">
         {MODES.map((mode, i) => {
           const reason = reasons[i];
@@ -97,9 +181,12 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
           return (
             <button
               key={mode}
+              ref={el => {
+                buttonRefs.current[mode] = el;
+              }}
               type="button"
               data-testid={`autopilot-start-${mode}`}
-              onClick={() => handleStart(mode)}
+              onClick={() => handleClick(mode)}
               disabled={starting !== null || reason !== ''}
               title={reason || undefined}
               aria-describedby={reasonId}
@@ -147,6 +234,18 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
         >
           {message.text}
         </div>
+      )}
+      {pending && (
+        <ConfirmDialog
+          title={pending.title}
+          message={pending.message}
+          confirmLabel={t('autopilot.confirm.start')}
+          cancelLabel={t('autopilot.confirm.cancel')}
+          onConfirm={handleConfirm}
+          onCancel={() => setPending(null)}
+          returnFocusFallbackRef={rootRef}
+          testIdPrefix="autopilot-confirm"
+        />
       )}
     </div>
   );

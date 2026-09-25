@@ -364,6 +364,64 @@ describe('useModalDialog', () => {
     expect(btn('fallback')).toHaveFocus();
   });
 
+  // DFLT-00147: the autopilot's confirm dialog closes in the same render that
+  // disables the start button that opened it.
+  it('returns focus to the fallback when the opener was disabled as the dialog closed', () => {
+    const Harness: React.FC<{ open: boolean; openerDisabled: boolean }> = ({ open, openerDisabled }) => {
+      const fallbackRef = useRef<HTMLDivElement>(null);
+      return (
+        <div ref={fallbackRef} tabIndex={-1} data-testid="fallback">
+          <button type="button" disabled={openerDisabled}>
+            opener
+          </button>
+          {open && <Dialog onEscape={vi.fn()} fallbackRef={fallbackRef} />}
+        </div>
+      );
+    };
+    const { rerender } = render(<Harness open={false} openerDisabled={false} />);
+    btn('opener').focus();
+
+    rerender(<Harness open openerDisabled={false} />);
+    expect(btn('first')).toHaveFocus();
+
+    rerender(<Harness open={false} openerDisabled />);
+    expect(screen.getByTestId('fallback')).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+  });
+
+  it('still returns focus to the opener, not the fallback, when the opener can take it', () => {
+    const Harness: React.FC<{ open: boolean }> = ({ open }) => {
+      const fallbackRef = useRef<HTMLDivElement>(null);
+      return (
+        <div ref={fallbackRef} tabIndex={-1} data-testid="fallback">
+          <button type="button">opener</button>
+          {open && <Dialog onEscape={vi.fn()} fallbackRef={fallbackRef} />}
+        </div>
+      );
+    };
+    const { rerender } = render(<Harness open={false} />);
+    btn('opener').focus();
+
+    rerender(<Harness open />);
+    rerender(<Harness open={false} />);
+    expect(btn('opener')).toHaveFocus();
+  });
+
+  it('leaves focus alone without a fallback when the opener was disabled as the dialog closed', () => {
+    const Harness: React.FC<{ open: boolean; openerDisabled: boolean }> = ({ open, openerDisabled }) => (
+      <>
+        <button type="button" disabled={openerDisabled}>
+          opener
+        </button>
+        {open && <Dialog onEscape={vi.fn()} />}
+      </>
+    );
+    const { rerender } = render(<Harness open={false} openerDisabled={false} />);
+    btn('opener').focus();
+    rerender(<Harness open openerDisabled={false} />);
+    expect(() => rerender(<Harness open={false} openerDisabled />)).not.toThrow();
+  });
+
   it('does not throw when there is neither an opener nor a fallback', () => {
     const { unmount } = render(<Dialog onEscape={vi.fn()} />);
     expect(() => unmount()).not.toThrow();

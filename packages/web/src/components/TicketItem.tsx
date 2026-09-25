@@ -66,7 +66,7 @@ interface Props {
   // a run. Omitted means no run concerns it.
   autopilot?: TicketAutopilotView;
   // Called when an autopilot start settles, to refresh the runs at once.
-  onAutopilotChanged?: () => void;
+  onAutopilotChanged?: () => void | Promise<void>;
 }
 
 // How many label chips the collapsed header row shows before folding the

@@ -1,8 +1,9 @@
 // DFLT-00142 phase 5: starting the autopilot from a ticket, the run state
 // badges, the duplicate-start guard on the buttons, the translated server
 // errors and the "automatic decisions" section. fetch is served by
-// test/fakeBackend.ts.
-import { render, screen, waitFor, within } from '@testing-library/react';
+// test/fakeBackend.ts. DFLT-00147: the start is confirmed in the in-app
+// dialog, never with window.confirm.
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
@@ -77,6 +78,34 @@ async function expand(user: ReturnType<typeof userEvent.setup>, id: string) {
   return within(card(id)).findByTestId('autopilot-controls');
 }
 
+const dialog = () => screen.queryByTestId('autopilot-confirm');
+const confirmStart = (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByTestId('autopilot-confirm-confirm'));
+const cancelStart = (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByTestId('autopilot-confirm-cancel'));
+
+const runRequestCount = () => fetchMock.mock.calls.filter(c => String(c[0]).startsWith('/api/autopilot/runs')).length;
+
+// What the regular poll does: re-fetch the tickets, then the runs. Clicked
+// with fireEvent so focus stays inside the open dialog.
+async function poll() {
+  const runsBefore = runRequestCount();
+  fireEvent.click(screen.getByTitle(i18n.t('toolbar.refreshTitle')));
+  await waitFor(() => expect(runRequestCount()).toBeGreaterThan(runsBefore));
+}
+
+// Holds POST /api/tickets/{id}/autopilot until the returned release() is
+// called, to look at the state while the start is in flight.
+function holdStarts() {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('/autopilot') && init?.method === 'POST') await gate;
+    return backend.fetch(input, init);
+  });
+  return release;
+}
+
 const startRequests = () =>
   fetchMock.mock.calls
     .filter(c => String(c[0]).endsWith('/autopilot') && (c[1] as RequestInit | undefined)?.method === 'POST')
@@ -98,26 +127,155 @@ describe('autopilot in the Web UI', () => {
     ['tree', 'オートパイロット（ツリー）']
   ] as const)('starts a %s run from the ticket detail after confirmation', async (mode, label) => {
     seed();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const user = await renderApp();
     const controls = await expand(user, X);
 
     await user.click(within(controls).getByRole('button', { name: label }));
 
-    expect(confirm).toHaveBeenCalledWith(i18n.t(`autopilot.confirm.${mode}`, { id: X }));
+    const shown = screen.getByRole('dialog', { name: i18n.t('autopilot.confirm.title') });
+    expect(shown).toHaveAccessibleDescription(i18n.t(`autopilot.confirm.${mode}`, { id: X }));
+    expect(startRequests()).toEqual([]);
+    await confirmStart(user);
+    expect(dialog()).not.toBeInTheDocument();
     await waitFor(() => expect(startRequests()).toEqual([{ url: `/api/tickets/${X}/autopilot`, body: { mode } }]));
     expect(await within(controls).findByTestId('autopilot-message')).toHaveTextContent(
       i18n.t('autopilot.started', { runId: 'run-1' })
     );
   });
 
-  it('does not start when the confirmation is cancelled', async () => {
+  it('shows the dialog in English too', async () => {
+    await i18n.changeLanguage('en');
     seed();
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
     const user = await renderApp();
     const controls = await expand(user, X);
-    await user.click(within(controls).getByRole('button', { name: 'オートパイロット（ツリー）' }));
+    await user.click(within(controls).getByTestId('autopilot-start-ticket'));
+    expect(screen.getByRole('dialog', { name: 'Start autopilot' })).toHaveAccessibleDescription(
+      i18n.t('autopilot.confirm.ticket', { id: X })
+    );
+    expect(screen.getByTestId('autopilot-confirm-confirm')).toHaveTextContent('Start');
+    expect(screen.getByTestId('autopilot-confirm-cancel')).toHaveTextContent('Cancel');
+  });
+
+  it('never calls window.confirm', async () => {
+    seed();
+    const confirm = vi.spyOn(window, 'confirm');
+    const user = await renderApp();
+    const controls = await expand(user, X);
+    await user.click(within(controls).getByTestId('autopilot-start-tree'));
+    await confirmStart(user);
+    await waitFor(() => expect(startRequests()).toHaveLength(1));
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('does not start when the confirmation is cancelled, and returns focus to the button', async () => {
+    seed();
+    const user = await renderApp();
+    const controls = await expand(user, X);
+    const tree = within(controls).getByRole('button', { name: 'オートパイロット（ツリー）' });
+    await user.click(tree);
+    expect(screen.getByTestId('autopilot-confirm-cancel')).toHaveFocus();
+    await cancelStart(user);
+    expect(dialog()).not.toBeInTheDocument();
+    expect(tree).toHaveFocus();
     expect(startRequests()).toEqual([]);
+    expect(within(controls).queryByTestId('autopilot-message')).not.toBeInTheDocument();
+  });
+
+  it('does not start on Escape or a click on the overlay', async () => {
+    seed();
+    const user = await renderApp();
+    const controls = await expand(user, X);
+    await user.click(within(controls).getByTestId('autopilot-start-ticket'));
+    await user.keyboard('{Escape}');
+    expect(dialog()).not.toBeInTheDocument();
+    await user.click(within(controls).getByTestId('autopilot-start-ticket'));
+    await user.click(screen.getByTestId('autopilot-confirm-overlay'));
+    expect(dialog()).not.toBeInTheDocument();
+    expect(startRequests()).toEqual([]);
+    // The ticket stays expanded: the dialog's clicks do not reach its header.
+    expect(within(card(X)).getByTestId('autopilot-controls')).toBeInTheDocument();
+  });
+
+  it('keeps focus off <body> after confirming, and returns it to the button once the start settles', async () => {
+    seed();
+    const release = holdStarts();
+    const user = await renderApp();
+    const controls = await expand(user, X);
+    const tree = within(controls).getByTestId('autopilot-start-tree');
+    await user.click(tree);
+    await confirmStart(user);
+
+    await waitFor(() => expect(startRequests()).toHaveLength(1));
+    expect(tree).toBeDisabled();
+    expect(controls).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+
+    release();
+    expect(await within(controls).findByTestId('autopilot-message')).toHaveTextContent(
+      i18n.t('autopilot.started', { runId: 'run-1' })
+    );
+    await waitFor(() => expect(tree).toHaveFocus());
+  });
+
+  it('leaves focus on the controls when the refreshed runs disable the button after a start', async () => {
+    seed();
+    const release = holdStarts();
+    const user = await renderApp();
+    const controls = await expand(user, X);
+    const tree = within(controls).getByTestId('autopilot-start-tree');
+    await user.click(tree);
+    await confirmStart(user);
+    await waitFor(() => expect(startRequests()).toHaveLength(1));
+    backend.autopilotRuns = [run({ root: X, members: [X], current: undefined, tickets: {}, state: 'starting' })];
+
+    release();
+    await waitFor(() => expect(within(card(X)).getByTestId('autopilot-badge-running')).toBeInTheDocument());
+    await within(controls).findByTestId('autopilot-message');
+    expect(tree).toBeDisabled();
+    expect(controls).toHaveFocus();
+  });
+
+  it('keeps the text the dialog opened with when a poll changes whether the run would resume', async () => {
+    const list = tickets();
+    list[4].status = 'DONE';
+    seed({ tickets: list, runs: [run({ root: X, mode: 'tree', active: false, state: 'stopped', members: [], current: undefined })] });
+    const user = await renderApp();
+    const controls = await expand(user, X);
+    const tree = within(controls).getByTestId('autopilot-start-tree');
+    await waitFor(() => expect(tree).toBeEnabled());
+    await user.click(tree);
+    const resumeText = i18n.t('autopilot.confirm.resume', { id: X, mode: i18n.t('autopilot.modes.tree') });
+    expect(screen.getByRole('dialog', { name: i18n.t('autopilot.confirm.resumeTitle') })).toHaveAccessibleDescription(resumeText);
+
+    // The poll shows the ticket reopened and the stopped run gone: a start
+    // would now be a fresh one (still allowed), so only the text could change.
+    backend.tickets = backend.tickets.map(tk => (tk.id === X ? { ...tk, status: 'IN PROGRESS' } : tk));
+    backend.autopilotRuns = [];
+    await poll();
+    // The single button, disabled on the finished ticket, is enabled again
+    // once the new view has arrived.
+    await waitFor(() => expect(within(controls).getByTestId('autopilot-start-ticket')).toBeEnabled());
+
+    expect(screen.getByRole('dialog', { name: i18n.t('autopilot.confirm.resumeTitle') })).toHaveAccessibleDescription(resumeText);
+  });
+
+  it('closes the dialog without starting when a poll shows the start would be refused', async () => {
+    seed();
+    const user = await renderApp();
+    const controls = await expand(user, X);
+    const tree = within(controls).getByTestId('autopilot-start-tree');
+    await user.click(tree);
+    expect(dialog()).toBeInTheDocument();
+
+    backend.autopilotRuns = [run({ root: X, members: [X], current: undefined, tickets: {}, state: 'starting' })];
+    await poll();
+
+    await waitFor(() => expect(dialog()).not.toBeInTheDocument());
+    expect(startRequests()).toEqual([]);
+    expect(tree).toBeDisabled();
+    expect(within(controls).getByTestId('autopilot-disabled-reason')).toHaveTextContent(i18n.t('autopilot.blocked', { root: X }));
+    expect(controls).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
   });
 
   it('shows running / processing / waiting badges in the list', async () => {
@@ -182,10 +340,10 @@ describe('autopilot in the Web UI', () => {
   ] as const)('shows the server error %s %s translated', async (lang, code, status) => {
     await i18n.changeLanguage(lang);
     seed({ start: () => ({ status, body: { error: { code, message: 'backend text' } } }) });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const user = await renderApp();
     const controls = await expand(user, X);
     await user.click(within(controls).getByTestId('autopilot-start-tree'));
+    await confirmStart(user);
     const message = await within(controls).findByTestId('autopilot-message');
     expect(message).toHaveTextContent(i18n.t('autopilot.failed', { message: i18n.t(`errors.${code}`) }));
     expect(message).not.toHaveTextContent('backend text');
@@ -193,11 +351,11 @@ describe('autopilot in the Web UI', () => {
 
   it('refreshes the runs right after a start', async () => {
     seed();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const user = await renderApp();
     const controls = await expand(user, X);
     backend.autopilotRuns = [run({ root: X, members: [X], current: undefined, tickets: {}, state: 'starting' })];
     await user.click(within(controls).getByTestId('autopilot-start-tree'));
+    await confirmStart(user);
     await waitFor(() => expect(within(card(X)).getByTestId('autopilot-badge-running')).toBeInTheDocument());
     expect(within(controls).getByTestId('autopilot-start-tree')).toBeDisabled();
   });
@@ -206,7 +364,6 @@ describe('autopilot in the Web UI', () => {
     const list = tickets();
     list[4].status = 'DONE';
     seed({ tickets: list, runs: [run({ root: X, mode: 'tree', active: false, state: 'stopped', members: [], current: undefined })] });
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const user = await renderApp();
     const controls = await expand(user, X);
     const single = within(controls).getByTestId('autopilot-start-ticket');
@@ -215,7 +372,9 @@ describe('autopilot in the Web UI', () => {
     const tree = within(controls).getByTestId('autopilot-start-tree');
     expect(tree).toBeEnabled();
     await user.click(tree);
-    expect(confirm).toHaveBeenCalledWith(i18n.t('autopilot.confirm.resume', { id: X, mode: i18n.t('autopilot.modes.tree') }));
+    expect(screen.getByRole('dialog', { name: i18n.t('autopilot.confirm.resumeTitle') })).toHaveAccessibleDescription(
+      i18n.t('autopilot.confirm.resume', { id: X, mode: i18n.t('autopilot.modes.tree') })
+    );
   });
 
   it('lists the autopilot artifacts, and only them, under automatic decisions', async () => {
