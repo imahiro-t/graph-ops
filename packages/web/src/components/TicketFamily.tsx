@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CornerLeftUp, GitFork } from 'lucide-react';
 import { TicketRef } from '../types';
@@ -17,6 +17,7 @@ interface Props {
 // that are not part of a tree look exactly as before.
 export const TicketFamily: React.FC<Props> = ({ parent, childTickets = [], onOpenTicket }) => {
   const { t } = useTranslation();
+  const childrenHeadingId = useId();
   if (!parent && childTickets.length === 0) return null;
 
   const link = (ref: TicketRef, testId: string) => {
@@ -46,7 +47,7 @@ export const TicketFamily: React.FC<Props> = ({ parent, childTickets = [], onOpe
       {parent && (
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-            <CornerLeftUp className="w-3.5 h-3.5 text-indigo-500" />
+            <CornerLeftUp className="w-3.5 h-3.5 text-indigo-500" aria-hidden="true" />
             {t('ticketItem.family.parent')}
           </span>
           {link(parent, 'ticket-family-parent')}
@@ -54,11 +55,11 @@ export const TicketFamily: React.FC<Props> = ({ parent, childTickets = [], onOpe
       )}
       {childTickets.length > 0 && (
         <div>
-          <div className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
-            <GitFork className="w-3.5 h-3.5 text-indigo-500" />
+          <div id={childrenHeadingId} className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
+            <GitFork className="w-3.5 h-3.5 text-indigo-500" aria-hidden="true" />
             {t('ticketItem.family.children', { count: childTickets.length })}
           </div>
-          <ul className="space-y-1" data-testid="ticket-family-children">
+          <ul className="space-y-1" data-testid="ticket-family-children" aria-labelledby={childrenHeadingId}>
             {childTickets.map(c => (
               <li key={c.id}>{link(c, 'ticket-family-child')}</li>
             ))}

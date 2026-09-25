@@ -85,6 +85,9 @@ type Options struct {
 	TeamExtensionsDir string
 	TerminalCommand   string
 	ClaudeBinary      string
+	// Logf receives the registry's operational warnings (a stale lock
+	// removed, an unreadable run file); nil discards them.
+	Logf func(format string, args ...any)
 }
 
 // RegistryRoot is where a home directory's autopilot registry lives:
@@ -102,7 +105,7 @@ func RegistryRoot(homeDir string) string {
 func New(o Options) *Service {
 	s := &Service{
 		Repo:     o.Repo,
-		Registry: &autopilot.Registry{Root: RegistryRoot(o.HomeDir)},
+		Registry: &autopilot.Registry{Root: RegistryRoot(o.HomeDir), Logf: o.Logf},
 		Launcher: TerminalLauncher{Config: terminal.Config{TerminalCommand: o.TerminalCommand}, ClaudeBin: o.ClaudeBinary},
 	}
 	s.Settings = func(projectID string) (autopilot.Settings, error) {
@@ -266,11 +269,20 @@ func (s *Service) findRun(runID string) (string, error) {
 
 // withRun loads runID under its project's lock, runs fn, and saves the run
 // when fn succeeds.
+//
+// fn must stay free of git, DB and network work: those belong before or
+// after it (see sampleSession), so the lock is held only for as long as it
+// takes to read, decide and write the run file.
 func (s *Service) withRun(runID string, fn func(tx *autopilot.Tx, run *autopilot.Run) error) error {
 	projectID, err := s.findRun(runID)
 	if err != nil {
 		return err
 	}
+	return s.withRunIn(projectID, runID, fn)
+}
+
+// withRunIn is withRun for a run whose project is already known.
+func (s *Service) withRunIn(projectID, runID string, fn func(tx *autopilot.Tx, run *autopilot.Run) error) error {
 	return s.registry().WithLock(projectID, func(tx *autopilot.Tx) error {
 		run, err := tx.Load(runID)
 		if err != nil {
@@ -312,6 +324,10 @@ type StartResult struct {
 	Resumed   bool   `json:"resumed"`
 	Adopted   bool   `json:"adopted"`
 	Next      string `json:"next"`
+	// PermissionMode is the child sessions' permission mode in the run's
+	// settings snapshot -- what the Web UI's launch opens the orchestrator
+	// with. Not printed: the CLI's orchestrator is already running.
+	PermissionMode string `json:"-"`
 }
 
 // Start starts a run from ticketID (autopilot start), or with reserve, only
@@ -327,16 +343,17 @@ func (s *Service) Start(ticketID, mode, runID string, reserve bool) (StartResult
 	if err != nil {
 		return StartResult{}, err
 	}
-	var idx *projectIndex
-	descendants := func(id string) ([]string, error) {
-		if idx == nil {
-			var err error
-			if idx, err = s.index(root.ProjectID); err != nil {
-				return nil, err
-			}
-		}
-		return idx.descendants(id), nil
+	if !autopilot.ValidTicketID(root.ID) {
+		return StartResult{}, domain.NewAPIError(domain.ErrCodeValidation,
+			"VALIDATION_ERROR: ticket id %q cannot name a worktree or branch (letters, digits, '.', '_' and '-' only)", root.ID)
 	}
+	// The tree is read before the registry lock is taken: the lock covers
+	// only the run files (see autopilot.Registry).
+	idx, err := s.index(root.ProjectID)
+	if err != nil {
+		return StartResult{}, err
+	}
+	descendants := func(id string) ([]string, error) { return idx.descendants(id), nil }
 	res, err := s.registry().Begin(autopilot.BeginRequest{
 		RootID: root.ID, ProjectID: root.ProjectID, RootStatus: root.Status,
 		Mode: mode, RunID: runID, Reserve: reserve, Settings: settings, Descendants: descendants,
@@ -347,7 +364,8 @@ func (s *Service) Start(ticketID, mode, runID string, reserve bool) (StartResult
 	return StartResult{
 		RunID: res.Run.ID, ProjectID: res.Run.ProjectID, Mode: res.Run.Mode, Root: res.Run.RootTicketID,
 		State: res.Run.State, Created: res.Created, Resumed: res.TookOver, Adopted: res.Adopted,
-		Next: "graph-engine autopilot next " + res.Run.ID,
+		Next:           "graph-engine autopilot next " + res.Run.ID,
+		PermissionMode: res.Run.Settings.PermissionMode,
 	}, nil
 }
 
@@ -380,19 +398,25 @@ type NextResult struct {
 
 // Next decides the run's next action (autopilot next).
 func (s *Service) Next(runID string) (NextResult, error) {
+	projectID, err := s.findRun(runID)
+	if err != nil {
+		return NextResult{}, err
+	}
+	// The DB and git reads happen before the lock is taken.
+	idx, err := s.index(projectID)
+	if err != nil {
+		return NextResult{}, err
+	}
+	sample := s.sampleSession(projectID, runID, "")
 	var out NextResult
-	err := s.withRun(runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+	err = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
 		if run.State == autopilot.RunStarting {
 			return invalidState("run %s is reserved and not adopted yet; run `graph-engine autopilot start %s --mode %s --run %s` first", run.ID, run.RootTicketID, run.Mode, run.ID)
 		}
 		now := s.now()
 		if !run.IsFinal() {
 			run.Heartbeat = now
-			s.observe(run, now)
-		}
-		idx, err := s.index(run.ProjectID)
-		if err != nil {
-			return err
+			sample.observe(run.ActiveSession(), now)
 		}
 		runs, err := tx.List()
 		if err != nil {
@@ -452,15 +476,55 @@ func (s *Service) sessionWorktree(run *autopilot.Run, ticketID, role string) str
 	return autopilot.WorktreePath(repo, ticketID)
 }
 
-// observe refreshes the activity of the run's running session from the DB
-// and its worktree (D4-2).
-func (s *Service) observe(run *autopilot.Run, now time.Time) {
-	st := run.ActiveSession()
-	if st == nil {
+// sessionSample is a session's DB and worktree fingerprints, computed
+// outside the registry lock (they take a DB read -- a network call on a
+// remote backend -- and `git status`) and applied under it only if the
+// session is still the one sampled and nobody has re-baselined its
+// fingerprints in between (D4-2).
+type sessionSample struct {
+	ticket, role string
+	launchedAt   time.Time
+	// baseDB/baseWT are the session's stored fingerprints when sampled.
+	baseDB, baseWT string
+	db, wt         string
+}
+
+// sampleSession loads runID without the lock and fingerprints the running
+// session of ticketID ("" means the run's active session). nil when there
+// is none.
+func (s *Service) sampleSession(projectID, runID, ticketID string) *sessionSample {
+	run, err := s.registry().Load(projectID, runID)
+	if err != nil || run == nil {
+		return nil
+	}
+	var st *autopilot.TicketState
+	if ticketID == "" {
+		st = run.ActiveSession()
+	} else {
+		st = run.Ticket(ticketID)
+	}
+	if st == nil || st.Role == "" {
+		return nil
+	}
+	db, wt := s.fingerprints(run, st)
+	return &sessionSample{ticket: st.ID, role: st.Role, launchedAt: st.LaunchedAt,
+		baseDB: st.DBFingerprint, baseWT: st.WorktreeFingerprint, db: db, wt: wt}
+}
+
+// sameSession reports whether st is still the session the sample was taken
+// of.
+func (x *sessionSample) sameSession(st *autopilot.TicketState) bool {
+	return x != nil && st != nil && st.ID == x.ticket && st.Role == x.role && st.LaunchedAt.Equal(x.launchedAt)
+}
+
+// observe compares the sample with st's stored fingerprints and records any
+// change as activity (autopilot.ObserveActivity) -- only when st is the
+// sampled session and its fingerprints are still the ones the sample saw.
+func (x *sessionSample) observe(st *autopilot.TicketState, now time.Time) {
+	if !x.sameSession(st) || st.DBFingerprint != x.baseDB || st.WorktreeFingerprint != x.baseWT {
 		return
 	}
-	dbFP, wtFP := s.fingerprints(run, st)
-	autopilot.ObserveActivity(st, dbFP, wtFP, now)
+	autopilot.ObserveActivity(st, x.db, x.wt, now)
 }
 
 func (s *Service) fingerprints(run *autopilot.Run, st *autopilot.TicketState) (dbFP, wtFP string) {
@@ -518,14 +582,21 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		return LaunchResult{}, err
 	}
 
+	// A ticket ID that cannot name a worktree is refused by EnsureWorktree
+	// below, as a launch failure: counted, and recorded as launch_failed
+	// once it repeats, rather than handed back by next forever.
+
+	// Read before the lock: the branch a ticket with no merge target starts
+	// from.
+	defaultBranch := s.Git.DefaultBranch(repo)
+
 	var (
-		snapshot                    autopilot.Run
-		prevTicket                  autopilot.TicketState
-		workDir, base, gitTicket    string
-		gitBase                     string
-		permissionMode, sessionRole = "", role
+		snapshot                          autopilot.Run
+		prevTicket                        autopilot.TicketState
+		workDir, base, gitTicket, gitBase string
+		permissionMode                    string
 	)
-	err = s.withRun(runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+	err = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
 		if run.IsFinal() || run.State == autopilot.RunStarting {
 			return invalidState("run %s is %s", run.ID, run.State)
 		}
@@ -552,7 +623,7 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 				}
 				base = t.Branch
 			} else {
-				base = s.Git.DefaultBranch(repo)
+				base = defaultBranch
 			}
 			st.Status, st.Reason, st.Detail, st.FailedRole = autopilot.TicketLaunched, "", "", ""
 			st.RetryPending = false
@@ -596,7 +667,7 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 				workDir = autopilot.WorktreePath(repo, ticketID)
 			}
 		}
-		st.Role = sessionRole
+		st.Role = role
 		st.LaunchedAt = now
 		st.DBFingerprint, st.WorktreeFingerprint = "", ""
 		autopilot.RecordActivity(st, autopilot.ActivityLaunch, now)
@@ -621,29 +692,23 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		return s.Launcher.Launch(workDir, []string{"--permission-mode", permissionMode}, WorkerPrompt(runID, ticketID, role))
 	}()
 	if launchErr != nil {
-		_ = s.withRun(runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
-			restored := prevTicket
-			run.Tickets[ticketID] = &restored
-			run.WorkLaunches = snapshot.WorkLaunches
-			run.Finalize = snapshot.Finalize
-			run.State = snapshot.State
-			return nil
-		})
-		return LaunchResult{}, fmt.Errorf("launching the %s session for %s: %w", role, ticketID, launchErr)
+		return LaunchResult{}, s.launchFailed(projectID, runID, ticketID, role, &snapshot, prevTicket, launchErr)
 	}
 
+	// The baseline the next observation compares against, fingerprinted
+	// outside the lock.
+	sample := s.sampleSession(projectID, runID, ticketID)
 	var out LaunchResult
-	err = s.withRun(runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+	err = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
 		st, err := ticketState(run, ticketID)
 		if err != nil {
 			return err
 		}
+		st.LaunchFailures = 0
 		if role == autopilot.RoleWork {
 			st.Worktree = workDir
 		}
-		// The baseline the next observation compares against.
-		dbFP, wtFP := s.fingerprints(run, st)
-		autopilot.ObserveActivity(st, dbFP, wtFP, s.now())
+		sample.observe(st, s.now())
 		out = LaunchResult{Launched: ticketID, Role: role, Worktree: workDir, Next: fmt.Sprintf("graph-engine autopilot wait %s %s", runID, ticketID)}
 		if role == autopilot.RoleWork {
 			out.Branch, out.BaseBranch = st.Branch, st.BaseBranch
@@ -651,6 +716,58 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		return nil
 	})
 	return out, err
+}
+
+// MaxLaunchAttempts is how many launches of one session in a row may fail
+// (git could not prepare the worktree, the terminal did not open) before the
+// session is recorded as failed with reason launch_failed -- so an
+// orchestrator that goes back to next after a failed launch is not handed
+// the same launch forever, and onFailure (stop or continue) applies with the
+// reason in the summary (completion criterion 5).
+const MaxLaunchAttempts = 2
+
+// launchFailed puts back what Launch recorded before a launch that failed
+// and counts the failure; the MaxLaunchAttempts-th one in a row ends the
+// session as failed (launch_failed) -- the work failed, the merge-up blocked
+// out of the target, or finalize failed, as if its session had reported so.
+func (s *Service) launchFailed(projectID, runID, ticketID, role string, snapshot *autopilot.Run, prev autopilot.TicketState, launchErr error) error {
+	detail := oneLine(launchErr.Error())
+	if r := []rune(detail); len(r) > 300 {
+		detail = string(r[:299]) + "…"
+	}
+	attempt, recorded := 0, false
+	saveErr := s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+		restored := prev
+		run.Tickets[ticketID] = &restored
+		run.WorkLaunches = snapshot.WorkLaunches
+		run.Finalize = snapshot.Finalize
+		run.State = snapshot.State
+		restored.LaunchFailures++
+		attempt = restored.LaunchFailures
+		if attempt < MaxLaunchAttempts {
+			return nil
+		}
+		restored.LaunchFailures = 0
+		restored.RetryPending = false
+		restored.Role = role
+		autopilot.ApplyOutcome(run, &restored, autopilot.TicketFailed, autopilot.ReasonLaunchFailed, detail, "")
+		recorded = true
+		return nil
+	})
+	msg := fmt.Sprintf("launching the %s session for %s failed (attempt %d of %d): %v", role, ticketID, attempt, MaxLaunchAttempts, launchErr)
+	switch {
+	case saveErr != nil:
+		msg += fmt.Sprintf("; recording the failure also failed: %v", saveErr)
+	case recorded:
+		msg += fmt.Sprintf("; recorded as failed (%s) -- run next", autopilot.ReasonLaunchFailed)
+	default:
+		msg += "; run next to try again"
+	}
+	var apiErr *domain.APIError
+	if errors.As(launchErr, &apiErr) {
+		return domain.NewAPIError(apiErr.Code, "%s", msg)
+	}
+	return errors.New(msg)
 }
 
 // ---------------------------------------------------------------------------
@@ -686,10 +803,15 @@ func (s *Service) Wait(runID, ticketID string, timeout time.Duration) (WaitResul
 	if sleep == nil {
 		sleep = time.Sleep
 	}
+	projectID, err := s.findRun(runID)
+	if err != nil {
+		return WaitResult{}, err
+	}
 	started := time.Now()
 	for {
 		var res WaitResult
-		err := s.withRun(runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+		sample := s.sampleSession(projectID, runID, ticketID)
+		err := s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
 			st, err := ticketState(run, ticketID)
 			if err != nil {
 				return err
@@ -702,8 +824,7 @@ func (s *Service) Wait(runID, ticketID string, timeout time.Duration) (WaitResul
 				if !run.IsFinal() {
 					run.Heartbeat = now
 				}
-				dbFP, wtFP := s.fingerprints(run, st)
-				autopilot.ObserveActivity(st, dbFP, wtFP, now)
+				sample.observe(st, now)
 				autopilot.CheckStall(run, now)
 			}
 			if st.Role == "" {
@@ -757,54 +878,91 @@ type MergeResult struct {
 	Branch       string `json:"branch"`
 	TargetBranch string `json:"target_branch"`
 	Reason       string `json:"reason,omitempty"`
+	// Detail is the git error behind an unexpected needs_merge_session.
+	Detail string `json:"detail,omitempty"`
 	// No "next" hint: after merge-up the orchestrator always runs next
 	// (the skill says so), and every byte here is read once per merged
 	// ticket.
 }
 
-func (s *Service) mergeBranches(run *autopilot.Run, st *autopilot.TicketState) (repo, source, target string, err error) {
+func mergeBranches(run *autopilot.Run, st *autopilot.TicketState) (source, target string, err error) {
 	if st.Target == "" {
-		return "", "", "", domain.NewAPIError(domain.ErrCodeValidation,
+		return "", "", domain.NewAPIError(domain.ErrCodeValidation,
 			"VALIDATION_ERROR: ticket %s has no parent branch in run %s (a single-mode run or the tree's root is not merged into a parent)", st.ID, run.ID)
 	}
 	t := run.Ticket(st.Target)
 	if t == nil || t.Branch == "" || st.Branch == "" {
-		return "", "", "", invalidState("ticket %s or its merge target %s has no branch", st.ID, st.Target)
+		return "", "", invalidState("ticket %s or its merge target %s has no branch", st.ID, st.Target)
 	}
-	repo, err = s.localPath(run.ProjectID)
-	return repo, st.Branch, t.Branch, err
+	return st.Branch, t.Branch, nil
 }
 
 // MergeUp carries a done ticket's branch -- with everything its subtree
 // merged into it -- up into its merge target's branch, fast-forward only
-// (autopilot merge-up, D6). When that is not possible (not a fast-forward, or
-// the target's worktree is dirty) nothing is changed and the result is
-// needs_merge_session: the next `next` launches a merge-up session.
+// (autopilot merge-up, D6). When that is not possible nothing is changed and
+// the result is needs_merge_session: the next `next` launches a merge-up
+// session. That covers every way the fast-forward can fail -- not a
+// fast-forward, a dirty target worktree, and any other git error (an
+// untracked file in the way, a leftover index.lock, a branch somebody
+// deleted) -- so a failing merge-up never hands the orchestrator the same
+// merge-up again: the session either merges, or reports and is recorded.
+//
+// The fast-forward runs outside the registry lock; the run is re-read under
+// it before the result is recorded.
 func (s *Service) MergeUp(runID, ticketID string) (MergeResult, error) {
+	projectID, err := s.findRun(runID)
+	if err != nil {
+		return MergeResult{}, err
+	}
 	var out MergeResult
-	err := s.withRun(runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
-		st, err := ticketState(run, ticketID)
+	var repo string
+	var repoErr error
+	err = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+		st, err := mergeUpState(run, ticketID)
 		if err != nil {
 			return err
 		}
-		if st.Status != autopilot.TicketDone || st.Role != "" {
-			return invalidState("ticket %s is %s; only a done ticket with no session running is merged up", ticketID, st.Status)
-		}
-		repo, source, target, err := s.mergeBranches(run, st)
+		source, target, err := mergeBranches(run, st)
 		if err != nil {
 			return err
 		}
+		repo, repoErr = s.localPath(run.ProjectID)
 		run.Heartbeat = s.now()
 		out = MergeResult{Ticket: ticketID, Branch: source, TargetBranch: target}
-		moved, err := s.Git.FastForward(repo, source, target)
+		return nil
+	})
+	if err != nil {
+		return MergeResult{}, err
+	}
+
+	moved, ffErr := false, repoErr
+	if ffErr == nil {
+		moved, ffErr = s.Git.FastForward(repo, out.Branch, out.TargetBranch)
+	}
+
+	err = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+		st, err := mergeUpState(run, ticketID)
 		if err != nil {
-			var apiErr *domain.APIError
-			if errors.As(err, &apiErr) && (apiErr.Code == autopilot.ErrCodeNotFastForward || apiErr.Code == autopilot.ErrCodeParentDirty) {
-				st.MergeNeedsSession = true
-				out.Result, out.Reason = "needs_merge_session", string(apiErr.Code)
-				return nil
-			}
 			return err
+		}
+		if source, target, err := mergeBranches(run, st); err != nil || source != out.Branch || target != out.TargetBranch {
+			return invalidState("ticket %s's merge target changed while it was being merged up; run next", ticketID)
+		}
+		if ffErr != nil {
+			st.MergeNeedsSession = true
+			out.Result, out.Reason = "needs_merge_session", "GIT_ERROR"
+			var apiErr *domain.APIError
+			if errors.As(ffErr, &apiErr) {
+				out.Reason = string(apiErr.Code)
+			}
+			if out.Reason != string(autopilot.ErrCodeNotFastForward) && out.Reason != string(autopilot.ErrCodeParentDirty) {
+				// Unexpected: the merge-up session gets to see why.
+				out.Detail = oneLine(ffErr.Error())
+				if r := []rune(out.Detail); len(r) > 300 {
+					out.Detail = string(r[:299]) + "…"
+				}
+			}
+			return nil
 		}
 		autopilot.MarkMergedUp(run, st)
 		out.Result = "merged"
@@ -813,38 +971,73 @@ func (s *Service) MergeUp(runID, ticketID string) (MergeResult, error) {
 		}
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return MergeResult{}, err
+	}
+	return out, nil
+}
+
+// mergeUpState is ticketID's state if it can be merged up now: done, with
+// no session running.
+func mergeUpState(run *autopilot.Run, ticketID string) (*autopilot.TicketState, error) {
+	st, err := ticketState(run, ticketID)
+	if err != nil {
+		return nil, err
+	}
+	if st.Status != autopilot.TicketDone || st.Role != "" {
+		return nil, invalidState("ticket %s is %s; only a done ticket with no session running is merged up", ticketID, st.Status)
+	}
+	return st, nil
 }
 
 // MergeIntoParent fast-forwards the worker's branch into its merge target's
 // branch (autopilot merge-into-parent, the tree child's release step). It
 // fails -- changing nothing -- with NOT_FAST_FORWARD or
 // PARENT_WORKTREE_DIRTY (S9); the worker then reports blocked
-// (merge_conflict).
+// (merge_conflict). The fast-forward runs outside the registry lock.
 func (s *Service) MergeIntoParent(runID, ticketID string) (MergeResult, error) {
-	var out MergeResult
-	err := s.withRun(runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+	projectID, err := s.findRun(runID)
+	if err != nil {
+		return MergeResult{}, err
+	}
+	var repo, source, target string
+	err = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
 		st, err := ticketState(run, ticketID)
 		if err != nil {
 			return err
 		}
-		repo, source, target, err := s.mergeBranches(run, st)
-		if err != nil {
+		if source, target, err = mergeBranches(run, st); err != nil {
+			return err
+		}
+		if repo, err = s.localPath(run.ProjectID); err != nil {
 			return err
 		}
 		autopilot.RecordActivity(st, "merge-into-parent", s.now())
-		moved, err := s.Git.FastForward(repo, source, target)
+		return nil
+	})
+	if err != nil {
+		return MergeResult{}, err
+	}
+	moved, err := s.Git.FastForward(repo, source, target)
+	if err != nil {
+		return MergeResult{}, err
+	}
+	out := MergeResult{Result: "merged", Ticket: ticketID, Branch: source, TargetBranch: target}
+	if !moved {
+		out.Result = "up_to_date"
+	}
+	err = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+		st, err := ticketState(run, ticketID)
 		if err != nil {
 			return err
 		}
 		autopilot.MarkMergedSelf(run, st)
-		out = MergeResult{Result: "merged", Ticket: ticketID, Branch: source, TargetBranch: target}
-		if !moved {
-			out.Result = "up_to_date"
-		}
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return MergeResult{}, err
+	}
+	return out, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -883,6 +1076,7 @@ type WorkerContext struct {
 // as activity.
 func (s *Service) WorkerContext(runID, ticketID string) (WorkerContext, error) {
 	var out WorkerContext
+	repo := ""
 	err := s.withRun(runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
 		st, err := ticketState(run, ticketID)
 		if err != nil {
@@ -913,9 +1107,7 @@ func (s *Service) WorkerContext(runID, ticketID string) (WorkerContext, error) {
 			}
 		}
 		if out.Position != "tree_child" {
-			if repo, err := s.localPath(run.ProjectID); err == nil {
-				out.DefaultBranch = s.Git.DefaultBranch(repo)
-			}
+			repo, _ = s.localPath(run.ProjectID)
 		}
 		for k := range st.PendingDecisions {
 			out.PendingDecisions = append(out.PendingDecisions, k)
@@ -923,6 +1115,10 @@ func (s *Service) WorkerContext(runID, ticketID string) (WorkerContext, error) {
 		sort.Strings(out.PendingDecisions)
 		return nil
 	})
+	if err == nil && repo != "" {
+		// git, after the lock is released.
+		out.DefaultBranch = s.Git.DefaultBranch(repo)
+	}
 	return out, err
 }
 
@@ -977,47 +1173,82 @@ func (s *Service) AttachDecisions(runID, ticketID, nodeID string) (AttachResult,
 	if node.TicketID != ticketID {
 		return AttachResult{}, domain.NewAPIError(domain.ErrCodeValidation, "VALIDATION_ERROR: node %s belongs to ticket %s, not %s", nodeID, node.TicketID, ticketID)
 	}
-	out := AttachResult{Attached: []string{}, Skipped: []string{}}
-	err = s.withRun(runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+	projectID, err := s.findRun(runID)
+	if err != nil {
+		return AttachResult{}, err
+	}
+	var pending map[string]string
+	err = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
 		st, err := ticketState(run, ticketID)
 		if err != nil {
 			return err
 		}
 		autopilot.RecordActivity(st, "attach-decisions", s.now())
-		if len(st.PendingDecisions) == 0 {
-			return nil
+		pending = make(map[string]string, len(st.PendingDecisions))
+		for k, v := range st.PendingDecisions {
+			pending[k] = v
 		}
-		existing, err := s.Repo.ListArtifactsByTicket(ticketID)
+		return nil
+	})
+	out := AttachResult{Attached: []string{}, Skipped: []string{}}
+	if err != nil || len(pending) == 0 {
+		return out, err
+	}
+
+	// The DB writes happen outside the lock. A decision already saved on
+	// the ticket (a repeated call) is not saved again.
+	existing, err := s.Repo.ListArtifactsByTicket(ticketID)
+	if err != nil {
+		return out, err
+	}
+	have := map[string]bool{}
+	for _, a := range existing {
+		have[a.Name] = true
+	}
+	kinds := make([]string, 0, len(pending))
+	for k := range pending {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	handled := map[string]string{}
+	var createErr error
+	for _, k := range kinds {
+		name := DecisionArtifactName(k)
+		if have[name] {
+			out.Skipped = append(out.Skipped, name)
+			handled[k] = pending[k]
+			continue
+		}
+		content := pending[k]
+		if _, createErr = s.Repo.CreateArtifact(domain.Artifact{
+			ID: engine.NewArtifactID(), TicketID: ticketID, NodeID: nodeID, Name: name,
+			Type: domain.ArtifactText, Content: &content,
+		}); createErr != nil {
+			break
+		}
+		out.Attached = append(out.Attached, name)
+		handled[k] = pending[k]
+	}
+
+	// Clear what was saved -- unless it was recorded again meanwhile.
+	err = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+		st, err := ticketState(run, ticketID)
 		if err != nil {
 			return err
 		}
-		have := map[string]bool{}
-		for _, a := range existing {
-			have[a.Name] = true
-		}
-		kinds := make([]string, 0, len(st.PendingDecisions))
-		for k := range st.PendingDecisions {
-			kinds = append(kinds, k)
-		}
-		sort.Strings(kinds)
-		for _, k := range kinds {
-			name := DecisionArtifactName(k)
-			if have[name] {
-				out.Skipped = append(out.Skipped, name)
-				continue
+		for k, v := range handled {
+			if st.PendingDecisions[k] == v {
+				delete(st.PendingDecisions, k)
 			}
-			content := st.PendingDecisions[k]
-			if _, err := s.Repo.CreateArtifact(domain.Artifact{
-				ID: engine.NewArtifactID(), TicketID: ticketID, NodeID: nodeID, Name: name,
-				Type: domain.ArtifactText, Content: &content,
-			}); err != nil {
-				return err
-			}
-			out.Attached = append(out.Attached, name)
 		}
-		st.PendingDecisions = nil
+		if len(st.PendingDecisions) == 0 {
+			st.PendingDecisions = nil
+		}
 		return nil
 	})
+	if createErr != nil {
+		return out, createErr
+	}
 	return out, err
 }
 
@@ -1025,7 +1256,12 @@ func (s *Service) AttachDecisions(runID, ticketID, nodeID string) (AttachResult,
 // awaiting non-empty the session enters "waiting for a person" and is exempt
 // from the stall check until its next activity (D4-2).
 func (s *Service) Touch(runID, ticketID, awaiting string) error {
-	return s.withRun(runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+	projectID, err := s.findRun(runID)
+	if err != nil {
+		return err
+	}
+	sample := s.sampleSession(projectID, runID, ticketID)
+	return s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
 		st, err := ticketState(run, ticketID)
 		if err != nil {
 			return err
@@ -1035,8 +1271,8 @@ func (s *Service) Touch(runID, ticketID, awaiting string) error {
 		// Re-baseline the fingerprints, so a change the worker made just
 		// before touching does not count as a later activity (which would
 		// end the wait for a person at the next poll).
-		if st.Role != "" {
-			st.DBFingerprint, st.WorktreeFingerprint = s.fingerprints(run, st)
+		if sample.sameSession(st) {
+			st.DBFingerprint, st.WorktreeFingerprint = sample.db, sample.wt
 		}
 		st.AwaitingHuman = strings.TrimSpace(awaiting)
 		return nil
@@ -1118,16 +1354,19 @@ func (s *Service) Status(projectID string) ([]RunStatus, error) {
 	now := s.now()
 	out := make([]RunStatus, 0, len(runs))
 	for i := len(runs) - 1; i >= 0; i-- {
-		r := runs[i]
-		rs := RunStatus{RunID: r.ID, ProjectID: r.ProjectID, Mode: r.Mode, Root: r.RootTicketID, State: r.State,
-			Active: r.IsActive(now), Heartbeat: r.Heartbeat, StopReason: r.StopReason, Tickets: map[string]string{}}
-		for id, st := range r.Tickets {
-			rs.Tickets[id] = st.Status
-		}
-		if st := r.ActiveSession(); st != nil {
-			rs.Current, rs.CurrentRole, rs.AwaitingHuman = st.ID, st.Role, st.AwaitingHuman
-		}
-		out = append(out, rs)
+		out = append(out, runStatus(runs[i], now))
 	}
 	return out, nil
+}
+
+func runStatus(r *autopilot.Run, now time.Time) RunStatus {
+	rs := RunStatus{RunID: r.ID, ProjectID: r.ProjectID, Mode: r.Mode, Root: r.RootTicketID, State: r.State,
+		Active: r.IsActive(now), Heartbeat: r.Heartbeat, StopReason: r.StopReason, Tickets: map[string]string{}}
+	for id, st := range r.Tickets {
+		rs.Tickets[id] = st.Status
+	}
+	if st := r.ActiveSession(); st != nil {
+		rs.Current, rs.CurrentRole, rs.AwaitingHuman = st.ID, st.Role, st.AwaitingHuman
+	}
+	return rs
 }

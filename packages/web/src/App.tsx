@@ -23,6 +23,7 @@ import { getPriorityMeta, matchesPriorityFilter } from './priorityMeta';
 import { matchesLabelFilter } from './labelMeta';
 import { assigneeFilterOptions, isUnassignedOption, matchesAssigneeFilter } from './assigneeFilter';
 import { TicketItem } from './components/TicketItem';
+import { StatusLiveRegion } from './components/StatusLiveRegion';
 import { LabelFilter } from './components/LabelFilter';
 import { MultiSelectFilter } from './components/MultiSelectFilter';
 import { fetchLabels } from './lib/labelsApi';
@@ -791,6 +792,25 @@ export const App: React.FC = () => {
   // the filters first if they hide it, since a link that silently goes
   // nowhere would be worse -- and scrolls it into view once rendered.
   const [focusTicketId, setFocusTicketId] = useState<string | null>(null);
+  // The live announcement of what opening a related ticket changed (the
+  // filters it cleared), cleared after a while so the same message can be
+  // announced again.
+  const [openNotice, setOpenNotice] = useState('');
+  const openNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const announceOpenNotice = (message: string) => {
+    if (openNoticeTimer.current !== null) clearTimeout(openNoticeTimer.current);
+    setOpenNotice(message);
+    openNoticeTimer.current = setTimeout(() => {
+      openNoticeTimer.current = null;
+      setOpenNotice('');
+    }, 5000);
+  };
+  useEffect(
+    () => () => {
+      if (openNoticeTimer.current !== null) clearTimeout(openNoticeTimer.current);
+    },
+    []
+  );
   const handleOpenTicket = (id: string) => {
     // Every ticket of the current project is loaded (paging is client-side),
     // so a ticket missing here is gone or in another project: nothing to open.
@@ -803,6 +823,8 @@ export const App: React.FC = () => {
       setFilterPriorities([]);
       setFilterLabelIds([]);
       visible = tickets;
+      // Say so: the filters changed without the person touching them.
+      announceOpenNotice(t('ticketItem.family.filtersCleared', { id }));
     }
     const index = visible.findIndex(t => t.id === id);
     if (index >= 0) setPage(Math.floor(index / ticketsPerPage) + 1);
@@ -818,7 +840,8 @@ export const App: React.FC = () => {
     if (!focusTicketId) return;
     const el = document.getElementById(`ticket-${focusTicketId}`);
     if (el) {
-      el.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+      const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+      el.scrollIntoView?.({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' });
       el.focus({ preventScroll: true });
     }
     setFocusTicketId(null);
@@ -1161,6 +1184,7 @@ export const App: React.FC = () => {
               "a project is selected" cannot both hold. Once a project is
               selected, its list not having arrived yet is "loading" too --
               not the empty state, and never the previous project's list. */}
+          <StatusLiveRegion message={openNotice} />
           {!isCurrentProjectResolved ? (
             <div
               className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm"

@@ -35,7 +35,9 @@ export async function startAutopilot(
 //   running        -- it is the root of the run ("autopilot running")
 //   processing     -- its child session is running now
 //   awaitingHuman  -- its child session waits for a person
-//   waiting        -- the run has not reached it yet
+//   waiting        -- the run will still launch it (the run's pending list:
+//                     not DONE/CLOSED, not beyond maxDepth/maxTickets, not
+//                     under a ticket in progress elsewhere or a failed one)
 export type AutopilotBadge = 'running' | 'processing' | 'awaitingHuman' | 'waiting';
 
 export interface TicketAutopilotView {
@@ -125,9 +127,8 @@ export function ticketAutopilotView(
         } else {
           add('processing');
         }
-      } else if (run.root !== ticketId) {
-        const state = run.tickets[ticketId];
-        if (state === undefined || state === 'queued') add('waiting');
+      } else if (run.root !== ticketId && run.pending.includes(ticketId)) {
+        add('waiting');
       }
     } else if (!blockedBy.tree && descendantsOf(ticketId).has(run.root)) {
       blockedBy.tree = run.root;

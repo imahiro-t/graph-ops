@@ -1,6 +1,7 @@
 package autopilot
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -26,23 +27,50 @@ import (
 // other's files (completion criterion 8).
 //
 // The lock is a file created with O_EXCL, retried until it is free: it works
-// the same on every OS and needs no flock. A lock whose file is older than
-// StaleLockAge is taken to be left by a crashed process and removed. Writes of
-// a run file go to a temp file in the same directory and are renamed over the
-// target, so a reader never sees half a file -- which is what lets read-only
-// callers (Load) skip the lock.
+// the same on every OS and needs no flock. The file holds a token unique to
+// its holder, and the holder refreshes the file's modification time every
+// lockRefreshInterval for as long as it holds it, so a lock is only ever
+// "stale" -- older than StaleLockAge -- when its holder is gone (crashed,
+// killed, or suspended for minutes). A waiter removes a stale lock only
+// after checking that the file still holds the token it judged stale, and a
+// holder only ever removes (or saves under) the lock while the file still
+// holds its own token: a holder whose lock was taken from it fails its save
+// with AUTOPILOT_REGISTRY_LOCKED instead of overwriting the new holder's
+// work.
+//
+// What happens under the lock is kept to reading, deciding and writing run
+// files: the git, DB and network work of a command (fingerprints,
+// fast-forwards, the ticket tree, artifacts) is done before or after it (see
+// runner), so the lock is held for milliseconds and a waiter's LockTimeout
+// is never spent behind a slow git hook or a remote backend.
+//
+// Writes of a run file go to a temp file in the same directory and are
+// renamed over the target, so a reader never sees half a file -- which is
+// what lets read-only callers (Load, List) skip the lock.
 type Registry struct {
 	Root string
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
 	// LockTimeout bounds how long WithLock waits; 0 means 60 seconds.
 	LockTimeout time.Duration
+	// Logf reports what an operator should be able to trace afterwards --
+	// a stale lock removed, a lock lost, a run file that cannot be read.
+	// nil discards it. The CLI writes it to stderr, the HTTP server to its
+	// logger.
+	Logf func(format string, args ...any)
 }
 
-// StaleLockAge is how old a lock file has to be before it is presumed
-// abandoned. Nothing holds the lock for long (no terminal launch or network
-// call happens under it), so a minute is ample.
-const StaleLockAge = time.Minute
+// StaleLockAge is how long a lock file may go unrefreshed before it is
+// presumed abandoned. Its holder refreshes it every lockRefreshInterval, so
+// only a holder that has stopped running for this long loses it.
+var StaleLockAge = 2 * time.Minute
+
+// lockRefreshInterval is how often a holder refreshes its lock file.
+var lockRefreshInterval = 10 * time.Second
+
+// ErrCodeRegistryCorrupt: a run file of the project cannot be read, so a
+// start cannot tell whether it would duplicate an active run.
+const ErrCodeRegistryCorrupt domain.ErrorCode = "AUTOPILOT_REGISTRY_CORRUPT"
 
 var (
 	runIDPattern     = regexp.MustCompile(`^run-[a-z0-9-]{1,64}$`)
@@ -114,6 +142,88 @@ func (g *Registry) LockPath(projectID string) (string, error) {
 type Tx struct {
 	g         *Registry
 	projectID string
+	lock      *heldLock
+}
+
+func (g *Registry) logf(format string, args ...any) {
+	if g.Logf != nil {
+		g.Logf(format, args...)
+	}
+}
+
+// heldLock is a lock file this process created, identified by its token.
+type heldLock struct {
+	path  string
+	token []byte
+	stop  chan struct{}
+	done  chan struct{}
+}
+
+// owned reports whether the lock file still holds this holder's token.
+func (l *heldLock) owned() bool {
+	cur, err := os.ReadFile(l.path)
+	return err == nil && bytes.Equal(cur, l.token)
+}
+
+// refresh keeps the lock file's modification time recent while it is held,
+// so no waiter takes it for abandoned however long fn runs.
+func (l *heldLock) refresh() {
+	defer close(l.done)
+	t := time.NewTicker(lockRefreshInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-l.stop:
+			return
+		case <-t.C:
+			if l.owned() {
+				now := time.Now()
+				_ = os.Chtimes(l.path, now, now)
+			}
+		}
+	}
+}
+
+// release stops the refresh and removes the lock file -- only while it is
+// still this holder's.
+func (g *Registry) release(l *heldLock) {
+	close(l.stop)
+	<-l.done
+	if l.owned() {
+		_ = os.Remove(l.path)
+		return
+	}
+	g.logf("autopilot registry lock %s was taken over by another process while this one held it (token %s); leaving it in place",
+		l.path, strings.TrimSpace(string(l.token)))
+}
+
+// removeIfStale removes the lock file at path if it has gone unrefreshed for
+// StaleLockAge and still holds the content it held when judged stale (so a
+// lock a faster waiter has just re-created is never the one removed). It
+// reports whether it removed it.
+func (g *Registry) removeIfStale(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || time.Since(info.ModTime()) <= StaleLockAge {
+		return false
+	}
+	seen, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	// Re-check right before removing: same content, still unrefreshed.
+	cur, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(cur, seen) {
+		return false
+	}
+	if info, err := os.Stat(path); err != nil || time.Since(info.ModTime()) <= StaleLockAge {
+		return false
+	}
+	if err := os.Remove(path); err != nil {
+		return false
+	}
+	g.logf("removed a stale autopilot registry lock %s (held by %q, not refreshed since %s): its holder is presumed gone",
+		path, strings.TrimSpace(string(seen)), info.ModTime().UTC().Format(time.RFC3339))
+	return true
 }
 
 // WithLock runs fn holding projectID's lock.
@@ -129,19 +239,28 @@ func (g *Registry) WithLock(projectID string, fn func(tx *Tx) error) error {
 	if timeout == 0 {
 		timeout = 60 * time.Second
 	}
+	var nonce [8]byte
+	_, _ = rand.Read(nonce[:])
+	token := []byte(fmt.Sprintf("%d %s %s\n", os.Getpid(), time.Now().UTC().Format(time.RFC3339Nano), hex.EncodeToString(nonce[:])))
 	deadline := time.Now().Add(timeout)
 	for {
 		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
-			fmt.Fprintf(f, "%d %s\n", os.Getpid(), time.Now().UTC().Format(time.RFC3339Nano))
-			f.Close()
+			_, werr := f.Write(token)
+			cerr := f.Close()
+			if werr != nil || cerr != nil {
+				_ = os.Remove(lockPath)
+				if werr == nil {
+					werr = cerr
+				}
+				return werr
+			}
 			break
 		}
 		if !errors.Is(err, os.ErrExist) {
 			return err
 		}
-		if info, statErr := os.Stat(lockPath); statErr == nil && time.Since(info.ModTime()) > StaleLockAge {
-			_ = os.Remove(lockPath)
+		if g.removeIfStale(lockPath) {
 			continue
 		}
 		if time.Now().After(deadline) {
@@ -150,8 +269,20 @@ func (g *Registry) WithLock(projectID string, fn func(tx *Tx) error) error {
 		}
 		time.Sleep(15 * time.Millisecond)
 	}
-	defer os.Remove(lockPath)
-	return fn(&Tx{g: g, projectID: projectID})
+	l := &heldLock{path: lockPath, token: token, stop: make(chan struct{}), done: make(chan struct{})}
+	go l.refresh()
+	defer g.release(l)
+	return fn(&Tx{g: g, projectID: projectID, lock: l})
+}
+
+// checkOwned fails when this transaction's lock has been taken from it, so
+// nothing is written without the lock.
+func (tx *Tx) checkOwned() error {
+	if tx.lock == nil || tx.lock.owned() {
+		return nil
+	}
+	return domain.NewAPIError(ErrCodeRegistryLockTimed,
+		"AUTOPILOT_REGISTRY_LOCKED: the autopilot registry lock %s was taken over by another process while this command held it; nothing was saved -- run the command again", tx.lock.path)
 }
 
 // ProjectID is the project this transaction's lock belongs to.
@@ -172,6 +303,9 @@ func (tx *Tx) Save(run *Run) error {
 	if err != nil {
 		return err
 	}
+	if err := tx.checkOwned(); err != nil {
+		return err
+	}
 	run.UpdatedAt = tx.g.now()
 	data, err := json.MarshalIndent(run, "", "  ")
 	if err != nil {
@@ -184,6 +318,9 @@ func (tx *Tx) Save(run *Run) error {
 func (tx *Tx) Delete(runID string) error {
 	path, err := tx.g.runPath(tx.projectID, runID)
 	if err != nil {
+		return err
+	}
+	if err := tx.checkOwned(); err != nil {
 		return err
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -213,28 +350,48 @@ func (g *Registry) Load(projectID, runID string) (*Run, error) {
 	return &run, nil
 }
 
+// UnreadableRun is a run file List could not parse.
+type UnreadableRun struct {
+	Path string `json:"path"`
+	Err  string `json:"error"`
+}
+
 // List reads every run of projectID, oldest (by creation) first. A file that
-// cannot be parsed is skipped rather than failing the listing.
+// cannot be parsed is left out of the listing and reported through Logf;
+// ListChecked also returns it, for a caller that must not decide without it.
 func (g *Registry) List(projectID string) ([]*Run, error) {
+	runs, _, err := g.ListChecked(projectID)
+	return runs, err
+}
+
+// ListChecked is List that also returns the run files it could not parse.
+func (g *Registry) ListChecked(projectID string) ([]*Run, []UnreadableRun, error) {
 	dir, err := g.projectDir(projectID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	entries, err := os.ReadDir(filepath.Join(dir, "runs"))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var runs []*Run
+	var bad []UnreadableRun
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || !strings.HasSuffix(name, ".json") || !ValidRunID(strings.TrimSuffix(name, ".json")) {
 			continue
 		}
 		run, err := g.Load(projectID, strings.TrimSuffix(name, ".json"))
-		if err != nil || run == nil {
+		if err != nil {
+			path := filepath.Join(dir, "runs", name)
+			bad = append(bad, UnreadableRun{Path: path, Err: err.Error()})
+			g.logf("skipping an unreadable autopilot run file %s: %v (fix or remove it; until then the run it holds is invisible)", path, err)
+			continue
+		}
+		if run == nil {
 			continue
 		}
 		runs = append(runs, run)
@@ -245,7 +402,44 @@ func (g *Registry) List(projectID string) ([]*Run, error) {
 		}
 		return runs[i].ID < runs[j].ID
 	})
-	return runs, nil
+	return runs, bad, nil
+}
+
+// KeepSettledRuns is how many settled runs (see Prune) a project keeps.
+const KeepSettledRuns = 20
+
+// Prune deletes a project's oldest settled runs beyond KeepSettledRuns, so
+// the registry -- which the runs API reads on every Web UI poll and next
+// reads on every call -- does not grow with the project's history. A run is
+// settled when it is not active and no start would take it over again:
+// finished, or superseded by a newer run of the same root and mode (a start
+// only ever takes over the newest one). A stopped or interrupted run that is
+// the newest of its root and mode is kept however old, since running the
+// same command again resumes it. runs is the project's listing, oldest
+// first; it returns the IDs it deleted.
+func (tx *Tx) Prune(runs []*Run, now time.Time) ([]string, error) {
+	type key struct{ root, mode string }
+	newest := map[key]*Run{}
+	for _, r := range runs {
+		newest[key{r.RootTicketID, r.Mode}] = r
+	}
+	var settled []*Run
+	for _, r := range runs {
+		if r.IsActive(now) || r.State == RunStarting {
+			continue
+		}
+		if r.State == RunFinished || newest[key{r.RootTicketID, r.Mode}] != r {
+			settled = append(settled, r)
+		}
+	}
+	var deleted []string
+	for i := 0; i < len(settled)-KeepSettledRuns; i++ {
+		if err := tx.Delete(settled[i].ID); err != nil {
+			return deleted, err
+		}
+		deleted = append(deleted, settled[i].ID)
+	}
+	return deleted, nil
 }
 
 // FindProject returns the project whose registry holds runID, "" if none

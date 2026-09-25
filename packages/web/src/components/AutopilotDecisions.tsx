@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Bot, ExternalLink } from 'lucide-react';
 import { Artifact } from '../types';
@@ -30,6 +30,9 @@ interface Props {
 // never listed here. Renders nothing when there are none.
 export const AutopilotDecisions: React.FC<Props> = ({ artifacts, nodes }) => {
   const { t, i18n } = useTranslation();
+  // Several tickets can be expanded at once: the heading's id has to be
+  // unique per section.
+  const headingId = useId();
   const items = artifacts.filter(a => a.name.startsWith(AUTOPILOT_ARTIFACT_PREFIX));
   if (items.length === 0) return null;
   const nodeName = new Map(nodes.map(n => [n.id, n.name]));
@@ -37,11 +40,11 @@ export const AutopilotDecisions: React.FC<Props> = ({ artifacts, nodes }) => {
   return (
     <section
       data-testid="autopilot-decisions"
-      aria-labelledby="autopilot-decisions-heading"
+      aria-labelledby={headingId}
       className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs text-xs"
     >
       <h3
-        id="autopilot-decisions-heading"
+        id={headingId}
         className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-2"
       >
         <Bot className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" aria-hidden="true" />

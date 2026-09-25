@@ -116,6 +116,11 @@ describe('ticket parent/children in the Web UI', () => {
     await user.click(within(family).getAllByTestId('ticket-family-child')[0]);
     await waitFor(() => expect(card('ALP-00003')).not.toBeNull());
     expect(search).toHaveValue('');
+    // The filters changed without the person touching them: announced
+    // (DFLT-00142 accessibility review, iteration 1).
+    expect(
+      screen.getAllByRole('status').some(s => s.textContent === i18n.t('ticketItem.family.filtersCleared', { id: 'ALP-00003' }))
+    ).toBe(true);
   });
 
   it('renders the headings in English too', async () => {

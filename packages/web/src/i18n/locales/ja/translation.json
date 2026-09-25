@@ -156,7 +156,8 @@
     "family": {
       "parent": "親チケット",
       "children": "子チケット（{{count}}件）",
-      "open": "{{id}} を開く"
+      "open": "{{id}} を開く",
+      "filtersCleared": "{{id}} を表示するためにフィルタを解除しました。"
     },
     "description": {
       "title": "説明",
@@ -644,7 +645,8 @@
     "PROJECT_LOCAL_PATH_NOT_SET": "このプロジェクトのローカルパスがこの環境で設定されていません。設定画面のプロジェクト設定でローカルパスを設定してから起動してください。",
     "AUTOPILOT_RUN_NOT_FOUND": "指定したオートパイロットの実行記録が見つかりません。",
     "AUTOPILOT_INVALID_STATE": "オートパイロットの実行記録が、この操作を受け付けられない状態です。画面を更新してから再度お試しください。",
-    "AUTOPILOT_REGISTRY_LOCKED": "オートパイロットの実行記録がほかの処理で使用中です。少し待ってから再度お試しください。"
+    "AUTOPILOT_REGISTRY_LOCKED": "オートパイロットの実行記録がほかの処理で使用中です。少し待ってから再度お試しください。",
+    "AUTOPILOT_REGISTRY_CORRUPT": "オートパイロットの実行記録の一部が読み取れないため、二重起動にならないかを判定できません。サーバーのログに出ているファイル（~/.graph-ops/autopilot 配下）を修正または削除してから、再度お試しください。"
   },
   "labels": {
     "colors": {

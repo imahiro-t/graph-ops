@@ -13,6 +13,7 @@
 import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, CheckCircle2, Loader2, Lock, RotateCcw, Save } from 'lucide-react';
+import { StatusLiveRegion } from '../StatusLiveRegion';
 import {
   AUTOPILOT_SETTING_KEYS,
   AutopilotSettingItem,
@@ -253,7 +254,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
 
       {loading && !data ? (
         <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 text-xs py-8 justify-center">
-          <Loader2 className="w-4 h-4 animate-spin" /> {t('settings.common.loading')}
+          <Loader2 className="w-4 h-4 motion-safe:animate-spin" aria-hidden="true" /> {t('settings.common.loading')}
         </div>
       ) : (
         <>
@@ -261,6 +262,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
             {items.map(it => {
               const inputId = `${idPrefix}-${it.key}`;
               const hintId = `${inputId}-hint`;
+              const sourceId = `${inputId}-source`;
               const canClear = !it.locked && (draft[it.key] ?? null) !== null;
               return (
                 <div key={it.key} className="flex items-start gap-3 px-3 py-2.5">
@@ -271,13 +273,21 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
                     <p id={hintId} className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                       {t(`settings.autopilot.keys.${it.key}.hint`)}
                     </p>
-                    <p className="text-[10px] mt-0.5 flex items-center gap-1 text-slate-400 dark:text-slate-500" data-testid={`autopilot-source-${it.key}`}>
+                    {/* Where the value comes from -- for a locked key, the reason
+                        it cannot be changed: required information, so it
+                        keeps the hint's contrast and is part of the
+                        control's description. */}
+                    <p
+                      id={sourceId}
+                      className="text-[10px] mt-0.5 flex items-center gap-1 text-slate-500 dark:text-slate-400"
+                      data-testid={`autopilot-source-${it.key}`}
+                    >
                       {it.locked && <Lock className="w-3 h-3" aria-hidden="true" />}
                       {sourceText(it)}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    {renderControl(it, inputId, hintId)}
+                    {renderControl(it, inputId, `${hintId} ${sourceId}`)}
                     {!it.locked && (
                       <button
                         type="button"
@@ -285,7 +295,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
                         disabled={!canClear || saving}
                         title={t('settings.autopilot.clearLocal')}
                         aria-label={t('settings.autopilot.clearLocalFor', { key: t(`settings.autopilot.keys.${it.key}.label`) })}
-                        className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30"
+                        className="p-1 rounded text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30"
                       >
                         <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
                       </button>
@@ -304,8 +314,12 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
           )}
 
           <div className="flex justify-end items-center gap-2">
+            {/* The flash disappears after 2 seconds; the always-mounted live
+                region is what announces it (SC 4.1.3), like
+                AppSettingsEditor's. */}
+            <StatusLiveRegion message={savedFlash ? t('settings.common.saveSuccess') : ''} />
             {savedFlash && (
-              <span className="text-emerald-600 text-xs flex items-center gap-1">
+              <span aria-hidden="true" className="text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}
               </span>
             )}
@@ -315,7 +329,11 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
               disabled={saving || !isDirty}
               className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
             >
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              {saving ? (
+                <Loader2 className="w-3.5 h-3.5 motion-safe:animate-spin" aria-hidden="true" />
+              ) : (
+                <Save className="w-3.5 h-3.5" aria-hidden="true" />
+              )}
               {saving ? t('settings.common.saving') : t('settings.common.save')}
             </button>
           </div>

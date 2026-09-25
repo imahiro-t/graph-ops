@@ -2,6 +2,7 @@ package runner
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/graph-ops/core-go/internal/autopilot"
@@ -180,6 +181,18 @@ func RenderSummary(run *autopilot.Run, titles map[string]string) string {
 	if run.Mode == autopilot.ModeTree && len(outside) > 0 {
 		b.WriteString("\n## Work not in the root branch\n\n")
 		for _, st := range outside {
+			if st.FailedRole == autopilot.RoleMergeUp && st.Merge == autopilot.MergedSelf {
+				// Its own merge-into-parent went through; only its merge-up
+				// -- what reached its branch after that, its subtree's work
+				// above all -- did not.
+				fmt.Fprintf(&b, "- %s (%s, %s): its own merge into its parent is in; what reached branch `%s` after that is not",
+					st.ID, st.Status, st.Reason, st.Branch)
+				if carried := mergedInto(run, st.ID); len(carried) > 0 {
+					fmt.Fprintf(&b, ", including the work of %s", strings.Join(carried, ", "))
+				}
+				b.WriteString("\n")
+				continue
+			}
 			fmt.Fprintf(&b, "- %s (%s, %s): branch `%s`\n", st.ID, st.Status, st.Reason, st.Branch)
 		}
 	}
@@ -199,6 +212,33 @@ func RenderSummary(run *autopilot.Run, titles map[string]string) string {
 		}
 	}
 	return b.String()
+}
+
+// mergedInto returns, in run order, every ticket whose work reached id's
+// branch: those merged into it, and recursively those merged into them.
+func mergedInto(run *autopilot.Run, id string) []string {
+	in := map[string]bool{id: true}
+	var out []string
+	for changed := true; changed; {
+		changed = false
+		for _, o := range run.Order {
+			st := run.Tickets[o]
+			if st == nil || in[o] || !in[st.Target] {
+				continue
+			}
+			if st.Merge == autopilot.MergedSelf || st.Merge == autopilot.MergedSubtree {
+				in[o] = true
+				out = append(out, o)
+				changed = true
+			}
+		}
+	}
+	order := map[string]int{}
+	for i, o := range run.Order {
+		order[o] = i
+	}
+	sort.SliceStable(out, func(i, j int) bool { return order[out[i]] < order[out[j]] })
+	return out
 }
 
 func code(s string) string {

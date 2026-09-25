@@ -56,6 +56,10 @@ const (
 	ReasonParentFailed        = "parent_failed"
 	ReasonUnresponsive        = "unresponsive"
 	ReasonMergeConflict       = "merge_conflict"
+	// ReasonLaunchFailed: the session could not be started (git could not
+	// prepare the worktree, or the terminal did not open) MaxLaunchAttempts
+	// times in a row.
+	ReasonLaunchFailed = "launch_failed"
 
 	StopTicketFailed   = "ticket_failed"
 	StopFinalizeFailed = "finalize_failed"
@@ -177,6 +181,9 @@ type TicketState struct {
 	// FailedRole is the role of the session whose report failed/blocked
 	// this ticket (work or merge-up).
 	FailedRole string `json:"failed_role,omitempty"`
+	// LaunchFailures counts the launches in a row that failed to start this
+	// ticket's session; reset by a launch that succeeds.
+	LaunchFailures int `json:"launch_failures,omitempty"`
 
 	// Role is the role of the session running for this ticket right now,
 	// "" when none is. LastRole is the role of the latest one.
@@ -224,15 +231,44 @@ func (r *Run) Ticket(id string) *TicketState {
 	return r.Tickets[id]
 }
 
-// addTicket records st, keeping Order.
+// addTicket records st, keeping Order. A ticket classified again (after
+// dropTicket) keeps its original place in Order.
 func (r *Run) addTicket(st *TicketState) {
 	if r.Tickets == nil {
 		r.Tickets = map[string]*TicketState{}
 	}
-	if _, ok := r.Tickets[st.ID]; !ok {
+	if _, ok := r.Tickets[st.ID]; !ok && !r.inOrder(st.ID) {
 		r.Order = append(r.Order, st.ID)
 	}
 	r.Tickets[st.ID] = st
+}
+
+func (r *Run) inOrder(id string) bool {
+	for _, o := range r.Order {
+		if o == id {
+			return true
+		}
+	}
+	return false
+}
+
+// dropTicket forgets a ticket's classification so the planner classifies it
+// afresh the next time it reaches it. Its place in Order is kept.
+func (r *Run) dropTicket(id string) { delete(r.Tickets, id) }
+
+// reclassifiedOnTakeOver are the skips a takeover forgets, because what they
+// were decided from may have changed since: the settings (maxTickets,
+// maxDepth) that a person raises to get past a stop, and the DB statuses
+// (DONE, CLOSED, IN PROGRESS elsewhere) that may have moved on. A
+// parent_failed skip is re-decided by the planner itself once its cause is
+// retried.
+var reclassifiedOnTakeOver = map[string]bool{
+	ReasonLimitTickets:        true,
+	ReasonLimitDepth:          true,
+	ReasonAlreadyDone:         true,
+	ReasonClosed:              true,
+	ReasonInProgressElsewhere: true,
+	ReasonAncestorInProgress:  true,
 }
 
 // ActiveSession returns the ticket that has a session running, or nil. A
@@ -269,14 +305,22 @@ func (r *Run) stop(now time.Time, reason, ticket, detail string) {
 // back to running, a new generation, settings refreshed, and the failed
 // pieces queued for one more attempt -- failed/blocked work is re-launched
 // once, a merge-up that could not be done is tried again, and a failed
-// finalize is launched again (S7). Records of done and skipped tickets are
-// kept.
+// finalize is launched again (S7). Records of done tickets are kept; skips
+// that depended on the settings or on DB statuses are forgotten, so the
+// planner decides them again under the refreshed settings -- raising
+// maxTickets or maxDepth and running the same command again processes the
+// tickets the limits had left out.
 func (r *Run) TakeOver(now time.Time, settings Settings) {
 	r.State = RunRunning
 	r.Generation++
 	r.Settings = settings
 	r.Heartbeat = now
 	r.StopReason, r.StopTicket, r.StopDetail = "", "", ""
+	for id, st := range r.Tickets {
+		if st.Status == TicketSkipped && reclassifiedOnTakeOver[st.Reason] {
+			r.dropTicket(id)
+		}
+	}
 	for _, st := range r.Tickets {
 		if st.Status != TicketFailed && st.Status != TicketBlocked {
 			continue

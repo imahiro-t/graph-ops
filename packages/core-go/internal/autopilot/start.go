@@ -65,9 +65,17 @@ func (g *Registry) Begin(req BeginRequest) (BeginResult, error) {
 	var savedID string
 	err := g.WithLock(req.ProjectID, func(tx *Tx) error {
 		now := g.now()
-		runs, err := tx.List()
+		runs, unreadable, err := g.ListChecked(req.ProjectID)
 		if err != nil {
 			return err
+		}
+		if len(unreadable) > 0 {
+			// An unreadable file may be an active run: starting now could
+			// duplicate it, so refuse until somebody looks.
+			return domain.NewAPIError(ErrCodeRegistryCorrupt,
+				"AUTOPILOT_REGISTRY_CORRUPT: the autopilot run file %s cannot be read (%s), so whether this start would duplicate an active run cannot be told; fix or remove the file and start again",
+				unreadable[0].Path, unreadable[0].Err).
+				WithDetails(map[string]any{"path": unreadable[0].Path})
 		}
 		var cand *Run
 		var previous []byte
@@ -147,6 +155,11 @@ func (g *Registry) Begin(req BeginRequest) (BeginResult, error) {
 				Tickets:      map[string]*TicketState{},
 			}
 			res.Created = true
+			if deleted, err := tx.Prune(runs, now); err != nil {
+				g.logf("pruning old autopilot runs of project %s: %v", req.ProjectID, err)
+			} else if len(deleted) > 0 {
+				g.logf("pruned %d settled autopilot run(s) of project %s beyond the newest %d", len(deleted), req.ProjectID, KeepSettledRuns)
+			}
 		}
 		if req.Reserve {
 			cand.State = RunStarting

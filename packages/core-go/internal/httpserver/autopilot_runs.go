@@ -22,6 +22,11 @@ func (s *Server) autopilotService() *runner.Service {
 		Repo: s.repo, HomeDir: s.cfg.HomeDir,
 		UserExtensionsDir: s.cfg.UserExtensionsDir, TeamExtensionsDir: s.cfg.TeamExtensionsDir,
 		TerminalCommand: s.cfg.TerminalCommand, ClaudeBinary: s.cfg.ClaudeBinary,
+		// The registry's operational warnings (a stale lock removed, an
+		// unreadable run file) go to the server log.
+		Logf: func(format string, args ...any) {
+			s.logger.Warn(fmt.Sprintf(format, args...), slog.String("event", "autopilot_registry"))
+		},
 	})
 	if s.cfg.AutopilotLauncher != nil {
 		svc.Launcher = s.cfg.AutopilotLauncher
@@ -109,16 +114,18 @@ func (s *Server) handleStartAutopilot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, statusForError(err, http.StatusInternalServerError), err)
 		return
 	}
-	// The run's own snapshot, which Start just took from the effective
+	// The run's own snapshot, which Start just saved from the effective
 	// settings: what the orchestrator -- and every child it launches -- runs
 	// with.
-	permissionMode := autopilot.Defaults().PermissionMode
-	if run, err := svc.Registry.Load(res.ProjectID, res.RunID); err == nil && run != nil && run.Settings.PermissionMode != "" {
-		permissionMode = run.Settings.PermissionMode
-	}
-	launchErr := svc.Launcher.Launch(localPath, []string{"--permission-mode", permissionMode},
+	launchErr := svc.Launcher.Launch(localPath, []string{"--permission-mode", res.PermissionMode},
 		runner.OrchestratorPrompt(mode, ticket.ID, res.RunID))
 	if launchErr != nil {
+		s.logger.Warn("the autopilot terminal failed to open; cancelling the reservation",
+			slog.String("event", "autopilot_launch_failed"),
+			slog.String("run_id", res.RunID),
+			slog.String("ticket_id", ticket.ID),
+			slog.String("mode", mode),
+			slog.String("error", launchErr.Error()))
 		if cancelErr := svc.CancelReservation(res.RunID); cancelErr != nil {
 			s.logger.Warn("failed to cancel the autopilot reservation after the terminal failed to open",
 				slog.String("event", "autopilot_reservation_cancel_failed"),
@@ -128,6 +135,14 @@ func (s *Server) handleStartAutopilot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("opening the autopilot terminal: %w", launchErr))
 		return
 	}
+	s.logger.Info("autopilot launched from the Web UI",
+		slog.String("event", "autopilot_launched"),
+		slog.String("run_id", res.RunID),
+		slog.String("ticket_id", ticket.ID),
+		slog.String("mode", mode),
+		slog.Bool("created", res.Created),
+		slog.Bool("resumed", res.Resumed),
+		slog.String("permission_mode", res.PermissionMode))
 	writeJSON(w, http.StatusOK, autopilotStartResponse{
 		RunID: res.RunID, Mode: res.Mode, Root: res.Root, State: res.State,
 		Created: res.Created, Resumed: res.Resumed,

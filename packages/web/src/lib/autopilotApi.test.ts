@@ -26,6 +26,7 @@ function run(o: Partial<AutopilotRun>): AutopilotRun {
     heartbeat: '',
     tickets: {},
     members: ['B', 'C'],
+    pending: ['C'],
     ...o
   };
 }
@@ -56,14 +57,24 @@ describe('ticketAutopilotView', () => {
   });
 
   it('does not mark a reached, finished member as waiting', () => {
-    const runs = [run({ tickets: { B: 'done', C: 'skipped' } })];
+    const runs = [run({ tickets: { B: 'done', C: 'skipped' }, pending: [] })];
     expect(ticketAutopilotView(runs, 'C', descendantsOf).badges).toEqual([]);
   });
 
+  // QA review 2 (iteration 1): a member the run will never launch -- DONE,
+  // or below a limit_depth / limit_tickets skip -- is not "waiting", even
+  // though the run has not reached it.
+  it('marks as waiting only what the run will still launch (pending), not every unreached member', () => {
+    const runs = [run({ tickets: { B: 'launched' }, current: 'B', pending: [] })];
+    expect(ticketAutopilotView(runs, 'C', descendantsOf).badges).toEqual([]);
+    // Still a member: the buttons stay disabled.
+    expect(ticketAutopilotView(runs, 'C', descendantsOf).blockedBy).toEqual({ ticket: 'B', tree: 'B' });
+  });
+
   it('is resumable only when the newest run of that root and mode is stopped or interrupted', () => {
-    const stopped = run({ active: false, state: 'stopped', members: [] });
-    const interrupted = run({ active: false, state: 'running', members: [] });
-    const finished = run({ active: false, state: 'finished', members: [] });
+    const stopped = run({ active: false, state: 'stopped', members: [], pending: [] });
+    const interrupted = run({ active: false, state: 'running', members: [], pending: [] });
+    const finished = run({ active: false, state: 'finished', members: [], pending: [] });
     expect(ticketAutopilotView([stopped], 'B', descendantsOf).resumable).toEqual({ ticket: false, tree: true });
     expect(ticketAutopilotView([interrupted], 'B', descendantsOf).resumable.tree).toBe(true);
     // Newest first: a finished run hides an older stopped one.

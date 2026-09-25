@@ -43,6 +43,7 @@ function run(overrides: Partial<AutopilotRun> = {}): AutopilotRun {
     current_role: 'work',
     tickets: { [R]: 'done', [C]: 'launched' },
     members: [R, C, D],
+    pending: [D],
     ...overrides
   };
 }

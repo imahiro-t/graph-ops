@@ -200,7 +200,7 @@ func TestRegistry_TakesOverInterruptedRun(t *testing.T) {
 }
 
 func TestRegistry_StoppedFinishedAndModeRules(t *testing.T) {
-	t.Run("stopped is taken over, done/skipped kept, stop kept as history", func(t *testing.T) {
+	t.Run("stopped is taken over, done kept, DB/limit skips forgotten, stop kept as history", func(t *testing.T) {
 		g, _ := newRegistry(t)
 		run := mustBegin(t, g, nil, "R", ModeTree)
 		run.addTicket(&TicketState{ID: "R", Status: TicketDone})
@@ -217,8 +217,13 @@ func TestRegistry_StoppedFinishedAndModeRules(t *testing.T) {
 		if !res.TookOver || r.ID != run.ID || r.State != RunRunning || r.StopReason != "" || len(r.Stops) != 1 {
 			t.Fatalf("run = %+v", r)
 		}
-		if r.Tickets["R"].Status != TicketDone || r.Tickets["B"].Status != TicketSkipped || !r.Tickets["A"].RetryPending {
+		// B's already_done skip is decided again by the planner (QA review
+		// 3); its place in Order is kept.
+		if r.Tickets["R"].Status != TicketDone || r.Tickets["B"] != nil || !r.Tickets["A"].RetryPending {
 			t.Fatalf("tickets = %+v %+v %+v", r.Tickets["R"], r.Tickets["B"], r.Tickets["A"])
+		}
+		if len(r.Order) != 3 || r.Order[1] != "B" {
+			t.Fatalf("order = %v", r.Order)
 		}
 	})
 	t.Run("finished is not taken over", func(t *testing.T) {

@@ -634,6 +634,11 @@ export interface AutopilotRun {
   // For an active run: the tickets it owns (the root and, for a tree run,
   // all its descendants, reached or not). Empty for an inactive run.
   members: string[];
+  // For an active run: the members it may still launch as work -- what the
+  // "waiting" badge shows. DONE/CLOSED tickets and subtrees the run will not
+  // enter (beyond maxDepth/maxTickets, under a ticket in progress elsewhere
+  // or a failed one) are left out. Empty for an inactive run.
+  pending: string[];
 }
 
 // POST /api/tickets/{id}/autopilot's answer.

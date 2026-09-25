@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -31,9 +32,42 @@ const WorktreeDirName = ".claude/worktrees"
 // naming).
 func BranchFor(ticketID string) string { return "worktree-" + ticketID }
 
+// ticketIDPattern is what a ticket ID must look like to name a worktree
+// directory and a branch: the IDs GraphOps and Jira issue always do. It is
+// checked before an ID gets near a path or a git argument, so an ID from a
+// future external data source cannot climb out of .claude/worktrees or pass
+// for a git option.
+var ticketIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
+// ValidTicketID reports whether ticketID can name a worktree and a branch.
+func ValidTicketID(ticketID string) bool {
+	return ticketIDPattern.MatchString(ticketID) && !strings.Contains(ticketID, "..")
+}
+
 // WorktreePath returns ticketID's worktree path inside repo.
 func WorktreePath(repo, ticketID string) string {
 	return filepath.Join(repo, filepath.FromSlash(WorktreeDirName), ticketID)
+}
+
+// statusPaths returns the paths `git status --porcelain -z` lists, sorted. A
+// rename or copy record ("R  new\0old\0") is followed by a record of its
+// source path, which has no status prefix: that one is skipped, not cut
+// like a status record.
+func statusPaths(status string) []string {
+	var paths []string
+	recs := strings.Split(status, "\x00")
+	for i := 0; i < len(recs); i++ {
+		rec := recs[i]
+		if len(rec) <= 3 {
+			continue
+		}
+		paths = append(paths, rec[3:])
+		if strings.ContainsAny(rec[:2], "RC") {
+			i++
+		}
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 // Git runs git in a repository.
@@ -172,6 +206,10 @@ func (g Git) WorktreeFor(repo, branch string) (string, error) {
 // yet. An existing worktree or branch is reused as it is (resumption).
 // It returns the worktree path, the branch, and whether anything was created.
 func (g Git) EnsureWorktree(repo, ticketID, base string) (path, branch string, created bool, err error) {
+	if !ValidTicketID(ticketID) {
+		return "", "", false, domain.NewAPIError(domain.ErrCodeValidation,
+			"VALIDATION_ERROR: ticket id %q cannot name a worktree or branch (letters, digits, '.', '_' and '-' only)", ticketID)
+	}
 	branch = BranchFor(ticketID)
 	path = WorktreePath(repo, ticketID)
 	existing, err := g.WorktreeFor(repo, branch)
@@ -283,14 +321,7 @@ func (g Git) WorktreeFingerprint(worktree string) string {
 	h.Write([]byte(head))
 	h.Write([]byte{0})
 	h.Write([]byte(status))
-	var paths []string
-	for _, rec := range strings.Split(status, "\x00") {
-		if len(rec) > 3 {
-			paths = append(paths, rec[3:])
-		}
-	}
-	sort.Strings(paths)
-	for _, p := range paths {
+	for _, p := range statusPaths(status) {
 		if info, err := os.Stat(filepath.Join(worktree, p)); err == nil {
 			fmt.Fprintf(h, "\x00%s %d %d", p, info.Size(), info.ModTime().UnixNano())
 		}

@@ -45,6 +45,11 @@ var newAutopilotService = func(repo store.GraphRepository, rc runtimeConfig) *ru
 		Repo: repo, HomeDir: rc.HomeDir,
 		UserExtensionsDir: rc.UserExtensionsDir, TeamExtensionsDir: rc.TeamExtensionsDir,
 		TerminalCommand: rc.TerminalCommand, ClaudeBinary: rc.ClaudeBinary,
+		// The registry's operational warnings go to stderr, out of the
+		// one-line JSON the orchestrator reads on stdout.
+		Logf: func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, "graph-engine: warning: "+format+"\n", args...)
+		},
 	})
 }
 
@@ -375,23 +380,17 @@ func cmdAutopilotStatus(repo store.GraphRepository, rc runtimeConfig, svc *runne
 // project is resolved like list-labels' (--project, else cwd's local path,
 // else the current project).
 func cmdAutopilotSettings(repo store.GraphRepository, rc runtimeConfig, args []string) error {
-	var projectFlag string
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--project":
-			if i+1 >= len(args) || args[i+1] == "" {
-				return fmt.Errorf("%s: --project needs a value", autopilotSettingsUsageLine)
-			}
-			if projectFlag != "" {
-				return fmt.Errorf("%s: --project given more than once", autopilotSettingsUsageLine)
-			}
-			projectFlag = args[i+1]
-			i++
-		default:
-			return fmt.Errorf("%s: unexpected argument %q", autopilotSettingsUsageLine, args[i])
-		}
+	pos, vals, err := autopilotFlags(args, autopilotSettingsUsageLine, "--project")
+	if err != nil {
+		return err
 	}
-	projectID, notice, err := resolveCLIProject(repo, rc, projectFlag)
+	if len(pos) != 0 {
+		return fmt.Errorf("%s: unexpected argument %q", autopilotSettingsUsageLine, pos[0])
+	}
+	if v, ok := vals["--project"]; ok && v == "" {
+		return fmt.Errorf("%s: --project needs a value", autopilotSettingsUsageLine)
+	}
+	projectID, notice, err := resolveCLIProject(repo, rc, vals["--project"])
 	if err != nil {
 		return err
 	}

@@ -39,6 +39,7 @@ It prints one JSON line with `action`, `ticket`, `role`, `reason` and `command`.
   - Exit code 2: do not judge anything yourself; go back to `next`. When the line says `awaiting_human`, first tell the person in one line which ticket waits for them (in that ticket's terminal or the Web UI).
   - Exit code 1: an error. Run `next` again once; if that fails too, show the error and stop.
 - `merge-up`: run `command`, then `next` again. (A `ticket` run never returns it.)
+- `launch` exits with code 1: do not retry it and do not investigate. Keep the error's one line and run `next` again. The engine counts failed launches and records the ticket as failed (`launch_failed`) after the second one in a row, so `next` moves on by itself and `onFailure` applies. Only if `next` hands out the same command a third time after two failures in a row, show the error and go to step 3.
 - `done` or `stopped`: go to step 3.
 
 ## 3. Show the summary

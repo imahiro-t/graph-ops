@@ -106,7 +106,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
               className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-slate-700 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
             >
               {starting === mode ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                <Loader2 className="w-3.5 h-3.5 motion-safe:animate-spin" aria-hidden="true" />
               ) : mode === 'tree' ? (
                 <GitFork className="w-3.5 h-3.5" aria-hidden="true" />
               ) : (
@@ -117,6 +117,13 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
           );
         })}
       </div>
+      {view.awaiting && (
+        // What the person is waited on for, as text a sighted keyboard user
+        // can read too (the badge only carries it as a tooltip).
+        <p data-testid="autopilot-awaiting" className="text-[11px] text-amber-900 dark:text-amber-100">
+          {t('autopilot.badges.awaitingTitle', { what: view.awaiting })}
+        </p>
+      )}
       {distinctReasons.map((r, i) => (
         <p
           key={r}

@@ -116,11 +116,12 @@ EOF
 
 ## 7. Role `merge-up`
 
-This session runs in `merge_worktree` because `merge_source_branch` could not be fast-forwarded into `target_branch`. Do not call `get-executable`, `complete-node`, `reopen-nodes` or any other command that changes the ticket's nodes, and save no artifacts.
+This session runs in `merge_worktree` because `merge_source_branch` could not be fast-forwarded into `target_branch`: not a fast-forward, uncommitted changes in the worktree, or another git error (an untracked file in the way, a leftover `index.lock`, a missing branch). Do not call `get-executable`, `complete-node`, `reopen-nodes` or any other command that changes the ticket's nodes, and save no artifacts.
 
 1. If the worktree has uncommitted changes, neither commit nor discard them: report `blocked` with reason `merge_conflict` and say why in the summary.
 2. Run `git merge "<merge_source_branch>"`, resolve the conflicts, re-run the tests, and commit the merge.
 3. Report `done` (step 6). If the conflicts cannot be resolved or the tests keep failing, run `git merge --abort` and report `blocked` with reason `merge_conflict`.
+4. If `git merge` fails before any conflict (an untracked file it would overwrite, a leftover `index.lock`, a missing branch), do not delete or move files you did not create: report `blocked` with reason `merge_failed` and the git message in the summary.
 
 ## 8. Role `finalize`
 

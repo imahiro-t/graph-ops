@@ -24,22 +24,30 @@ type RunView struct {
 	// not reached yet, which Tickets does not list. Empty for a run that is
 	// not active, since only an active run blocks a start.
 	Members []string `json:"members"`
+	// Pending is the members the run may still launch as work
+	// (autopilot.Pending): the Web UI's "waiting" badge. Unlike Members it
+	// leaves out what the planner would skip -- DONE/CLOSED tickets, and
+	// subtrees beyond maxDepth or maxTickets, under a ticket in progress
+	// elsewhere, or under a failed one. Empty for a run that is not active.
+	Pending []string `json:"pending"`
 }
 
 // Runs lists projectID's active runs and its RecentInactiveRuns most recent
 // other ones, newest first (the Web UI's runs API). The tree is read from
 // the DB once, whatever the number of runs.
 func (s *Service) Runs(projectID string) ([]RunView, error) {
-	statuses, err := s.Status(projectID)
+	runs, err := s.registry().List(projectID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]RunView, 0, len(statuses))
+	now := s.now()
+	out := make([]RunView, 0, len(runs))
 	var idx *projectIndex
 	inactive := 0
-	for _, st := range statuses {
-		view := RunView{RunStatus: st, Members: []string{}}
-		if !st.Active {
+	for i := len(runs) - 1; i >= 0; i-- {
+		r := runs[i]
+		view := RunView{RunStatus: runStatus(r, now), Members: []string{}, Pending: []string{}}
+		if !view.Active {
 			if inactive >= RecentInactiveRuns {
 				continue
 			}
@@ -47,15 +55,16 @@ func (s *Service) Runs(projectID string) ([]RunView, error) {
 			out = append(out, view)
 			continue
 		}
-		view.Members = append(view.Members, st.Root)
-		if st.Mode == autopilot.ModeTree {
-			if idx == nil {
-				if idx, err = s.index(projectID); err != nil {
-					return nil, err
-				}
+		if idx == nil {
+			if idx, err = s.index(projectID); err != nil {
+				return nil, err
 			}
-			view.Members = append(view.Members, idx.descendants(st.Root)...)
 		}
+		view.Members = append(view.Members, r.RootTicketID)
+		if r.Mode == autopilot.ModeTree {
+			view.Members = append(view.Members, idx.descendants(r.RootTicketID)...)
+		}
+		view.Pending = append(view.Pending, autopilot.Pending(r, idx.tree(r.RootTicketID, r.Mode), foreignLaunched(runs, r.ID, now))...)
 		out = append(out, view)
 	}
 	return out, nil

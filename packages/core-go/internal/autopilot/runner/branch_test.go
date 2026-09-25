@@ -332,7 +332,9 @@ func TestMergeUp_SessionIsWatchedForStalls(t *testing.T) {
 		}
 		h.clock.Advance(61 * 60e9)
 	})
-	if s := h.st(run.RunID, c); s.Status != autopilot.TicketFailed || s.Reason != autopilot.ReasonUnresponsive || s.Merge != autopilot.NotMerged {
+	// C's own merge-into-parent went through, so it stays merged_self: only
+	// what its merge-up would have carried is left out (QA review 4).
+	if s := h.st(run.RunID, c); s.Status != autopilot.TicketFailed || s.Reason != autopilot.ReasonUnresponsive || s.Merge != autopilot.MergedSelf {
 		t.Fatalf("C = %+v", s)
 	}
 }

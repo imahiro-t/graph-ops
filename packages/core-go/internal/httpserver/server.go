@@ -637,7 +637,7 @@ func statusForError(err error, fallback int) int {
 		// the request's precondition not being met, a 400 like the
 		// validation errors above.
 		case autopilot.ErrCodeAlreadyRunning, autopilot.ErrCodeRootFinished,
-			autopilot.ErrCodeInvalidRunState, autopilot.ErrCodeRegistryLockTimed:
+			autopilot.ErrCodeInvalidRunState, autopilot.ErrCodeRegistryLockTimed, autopilot.ErrCodeRegistryCorrupt:
 			return http.StatusConflict
 		case autopilot.ErrCodeLocalPathNotSet:
 			return http.StatusBadRequest

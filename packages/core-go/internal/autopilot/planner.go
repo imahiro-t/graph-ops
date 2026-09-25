@@ -175,7 +175,13 @@ func ApplyOutcome(run *Run, st *TicketState, result, reason, detail, summary str
 				reason = ReasonMergeConflict
 			}
 			st.Status, st.Reason, st.Detail, st.FailedRole = result, reason, detail, RoleMergeUp
-			st.Merge = NotMerged
+			// A ticket whose own merge-into-parent went through stays
+			// merged_self: its own commits are in the target; only what
+			// its subtree merged into it since is not (the summary says
+			// so).
+			if st.Merge != MergedSelf {
+				st.Merge = NotMerged
+			}
 		}
 		st.MergeNeedsSession = false
 	default:
@@ -244,7 +250,7 @@ func (p *planner) visit(id string, depth int, target, inheritedSkip, skipCause s
 	if st != nil && st.Status == TicketSkipped && st.Reason == ReasonParentFailed && inheritedSkip != ReasonParentFailed {
 		// The failure that skipped it has since been retried successfully.
 		if c := p.run.Ticket(st.SkipCause); c == nil || (c.Status != TicketFailed && c.Status != TicketBlocked) {
-			st = p.reclassify(st, id, depth, target, tt)
+			st = p.reclassify(id, depth, target, tt)
 		}
 	}
 	if st == nil {
@@ -321,10 +327,9 @@ func (p *planner) visitChildren(tt *TreeTicket, depth int, target, inheritedSkip
 	return nil
 }
 
-func (p *planner) reclassify(st *TicketState, id string, depth int, target string, tt *TreeTicket) *TicketState {
-	delete(p.run.Tickets, id)
-	fresh := p.classify(id, depth, target, "", "", tt)
-	return fresh
+func (p *planner) reclassify(id string, depth int, target string, tt *TreeTicket) *TicketState {
+	p.run.dropTicket(id)
+	return p.classify(id, depth, target, "", "", tt)
 }
 
 // classify records a ticket the run reaches for the first time: queued for
@@ -403,4 +408,73 @@ func (p *planner) finish() Action {
 		run.stop(p.in.Now, StopFinalizeFailed, root.ID, detail)
 		return Action{Action: ActionStopped, Ticket: root.ID, Reason: StopFinalizeFailed, Detail: detail}
 	}
+}
+
+// Pending returns the tickets of run's tree that the run may still launch as
+// work, in the order it would reach them -- the Web UI's "waiting" badge. It
+// mirrors Next's walk without changing the run: a ticket already queued, or
+// failed and due for its retry, is pending; a ticket the run has not reached
+// yet is pending unless the planner would skip it (DONE/CLOSED, IN PROGRESS
+// elsewhere, deeper than maxDepth, beyond maxTickets). Subtrees the planner
+// would not enter -- under a limit_depth/limit_tickets or in-progress skip,
+// or under a failed ticket (onFailure stop stops the run; continue skips
+// them as parent_failed) -- contribute nothing. A finished or stopped run
+// has nothing pending.
+func Pending(run *Run, tree Tree, foreignLaunched map[string]bool) []string {
+	if run.IsFinal() {
+		return nil
+	}
+	budget := run.Settings.MaxTickets - run.WorkLaunches
+	var out []string
+	var walk func(id string, depth int)
+	walk = func(id string, depth int) {
+		tt := tree[id]
+		descend := true
+		if st := run.Ticket(id); st != nil {
+			switch st.Status {
+			case TicketQueued:
+				out = append(out, id)
+				if !st.Counted {
+					budget--
+				}
+			case TicketFailed, TicketBlocked:
+				if st.RetryPending && st.Role == "" {
+					out = append(out, id)
+				} else if !st.RetryPending {
+					descend = false
+				}
+			case TicketSkipped:
+				descend = st.Reason == ReasonAlreadyDone || st.Reason == ReasonClosed
+			}
+		} else if id == run.RootTicketID {
+			out = append(out, id)
+			budget--
+		} else {
+			status := domain.TicketStatus("")
+			if tt != nil {
+				status = tt.Status
+			}
+			switch {
+			case depth > run.Settings.MaxDepth:
+				return
+			case status == domain.TicketDone || status == domain.TicketClosed:
+				// Skipped, but its children are still processed.
+			case IsInProgress(status) && !foreignLaunched[id]:
+				return
+			case budget <= 0:
+				return
+			default:
+				out = append(out, id)
+				budget--
+			}
+		}
+		if !descend || tt == nil || run.Mode != ModeTree {
+			return
+		}
+		for _, c := range tt.Children {
+			walk(c, depth+1)
+		}
+	}
+	walk(run.RootTicketID, 0)
+	return out
 }

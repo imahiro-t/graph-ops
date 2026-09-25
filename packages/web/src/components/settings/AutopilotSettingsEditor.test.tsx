@@ -102,7 +102,9 @@ describe('AutopilotSettingsEditor', () => {
     await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
 
     await waitFor(() => expect(putBodies).toEqual([{ maxTickets: 30 }]));
-    await screen.findByText(i18n.t('settings.common.saveSuccess'));
+    // Announced by the always-mounted live region (SC 4.1.3); the visible
+    // flash is aria-hidden so it is not read twice.
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(i18n.t('settings.common.saveSuccess')));
     expect(screen.getByTestId('autopilot-source-maxTickets')).toHaveTextContent(i18n.t('settings.autopilot.source.local'));
     expect((screen.getByLabelText(label('maxTickets')) as HTMLInputElement).value).toBe('30');
     expect(onDirty).toHaveBeenLastCalledWith(false);
@@ -210,6 +212,37 @@ describe('AutopilotSettingsEditor', () => {
     expect(screen.getByText(/1000/)).toHaveTextContent(label('maxTickets'));
     expect(screen.getByText(/bypassPermissions/, { selector: 'li' })).toBeInTheDocument();
     expect(screen.getByText('fallback english')).toBeInTheDocument();
+  });
+
+  // DFLT-00142 accessibility review (iteration 1).
+  it('ties a locked control to where its value comes from, and uses readable colors', async () => {
+    const user = userEvent.setup();
+    stubServer(
+      response({
+        mainReflection: { value: 'pull_request', source: 'team_project', locked: true, team: 'pull_request' },
+        maxDepth: { value: 2, source: 'local', local: 2 }
+      })
+    );
+    renderEditor();
+
+    const select = await screen.findByLabelText(label('mainReflection'));
+    const source = screen.getByTestId('autopilot-source-mainReflection');
+    // The reason it cannot be changed is part of the control's description.
+    expect(select).toHaveAccessibleDescription(expect.stringContaining(i18n.t('settings.autopilot.source.team_project')));
+    expect(select.getAttribute('aria-describedby')?.split(' ')).toContain(source.id);
+    expect(source.className).toContain('text-slate-500');
+    expect(source.className).not.toContain('text-slate-400 dark:text-slate-500');
+
+    const reset = screen.getByRole('button', { name: i18n.t('settings.autopilot.clearLocalFor', { key: label('maxDepth') }) });
+    expect(reset.className).toContain('text-slate-500');
+
+    await user.clear(screen.getByLabelText(label('maxTickets')));
+    await user.type(screen.getByLabelText(label('maxTickets')), '30');
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(i18n.t('settings.common.saveSuccess')));
+    const flash = screen.getByText(i18n.t('settings.common.saveSuccess'), { selector: 'span[aria-hidden="true"]' });
+    expect(flash.className).toContain('text-emerald-700');
+    expect(flash.className).toContain('dark:text-emerald-400');
   });
 
   it('asks for a project when none is selected', () => {

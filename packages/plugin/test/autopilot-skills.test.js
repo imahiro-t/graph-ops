@@ -142,6 +142,11 @@ for (const [name, mode] of [['autopilot-ticket', 'ticket'], ['autopilot-tree', '
       '- `done` or `stopped`:',
       "with the Bash tool's `run_in_background`, then end your turn",
       'Exit code 2: do not judge anything yourself; go back to `next`',
+      // DFLT-00142 QA review 1: a failed launch (or merge-up) goes back to
+      // next, which moves on once the engine has recorded the failure.
+      mode === 'tree' ? '- `launch` or `merge-up` exits with code 1: do not retry it' : '- `launch` exits with code 1: do not retry it',
+      'records the ticket as failed (`launch_failed`) after the second one in a row',
+      'hands out the same command a third time after two failures in a row',
       "Never do the ticket's work here".replace("the ticket's", mode === 'tree' ? "any ticket's" : "the ticket's"),
       'Keep only the one-line results',
       'graph-engine autopilot summary "<runId>"',
