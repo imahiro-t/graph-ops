@@ -18,6 +18,12 @@
 // dark:text-slate-400 (4.04:1 on the slate-700 hover) to the same
 // text-slate-600 / dark:text-slate-300 pair.
 //
+// DFLT-00165: the expanded panel's closed-reason Archive icon is non-text
+// content that tells the ticket was closed, so it moves from text-slate-400 /
+// dark:text-slate-500 (2.51:1 / 3.56:1 on the translucent panel) to
+// text-slate-500 / dark:text-slate-400 (4.65:1 / 6.61:1), clearing WCAG
+// 1.4.11's 3:1.
+//
 // jsdom computes no colors, so these tests pin the Tailwind classes that
 // produce them, and check that the existing hover/disabled classes are kept.
 import { render, screen, within } from '@testing-library/react';
@@ -72,7 +78,7 @@ const renderItem = (ticket: TicketDetail, isExpanded = false) =>
     />
   );
 
-const expectContrastColors = (el: HTMLElement) => {
+const expectContrastColors = (el: Element) => {
   expect(el).toHaveClass('text-slate-500', 'dark:text-slate-400');
   expect(el).not.toHaveClass('text-slate-400');
   expect(el).not.toHaveClass('dark:text-slate-500');
@@ -131,6 +137,17 @@ describe('TicketItem icon button contrast (WCAG 1.4.11)', () => {
     renderItem(makeTicket('IN PROGRESS', [NODE]), true);
     const chevron = screen.getByRole('button', { name: i18n.t('ticketItem.toggleNode', { id: NODE.id }) });
     expectContrastColors(chevron);
+  });
+
+  it('draws the closed-reason Archive icon in slate-500 / dark:slate-400 (DFLT-00165)', () => {
+    // The panel is bg-slate-50/50 over white (about #FCFDFE: 4.65:1) and
+    // dark:bg-slate-800/30 over slate-900 (about #141C2F: 6.61:1).
+    renderItem({ ...makeTicket('CLOSED'), closed_reason: '重複' }, true);
+    const row = screen.getByText('重複').parentElement!;
+    const icon = row.querySelector('svg');
+    expect(icon).not.toBeNull();
+    expectContrastColors(icon!);
+    expect(icon).toHaveClass('w-3.5', 'h-3.5');
   });
 });
 

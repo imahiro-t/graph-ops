@@ -430,7 +430,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               <button
                 onClick={() => removeGate(idx)}
                 disabled={!g.isOverridden}
-                className="p-1 mb-0.5 text-slate-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40 shrink-0"
+                className="p-1 mb-0.5 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40 shrink-0"
                 title={g.isOverridden ? t('settings.reviewGates.deleteGate') : t('settings.reviewGates.cannotDeleteDefaultHint')}
               >
                 <Trash2 className="w-3.5 h-3.5" />

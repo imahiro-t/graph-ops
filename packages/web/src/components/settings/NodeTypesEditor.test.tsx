@@ -239,5 +239,30 @@ describe('NodeTypesEditor', () => {
 
       await waitFor(() => expect(mockedSaveType).toHaveBeenCalledWith(expect.anything(), 'custom_lint', ''));
     });
+
+    // DFLT-00165: the icon-only delete button rests at text-slate-500 /
+    // dark:text-slate-400 for WCAG 1.4.11's 3:1 -- 4.55:1 on the list's
+    // slate-50 and 4.76:1 on a selected/hovered white row, 5.71:1 on
+    // slate-800 and 6.96:1 on slate-900. The old text-slate-400 /
+    // dark:text-slate-500 was 2.45:1 on slate-50. The red hover and the
+    // disabled opacity (a disabled control is exempt from 1.4.11) are kept.
+    it('rests the delete buttons at slate-500 / dark:slate-400, keeping the red hover and disabled opacity', async () => {
+      render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+      await screen.findByDisplayValue('implementation-tier-text');
+
+      const buttons = [
+        deleteButton(),
+        ...screen.getAllByRole('button', { name: i18n.t('settings.nodeTypes.cannotDeleteDefaultHint') })
+      ];
+      expect(buttons).toHaveLength(3);
+      expect(buttons[0]).toBeEnabled();
+      expect(buttons[1]).toBeDisabled();
+      for (const b of buttons) {
+        expect(b).toHaveClass('text-slate-500', 'dark:text-slate-400');
+        expect(b).not.toHaveClass('text-slate-400');
+        expect(b).not.toHaveClass('dark:text-slate-500');
+        expect(b).toHaveClass('hover:text-red-600', 'dark:hover:text-red-400', 'disabled:opacity-30');
+      }
+    });
   });
 });

@@ -1086,7 +1086,7 @@ export const TicketItem: React.FC<Props> = ({
             </div>
             {ticket.closed_reason && (
               <div className="flex items-center gap-1 text-slate-700 dark:text-slate-300">
-                <Archive className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
+                <Archive className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
                 {t('ticketItem.close.reasonLabel')}: <span className="font-medium">{ticket.closed_reason}</span>
               </div>
             )}

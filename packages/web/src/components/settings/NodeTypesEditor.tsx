@@ -226,7 +226,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 onClick={() => removeType(info.type)}
                 disabled={!canDelete}
                 title={info.has_default ? t('settings.nodeTypes.cannotDeleteDefaultHint') : t('settings.nodeTypes.deleteType')}
-                className="shrink-0 p-1 mr-1 text-slate-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-30 rounded"
+                className="shrink-0 p-1 mr-1 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-30 rounded"
               >
                 <Trash2 className="w-3 h-3" />
               </button>
