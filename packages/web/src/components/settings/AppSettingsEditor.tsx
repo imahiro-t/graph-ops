@@ -49,7 +49,7 @@ interface FormState {
   httpDataSourceUrl: string;
   httpDataSourceToken: string;
   artifactsDir: string;
-  userExtensionsDir: string;
+  teamExtensionsDir: string;
   paginationPageSize: number;
   myName: string;
 }
@@ -82,7 +82,7 @@ const emptyForm: FormState = {
   httpDataSourceUrl: '',
   httpDataSourceToken: '',
   artifactsDir: '',
-  userExtensionsDir: '',
+  teamExtensionsDir: '',
   paginationPageSize: 10,
   myName: ''
 };
@@ -113,10 +113,20 @@ const toForm = (file: AppSettingsFile): FormState => ({
   httpDataSourceUrl: file.httpDataSourceUrl || '',
   httpDataSourceToken: file.httpDataSourceToken || '',
   artifactsDir: file.artifactsDir || '',
-  userExtensionsDir: file.userExtensionsDir || '',
+  teamExtensionsDir: file.teamExtensionsDir || '',
   paginationPageSize: file.paginationPageSize || 10,
   myName: file.myName || ''
 });
+
+// Whether a team settings directory is an absolute path -- a helper for the
+// inline hint only. The server has the final word (PUT /api/settings/app
+// rejects a non-absolute teamExtensionsDir with 400 VALIDATION_ERROR, using
+// Go's filepath.IsAbs on the machine it runs on); this accepts a POSIX path
+// ("/...") and a Windows drive-letter (C:\... or C:/...) or UNC
+// (\\server\share) path, so it never blocks a value the server could
+// accept.
+const isAbsoluteDirPath = (value: string): boolean =>
+  value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\');
 
 // Mirrors packages/core-go/internal/runtimeconfig.IsEnvVarRef's syntax
 // exactly (anchored "${NAME}", nothing before/after) so the UI's "loaded
@@ -420,8 +430,16 @@ export const AppSettingsEditor: React.FC<Props> = ({
   }
 
   const pageSizeInvalid = !Number.isInteger(form.paginationPageSize) || form.paginationPageSize < 1;
+  const teamDirTrimmed = form.teamExtensionsDir.trim();
+  const teamDirInvalid = teamDirTrimmed !== '' && !isAbsoluteDirPath(teamDirTrimmed);
   const saveBlocked =
-    saving || !formDirty || pageSizeInvalid || mysqlRequiredMissing || mysqlPasswordRetypeRequired || httpProblem !== null;
+    saving ||
+    !formDirty ||
+    pageSizeInvalid ||
+    teamDirInvalid ||
+    mysqlRequiredMissing ||
+    mysqlPasswordRetypeRequired ||
+    httpProblem !== null;
   const testConnectionBlocked = testingConnection || mysqlRequiredMissing || mysqlPasswordRetypeRequired;
 
   // Why the save button will not act, as text. A `disabled` button is removed
@@ -452,6 +470,8 @@ export const AppSettingsEditor: React.FC<Props> = ({
               : HTTP_PROBLEM_HINT_KEYS[httpProblem])
           : pageSizeInvalid
           ? t('settings.appSettings.pagination.invalidPageSize')
+          : teamDirInvalid
+          ? t('settings.appSettings.teamExtensionsDir.notAbsolute')
           : !formDirty
             ? t('settings.common.noChangesToSave')
             : '';
@@ -836,18 +856,34 @@ export const AppSettingsEditor: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Node/workflow config directory */}
+      {/* Team settings directory (teamExtensionsDir, DFLT-00153). The
+          personal directory (userExtensionsDir) is not edited here: it is
+          $HOME/.graph-ops unless config.json or GRAPH_USER_EXTENSIONS_DIR
+          says otherwise, and a save leaves it alone. */}
       <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2">
-        <h3 id={`${fieldId}-extensions-dir`} className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('settings.appSettings.extensionsDir.title')}</h3>
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.appSettings.extensionsDir.description')}</p>
+        <h3 id={`${fieldId}-team-extensions-dir`} className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('settings.appSettings.teamExtensionsDir.title')}</h3>
+        <p id={`${fieldId}-team-extensions-dir-description`} className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.appSettings.teamExtensionsDir.description')}</p>
         <input
-          aria-labelledby={`${fieldId}-extensions-dir`}
-          value={form.userExtensionsDir}
-          onChange={e => setForm(f => ({ ...f, userExtensionsDir: e.target.value }))}
-          placeholder={effective?.userExtensionsDir}
+          aria-labelledby={`${fieldId}-team-extensions-dir`}
+          aria-describedby={`${fieldId}-team-extensions-dir-description${teamDirInvalid ? ` ${fieldId}-team-extensions-dir-invalid` : ''}`}
+          aria-invalid={teamDirInvalid}
+          value={form.teamExtensionsDir}
+          onChange={e => setForm(f => ({ ...f, teamExtensionsDir: e.target.value }))}
+          placeholder={t('settings.appSettings.teamExtensionsDir.placeholder')}
           className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
         />
-        {effective && <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{t('settings.appSettings.currentlyInEffect', { value: effective.userExtensionsDir })}</p>}
+        {teamDirInvalid && (
+          <p id={`${fieldId}-team-extensions-dir-invalid`} className="text-[10px] text-red-600 dark:text-red-400 mt-0.5">
+            {t('settings.appSettings.teamExtensionsDir.notAbsolute')}
+          </p>
+        )}
+        {effective && (
+          <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+            {t('settings.appSettings.currentlyInEffect', {
+              value: effective.teamExtensionsDir || t('settings.appSettings.teamExtensionsDir.notSet')
+            })}
+          </p>
+        )}
       </div>
 
       <div className="flex justify-end items-center gap-2">

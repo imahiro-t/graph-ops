@@ -36,7 +36,7 @@ function makeResponse(overrides: Partial<AppSettingsResponse['file']> = {}): App
       httpDataSourceUrl: '',
       httpDataSourceToken: '',
       artifactsDir: '',
-      userExtensionsDir: '',
+      teamExtensionsDir: '',
       paginationPageSize: 10,
       myName: '',
       ...overrides
@@ -46,6 +46,7 @@ function makeResponse(overrides: Partial<AppSettingsResponse['file']> = {}): App
       dbPath: '/tmp/graph.db',
       artifactsDir: '/tmp/artifacts',
       userExtensionsDir: '/tmp/extensions',
+      teamExtensionsDir: '',
       paginationPageSize: 10
     },
     config_path: '/home/me/.graph-ops/config.json'

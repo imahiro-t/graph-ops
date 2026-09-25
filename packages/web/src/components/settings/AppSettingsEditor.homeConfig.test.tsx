@@ -35,7 +35,7 @@ function makeResponse(overrides: Partial<AppSettingsResponse> = {}): AppSettings
       mysqlTls: 'verify-full',
       mysqlTlsCa: '',
       artifactsDir: '',
-      userExtensionsDir: '',
+      teamExtensionsDir: '',
       paginationPageSize: 10,
       myName: ''
     },
@@ -44,6 +44,7 @@ function makeResponse(overrides: Partial<AppSettingsResponse> = {}): AppSettings
       dbPath: '/tmp/graph.db',
       artifactsDir: '/tmp/artifacts',
       userExtensionsDir: '/tmp/extensions',
+      teamExtensionsDir: '',
       paginationPageSize: 10
     },
     config_path: HOME_CONFIG,

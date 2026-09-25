@@ -35,7 +35,7 @@ function makeResponse(overrides: Partial<AppSettingsResponse['file']> = {}): App
       mysqlTls: 'verify-full',
       mysqlTlsCa: '',
       artifactsDir: '',
-      userExtensionsDir: '',
+      teamExtensionsDir: '',
       paginationPageSize: 10,
       myName: '',
       ...overrides
@@ -45,6 +45,7 @@ function makeResponse(overrides: Partial<AppSettingsResponse['file']> = {}): App
       dbPath: '/tmp/graph.db',
       artifactsDir: '/tmp/artifacts',
       userExtensionsDir: '/tmp/extensions',
+      teamExtensionsDir: '',
       paginationPageSize: 10
     },
     config_path: '/home/me/.graph-ops/config.json'
@@ -227,15 +228,15 @@ describe('AppSettingsEditor', () => {
 
   // DFLT-00074: fields that had a visible label (or only a placeholder) but
   // no programmatic association are now labelled.
-  it('labels the storage, profile, pagination and extensions-dir fields and the DB backend radio group', async () => {
-    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse({ dbPath: 'a.db', artifactsDir: 'arts', myName: 'me', userExtensionsDir: 'ext' }));
+  it('labels the storage, profile, pagination and team settings directory fields and the DB backend radio group', async () => {
+    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse({ dbPath: 'a.db', artifactsDir: 'arts', myName: 'me', teamExtensionsDir: '/srv/team' }));
     renderEditor();
 
     expect(await screen.findByLabelText(i18n.t('settings.appSettings.storage.dbPathLabel'))).toHaveValue('a.db');
     expect(screen.getByLabelText(i18n.t('settings.appSettings.storage.artifactsDirLabel'))).toHaveValue('arts');
     expect(screen.getByLabelText(i18n.t('settings.appSettings.myProfile.nameLabel'))).toHaveValue('me');
     expect(screen.getByLabelText(i18n.t('settings.appSettings.pagination.pageSizeLabel'))).toHaveValue(10);
-    expect(screen.getByLabelText(i18n.t('settings.appSettings.extensionsDir.title'))).toHaveValue('ext');
+    expect(screen.getByLabelText(i18n.t('settings.appSettings.teamExtensionsDir.title'))).toHaveValue('/srv/team');
 
     const group = screen.getByRole('radiogroup', { name: i18n.t('settings.appSettings.storage.dbBackendLabel') });
     // sqlite, mysql and (DFLT-00088) the HTTP custom data source.
@@ -397,5 +398,104 @@ describe('AppSettingsEditor project local paths', () => {
     rerenderWith([{ ...alpha, local_path: '' }]);
     expect(localPathInput('p-alpha')).toHaveValue('');
     expect(row('p-alpha').getAllByText(i18n.t('settings.appSettings.projects.notSet')).length).toBeGreaterThan(0);
+  });
+});
+
+// DFLT-00153: the former node/workflow config directory field now edits the
+// team settings directory (teamExtensionsDir); the personal directory
+// (userExtensionsDir) is no longer edited or sent.
+describe('AppSettingsEditor team settings directory', () => {
+  beforeEach(() => {
+    mockedFetchAppSettings.mockReset();
+    mockedSaveAppSettings.mockReset();
+  });
+
+  afterEach(async () => {
+    await i18n.changeLanguage('ja');
+  });
+
+  it('is labelled チーム設定ディレクトリ, describes its purpose and starts from file.teamExtensionsDir', async () => {
+    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse({ teamExtensionsDir: '/srv/team-graph-ops' }));
+    renderEditor();
+
+    const input = await screen.findByLabelText('チーム設定ディレクトリ');
+    expect(input).toHaveValue('/srv/team-graph-ops');
+    expect(input).toHaveAccessibleDescription(i18n.t('settings.appSettings.teamExtensionsDir.description'));
+    expect(screen.queryByText('ノード/ワークフロー設定ディレクトリ')).not.toBeInTheDocument();
+  });
+
+  it('shows "not set (personal settings only)" when no team tier is in effect', async () => {
+    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse());
+    renderEditor();
+
+    await screen.findByLabelText(i18n.t('settings.appSettings.teamExtensionsDir.title'));
+    expect(
+      screen.getByText(i18n.t('settings.appSettings.currentlyInEffect', { value: '未設定（個人設定のみ）' }))
+    ).toBeInTheDocument();
+  });
+
+  it('shows the team directory in effect when there is one', async () => {
+    const response = makeResponse({ teamExtensionsDir: '/srv/team' });
+    response.effective.teamExtensionsDir = '/srv/team';
+    mockedFetchAppSettings.mockResolvedValueOnce(response);
+    renderEditor();
+
+    await screen.findByLabelText(i18n.t('settings.appSettings.teamExtensionsDir.title'));
+    expect(screen.getByText(i18n.t('settings.appSettings.currentlyInEffect', { value: '/srv/team' }))).toBeInTheDocument();
+  });
+
+  it('saves teamExtensionsDir and never sends userExtensionsDir', async () => {
+    const user = userEvent.setup();
+    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse());
+    renderEditor();
+
+    const input = await screen.findByLabelText(i18n.t('settings.appSettings.teamExtensionsDir.title'));
+    await user.type(input, '/srv/team-graph-ops');
+
+    mockedSaveAppSettings.mockResolvedValueOnce(makeResponse({ teamExtensionsDir: '/srv/team-graph-ops' }));
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
+
+    await waitFor(() => expect(mockedSaveAppSettings).toHaveBeenCalledTimes(1));
+    const sent = mockedSaveAppSettings.mock.calls[0][1] as Record<string, unknown>;
+    expect(sent.teamExtensionsDir).toBe('/srv/team-graph-ops');
+    expect(sent).not.toHaveProperty('userExtensionsDir');
+  });
+
+  it('warns about a relative path and blocks saving until it is absolute', async () => {
+    const user = userEvent.setup();
+    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse());
+    renderEditor();
+
+    const input = await screen.findByLabelText(i18n.t('settings.appSettings.teamExtensionsDir.title'));
+    await user.type(input, 'shared/team');
+
+    const hint = i18n.t('settings.appSettings.teamExtensionsDir.notAbsolute');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAccessibleDescription(expect.stringContaining(hint));
+    const saveButton = screen.getByRole('button', { name: i18n.t('settings.common.save') });
+    expect(saveButton).toHaveAttribute('aria-disabled', 'true');
+    expect(document.getElementById('save-blocked-reason')).toHaveTextContent(hint);
+    await user.click(saveButton);
+    expect(mockedSaveAppSettings).not.toHaveBeenCalled();
+
+    await user.clear(input);
+    await user.type(input, '/srv/team');
+    expect(input).toHaveAttribute('aria-invalid', 'false');
+    expect(saveButton).toHaveAttribute('aria-disabled', 'false');
+  });
+
+  it('accepts a blank value (no team tier) as valid', async () => {
+    const user = userEvent.setup();
+    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse({ teamExtensionsDir: '/srv/team' }));
+    renderEditor();
+
+    const input = await screen.findByLabelText(i18n.t('settings.appSettings.teamExtensionsDir.title'));
+    await user.clear(input);
+
+    expect(input).toHaveAttribute('aria-invalid', 'false');
+    mockedSaveAppSettings.mockResolvedValueOnce(makeResponse());
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
+    await waitFor(() => expect(mockedSaveAppSettings).toHaveBeenCalledTimes(1));
+    expect((mockedSaveAppSettings.mock.calls[0][1] as Record<string, unknown>).teamExtensionsDir).toBe('');
   });
 });
