@@ -1122,7 +1122,11 @@ export const App: React.FC = () => {
                             {pendingApprovalCounts[p.id] > 0 && (
                               <PendingApprovalBadge count={pendingApprovalCounts[p.id]} />
                             )}
-                            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">{p.prefix}</span>
+                            {/* DFLT-00156: WCAG 1.4.3 (4.5:1) on every item background. slate-500 is
+                                4.76:1 on white and 4.55:1 on the slate-50 hover; slate-400 is 6.96:1
+                                on slate-900 and 5.71:1 on the slate-800 hover. The light hover margin
+                                is thin: recompute if the item backgrounds get darker. */}
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{p.prefix}</span>
                           </span>
                         </button>
                       );

@@ -16,6 +16,12 @@
 // aria-current="true" (and on no other item), and hides the decorative check
 // mark from assistive technology.
 //
+// DFLT-00156: each item's project prefix is drawn in colors that meet WCAG
+// 1.4.3's 4.5:1 against the item's backgrounds in both themes (slate-500 in
+// light, slate-400 in dark). jsdom computes no styles, so the test pins the
+// Tailwind classes; the ratios themselves are recorded next to the markup in
+// App.tsx.
+//
 // fetch is served by test/fakeBackend.ts.
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -607,6 +613,23 @@ describe('project switcher accessibility', () => {
       // The check mark's color, the only visual cue, is unchanged.
       expect(menuItem(alpha).querySelector('svg')).toHaveClass('text-blue-600');
       expect(menuItem(beta).querySelector('svg')).toHaveClass('text-transparent');
+    });
+  });
+
+  describe('prefix contrast', () => {
+    it('draws every item\'s prefix in slate-500 (light) and slate-400 (dark), not the low-contrast colors', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+
+      for (const p of [alpha, beta]) {
+        // Scoped to the item: the prefix also appears in the ticket ids.
+        const prefix = within(menuItem(p)).getByText(p.prefix, { exact: true });
+        expect(prefix).toHaveClass('text-slate-500', 'dark:text-slate-400');
+        expect(prefix).not.toHaveClass('text-slate-400');
+        expect(prefix).not.toHaveClass('dark:text-slate-500');
+        // Size and typeface are unchanged.
+        expect(prefix).toHaveClass('text-[10px]', 'font-mono');
+      }
     });
   });
 });
