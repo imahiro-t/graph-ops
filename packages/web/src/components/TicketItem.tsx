@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronDown,
@@ -15,6 +15,7 @@ import {
   Layers,
   ClipboardEdit,
   Check,
+  Copy,
   X,
   Trash2,
   History,
@@ -72,6 +73,85 @@ interface Props {
 // How many label chips the collapsed header row shows before folding the
 // rest into "+N" -- the row already carries id/status/priority/title/assignee.
 const MAX_HEADER_LABELS = 3;
+
+// How long the ID copy button shows its "copied"/"failed" state before going
+// back to idle (DFLT-00143).
+const COPY_FEEDBACK_MS = 1500;
+
+// A snapshot of the document selection, taken on mousedown on the header row
+// so the following click can tell whether the selection changed in between
+// (DFLT-00143). null means there is no (non-empty) selection.
+type SelectionSnapshot = {
+  anchorNode: Node | null;
+  anchorOffset: number;
+  focusNode: Node | null;
+  focusOffset: number;
+  text: string;
+} | null;
+
+function takeSelectionSnapshot(): SelectionSnapshot {
+  if (typeof window.getSelection !== 'function') return null;
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+  return {
+    anchorNode: sel.anchorNode,
+    anchorOffset: sel.anchorOffset,
+    focusNode: sel.focusNode,
+    focusOffset: sel.focusOffset,
+    text: sel.toString()
+  };
+}
+
+function sameSelection(a: SelectionSnapshot, b: SelectionSnapshot): boolean {
+  if (a === null || b === null) return a === b;
+  return a.anchorNode === b.anchorNode && a.anchorOffset === b.anchorOffset
+    && a.focusNode === b.focusNode && a.focusOffset === b.focusOffset && a.text === b.text;
+}
+
+// Whether a non-empty selection overlaps the row. Range.intersectsNode(row)
+// is true when a selected range even partly covers the row (including a
+// drag that starts outside the row and ends inside it). It is used instead
+// of Selection.containsNode(row, true), whose partial-containment result
+// jsdom gets wrong (true for a selection entirely after the row). The
+// anchor/focus check is always applied as well, as an extra safety net for
+// ranges intersectsNode does not report.
+function selectionOverlapsRow(row: HTMLElement): boolean {
+  if (typeof window.getSelection !== 'function') return false;
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
+  for (let i = 0; i < sel.rangeCount; i++) {
+    const range = sel.getRangeAt(i);
+    if (typeof range.intersectsNode === 'function' && range.intersectsNode(row)) return true;
+  }
+  return (!!sel.anchorNode && row.contains(sel.anchorNode)) || (!!sel.focusNode && row.contains(sel.focusNode));
+}
+
+// Whether a click on the header row is part of a text selection rather than
+// a plain "toggle the row" click (DFLT-00143):
+// - A keyboard-generated click (detail 0, e.g. Enter/Space on the chevron)
+//   is never a selection click.
+// - The second and later clicks of a double/triple click (which select a
+//   word/the element) always are.
+// - Otherwise it is one only if a non-empty selection overlaps the row now
+//   AND the selection changed since this click's mousedown -- i.e. the
+//   press/release made or changed it (the click that ends a drag over the
+//   ID or title). A selection left over from before (Chromium does not
+//   clear it on a mousedown over the row's select-none parts, nor before
+//   the click when the press lands inside the selection) does not stop the
+//   toggle. `pressSnapshot` is undefined when no mousedown on the row was
+//   seen for this click (e.g. a synthetic click); then any overlapping
+//   selection counts.
+function isSelectionClick(
+  event: React.MouseEvent,
+  row: HTMLElement | null,
+  pressSnapshot: SelectionSnapshot | undefined
+): boolean {
+  if (event.detail === 0) return false;
+  if (event.detail >= 2) return true;
+  if (!row || !selectionOverlapsRow(row)) return false;
+  if (pressSnapshot === undefined) return true;
+  return !sameSelection(pressSnapshot, takeSelectionSnapshot());
+}
 
 export const TicketItem: React.FC<Props> = ({
   ticket,
@@ -156,6 +236,65 @@ export const TicketItem: React.FC<Props> = ({
       setAssignToMeSaving(false);
     }
   };
+
+  // Header row text selection and the ID copy button (DFLT-00143).
+  const headerRowRef = useRef<HTMLDivElement>(null);
+  // The selection as it was on the latest mousedown on the row; consumed
+  // (reset to undefined) by the click that follows it.
+  const pressSnapshotRef = useRef<SelectionSnapshot | undefined>(undefined);
+  const handleHeaderMouseDown = (e: React.MouseEvent) => {
+    pressSnapshotRef.current = e.button === 0 ? takeSelectionSnapshot() : undefined;
+  };
+  const handleHeaderClick = (e: React.MouseEvent) => {
+    const pressSnapshot = pressSnapshotRef.current;
+    pressSnapshotRef.current = undefined;
+    if (isSelectionClick(e, headerRowRef.current, pressSnapshot)) return;
+    onToggleExpand();
+  };
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guards showCopyResult against a writeText that settles after the row
+  // unmounted (a list refresh or a filter change), which would otherwise
+  // start a timer no cleanup would ever clear.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = null;
+    };
+  }, []);
+  const showCopyResult = (state: 'copied' | 'failed') => {
+    if (!mountedRef.current) return;
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    setCopyState(state);
+    copyTimerRef.current = setTimeout(() => {
+      copyTimerRef.current = null;
+      setCopyState('idle');
+    }, COPY_FEEDBACK_MS);
+  };
+  // No document.execCommand('copy') fallback: it is deprecated. Without the
+  // Clipboard API (e.g. plain HTTP outside localhost) the button just shows
+  // the "failed" state; the ID text itself can still be selected and copied.
+  const handleCopyId = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
+      if (!clipboard || typeof clipboard.writeText !== 'function') throw new Error('Clipboard API unavailable');
+      await clipboard.writeText(ticket.id);
+      showCopyResult('copied');
+    } catch {
+      showCopyResult('failed');
+    }
+  };
+  const copyIdLabel =
+    copyState === 'copied'
+      ? t('ticketItem.copyId.copied', { id: ticket.id })
+      : copyState === 'failed'
+        ? t('ticketItem.copyId.failed', { id: ticket.id })
+        : t('ticketItem.copyId.button', { id: ticket.id });
+  const copyIdStatus = copyState === 'idle' ? '' : copyIdLabel;
 
   // Priority (DFLT-00048): changed from the ticket header via PATCH
   // /api/tickets/{id}'s "priority" field. Always one of the three levels --
@@ -567,18 +706,70 @@ export const TicketItem: React.FC<Props> = ({
           badge or the title) would touch the first item on the right (the
           assignee chip/button or the node progress). */}
       <div
-        onClick={onToggleExpand}
+        ref={headerRowRef}
+        onMouseDown={handleHeaderMouseDown}
+        onClick={handleHeaderClick}
         data-testid="ticket-header-row"
         className="p-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition select-none"
       >
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <button className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 shrink-0">
-            {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+          {/* The chevron is the row's keyboard / assistive-technology entry
+              point: a named button whose aria-expanded mirrors the row
+              (DFLT-00152). It deliberately has no onClick of its own -- the
+              toggle lives only in handleHeaderClick, which the chevron's
+              click (mouse, or Enter/Space with detail 0) bubbles up to, so
+              every activation toggles the row exactly once. */}
+          <button
+            type="button"
+            aria-expanded={isExpanded}
+            aria-label={t('ticketItem.toggleTicket', { id: ticket.id })}
+            data-testid="ticket-toggle-expand"
+            className="text-slate-500 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 shrink-0"
+          >
+            {isExpanded
+              ? <ChevronDown className="w-5 h-5" aria-hidden="true" />
+              : <ChevronRight className="w-5 h-5" aria-hidden="true" />}
           </button>
 
-          <span className="font-mono text-xs font-bold px-2 py-1 rounded bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0 whitespace-nowrap">
+          {/* The ID and the title are the only selectable text in the row
+              (select-text over the row's select-none, DFLT-00143), so they
+              can be dragged/double-clicked and copied without also picking
+              up the chevron or the badges. handleHeaderClick keeps such a
+              selection from toggling the row. */}
+          <span
+            data-testid="ticket-header-id"
+            className="font-mono text-xs font-bold px-2 py-1 rounded bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0 whitespace-nowrap select-text cursor-text"
+          >
             {ticket.id}
           </span>
+
+          {/* Copies the ticket ID (DFLT-00143). The name includes the ID
+              since every row has one; the always-mounted live region beside
+              it announces the result (the one in the expanded panel is not
+              rendered while the row is collapsed). */}
+          <button
+            type="button"
+            onClick={handleCopyId}
+            aria-label={copyIdLabel}
+            title={copyIdLabel}
+            data-testid="ticket-copy-id"
+            className={`-ml-1 w-6 h-6 inline-flex items-center justify-center rounded shrink-0 transition ${
+              copyState === 'copied'
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : copyState === 'failed'
+                  ? 'text-red-600 dark:text-red-400'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
+            }`}
+          >
+            {copyState === 'copied' ? (
+              <Check className="w-3.5 h-3.5" aria-hidden="true" />
+            ) : copyState === 'failed' ? (
+              <X className="w-3.5 h-3.5" aria-hidden="true" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+            )}
+          </button>
+          <StatusLiveRegion message={copyIdStatus} />
 
           {/* Label/colors shared with the node badge via statusMeta.ts
               (DFLT-00030). No `uppercase`/`tracking-wider`: English labels
@@ -610,7 +801,10 @@ export const TicketItem: React.FC<Props> = ({
               it, a long title would instead push the id/status badges (and
               the right-hand action area) to wrap/overflow. This is the one
               element in the row meant to give up space first. */}
-          <span className="font-bold text-slate-900 dark:text-slate-100 text-sm truncate min-w-0">
+          <span
+            data-testid="ticket-header-title"
+            className="font-bold text-slate-900 dark:text-slate-100 text-sm truncate min-w-0 select-text cursor-text"
+          >
             {ticket.title}
           </span>
 
@@ -783,7 +977,7 @@ export const TicketItem: React.FC<Props> = ({
               onClick={handleReopenTicket}
               disabled={isReopeningTicket}
               title={t('ticketItem.reopen.button')}
-              className="text-slate-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
+              className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
             >
               {isReopeningTicket ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
             </button>
@@ -795,7 +989,7 @@ export const TicketItem: React.FC<Props> = ({
                 setIsClosePromptOpen(v => !v);
               }}
               title={t('ticketItem.close.button')}
-              className="text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 transition p-1 -m-1 rounded"
+              className="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition p-1 -m-1 rounded"
             >
               <Archive className="w-4 h-4" />
             </button>
@@ -812,7 +1006,7 @@ export const TicketItem: React.FC<Props> = ({
             onClick={handleDeleteTicket}
             disabled={isDeletingTicket}
             title={t('ticketItem.delete.button')}
-            className="text-slate-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
+            className="text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
           >
             {isDeletingTicket ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
           </button>
@@ -1204,8 +1398,20 @@ export const TicketItem: React.FC<Props> = ({
                                 row is shrink-0 so the id/type/retry/manual/
                                 artifact badges never wrap. */}
                             <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                              <button className="text-slate-400 dark:text-slate-500 shrink-0">
-                                {isNodeExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                              {/* Named toggle for the node row (DFLT-00152).
+                                  No onClick of its own: its click bubbles to
+                                  the row's toggleNodeExpand, so it toggles
+                                  exactly once. */}
+                              <button
+                                type="button"
+                                aria-expanded={isNodeExpanded}
+                                aria-label={t('ticketItem.toggleNode', { id: node.id })}
+                                data-testid={`node-toggle-expand-${node.id}`}
+                                className="text-slate-500 dark:text-slate-400 shrink-0"
+                              >
+                                {isNodeExpanded
+                                  ? <ChevronDown className="w-4 h-4" aria-hidden="true" />
+                                  : <ChevronRight className="w-4 h-4" aria-hidden="true" />}
                               </button>
                               <span className="font-mono text-slate-400 dark:text-slate-500 w-4 shrink-0">{index + 1}</span>
                               <span className="font-mono font-bold text-slate-600 dark:text-slate-400 shrink-0 whitespace-nowrap">

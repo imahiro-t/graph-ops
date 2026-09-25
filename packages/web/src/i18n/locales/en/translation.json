@@ -146,6 +146,13 @@
     }
   },
   "ticketItem": {
+    "toggleTicket": "Toggle details for {{id}}",
+    "toggleNode": "Toggle details for node {{id}}",
+    "copyId": {
+      "button": "Copy {{id}}",
+      "copied": "Copied {{id}}",
+      "failed": "Could not copy {{id}}"
+    },
     "selfAssign": {
       "assign": "Assign to me",
       "unassign": "Unassign",
