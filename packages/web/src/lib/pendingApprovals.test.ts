@@ -12,7 +12,10 @@ describe('parsePendingApprovalCounts', () => {
     expect(parsePendingApprovalCounts({ counts: { a: 0, b: -1, c: 1.5, d: '3', e: null, f: true, g: 4 } })).toEqual({ g: 4 });
   });
 
-  it.each([null, undefined, 'x', 3, [], {}, { counts: null }, { counts: [1, 2] }, { counts: 'x' }])(
+  // Each row is wrapped in its own array: it.each spreads a row that is an
+  // array into the test's arguments, so a bare [] would run with no argument
+  // at all (a second undefined case) and never test a top-level array.
+  it.each([[null], [undefined], ['x'], [3], [[]], [{}], [{ counts: null }], [{ counts: [1, 2] }], [{ counts: 'x' }]])(
     'returns no counts for %j',
     body => {
       expect(parsePendingApprovalCounts(body)).toEqual({});

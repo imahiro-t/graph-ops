@@ -274,19 +274,58 @@ describe('project switcher pending-approval badges', () => {
     expect(badgeIn(alpha)).toHaveTextContent('7');
   });
 
-  describe.each<[string, FakePendingApprovals]>([
-    ['a 500', () => ({ status: 500, body: { error: { code: 'INTERNAL', message: 'boom' } } })],
+  // How each failure shows that the app has finished handling it, so the
+  // "no badge" checks below look at the menu after the answer was processed,
+  // not at the counts cleared when the menu opened: a failure that throws
+  // (a non-2xx status, a network error, a body that is not JSON) is logged;
+  // a malformed 200 is read to the end and parsed to no counts, silently.
+  let bodyRead: ReturnType<typeof held>;
+
+  function malformed200(body: unknown): FakePendingApprovals {
+    return () => {
+      const res = jsonResponse(body);
+      const json = res.json.bind(res);
+      res.json = async () => {
+        try {
+          return await json();
+        } finally {
+          bodyRead.release(res);
+        }
+      };
+      return res;
+    };
+  }
+
+  async function answerHandled(handled: 'logged' | 'parsed') {
+    if (handled === 'logged') {
+      await waitFor(() =>
+        expect(console.error).toHaveBeenCalledWith('Failed to load pending approval counts', expect.anything())
+      );
+      return;
+    }
+    await act(async () => {
+      await bodyRead.promise;
+      // Let the parsed counts reach the state and the render.
+      await new Promise(r => setTimeout(r, 0));
+    });
+    expect(console.error).not.toHaveBeenCalledWith('Failed to load pending approval counts', expect.anything());
+  }
+
+  describe.each<[string, FakePendingApprovals, 'logged' | 'parsed']>([
+    ['a 500', () => ({ status: 500, body: { error: { code: 'INTERNAL', message: 'boom' } } }), 'logged'],
     [
       'a network error',
       () => {
         throw new TypeError('Failed to fetch');
-      }
+      },
+      'logged'
     ],
-    ['a body that is not JSON', () => new Response('<html>oops</html>', { status: 200 })],
-    ['a 200 without "counts"', () => ({ status: 200, body: {} })],
-    ['a 200 with "counts": null', () => ({ status: 200, body: { counts: null } })]
-  ])('when the counts request fails with %s', (_, failing) => {
+    ['a body that is not JSON', () => new Response('<html>oops</html>', { status: 200 }), 'logged'],
+    ['a 200 without "counts"', malformed200({}), 'parsed'],
+    ['a 200 with "counts": null', malformed200({ counts: null }), 'parsed']
+  ])('when the counts request fails with %s', (_, failing, handled) => {
     beforeEach(() => {
+      bodyRead = held();
       seed(failing);
       vi.spyOn(console, 'error').mockImplementation(() => {});
     });
@@ -295,6 +334,7 @@ describe('project switcher pending-approval badges', () => {
       const user = await renderApp();
       await user.click(switcher());
       await waitFor(() => expect(countRequests()).toBe(1));
+      await answerHandled(handled);
 
       expect(menuItem(alpha)).toBeInTheDocument();
       expect(menuItem(beta)).toBeInTheDocument();
@@ -309,6 +349,7 @@ describe('project switcher pending-approval badges', () => {
       const user = await renderApp();
       await user.click(switcher());
       await waitFor(() => expect(countRequests()).toBe(1));
+      await answerHandled(handled);
 
       await user.click(screen.getByRole('button', { name: i18n.t('projectSwitcher.createNew') }));
       expect(await screen.findByRole('dialog', { name: i18n.t('createProjectModal.title') })).toBeInTheDocument();
