@@ -227,13 +227,58 @@ describe('TicketItem reject prompt focus and announcements', () => {
 
   // Routes POST /api/nodes/<id>/complete to `complete`; everything else keeps
   // the quiet default.
-  const stubComplete = (complete: () => Promise<Response>) =>
+  const stubComplete = (complete: (url: string) => Promise<Response>) =>
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) =>
-        String(input).endsWith('/complete') ? complete() : new Response('[]', { status: 200 })
+        String(input).endsWith('/complete') ? complete(String(input)) : new Response('[]', { status: 200 })
       )
     );
+  // Holds each gate's reject POST open until the test answers it.
+  const stubHeldCompletes = () => {
+    const pending = new Map<string, (res: Response) => void>();
+    stubComplete(url => new Promise<Response>(resolve => pending.set(url.split('/').at(-2) as string, resolve)));
+    return async (nodeId: string, res: Response) => {
+      const respond = pending.get(nodeId);
+      expect(respond).toBeDefined();
+      await act(async () => {
+        respond?.(res);
+      });
+    };
+  };
+
+  const GATE_B_ID = 'TEST-00157-03';
+  const GATE_B_NAME = '設計承認';
+  // plan --success--> gate A (GATE_ID) and gate B (GATE_B_ID), both reached.
+  const twoGateTicket = (
+    status: TicketStatus,
+    gateA: GraphNode['status'] = 'TODO',
+    gateB: GraphNode['status'] = 'TODO'
+  ): TicketDetail => {
+    const base = makeTicket(status, gateA);
+    return {
+      ...base,
+      nodes: [...base.nodes, node(GATE_B_ID, GATE_B_NAME, 'approval_gate', gateB, true)],
+      edges: [
+        ...base.edges,
+        {
+          id: 'edge-2',
+          ticket_id: 'TEST-00157',
+          from_node_id: 'TEST-00157-01',
+          to_node_id: GATE_B_ID,
+          condition: 'success',
+          created_at: '2026-01-01T00:00:00Z'
+        }
+      ]
+    };
+  };
+  const rejectWithReason = (nodeId: string) => {
+    fireEvent.click(screen.getByTestId(`node-reject-${nodeId}`));
+    const input = reasonInput() as HTMLInputElement;
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(input, { target: { value: '理由' } });
+    fireEvent.click(confirmRejectButton() as HTMLElement);
+  };
 
   it('moves focus to the gate toggle and announces the rejection once the reject succeeds', async () => {
     stubComplete(async () => new Response('{}', { status: 200 }));
@@ -336,29 +381,12 @@ describe('TicketItem reject prompt focus and announcements', () => {
   });
 
   it("leaves focus in the other gate's prompt when switching the reject prompt between gates", () => {
-    const GATE_B_NAME = '設計承認';
-    const base = makeTicket('IN REVIEW');
-    const twoGates: TicketDetail = {
-      ...base,
-      nodes: [...base.nodes, node('TEST-00157-03', GATE_B_NAME, 'approval_gate', 'TODO', true)],
-      edges: [
-        ...base.edges,
-        {
-          id: 'edge-2',
-          ticket_id: 'TEST-00157',
-          from_node_id: 'TEST-00157-01',
-          to_node_id: 'TEST-00157-03',
-          condition: 'success',
-          created_at: '2026-01-01T00:00:00Z'
-        }
-      ]
-    };
-    renderTicket('IN REVIEW', { ticket: twoGates });
+    renderTicket('IN REVIEW', { ticket: twoGateTicket('IN REVIEW') });
 
     fireEvent.click(screen.getByTestId(`node-reject-${GATE_ID}`));
     expect(document.activeElement).toBe(reasonInput());
 
-    fireEvent.click(screen.getByTestId('node-reject-TEST-00157-03'));
+    fireEvent.click(screen.getByTestId(`node-reject-${GATE_B_ID}`));
 
     const inputB = reasonInput() as HTMLInputElement;
     expect(inputB).not.toBeNull();
@@ -388,5 +416,88 @@ describe('TicketItem reject prompt focus and announcements', () => {
     rerenderTicket(makeTicket('CLOSED'));
     expect(document.activeElement).toBe(toggleOf(GATE_ID));
     expect(announcement(noLongerPendingText())).toHaveLength(1);
+  });
+
+  // Review findings on DFLT-00172 round 1: a late response for a prompt that
+  // a poll already removed must not pull focus back once the user has moved
+  // on, and rejects on two gates in flight at once must not clear each
+  // other's state.
+  it("does not pull focus out of another gate's prompt when a rejection whose prompt a poll removed responds late", async () => {
+    const respond = stubHeldCompletes();
+    const { rerenderTicket } = renderTicket('IN REVIEW', { ticket: twoGateTicket('IN REVIEW') });
+    rejectWithReason(GATE_ID);
+
+    // A poll lands A's REJECTED gate first; the user then opens B's prompt.
+    rerenderTicket(twoGateTicket('IN REVIEW', 'REJECTED'));
+    expect(reasonInput()).toBeNull();
+    fireEvent.click(screen.getByTestId(`node-reject-${GATE_B_ID}`));
+    const inputB = reasonInput() as HTMLInputElement;
+    expect(document.activeElement).toBe(inputB);
+
+    await respond(GATE_ID, new Response('{}', { status: 200 }));
+
+    await waitFor(() => expect(announcement(rejectedText())).toHaveLength(1));
+    expect(document.activeElement).toBe(inputB);
+  });
+
+  it('does not pull focus off a control the user moved to when a rejection whose prompt a poll removed responds late', async () => {
+    const respond = stubHeldCompletes();
+    const { rerenderTicket } = renderTicket('IN REVIEW');
+    rejectWithReason(GATE_ID);
+
+    rerenderTicket(makeTicket('IN REVIEW', 'REJECTED'));
+    const elsewhere = screen.getByTestId('ticket-copy-id');
+    elsewhere.focus();
+
+    await respond(GATE_ID, new Response('{}', { status: 200 }));
+
+    await waitFor(() => expect(announcement(rejectedText())).toHaveLength(1));
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it('settles as "no longer awaiting approval" when a poll removes the prompt and the reject then fails', async () => {
+    const respond = stubHeldCompletes();
+    const { rerenderTicket } = renderTicket('IN REVIEW');
+    rejectWithReason(GATE_ID);
+
+    // The ticket turns CLOSED under the in-flight reject, which then fails.
+    rerenderTicket(makeTicket('CLOSED'));
+    expect(reasonInput()).toBeNull();
+    expectNoAnnouncement();
+
+    await respond(
+      GATE_ID,
+      new Response(JSON.stringify({ error: { code: 'INVALID_NODE_STATE', message: 'closed' } }), { status: 409 })
+    );
+
+    await waitFor(() => expect(announcement(noLongerPendingText())).toHaveLength(1));
+    expect(document.activeElement).toBe(toggleOf(GATE_ID));
+    expect(screen.getByText(i18n.t('errors.INVALID_NODE_STATE'))).not.toBeNull();
+    expect(screen.queryByText(rejectedText())).toBeNull();
+  });
+
+  it("keeps each gate's in-flight reject apart when rejects on two gates overlap", async () => {
+    const respond = stubHeldCompletes();
+    const { rerenderTicket } = renderTicket('IN REVIEW', { ticket: twoGateTicket('IN REVIEW') });
+    rejectWithReason(GATE_ID);
+    // While A's POST is in flight, reject B too (A's prompt is switched out).
+    rejectWithReason(GATE_B_ID);
+
+    // A answers first: announced, and focus stays in B's (still open) prompt.
+    await respond(GATE_ID, new Response('{}', { status: 200 }));
+    await waitFor(() => expect(announcement(rejectedText())).toHaveLength(1));
+    expect(document.activeElement).toBe(reasonInput());
+
+    // A poll then removes B's prompt before B's own response. B's reject is
+    // still in flight, so this is not "no longer awaiting approval".
+    rerenderTicket(twoGateTicket('IN REVIEW', 'REJECTED', 'REJECTED'));
+    expect(reasonInput()).toBeNull();
+    expect(screen.queryByText(noLongerPendingText(GATE_B_NAME))).toBeNull();
+
+    await respond(GATE_B_ID, new Response('{}', { status: 200 }));
+
+    await waitFor(() => expect(announcement(rejectedText(GATE_B_NAME))).toHaveLength(1));
+    expect(screen.queryByText(noLongerPendingText(GATE_B_NAME))).toBeNull();
+    expect(document.activeElement).toBe(toggleOf(GATE_B_ID));
   });
 });

@@ -437,15 +437,20 @@ export const TicketItem: React.FC<Props> = ({
   // unmount. Anything else closing it (ticket CLOSED, gate judged
   // elsewhere, a poll landing mid-submit) leaves this unset.
   const closeReasonRef = useRef<{ nodeId: string; reason: 'submitted' | 'cancelled' | 'switched' } | null>(null);
-  // rejectInFlightRef: node id whose reject POST is in flight. A prompt that
-  // unmounts during it (App's polling can land the REJECTED gate before the
-  // POST's own response) is parked in deferredClosureRef, and the response
-  // decides whether it was our rejection or the gate being judged elsewhere.
-  const rejectInFlightRef = useRef<string | null>(null);
-  const deferredClosureRef = useRef<{ nodeId: string; hadFocus: boolean } | null>(null);
-  // Announced through a StatusLiveRegion that is always mounted (see the
-  // header). Cleared whenever a prompt opens so repeating the same text is
-  // still a change the screen reader picks up.
+  // rejectsInFlightRef: node ids whose reject POST is in flight. A prompt
+  // that unmounts during it (App's polling can land the REJECTED gate before
+  // the POST's own response) is parked in deferredClosuresRef under its node
+  // id, and the response decides whether it was our rejection or the gate
+  // being judged elsewhere. Keyed per node because rejects on different
+  // gates can be in flight at the same time (approval decisions are only
+  // serialised per gate -- see approvalPendingNodeId), and one gate's
+  // response must never clear or settle another gate's state.
+  const rejectsInFlightRef = useRef<Set<string>>(new Set());
+  const deferredClosuresRef = useRef<Map<string, { hadFocus: boolean }>>(new Map());
+  // Announced through a StatusLiveRegion that is always mounted, placed
+  // directly under this component's root div (outside the header row and
+  // its own copy-id region). Cleared whenever a prompt opens so repeating
+  // the same text is still a change the screen reader picks up.
   const [approvalAnnouncement, setApprovalAnnouncement] = useState('');
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -480,22 +485,32 @@ export const TicketItem: React.FC<Props> = ({
     return active === null || active === document.body;
   };
   const gateName = (nodeId: string) => ticket.nodes.find(n => n.id === nodeId)?.name ?? nodeId;
+  const announceRejected = (nodeId: string) =>
+    setApprovalAnnouncement(t('ticketItem.approvalGate.rejectedAnnouncement', { name: gateName(nodeId) }));
+  // `deferred`: the prompt unmounted earlier (a poll removed it while its
+  // reject POST was in flight) and is only being settled now, when the
+  // response arrives. hadFocus describes the moment it unmounted, not now:
+  // in between the user may have moved on -- opened another gate's prompt,
+  // tabbed to some other control -- and a late response must not pull them
+  // back. So a deferred settle only moves focus while it is still nowhere
+  // (<body>), i.e. where the prompt's removal left it.
+  //
   // The prompt closed because the gate stopped being pending for a reason
   // other than our own rejection. Only a user who was inside the prompt
   // gets moved and told -- a background refresh must not steal focus or
   // read out something unrelated to what they are doing.
-  const settleNoLongerPending = (nodeId: string, hadFocus: boolean) => {
+  const settleNoLongerPending = (nodeId: string, hadFocus: boolean, deferred = false) => {
     if (!hadFocus) return;
-    focusNodeToggle(nodeId);
+    if (!deferred || focusIsNowhere()) focusNodeToggle(nodeId);
     setApprovalAnnouncement(t('ticketItem.approvalGate.noLongerPendingAnnouncement', { name: gateName(nodeId) }));
   };
   // Our rejection went through. Focus follows unless the user has already
   // moved somewhere else on purpose; "nowhere" counts as not having moved,
   // since the confirm button turning disabled mid-submit drops focus to
   // <body> in some browsers.
-  const settleSubmitted = (nodeId: string, hadFocus: boolean) => {
-    if (hadFocus || focusIsNowhere()) focusNodeToggle(nodeId);
-    setApprovalAnnouncement(t('ticketItem.approvalGate.rejectedAnnouncement', { name: gateName(nodeId) }));
+  const settleSubmitted = (nodeId: string, hadFocus: boolean, deferred = false) => {
+    if (deferred ? focusIsNowhere() : hadFocus || focusIsNowhere()) focusNodeToggle(nodeId);
+    announceRejected(nodeId);
   };
 
   // No dependency array: runs after every commit, and consumes whatever
@@ -522,9 +537,9 @@ export const TicketItem: React.FC<Props> = ({
       // already has focus -- nothing to move or announce.
       return;
     }
-    if (rejectInFlightRef.current === closure.nodeId) {
+    if (rejectsInFlightRef.current.has(closure.nodeId)) {
       // Our reject POST is still in flight; its response settles this.
-      deferredClosureRef.current = closure;
+      deferredClosuresRef.current.set(closure.nodeId, { hadFocus: closure.hadFocus });
       return;
     }
     settleNoLongerPending(closure.nodeId, closure.hadFocus);
@@ -614,7 +629,7 @@ export const TicketItem: React.FC<Props> = ({
   // than here, so this function has one job: send the request.
   const handleApprovalDecision = async (nodeId: string, passed: boolean, reason?: string) => {
     setApprovalPendingNodeId(nodeId);
-    if (!passed) rejectInFlightRef.current = nodeId;
+    if (!passed) rejectsInFlightRef.current.add(nodeId);
     setApprovalErrors(prev => {
       if (!(nodeId in prev)) return prev;
       const next = { ...prev };
@@ -637,19 +652,19 @@ export const TicketItem: React.FC<Props> = ({
       if (!passed) {
         // DFLT-00172: how the rejection's focus/announcement is settled
         // depends on whether its prompt is still on screen.
-        const deferred = deferredClosureRef.current;
+        const deferred = deferredClosuresRef.current.get(nodeId);
         if (mountedPromptNodeRef.current === nodeId) {
           // Still mounted: the setRejectingNodeId below unmounts it in the
           // next commit, and the layout effect settles it then.
           closeReasonRef.current = { nodeId, reason: 'submitted' };
-        } else if (deferred?.nodeId === nodeId) {
+        } else if (deferred) {
           // A poll already removed it while the POST was in flight. The DOM
           // is committed, so settle it right here -- once.
-          settleSubmitted(nodeId, deferred.hadFocus);
+          settleSubmitted(nodeId, deferred.hadFocus, true);
         } else {
           // Its prompt was replaced by another gate's while in flight: the
           // user is typing there, so only announce.
-          setApprovalAnnouncement(t('ticketItem.approvalGate.rejectedAnnouncement', { name: gateName(nodeId) }));
+          announceRejected(nodeId);
         }
       }
       setRejectingNodeId(prev => (prev === nodeId ? null : prev));
@@ -659,12 +674,14 @@ export const TicketItem: React.FC<Props> = ({
       setApprovalErrors(prev => ({ ...prev, [nodeId]: errorMessage(err, t('errors.UNKNOWN')) }));
       // The prompt vanished mid-submit and the rejection failed: the gate
       // stopped being pending some other way.
-      const deferred = deferredClosureRef.current;
-      if (deferred?.nodeId === nodeId) settleNoLongerPending(nodeId, deferred.hadFocus);
+      const deferred = deferredClosuresRef.current.get(nodeId);
+      if (deferred) settleNoLongerPending(nodeId, deferred.hadFocus, true);
     } finally {
       if (!passed) {
-        rejectInFlightRef.current = null;
-        deferredClosureRef.current = null;
+        // Only this gate's entries: another gate's reject may still be in
+        // flight, with its own parked closure.
+        rejectsInFlightRef.current.delete(nodeId);
+        deferredClosuresRef.current.delete(nodeId);
       }
       setApprovalPendingNodeId(null);
     }
