@@ -205,6 +205,7 @@ export const App: React.FC = () => {
   // focus on close when the element that opened it is gone (the menu item
   // unmounts with the menu) or the dialog opened by itself (?newProject=1).
   const projectMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const projectMenuRef = useRef<HTMLDivElement>(null);
   // Per-project count of tickets awaiting approval, badged on the switcher's
   // menu items (DFLT-00144). Refetched every time the menu opens; empty
   // while that fetch is in flight and after it fails, so the menu never
@@ -233,16 +234,31 @@ export const App: React.FC = () => {
     void refreshPendingApprovalCounts();
   };
   // Escape closes the open switcher menu and puts focus back on its button
-  // (DFLT-00155), wherever focus is: the button, a menu item, or <body>
-  // (Safari does not focus a button on click). The listener only exists
-  // while the menu is open, so Escape elsewhere is untouched when it is
-  // closed. An Escape another handler already took, or one that cancels an
-  // IME composition, is left alone -- the same rules as useModalDialog.
+  // (DFLT-00155) when focus is on the button, a menu item, or <body> (Safari
+  // does not focus a button on click). The listener only exists while the
+  // menu is open, so Escape elsewhere is untouched when it is closed. An
+  // Escape another handler already took, or one that cancels an IME
+  // composition, is left alone -- the same rules as useModalDialog.
+  //
+  // Focus anywhere else is left alone too: the menu stays open when Tab
+  // moves focus past it, so a modal can be opened from the next header
+  // button on top of it. The menu's listener was registered first and so
+  // runs before the modal's (useModalDialog), and taking that Escape would
+  // leave the modal open with focus pulled out of it behind it.
   useEffect(() => {
     if (!isProjectMenuOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.key !== 'Escape') return;
       if (e.isComposing || e.keyCode === 229) return;
+      const target = e.target;
+      const focusIsOnSwitcher =
+        !(target instanceof Node) ||
+        target === document ||
+        target === document.body ||
+        target === document.documentElement ||
+        projectMenuButtonRef.current?.contains(target) ||
+        projectMenuRef.current?.contains(target);
+      if (!focusIsOnSwitcher) return;
       e.preventDefault();
       setIsProjectMenuOpen(false);
       projectMenuButtonRef.current?.focus();
@@ -1025,6 +1041,7 @@ export const App: React.FC = () => {
                     onClick={() => setIsProjectMenuOpen(false)}
                   />
                   <div
+                    ref={projectMenuRef}
                     id={PROJECT_MENU_ID}
                     role="dialog"
                     aria-label={t('projectSwitcher.menuLabel')}

@@ -212,6 +212,48 @@ describe('project switcher accessibility', () => {
       expect(popup()).not.toBeNull();
     });
 
+    // QA round 1: the menu stays open when Tab moves focus past it, so a
+    // modal can be opened from the next header button on top of it. Its
+    // Escape belongs to the modal, not to the menu behind it.
+    it('lets a modal opened over the open menu take Escape, keeping focus in the modal until it closes', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+      switcher().focus();
+      // Button -> Alpha -> Beta -> "New project..." -> "Launch Claude".
+      await user.tab();
+      await user.tab();
+      await user.tab();
+      await user.tab();
+      const launch = screen.getByRole('button', { name: i18n.t('header.launchClaude') });
+      expect(launch).toHaveFocus();
+      expect(popup()).not.toBeNull();
+
+      await user.keyboard('{Enter}');
+      const modal = await screen.findByRole('dialog', { name: i18n.t('claudeRunnerModal.title') });
+      expect(modal).toHaveAttribute('aria-modal', 'true');
+      expect(modal).toContainElement(document.activeElement as HTMLElement);
+
+      await user.keyboard('{Escape}');
+      // The first Escape closes the modal and returns focus to its opener,
+      // exactly as without the menu; the menu is not what it closes.
+      expect(screen.queryByRole('dialog', { name: i18n.t('claudeRunnerModal.title') })).toBeNull();
+      expect(launch).toHaveFocus();
+      expect(switcher()).not.toHaveFocus();
+    });
+
+    it('leaves the menu and the event alone when focus is outside the button and the menu', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+      const launch = screen.getByRole('button', { name: i18n.t('header.launchClaude') });
+      launch.focus();
+
+      const notCancelled = fireEvent.keyDown(launch, { key: 'Escape' });
+      expect(notCancelled).toBe(true);
+      expect(popup()).not.toBeNull();
+      expect(switcher()).toHaveAttribute('aria-expanded', 'true');
+      expect(launch).toHaveFocus();
+    });
+
     it('still refetches the pending-approval counts when the menu reopens after an Escape', async () => {
       const user = await renderApp();
       await user.click(switcher());
