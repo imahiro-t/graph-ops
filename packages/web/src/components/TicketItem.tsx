@@ -776,6 +776,9 @@ export const TicketItem: React.FC<Props> = ({
       delete next[nodeId];
       return next;
     });
+    // Whether the POST itself went through: an exception after that point
+    // (from onRefresh) is not a failed decision (DFLT-00216).
+    let requestSucceeded = false;
     try {
       const body: { passed: boolean; artifacts?: Array<{ name: string; type: string; content: string }> } = { passed };
       if (!passed) {
@@ -789,6 +792,7 @@ export const TicketItem: React.FC<Props> = ({
       if (!res.ok) {
         throw new Error(await localizedApiErrorMessage(t, res));
       }
+      requestSucceeded = true;
       if (!passed) {
         // DFLT-00172: how the rejection's focus/announcement is settled
         // depends on whether its prompt is still on screen.
@@ -833,6 +837,25 @@ export const TicketItem: React.FC<Props> = ({
       // stopped being pending some other way.
       const deferred = deferredClosuresRef.current.get(nodeId);
       if (deferred) settleNoLongerPending(nodeId, deferred.hadFocus, true);
+      // DFLT-00216: the approval failed after a poll had already removed this
+      // gate's Approve and Reject buttons (it stopped being pending some other
+      // way -- decided elsewhere, the ticket closed), so focus on them fell to
+      // <body>. Settle it the way the reject side does: move to the node's
+      // toggle and say the gate is no longer awaiting approval. Checked on the
+      // committed DOM, not pendingApprovalNodeIds: this closure holds the
+      // render from the click. Both buttons are rendered under the same
+      // condition, so Approve alone tells. Only while focus is still nowhere:
+      // a user who has moved on to some other control keeps their place and
+      // hears nothing about a gate they have left. With the buttons still
+      // there, focus stays where it is and the error shows (DFLT-00207).
+      if (
+        passed &&
+        !requestSucceeded &&
+        findInTicket(`[data-testid="node-approve-${nodeId}"]`) === null &&
+        focusIsNowhere()
+      ) {
+        settleNoLongerPending(nodeId, true);
+      }
     } finally {
       if (!passed) {
         // Only this gate's entries: another gate's reject may still be in
