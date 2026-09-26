@@ -171,6 +171,31 @@ describe('TicketItem header chevron', () => {
     await user.keyboard(' ');
     expect(headerChevron()).toHaveAttribute('aria-expanded', 'false');
   });
+
+  it('shows a focus-visible ring (lighter blue in dark mode) and no ring on a plain focus, keeping its colours', () => {
+    for (const isExpanded of [false, true]) {
+      const { unmount } = renderItem(isExpanded);
+      const tokens = headerChevron().className.split(/\s+/);
+      for (const cls of [
+        'rounded',
+        'focus:outline-none',
+        'focus-visible:ring-2',
+        'focus-visible:ring-blue-500',
+        'dark:focus-visible:ring-blue-400',
+        // The existing colours, hover colours and shrink-0 stay.
+        'text-slate-500',
+        'dark:text-slate-400',
+        'hover:text-slate-600',
+        'dark:hover:text-slate-300',
+        'shrink-0',
+      ]) {
+        expect(tokens).toContain(cls);
+      }
+      // Only focus-visible draws a ring, so a mouse click shows none.
+      expect(tokens.filter(c => c.startsWith('focus:ring') || c.startsWith('dark:focus:ring'))).toEqual([]);
+      unmount();
+    }
+  });
 });
 
 describe('TicketItem node-row chevron', () => {
