@@ -26,6 +26,7 @@
   },
   "toolbar": {
     "searchPlaceholder": "Search tickets (ID / title)...",
+    "searchLabel": "Search tickets",
     "statusAll": "Status: All",
     "statusSelected": "Status: {{count}} selected",
     "statusGroupLabel": "Filter by status",
