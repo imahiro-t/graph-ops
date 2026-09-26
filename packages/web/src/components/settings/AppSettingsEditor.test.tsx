@@ -402,6 +402,63 @@ describe('AppSettingsEditor project local paths', () => {
     expect(row('p-alpha').getAllByText(i18n.t('settings.appSettings.projects.notSet')).length).toBeGreaterThan(0);
   });
 
+  // DFLT-00148: deleting a project is confirmed through the in-app
+  // ConfirmDialog, not window.confirm.
+  describe('deleting a project', () => {
+    const deleteButton = () => row('p-alpha').getByTitle(i18n.t('settings.appSettings.projects.delete'));
+    const deleteCalls = () =>
+      (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([url, init]) => String(url) === '/api/projects/p-alpha' && (init as RequestInit | undefined)?.method === 'DELETE'
+      );
+
+    it('asks in a danger dialog naming the project, then deletes and reports the change on confirm', async () => {
+      const user = userEvent.setup();
+      const onProjectsChanged = vi.fn();
+      const confirmSpy = vi.spyOn(window, 'confirm');
+      renderWithProjects([alpha], onProjectsChanged);
+      await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+      await user.click(deleteButton());
+
+      const dialog = screen.getByRole('alertdialog', { name: i18n.t('settings.appSettings.projects.confirmDeleteTitle') });
+      expect(dialog).toHaveAttribute('data-testid', 'project-delete-confirm');
+      expect(dialog).toHaveAccessibleDescription(
+        i18n.t('settings.appSettings.projects.confirmDelete', { name: 'Alpha', id: 'p-alpha' })
+      );
+      expect(screen.getByTestId('project-delete-confirm-confirm')).toHaveTextContent(
+        i18n.t('settings.appSettings.projects.confirmDeleteButton')
+      );
+      expect(deleteCalls()).toHaveLength(0);
+
+      await user.click(screen.getByTestId('project-delete-confirm-confirm'));
+
+      await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
+      expect(deleteCalls()).toHaveLength(1);
+      expect(screen.queryByTestId('project-delete-confirm')).not.toBeInTheDocument();
+      expect(confirmSpy).not.toHaveBeenCalled();
+      confirmSpy.mockRestore();
+    });
+
+    it.each([
+      ['the cancel button', (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByTestId('project-delete-confirm-cancel'))],
+      ['Escape', (user: ReturnType<typeof userEvent.setup>) => user.keyboard('{Escape}')],
+      ['a click on the overlay', (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByTestId('project-delete-confirm-overlay'))]
+    ])('does nothing on %s and returns focus to the delete button', async (_how, dismiss) => {
+      const user = userEvent.setup();
+      const onProjectsChanged = vi.fn();
+      renderWithProjects([alpha], onProjectsChanged);
+      await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+      await user.click(deleteButton());
+      await dismiss(user);
+
+      expect(screen.queryByTestId('project-delete-confirm')).not.toBeInTheDocument();
+      expect(deleteCalls()).toHaveLength(0);
+      expect(onProjectsChanged).not.toHaveBeenCalled();
+      expect(deleteButton()).toHaveFocus();
+    });
+  });
+
   // DFLT-00165: the icon-only delete button rests at text-slate-500 /
   // dark:text-slate-400 for WCAG 1.4.11's 3:1 on the project row's white /
   // slate-900 (4.76:1 / 6.96:1; the old text-slate-400 / dark:text-slate-500

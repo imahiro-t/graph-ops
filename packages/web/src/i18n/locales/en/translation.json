@@ -1,7 +1,11 @@
 {
   "common": {
     "justNow": "just now",
-    "closeDialog": "Close"
+    "closeDialog": "Close",
+    "confirmDialog": {
+      "confirm": "OK",
+      "cancel": "Cancel"
+    }
   },
   "header": {
     "subtitle": "Ticket & Execution Graph Management",
@@ -229,7 +233,9 @@
     "noArtifactsYet": "No artifacts registered yet",
     "delete": {
       "button": "Delete ticket",
-      "confirm": "This will delete ticket {{id}} \"{{title}}\". This action cannot be undone. Are you sure you want to delete it?"
+      "confirm": "This will delete ticket {{id}} \"{{title}}\". This action cannot be undone. Are you sure you want to delete it?",
+      "confirmTitle": "Delete ticket",
+      "confirmButton": "Delete"
     },
     "close": {
       "button": "Close (withdraw without completing)",
@@ -337,7 +343,9 @@
       "labels": "Labels"
     },
     "unsavedChanges": {
-      "confirmMessage": "You have unsaved changes. They will be lost if you continue. Continue anyway?"
+      "confirmMessage": "You have unsaved changes. They will be lost if you continue. Continue anyway?",
+      "confirmTitle": "Unsaved changes",
+      "discardButton": "Discard changes"
     },
     "common": {
       "save": "Save",
@@ -365,7 +373,9 @@
       "confirmDeleteType": "Delete the override for the node type \"{{name}}\"? Its saved instructions cannot be restored.",
       "defaultBadge": "Default",
       "defaultBadgeHint": "This is a plugin-default node type you have not overridden. Edit the text below to override it.",
-      "cannotDeleteDefaultHint": "This is a plugin-default node type -- it can't be removed, only overridden (or left as-is)."
+      "cannotDeleteDefaultHint": "This is a plugin-default node type -- it can't be removed, only overridden (or left as-is).",
+      "confirmDeleteTypeTitle": "Delete node type override",
+      "confirmDeleteTypeButton": "Delete"
     },
     "reviewGates": {
       "intro": "Review gates referenced by review_gate nodes (via their gate id).",
@@ -523,7 +533,9 @@
         "localPathLabel": "Local path (this environment)",
         "localPathHint": "The local path is not stored in the DB -- only in this environment's home config file ($HOME/.graph-ops/config.json) -- so it never affects teammates sharing the same DB. Save it empty to unset it.",
         "notSet": "Not set",
-        "confirmDelete": "This will delete project \"{{name}}\" ({{id}}). Every ticket, node, and artifact under this project will be permanently deleted, and this action cannot be undone. Are you sure you want to delete it?"
+        "confirmDelete": "This will delete project \"{{name}}\" ({{id}}). Every ticket, node, and artifact under this project will be permanently deleted, and this action cannot be undone. Are you sure you want to delete it?",
+        "confirmDeleteTitle": "Delete project",
+        "confirmDeleteButton": "Delete"
       }
     },
     "labels": {
@@ -548,7 +560,9 @@
       "confirmDeleteInUse": "The label \"{{name}}\" is in use on {{count}} ticket(s). Deleting it removes it from all of them. Delete it?",
       "projectLabel": "Project",
       "projectPlaceholder": "Select a project",
-      "noProjects": "There are no projects yet. Create one before adding labels."
+      "noProjects": "There are no projects yet. Create one before adding labels.",
+      "confirmDeleteTitle": "Delete label",
+      "confirmDeleteButton": "Delete"
     },
     "autopilot": {
       "title": "Autopilot settings ({{project}})",

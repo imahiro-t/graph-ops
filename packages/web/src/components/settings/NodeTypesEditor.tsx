@@ -2,7 +2,7 @@
 // instructions appended for one node type (GET/PUT
 // /api/settings/node-types(/{type})). See internal/config.ResolveNodeTypeContext
 // for the append-by-default merge semantics this editor exposes.
-import React, { useCallback, useEffect, useId, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Save, CheckCircle2, Plus, Trash2, Check, X } from 'lucide-react';
 import { SettingsNodeTypeInfo } from '../../types';
@@ -11,6 +11,7 @@ import { getNodeTypeMeta } from '../../nodeTypeMeta';
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 
 // Mirrors config.isSafeExtensionName (packages/core-go/internal/config/
 // extensions.go) so an obviously-invalid name is rejected here with a clear
@@ -44,10 +45,23 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const [isAddingType, setIsAddingType] = useState(false);
   const [newTypeName, setNewTypeName] = useState('');
   const newTypeInputId = useId();
+  const addTypeButtonRef = useRef<HTMLButtonElement>(null);
+  // Set by confirmAddType when it closes the input row, so the effect below
+  // can put focus on the "add type" button that replaces it instead of
+  // leaving it on <body> (the focused input is removed from the DOM).
+  const focusAddButtonAfterAddRef = useRef(false);
+  // In-app confirmations (DFLT-00148), opened on top of the settings modal.
+  const { confirm, confirmDialog } = useConfirmDialog();
   const tierTextId = useId();
 
   const isDirty = tierText !== savedTierText;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
+
+  useEffect(() => {
+    if (isAddingType || !focusAddButtonAfterAddRef.current) return;
+    focusAddButtonAfterAddRef.current = false;
+    if (!document.activeElement || document.activeElement === document.body) addTypeButtonRef.current?.focus();
+  }, [isAddingType]);
 
   const loadTypes = useCallback(async () => {
     try {
@@ -91,9 +105,22 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // unsaved edits -- same shape and wording as TemplatesEditor's select, so
   // every list in the settings modal behaves alike. Returns whether the
   // switch happened (confirmAddType keeps its input row open on a cancel).
-  const select = (next: string): boolean => {
+  // Asynchronous since DFLT-00148: the question is the in-app ConfirmDialog.
+  // The code after the await uses the values from when it was asked
+  // (savedTierText among them); the dialog keeps the editor out of reach
+  // meanwhile, so they cannot have changed.
+  const select = async (next: string): Promise<boolean> => {
     if (next === selected) return true;
-    if (isDirty && !window.confirm(t('settings.unsavedChanges.confirmMessage'))) return false;
+    if (isDirty) {
+      const discard = await confirm({
+        title: t('settings.unsavedChanges.confirmTitle'),
+        message: t('settings.unsavedChanges.confirmMessage'),
+        confirmLabel: t('settings.unsavedChanges.discardButton'),
+        tone: 'danger',
+        testIdPrefix: 'node-type-discard-confirm'
+      });
+      if (!discard) return false;
+    }
     // Discarding: put the text back to its saved value first so isDirty is
     // already false while the next type loads -- otherwise the effect above
     // would re-send onDirtyChange(true) until the fetch lands, and the next
@@ -125,7 +152,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // user writes instructions for it and hits Save (handleSave), which PUTs
   // the text and creates the override file; nothing is lost if they navigate
   // away first (matches レビューゲート's unsaved-new-row behavior).
-  const confirmAddType = () => {
+  const confirmAddType = async () => {
     const name = newTypeName.trim();
     if (!name) return;
     if (!isValidTypeName(name)) {
@@ -135,11 +162,12 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     setError('');
     // Switch first (it may ask about unsaved edits); on a cancel, keep the
     // input row open and leave the list untouched.
-    if (!select(name)) return;
+    if (!(await select(name))) return;
     if (!types.some(info => info.type === name)) {
       setTypes(prev => [...prev, { type: name, has_default: false, has_user_override: false }]);
     }
     setNewTypeName('');
+    focusAddButtonAfterAddRef.current = true;
     setIsAddingType(false);
   };
 
@@ -156,11 +184,18 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // state to fall back to, only an overridden/not-yet-overridden one, exactly
   // like レビューゲート's default rows.
   // The saved instructions cannot be restored afterwards, so ask first
-  // (same window.confirm shape as AppSettingsEditor's handleDeleteProject).
+  // (the same in-app ConfirmDialog as AppSettingsEditor's handleDeleteProject).
   // Only custom types reach here and they have no translated label, so the
   // type name itself is what the user sees in the list.
   const removeType = async (type: string) => {
-    if (!window.confirm(t('settings.nodeTypes.confirmDeleteType', { name: type }))) return;
+    const confirmed = await confirm({
+      title: t('settings.nodeTypes.confirmDeleteTypeTitle'),
+      message: t('settings.nodeTypes.confirmDeleteType', { name: type }),
+      confirmLabel: t('settings.nodeTypes.confirmDeleteTypeButton'),
+      tone: 'danger',
+      testIdPrefix: 'node-type-delete-confirm'
+    });
+    if (!confirmed) return;
     setError('');
     try {
       await saveSettingsNodeType(t, type, '');
@@ -177,6 +212,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
   return (
     <div className="flex h-full min-h-0 gap-4">
+      {confirmDialog}
       {/* Left: type list */}
       <div className="w-56 shrink-0 border border-slate-200 dark:border-slate-800 rounded-lg overflow-y-auto bg-slate-50 dark:bg-slate-800 flex flex-col">
         <div className="px-3 py-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-slate-50 dark:bg-slate-800">
@@ -203,7 +239,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               }`}
             >
               <button
-                onClick={() => select(info.type)}
+                onClick={() => void select(info.type)}
                 className={`flex-1 min-w-0 text-left pl-3 pr-1 py-2 text-xs flex items-center gap-2 ${
                   selected === info.type ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'
                 }`}
@@ -248,7 +284,15 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   value={newTypeName}
                   onChange={e => setNewTypeName(e.target.value)}
                   onKeyDown={e => {
-                    if (e.key === 'Enter') confirmAddType();
+                    if (e.key === 'Enter') {
+                      // preventDefault: confirmAddType may open the in-app
+                      // unsaved-changes dialog, which moves focus onto its
+                      // cancel button while this key is still being handled;
+                      // without it the key's follow-up (keypress) would land
+                      // on that button and press it at once.
+                      e.preventDefault();
+                      void confirmAddType();
+                    }
                     if (e.key === 'Escape') {
                       // preventDefault tells the enclosing SettingsModal's
                       // dialog hook (useModalDialog) that this Escape was
@@ -261,7 +305,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   placeholder={t('settings.nodeTypes.newTypePlaceholder')}
                   className="flex-1 min-w-0 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
                 />
-                <button onClick={confirmAddType} className="p-1 text-emerald-600 hover:text-emerald-700 shrink-0" title={t('settings.common.yes')}>
+                <button onClick={() => void confirmAddType()} className="p-1 text-emerald-600 hover:text-emerald-700 shrink-0" title={t('settings.common.yes')}>
                   <Check aria-hidden="true" className="w-3.5 h-3.5" />
                 </button>
                 <button onClick={cancelAddType} className="p-1 text-slate-400 hover:text-slate-600 shrink-0" title={t('settings.common.no')}>
@@ -271,6 +315,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
             </>
           ) : (
             <button
+              ref={addTypeButtonRef}
               onClick={() => setIsAddingType(true)}
               className="w-full px-2 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 rounded text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition border border-slate-200 dark:border-slate-700"
             >

@@ -27,6 +27,7 @@ import { httpDataSourceProblem, HTTPDataSourceProblem, normalizeHTTPDataSourceUR
 import { StatusLiveRegion } from '../StatusLiveRegion';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 
 interface Props {
   projects: Project[];
@@ -155,6 +156,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
   onMyNameChanged
 }) => {
   const { t } = useTranslation();
+  const { confirm, confirmDialog } = useConfirmDialog();
   // See src/hooks/useLatest.ts -- keeps `load` below insensitive to
   // language changes (F-1).
   const tRef = useLatest(t);
@@ -405,10 +407,18 @@ export const AppSettingsEditor: React.FC<Props> = ({
     }
   };
 
+  // Confirmed through the in-app ConfirmDialog (DFLT-00148), opened on top of
+  // the settings modal; see useModalDialog for how the two dialogs share the
+  // keyboard.
   const handleDeleteProject = async (p: Project) => {
-    if (!window.confirm(t('settings.appSettings.projects.confirmDelete', { name: p.name, id: p.id }))) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: t('settings.appSettings.projects.confirmDeleteTitle'),
+      message: t('settings.appSettings.projects.confirmDelete', { name: p.name, id: p.id }),
+      confirmLabel: t('settings.appSettings.projects.confirmDeleteButton'),
+      tone: 'danger',
+      testIdPrefix: 'project-delete-confirm'
+    });
+    if (!confirmed) return;
     setProjectDeletingId(p.id);
     try {
       const res = await apiFetch(`/api/projects/${p.id}`, { method: 'DELETE' });
@@ -498,6 +508,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
 
   return (
     <div className="flex flex-col gap-4 h-full min-h-0 overflow-auto">
+      {confirmDialog}
       {/* 保存失敗はフォーカス移動を伴わずに現れ、しかもスクロールコンテナ最上部の
           ここに出る（下端の保存ボタンを押した直後は視野外になりうる）。読み上げは
           常時マウントの live region が担当する（SC 4.1.3）。 */}

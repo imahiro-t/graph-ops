@@ -258,7 +258,6 @@ describe('App project scoping', () => {
         }
         return realFetch(input, init);
       };
-      vi.spyOn(window, 'confirm').mockReturnValue(true);
 
       render(<App />);
       await screen.findByRole('button', { name: /Alpha/ });
@@ -269,6 +268,8 @@ describe('App project scoping', () => {
       await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.appSettings') }));
       const [deleteAlpha] = await screen.findAllByTitle(i18n.t('settings.appSettings.projects.delete'));
       await user.click(deleteAlpha);
+      // The in-app confirmation (DFLT-00148).
+      await user.click(screen.getByTestId('project-delete-confirm-confirm'));
       await screen.findByText(i18n.t('projectSwitcher.noProjectYet'));
 
       // Alpha's list finally answers, for a project that no longer exists.

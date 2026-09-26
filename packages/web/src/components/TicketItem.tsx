@@ -38,6 +38,7 @@ import { AutopilotControls } from './AutopilotControls';
 import { AutopilotDecisions } from './AutopilotDecisions';
 import { NO_AUTOPILOT, TicketAutopilotView } from '../lib/autopilotApi';
 import { useClaudeLaunch } from '../hooks/useClaudeLaunch';
+import { useConfirmDialog } from '../hooks/useConfirmDialog';
 import { formatDateTime, formatTime } from '../i18n/formatDate';
 import { localizedApiErrorMessage, errorMessage } from '../lib/apiError';
 import { apiFetch } from '../lib/apiFetch';
@@ -599,16 +600,26 @@ export const TicketItem: React.FC<Props> = ({
   });
 
   // Ticket deletion. A confirm dialog gates it (this is unrecoverable --
-  // there's no undo/trash), same pattern as the approval_gate reject
-  // confirmation below.
+  // there's no undo/trash): the in-app ConfirmDialog through
+  // useConfirmDialog (DFLT-00148), not window.confirm, so browser automation
+  // and tests can drive it. Its overlay stops click propagation, so
+  // answering it never toggles the card. On cancel focus goes back to the
+  // delete button; after a successful delete onRefresh() removes the card
+  // itself, so there is no fallback to return focus to.
   const [isDeletingTicket, setIsDeletingTicket] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const { confirm: confirmDelete, confirmDialog: deleteConfirmDialog } = useConfirmDialog();
 
   const handleDeleteTicket = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm(t('ticketItem.delete.confirm', { id: ticket.id, title: ticket.title }))) {
-      return;
-    }
+    const confirmed = await confirmDelete({
+      title: t('ticketItem.delete.confirmTitle'),
+      message: t('ticketItem.delete.confirm', { id: ticket.id, title: ticket.title }),
+      confirmLabel: t('ticketItem.delete.confirmButton'),
+      tone: 'danger',
+      testIdPrefix: 'ticket-delete-confirm'
+    });
+    if (!confirmed) return;
     setIsDeletingTicket(true);
     setDeleteError('');
     try {
@@ -1037,6 +1048,11 @@ export const TicketItem: React.FC<Props> = ({
           header row and the expandable panel, which each keep their own
           region -- so it exists before its text changes. */}
       <StatusLiveRegion message={approvalAnnouncement} />
+      {/* The ticket-delete confirmation (portalled to document.body). Placed
+          here rather than next to the delete button so that no event from
+          the dialog bubbles (through the React tree) into the header row's
+          mouse handlers. */}
+      {deleteConfirmDialog}
       {/* Header Row. gap-4 keeps a fixed space between the left group and
           the right-hand group (DFLT-00141): justify-between alone leaves no
           space once a long title stretches the flex-1 left group all the way

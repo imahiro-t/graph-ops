@@ -177,7 +177,6 @@ describe('App label filter', () => {
   });
 
   it('drops a deleted label from the selection', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const user = await renderApp();
     await toggleLabelInFilter(user, ['バグ', 'UI']);
     await user.keyboard('{Escape}');
@@ -188,6 +187,8 @@ describe('App label filter', () => {
     await user.selectOptions(screen.getByLabelText(i18n.t('settings.labels.projectLabel')), alpha.id);
     const row = await screen.findByTestId('label-row-label-ui');
     await user.click(within(row).getByRole('button', { name: `${i18n.t('settings.labels.delete')}: UI` }));
+    // The in-app confirmation (DFLT-00148) opens once the usage count is re-read.
+    await user.click(await screen.findByTestId('label-delete-confirm-confirm'));
 
     await waitFor(() => expect(labelFilterButton()).toHaveTextContent(i18n.t('toolbar.labelSelected', { count: 1 })));
     await user.click(screen.getByRole('button', { name: i18n.t('common.closeDialog') }));

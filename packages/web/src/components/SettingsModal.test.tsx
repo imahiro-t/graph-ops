@@ -112,9 +112,10 @@ describe('SettingsModal', () => {
     await screen.findByDisplayValue('plan-tier');
   });
 
+  // Since DFLT-00148 the question is the in-app ConfirmDialog, opened on top
+  // of this modal.
   it('asks before leaving the Templates tab with an unsaved edit', async () => {
     const user = userEvent.setup();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     renderModal();
 
     await user.click(screen.getByRole('button', { name: 'テンプレート' }));
@@ -123,10 +124,35 @@ describe('SettingsModal', () => {
     await user.clear(textarea);
     await user.type(textarea, '# 編集途中');
 
-    await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.nodeTypes') }));
-    expect(confirm).toHaveBeenCalledTimes(1);
+    const nodeTypesTab = screen.getByRole('button', { name: i18n.t('settings.tabs.nodeTypes') });
+    await user.click(nodeTypesTab);
+    const dialog = screen.getByRole('alertdialog', { name: i18n.t('settings.unsavedChanges.confirmTitle') });
+    expect(dialog).toHaveAttribute('data-testid', 'settings-discard-confirm');
+    expect(dialog).toHaveAccessibleDescription(i18n.t('settings.unsavedChanges.confirmMessage'));
+    expect(screen.getByTestId('settings-discard-confirm-confirm')).toHaveTextContent(i18n.t('settings.unsavedChanges.discardButton'));
+
+    await user.click(screen.getByTestId('settings-discard-confirm-cancel'));
+    expect(screen.queryByTestId('settings-discard-confirm')).not.toBeInTheDocument();
+    expect(nodeTypesTab).toHaveFocus();
     expect(screen.getByRole('button', { name: 'レビュー' })).toHaveAttribute('aria-current', 'true');
     expect(textarea).toHaveValue('# 編集途中');
+  });
+
+  it('switches the tab once the discard is confirmed', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.click(screen.getByRole('button', { name: 'テンプレート' }));
+    const textarea = await screen.findByDisplayValue('plan-tier');
+    await user.type(textarea, ' edited');
+
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.skills') }));
+    await user.click(screen.getByTestId('settings-discard-confirm-confirm'));
+
+    expect(screen.queryByTestId('settings-discard-confirm')).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue('plan-tier edited')).not.toBeInTheDocument();
+    await waitFor(() => expect(fetchSettingsSkills).toHaveBeenCalled());
+    expect(screen.getByRole('dialog', { name: i18n.t('settings.modalTitle') })).toBeInTheDocument();
   });
 
   // DFLT-00124, completion criterion 8: the "全体設定 / プロジェクト単位設定"
@@ -152,19 +178,19 @@ describe('SettingsModal', () => {
 
   it('does not ask when switching to another tab after discarding a template edit', async () => {
     const user = userEvent.setup();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderModal();
 
     await user.click(screen.getByRole('button', { name: 'テンプレート' }));
     const textarea = await screen.findByDisplayValue('plan-tier');
     await user.type(textarea, ' edited');
     await user.click(screen.getByRole('button', { name: 'レビュー' }));
-    expect(confirm).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByTestId('template-discard-confirm-confirm'));
     await screen.findByDisplayValue('review-tier');
 
     await user.click(screen.getByRole('button', { name: 'レポート' }));
     await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.skills') }));
-    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(fetchSettingsSkills).toHaveBeenCalled());
   });
 
   // DFLT-00074: dialog semantics, focus management and Escape handling.
@@ -203,50 +229,57 @@ describe('SettingsModal', () => {
       expect(closeButton()).toHaveFocus();
     });
 
+    const discardDialog = () => screen.queryByTestId('settings-discard-confirm');
+
     it('closes on Escape without asking when nothing is unsaved', async () => {
       const user = userEvent.setup();
-      const confirm = vi.spyOn(window, 'confirm');
       const onClose = vi.fn();
       renderModal(onClose);
       await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
 
       await user.keyboard('{Escape}');
-      expect(confirm).not.toHaveBeenCalled();
+      expect(discardDialog()).not.toBeInTheDocument();
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
-    it('asks before closing on Escape with an unsaved edit, and stays open with the edit when cancelled', async () => {
+    it.each([
+      ['the cancel button', (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByTestId('settings-discard-confirm-cancel'))],
+      ['a click on the overlay', (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByTestId('settings-discard-confirm-overlay'))]
+    ])('asks before closing on Escape with an unsaved edit, and stays open with the edit when cancelled with %s', async (_how, dismiss) => {
       const user = userEvent.setup();
-      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
       const onClose = vi.fn();
       renderModal(onClose);
 
       const textarea = await makeTemplateEditDirty(user);
       await user.keyboard('{Escape}');
 
-      expect(confirm).toHaveBeenCalledTimes(1);
-      expect(confirm).toHaveBeenCalledWith(i18n.t('settings.unsavedChanges.confirmMessage'));
+      expect(screen.getByRole('alertdialog', { name: i18n.t('settings.unsavedChanges.confirmTitle') })).toHaveAccessibleDescription(
+        i18n.t('settings.unsavedChanges.confirmMessage')
+      );
+      await dismiss(user);
+
+      expect(discardDialog()).not.toBeInTheDocument();
       expect(onClose).not.toHaveBeenCalled();
-      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: i18n.t('settings.modalTitle') })).toBeInTheDocument();
       expect(textarea).toHaveValue('plan-tier edited');
+      expect(textarea).toHaveFocus();
     });
 
     it('closes on Escape with an unsaved edit once the discard is confirmed', async () => {
       const user = userEvent.setup();
-      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
       const onClose = vi.fn();
       renderModal(onClose);
 
       await makeTemplateEditDirty(user);
       await user.keyboard('{Escape}');
+      expect(onClose).not.toHaveBeenCalled();
+      await user.click(screen.getByTestId('settings-discard-confirm-confirm'));
 
-      expect(confirm).toHaveBeenCalledTimes(1);
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
     it('lets Escape in the "add node type" input cancel only the add, and closes on the next Escape', async () => {
       const user = userEvent.setup();
-      const confirm = vi.spyOn(window, 'confirm');
       const onClose = vi.fn();
       renderModal(onClose);
 
@@ -258,7 +291,7 @@ describe('SettingsModal', () => {
       expect(screen.queryByLabelText(i18n.t('settings.nodeTypes.newTypeLabel'))).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') })).toBeInTheDocument();
       expect(onClose).not.toHaveBeenCalled();
-      expect(confirm).not.toHaveBeenCalled();
+      expect(discardDialog()).not.toBeInTheDocument();
 
       await user.keyboard('{Escape}');
       expect(onClose).toHaveBeenCalledTimes(1);
@@ -296,6 +329,149 @@ describe('SettingsModal', () => {
       expect(screen.getByRole('button', { name: 'open-settings' })).toHaveFocus();
     });
 
+    // DFLT-00148: a ConfirmDialog opened on top of this modal (a nested
+    // modal). Only the topmost dialog handles Escape and Tab, and closing it
+    // puts focus back on the element inside this modal that opened it.
+    describe('with a confirmation open on top of it', () => {
+      const settingsDialog = () => screen.getByRole('dialog', { name: i18n.t('settings.modalTitle') });
+
+      const openDiscardFromTab = async (user: ReturnType<typeof userEvent.setup>, onClose = vi.fn()) => {
+        renderModal(onClose);
+        await makeTemplateEditDirty(user);
+        const skillsTab = screen.getByRole('button', { name: i18n.t('settings.tabs.skills') });
+        await user.click(skillsTab);
+        expect(screen.getByTestId('settings-discard-confirm')).toBeInTheDocument();
+        return skillsTab;
+      };
+
+      it('closes only the confirmation on Escape, keeping the settings modal and the edit, and returns focus to the tab', async () => {
+        const user = userEvent.setup();
+        const onClose = vi.fn();
+        const skillsTab = await openDiscardFromTab(user, onClose);
+        expect(screen.getByTestId('settings-discard-confirm-cancel')).toHaveFocus();
+
+        await user.keyboard('{Escape}');
+
+        expect(discardDialog()).not.toBeInTheDocument();
+        expect(onClose).not.toHaveBeenCalled();
+        expect(settingsDialog()).toBeInTheDocument();
+        expect(screen.getByDisplayValue('plan-tier edited')).toBeInTheDocument();
+        expect(skillsTab).toHaveFocus();
+
+        // The settings modal handles Escape again once the confirmation is
+        // gone (and asks again, since the edit is still unsaved).
+        await user.keyboard('{Escape}');
+        expect(discardDialog()).toBeInTheDocument();
+        expect(onClose).not.toHaveBeenCalled();
+      });
+
+      it('keeps Tab and Shift+Tab inside the confirmation', async () => {
+        const user = userEvent.setup();
+        await openDiscardFromTab(user);
+        const cancel = screen.getByTestId('settings-discard-confirm-cancel');
+        const confirm = screen.getByTestId('settings-discard-confirm-confirm');
+        expect(cancel).toHaveFocus();
+
+        await user.tab();
+        expect(confirm).toHaveFocus();
+        await user.tab();
+        expect(cancel).toHaveFocus();
+        await user.tab({ shift: true });
+        expect(confirm).toHaveFocus();
+        await user.tab({ shift: true });
+        expect(cancel).toHaveFocus();
+        expect(settingsDialog()).toBeInTheDocument();
+      });
+
+      it('handles an editor confirmation (the template list) the same way', async () => {
+        const user = userEvent.setup();
+        const onClose = vi.fn();
+        renderModal(onClose);
+        await makeTemplateEditDirty(user);
+        const reviewItem = screen.getByRole('button', { name: 'レビュー' });
+        await user.click(reviewItem);
+        expect(screen.getByTestId('template-discard-confirm-cancel')).toHaveFocus();
+
+        await user.tab({ shift: true });
+        expect(screen.getByTestId('template-discard-confirm-confirm')).toHaveFocus();
+        await user.keyboard('{Escape}');
+
+        expect(screen.queryByTestId('template-discard-confirm')).not.toBeInTheDocument();
+        expect(onClose).not.toHaveBeenCalled();
+        expect(settingsDialog()).toBeInTheDocument();
+        expect(reviewItem).toHaveFocus();
+        expect(screen.getByRole('button', { name: '実行計画' })).toHaveAttribute('aria-current', 'true');
+      });
+
+      it('handles a delete confirmation (a node type override) the same way', async () => {
+        (fetchSettingsNodeTypes as unknown as Mock).mockResolvedValue([
+          { type: 'custom_lint', has_default: false, has_user_override: true }
+        ]);
+        const user = userEvent.setup();
+        const onClose = vi.fn();
+        renderModal(onClose);
+        const deleteButton = await screen.findByRole('button', { name: i18n.t('settings.nodeTypes.deleteType') });
+
+        await user.click(deleteButton);
+        expect(screen.getByRole('alertdialog', { name: i18n.t('settings.nodeTypes.confirmDeleteTypeTitle') })).toBeInTheDocument();
+        await user.tab();
+        await user.tab();
+        expect(screen.getByTestId('node-type-delete-confirm-cancel')).toHaveFocus();
+        await user.keyboard('{Escape}');
+
+        expect(screen.queryByTestId('node-type-delete-confirm')).not.toBeInTheDocument();
+        expect(onClose).not.toHaveBeenCalled();
+        expect(settingsDialog()).toBeInTheDocument();
+        expect(deleteButton).toHaveFocus();
+      });
+
+      it('closes the settings modal with the confirmation when the discard from the close button is confirmed, returning focus to its opener', async () => {
+        const user = userEvent.setup();
+        const Harness = () => {
+          const [isOpen, setIsOpen] = useState(false);
+          return (
+            <>
+              <button type="button" onClick={() => setIsOpen(true)}>
+                open-settings
+              </button>
+              <SettingsModal
+                isOpen={isOpen}
+                onClose={() => setIsOpen(false)}
+                projects={[]}
+                currentProject={null}
+                onProjectsChanged={vi.fn()}
+                onPaginationPageSizeChanged={vi.fn()}
+                onMyNameChanged={vi.fn()}
+              />
+            </>
+          );
+        };
+        render(<Harness />);
+        await user.click(screen.getByRole('button', { name: 'open-settings' }));
+        await makeTemplateEditDirty(user);
+
+        await user.click(closeButton());
+        expect(discardDialog()).toBeInTheDocument();
+        await user.click(screen.getByTestId('settings-discard-confirm-confirm'));
+
+        expect(discardDialog()).not.toBeInTheDocument();
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'open-settings' })).toHaveFocus();
+      });
+
+      it('returns focus to the close button when the discard from it is cancelled', async () => {
+        const user = userEvent.setup();
+        const onClose = vi.fn();
+        renderModal(onClose);
+        await makeTemplateEditDirty(user);
+
+        await user.click(closeButton());
+        await user.click(screen.getByTestId('settings-discard-confirm-cancel'));
+
+        expect(onClose).not.toHaveBeenCalled();
+        expect(closeButton()).toHaveFocus();
+      });
+    });
   });
 
   // DFLT-00077, carried over to the labels tab (DFLT-00124): App.tsx keeps
