@@ -1281,6 +1281,9 @@ export const App: React.FC = () => {
                 value={filterQuery}
                 onChange={e => { setFilterQuery(e.target.value); setPage(1); }}
                 placeholder={t('toolbar.searchPlaceholder')}
+                // DFLT-00170: the accessible name comes from aria-label, not the placeholder,
+                // which disappears once the user types (WCAG 1.3.1 / 3.3.2 / 4.1.2).
+                aria-label={t('toolbar.searchLabel')}
                 className="pl-8 pr-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs focus:outline-none focus:border-blue-500 w-56 text-slate-900 dark:text-slate-100"
               />
             </div>

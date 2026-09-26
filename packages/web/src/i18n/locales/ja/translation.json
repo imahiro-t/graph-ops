@@ -26,6 +26,7 @@
   },
   "toolbar": {
     "searchPlaceholder": "チケット検索 (ID・タイトル)...",
+    "searchLabel": "チケット検索",
     "statusAll": "ステータス: すべて",
     "statusSelected": "ステータス: {{count}}件選択",
     "statusGroupLabel": "ステータスで絞り込む",
