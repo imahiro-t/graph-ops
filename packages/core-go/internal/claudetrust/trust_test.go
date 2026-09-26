@@ -44,8 +44,6 @@ func writeGitFile(t *testing.T, dir, gitdir string) {
 	}
 }
 
-// projectsJSON builds a ~/.claude.json with the given hasTrustDialogAccepted
-// values (a nil value leaves the key out of the entry).
 // makeSubmodule lays out <root>/outer as a repository with a submodule at
 // outer/lib whose .git file points to ../.git/modules/lib, the way
 // `git submodule add` leaves it, and returns both paths.
@@ -58,6 +56,8 @@ func makeSubmodule(t *testing.T, root string) (outer, sub string) {
 	return outer, sub
 }
 
+// projectsJSON builds a ~/.claude.json with the given hasTrustDialogAccepted
+// values (a nil value leaves the key out of the entry).
 func projectsJSON(t *testing.T, entries map[string]any) string {
 	t.Helper()
 	projects := map[string]any{}
@@ -196,8 +196,8 @@ func TestCheck(t *testing.T) {
 		{
 			name: "a submodule's root with only the outer repository trusted (confirmed: the dialog appears)",
 			prepare: func(t *testing.T, s setup) string {
-				repo, sub := makeSubmodule(t, s.root)
-				writeConfig(t, s.home, projectsJSON(t, map[string]any{repo: true}))
+				outer, sub := makeSubmodule(t, s.root)
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{outer: true}))
 				return sub
 			},
 			untrusted: true,
@@ -205,8 +205,8 @@ func TestCheck(t *testing.T) {
 		{
 			name: "a submodule's subfolder with only the outer repository trusted (confirmed: the dialog appears)",
 			prepare: func(t *testing.T, s setup) string {
-				repo, sub := makeSubmodule(t, s.root)
-				writeConfig(t, s.home, projectsJSON(t, map[string]any{repo: true}))
+				outer, sub := makeSubmodule(t, s.root)
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{outer: true}))
 				return mkdir(t, filepath.Join(sub, "sub"))
 			},
 			untrusted: true,
@@ -230,9 +230,9 @@ func TestCheck(t *testing.T) {
 		{
 			name: "the outer repository with only its submodule trusted (confirmed: the dialog appears)",
 			prepare: func(t *testing.T, s setup) string {
-				repo, sub := makeSubmodule(t, s.root)
+				outer, sub := makeSubmodule(t, s.root)
 				writeConfig(t, s.home, projectsJSON(t, map[string]any{sub: true}))
-				return repo
+				return outer
 			},
 			untrusted: true,
 		},
