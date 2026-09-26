@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { Artifact } from '../types';
 import { AutopilotDecisions } from './AutopilotDecisions';
-import { AutopilotControls } from './AutopilotControls';
+import { AutopilotControls, SETTLE_TIMEOUT_MS } from './AutopilotControls';
 import { TicketFamily } from './TicketFamily';
 import { NO_AUTOPILOT } from '../lib/autopilotApi';
 
@@ -137,6 +137,80 @@ describe('autopilot accessibility', () => {
       }
     }
   });
+
+  // DFLT-00149: the resume dialog's confirm button says "Resume", not "Start".
+  it('labels the confirm button of the resume dialog with a resume word, in both languages', async () => {
+    const expected: Record<string, { resume: string; start: string }> = {
+      ja: { resume: '再開する', start: '起動する' },
+      en: { resume: 'Resume', start: 'Start' }
+    };
+    for (const lang of ['ja', 'en']) {
+      await i18n.changeLanguage(lang);
+      const user = userEvent.setup();
+      const { unmount } = render(
+        <AutopilotControls
+          ticketId="T"
+          status="DONE"
+          view={{ ...NO_AUTOPILOT, resumable: { ticket: false, tree: true } }}
+        />
+      );
+      await user.click(screen.getByTestId('autopilot-start-tree'));
+      const dialog = screen.getByRole('dialog', { name: i18n.t('autopilot.confirm.resumeTitle') });
+      expect(i18n.t('autopilot.confirm.resumeStart')).toBe(expected[lang].resume);
+      expect(within(dialog).getByTestId('autopilot-confirm-confirm')).toHaveTextContent(expected[lang].resume);
+      expect(within(dialog).getByRole('button', { name: expected[lang].resume })).toBeInTheDocument();
+      expect(within(dialog).queryByRole('button', { name: expected[lang].start })).not.toBeInTheDocument();
+      unmount();
+
+      // A fresh start keeps its "Start" label.
+      const fresh = render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
+      await user.click(screen.getByTestId('autopilot-start-tree'));
+      const freshDialog = screen.getByRole('dialog', { name: i18n.t('autopilot.confirm.title') });
+      expect(within(freshDialog).getByRole('button', { name: expected[lang].start })).toBeInTheDocument();
+      fresh.unmount();
+    }
+  });
+
+  // DFLT-00149: a refresh after the start that hangs or fails does not leave
+  // the buttons in their "starting" state.
+  for (const [label, onSettled, advance] of [
+    ['never settles', () => new Promise<void>(() => {}), true],
+    ['rejects', () => Promise.reject(new Error('refresh failed')), false]
+  ] as const) {
+    it(`re-enables the start buttons when the refresh after a start ${label}`, async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+          new Response(
+            JSON.stringify({ run_id: 'run-1', mode: 'tree', root: 'T', state: 'starting', created: true, resumed: false }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        );
+        const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+        render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} onSettled={onSettled} />);
+        const button = screen.getByTestId('autopilot-start-tree');
+        await user.click(button);
+        await user.click(screen.getByTestId('autopilot-confirm-confirm'));
+        await screen.findByTestId('autopilot-message');
+        if (advance) {
+          // Still waiting on the refresh: the buttons are in "starting".
+          expect(button).toBeDisabled();
+          expect(screen.getByTestId('autopilot-start-ticket')).toBeDisabled();
+          await act(async () => {
+            vi.advanceTimersByTime(SETTLE_TIMEOUT_MS);
+          });
+        }
+        await vi.waitFor(() => expect(button).toBeEnabled());
+        expect(screen.getByTestId('autopilot-start-ticket')).toBeEnabled();
+      } finally {
+        cleanup();
+        vi.restoreAllMocks();
+        vi.useRealTimers();
+      }
+    });
+  }
 
   it('keeps the focus fallback of the controls out of the Tab order', () => {
     render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
