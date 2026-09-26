@@ -2,6 +2,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TRANSIENT_ANNOUNCEMENT_DURATION_MS } from '../../hooks/useTransientAnnouncement';
 import i18n from '../../i18n';
 import { LabelUsage, Project } from '../../types';
 
@@ -37,6 +38,20 @@ const label = (id: string, name: string, color: LabelUsage['color'], ticketCount
   updated_at: '2026-01-01T00:00:00Z',
   ticket_count: ticketCount
 });
+
+// DFLT-00148: deletion is confirmed through the in-app ConfirmDialog. It
+// opens once the usage count has been re-read, so these wait for it.
+type User = ReturnType<typeof userEvent.setup>;
+const findDeleteDialog = () => screen.findByRole('alertdialog', { name: i18n.t('settings.labels.confirmDeleteTitle') });
+async function answerDelete(user: User, confirmed: boolean) {
+  await findDeleteDialog();
+  await user.click(screen.getByTestId(confirmed ? 'label-delete-confirm-confirm' : 'label-delete-confirm-cancel'));
+}
+
+// Texts of every role="status" element. The tab always mounts an (initially
+// empty) StatusLiveRegion for delete announcements (DFLT-00197), so a single
+// getByRole('status') would match more than one element.
+const statusTexts = () => screen.getAllByRole('status').map(el => el.textContent ?? '');
 
 function createForm() {
   return within(screen.getByTestId('label-create-form'));
@@ -162,7 +177,6 @@ describe('LabelsEditor', () => {
   it('confirms deleting an in-use label with its usage count, and deletes on OK', async () => {
     mockedFetch.mockResolvedValue([label('label-bug', 'バグ', 'red', 3)]);
     mockedDelete.mockResolvedValue({ success: true, removed_ticket_count: 3 });
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const onLabelsChanged = vi.fn();
     const user = userEvent.setup();
     render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" onLabelsChanged={onLabelsChanged} />);
@@ -170,38 +184,53 @@ describe('LabelsEditor', () => {
 
     await user.click(within(row).getByRole('button', { name: `${i18n.t('settings.labels.delete')}: バグ` }));
 
-    expect(confirmSpy).toHaveBeenCalledWith(i18n.t('settings.labels.confirmDeleteInUse', { name: 'バグ', count: 3 }));
-    expect(confirmSpy.mock.calls[0][0]).toContain('3');
+    const dialog = await findDeleteDialog();
+    expect(dialog).toHaveAccessibleDescription(i18n.t('settings.labels.confirmDeleteInUse', { name: 'バグ', count: 3 }));
+    expect(dialog).toHaveTextContent('3');
+    expect(screen.getByTestId('label-delete-confirm-confirm')).toHaveTextContent(i18n.t('settings.labels.confirmDeleteButton'));
+    expect(mockedDelete).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId('label-delete-confirm-confirm'));
     expect(mockedDelete).toHaveBeenCalledWith(expect.anything(), 'label-bug');
     await waitFor(() => expect(screen.queryByTestId('label-row-label-bug')).not.toBeInTheDocument());
     expect(onLabelsChanged).toHaveBeenCalledTimes(1);
   });
 
-  it('does nothing when the in-use delete is cancelled', async () => {
+  it.each([
+    ['the cancel button', (user: User) => user.click(screen.getByTestId('label-delete-confirm-cancel'))],
+    ['Escape', (user: User) => user.keyboard('{Escape}')],
+    ['a click on the overlay', (user: User) => user.click(screen.getByTestId('label-delete-confirm-overlay'))]
+  ])('does nothing when the in-use delete is cancelled with %s', async (_how, dismiss) => {
     mockedFetch.mockResolvedValue([label('label-bug', 'バグ', 'red', 3)]);
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
     const onLabelsChanged = vi.fn();
     const user = userEvent.setup();
     render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" onLabelsChanged={onLabelsChanged} />);
     const row = await screen.findByTestId('label-row-label-bug');
 
     await user.click(within(row).getByRole('button', { name: `${i18n.t('settings.labels.delete')}: バグ` }));
+    await findDeleteDialog();
+    await dismiss(user);
 
+    expect(screen.queryByTestId('label-delete-confirm')).not.toBeInTheDocument();
     expect(mockedDelete).not.toHaveBeenCalled();
     expect(screen.getByTestId('label-row-label-bug')).toBeInTheDocument();
     expect(onLabelsChanged).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('label-row-label-bug')).getByRole('button', { name: `${i18n.t('settings.labels.delete')}: バグ` })
+      ).toHaveFocus()
+    );
   });
 
   it('uses the plain confirmation for an unused label', async () => {
     mockedDelete.mockResolvedValue({ success: true, removed_ticket_count: 0 });
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const user = userEvent.setup();
     render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
     const row = await screen.findByTestId('label-row-label-feat');
 
     await user.click(within(row).getByRole('button', { name: `${i18n.t('settings.labels.delete')}: 機能追加` }));
 
-    expect(confirmSpy).toHaveBeenCalledWith(i18n.t('settings.labels.confirmDelete', { name: '機能追加' }));
+    expect(await findDeleteDialog()).toHaveAccessibleDescription(i18n.t('settings.labels.confirmDelete', { name: '機能追加' }));
+    await user.click(screen.getByTestId('label-delete-confirm-confirm'));
     expect(mockedDelete).toHaveBeenCalledWith(expect.anything(), 'label-feat');
   });
 
@@ -211,7 +240,6 @@ describe('LabelsEditor', () => {
         .mockResolvedValueOnce([label('label-bug', 'バグ', 'red', 0)])
         .mockResolvedValueOnce([label('label-bug', 'バグ', 'red', 4)]);
       mockedDelete.mockResolvedValue({ success: true, removed_ticket_count: 4 });
-      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
       const user = userEvent.setup();
       render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
       const row = await screen.findByTestId('label-row-label-bug');
@@ -219,9 +247,11 @@ describe('LabelsEditor', () => {
 
       await user.click(within(row).getByRole('button', { name: `${i18n.t('settings.labels.delete')}: バグ` }));
 
+      expect(await findDeleteDialog()).toHaveAccessibleDescription(
+        i18n.t('settings.labels.confirmDeleteInUse', { name: 'バグ', count: 4 })
+      );
       expect(mockedFetch).toHaveBeenCalledTimes(2);
-      expect(confirmSpy).toHaveBeenCalledTimes(1);
-      expect(confirmSpy).toHaveBeenCalledWith(i18n.t('settings.labels.confirmDeleteInUse', { name: 'バグ', count: 4 }));
+      await user.click(screen.getByTestId('label-delete-confirm-confirm'));
       expect(mockedDelete).toHaveBeenCalledWith(expect.anything(), 'label-bug');
     });
 
@@ -229,14 +259,14 @@ describe('LabelsEditor', () => {
       mockedFetch
         .mockResolvedValueOnce([label('label-bug', 'バグ', 'red', 3)])
         .mockResolvedValueOnce([label('label-bug', 'バグ', 'red', 0)]);
-      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
       const user = userEvent.setup();
       render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
       const row = await screen.findByTestId('label-row-label-bug');
 
       await user.click(within(row).getByRole('button', { name: `${i18n.t('settings.labels.delete')}: バグ` }));
 
-      expect(confirmSpy).toHaveBeenCalledWith(i18n.t('settings.labels.confirmDelete', { name: 'バグ' }));
+      expect(await findDeleteDialog()).toHaveAccessibleDescription(i18n.t('settings.labels.confirmDelete', { name: 'バグ' }));
+      await user.click(screen.getByTestId('label-delete-confirm-cancel'));
       expect(mockedDelete).not.toHaveBeenCalled();
       await waitFor(() =>
         expect(within(screen.getByTestId('label-row-label-bug')).getByTestId('label-usage')).toHaveTextContent(
@@ -247,7 +277,6 @@ describe('LabelsEditor', () => {
 
     it('shows an error and neither confirms nor deletes when re-reading the count fails', async () => {
       mockedFetch.mockResolvedValueOnce([label('label-bug', 'バグ', 'red', 0)]).mockRejectedValueOnce(new Error('network down'));
-      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
       const user = userEvent.setup();
       render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
       const row = await screen.findByTestId('label-row-label-bug');
@@ -256,7 +285,7 @@ describe('LabelsEditor', () => {
       await user.click(deleteButton);
 
       expect(await screen.findByRole('alert')).toHaveTextContent('network down');
-      expect(confirmSpy).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('label-delete-confirm')).not.toBeInTheDocument();
       expect(mockedDelete).not.toHaveBeenCalled();
       await waitFor(() => expect(deleteButton).toHaveFocus());
     });
@@ -323,35 +352,37 @@ describe('LabelsEditor', () => {
         .mockResolvedValueOnce([three[0], three[2]])
         .mockResolvedValueOnce([three[0]]);
       mockedDelete.mockResolvedValue({ success: true, removed_ticket_count: 0 });
-      vi.spyOn(window, 'confirm').mockReturnValue(true);
       const user = userEvent.setup();
       render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
       await screen.findByTestId('label-row-label-b');
 
       // B (middle) -> focus goes to C, the next row.
       await user.click(deleteButton(screen.getByTestId('label-row-label-b'), 'B'));
+      await answerDelete(user, true);
       await waitFor(() => expect(screen.queryByTestId('label-row-label-b')).not.toBeInTheDocument());
       await waitFor(() => expect(deleteButton(screen.getByTestId('label-row-label-c'), 'C')).toHaveFocus());
 
       // C (now last) -> focus goes to A, the previous row.
       await user.keyboard('{Enter}');
+      await answerDelete(user, true);
       await waitFor(() => expect(screen.queryByTestId('label-row-label-c')).not.toBeInTheDocument());
       await waitFor(() => expect(deleteButton(screen.getByTestId('label-row-label-a'), 'A')).toHaveFocus());
 
       // A (the only one) -> focus goes to the create form's name input.
       await user.keyboard('{Enter}');
+      await answerDelete(user, true);
       await waitFor(() => expect(screen.queryByTestId('label-row-label-a')).not.toBeInTheDocument());
       await waitFor(() => expect(createForm().getByRole('textbox')).toHaveFocus());
       expect(mockedDelete).toHaveBeenCalledTimes(3);
     });
 
     it('returns focus to the delete button when the deletion is cancelled', async () => {
-      vi.spyOn(window, 'confirm').mockReturnValue(false);
       const user = userEvent.setup();
       render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
       const row = await screen.findByTestId('label-row-label-bug');
 
       await user.click(deleteButton(row, 'バグ'));
+      await answerDelete(user, false);
 
       await waitFor(() => expect(deleteButton(screen.getByTestId('label-row-label-bug'), 'バグ')).toHaveFocus());
     });
@@ -471,7 +502,7 @@ describe('LabelsEditor', () => {
 
       // Neither the error nor the cleared spinner belongs to project B.
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-      expect(screen.getByRole('status')).toHaveTextContent(i18n.t('settings.labels.loading'));
+      expect(statusTexts()).toContain(i18n.t('settings.labels.loading'));
     });
 
     // Accessibility review condition A-2: an error raised for one project --
@@ -498,7 +529,7 @@ describe('LabelsEditor', () => {
       expect(disabled).toBeDisabled();
       expect(disabled).not.toHaveAttribute('aria-invalid');
       expect(disabled).not.toHaveAttribute('aria-describedby');
-      expect(screen.getByRole('status')).toHaveTextContent(i18n.t('settings.labels.selectProject'));
+      expect(statusTexts()).toContain(i18n.t('settings.labels.selectProject'));
     });
   });
 
@@ -507,10 +538,163 @@ describe('LabelsEditor', () => {
     mockedFetch.mockImplementation(() => new Promise(r => (resolveFetch = r)));
     render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
 
-    expect(await screen.findByRole('status')).toHaveTextContent(i18n.t('settings.labels.loading'));
+    await waitFor(() => expect(statusTexts()).toContain(i18n.t('settings.labels.loading')));
     expect(createForm().getByRole('textbox')).toHaveAttribute('maxLength', '50');
 
     resolveFetch([]);
-    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    await waitFor(() => expect(statusTexts()).not.toContain(i18n.t('settings.labels.loading')));
+  });
+});
+
+// DFLT-00197: a confirmed, successful delete is announced in an always-mounted
+// live region, as DFLT-00194 did for node types, projects and tickets.
+describe('LabelsEditor announcing a delete', () => {
+  const successText = (name: string) => i18n.t('settings.labels.deleteSuccess', { name });
+  const goneText = (name: string) => i18n.t('settings.labels.deleteAlreadyGone', { name });
+  const deleteButton = (id: string, name: string) =>
+    within(screen.getByTestId(`label-row-${id}`)).getByRole('button', { name: `${i18n.t('settings.labels.delete')}: ${name}` });
+  const bug = label('label-bug', 'バグ', 'red', 2);
+  const feat = label('label-feat', '機能追加', 'blue', 0);
+
+  beforeEach(() => {
+    mockedFetch.mockReset();
+    mockedDelete.mockReset();
+    mockedFetch.mockResolvedValue([bug, feat]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('announces the deleted label in a polite live region and still moves focus to the next row', async () => {
+    mockedDelete.mockResolvedValue({ success: true, removed_ticket_count: 2 });
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+    expect(statusTexts()).not.toContain(successText('バグ'));
+
+    await user.click(deleteButton('label-bug', 'バグ'));
+    await answerDelete(user, true);
+
+    await waitFor(() => expect(statusTexts()).toContain(successText('バグ')));
+    await waitFor(() => expect(deleteButton('label-feat', '機能追加')).toHaveFocus());
+    const region = screen.getAllByRole('status').find(el => el.textContent === successText('バグ'))!;
+    expect(region).toHaveAttribute('aria-live', 'polite');
+    expect(region.contains(document.activeElement)).toBe(false);
+  });
+
+  it('names the label as the confirmation did, with the re-read name', async () => {
+    mockedFetch.mockResolvedValueOnce([bug, feat]).mockResolvedValueOnce([{ ...bug, name: '不具合' }, feat]);
+    mockedDelete.mockResolvedValue({ success: true, removed_ticket_count: 2 });
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    await user.click(deleteButton('label-bug', 'バグ'));
+    await answerDelete(user, true);
+
+    await waitFor(() => expect(statusTexts()).toContain(successText('不具合')));
+  });
+
+  it('announces nothing when the user cancels', async () => {
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    await user.click(deleteButton('label-bug', 'バグ'));
+    await answerDelete(user, false);
+
+    await waitFor(() => expect(deleteButton('label-bug', 'バグ')).toHaveFocus());
+    expect(statusTexts()).not.toContain(successText('バグ'));
+    expect(statusTexts()).not.toContain(goneText('バグ'));
+  });
+
+  it('announces nothing when the delete fails, and keeps the error and focus as they were', async () => {
+    mockedDelete.mockRejectedValue(new Error('boom'));
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    await user.click(deleteButton('label-bug', 'バグ'));
+    await answerDelete(user, true);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('boom');
+    await waitFor(() => expect(deleteButton('label-bug', 'バグ')).toHaveFocus());
+    expect(statusTexts()).not.toContain(successText('バグ'));
+  });
+
+  it('announces nothing when re-reading the labels fails', async () => {
+    mockedFetch.mockResolvedValueOnce([bug, feat]).mockRejectedValueOnce(new Error('network down'));
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    await user.click(deleteButton('label-bug', 'バグ'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('network down');
+    expect(mockedDelete).not.toHaveBeenCalled();
+    expect(statusTexts()).not.toContain(successText('バグ'));
+    expect(statusTexts()).not.toContain(goneText('バグ'));
+  });
+
+  it('says the label had already been deleted, without claiming this user deleted it, when it is gone on re-read', async () => {
+    mockedFetch.mockResolvedValueOnce([bug, feat]).mockResolvedValueOnce([feat]);
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    await user.click(deleteButton('label-bug', 'バグ'));
+
+    await waitFor(() => expect(statusTexts()).toContain(goneText('バグ')));
+    expect(statusTexts()).not.toContain(successText('バグ'));
+    expect(screen.queryByTestId('label-delete-confirm')).not.toBeInTheDocument();
+    expect(mockedDelete).not.toHaveBeenCalled();
+    await waitFor(() => expect(deleteButton('label-feat', '機能追加')).toHaveFocus());
+  });
+
+  it('keeps the announcement when the last label is deleted and the list is replaced by the empty state', async () => {
+    mockedFetch.mockResolvedValue([bug]);
+    mockedDelete.mockResolvedValue({ success: true, removed_ticket_count: 2 });
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    await user.click(deleteButton('label-bug', 'バグ'));
+    await answerDelete(user, true);
+
+    expect(await screen.findByText(i18n.t('settings.labels.empty'))).toBeInTheDocument();
+    expect(statusTexts()).toContain(successText('バグ'));
+    await waitFor(() => expect(createForm().getByRole('textbox')).toHaveFocus());
+  });
+
+  it('places the live region last in the space-y container, so the heading gains no top margin', async () => {
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    const region = screen.getAllByRole('status').find(el => el.getAttribute('aria-live') === 'polite')!;
+    const container = region.parentElement!;
+    expect(container).toHaveClass('space-y-4');
+    expect(container.lastElementChild).toBe(region);
+    // space-y-4 adds margin-top to every child that has a preceding sibling;
+    // the heading must stay the first child.
+    const heading = screen.getByRole('heading', { name: i18n.t('settings.labels.title') });
+    expect(container.firstElementChild).toContainElement(heading);
+  });
+
+  it('clears the announcement after a while', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mockedDelete.mockResolvedValue({ success: true, removed_ticket_count: 2 });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    await user.click(deleteButton('label-bug', 'バグ'));
+    await answerDelete(user, true);
+    await waitFor(() => expect(statusTexts()).toContain(successText('バグ')));
+
+    act(() => {
+      vi.advanceTimersByTime(TRANSIENT_ANNOUNCEMENT_DURATION_MS);
+    });
+    expect(statusTexts()).not.toContain(successText('バグ'));
   });
 });

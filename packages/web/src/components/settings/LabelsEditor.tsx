@@ -17,6 +17,9 @@ import { getLabelColorMeta } from '../../labelMeta';
 import { createLabel, deleteLabel, fetchLabels, updateLabel } from '../../lib/labelsApi';
 import { errorMessage } from '../../lib/apiError';
 import { LabelChip } from '../LabelChip';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import { useTransientAnnouncement } from '../../hooks/useTransientAnnouncement';
+import { StatusLiveRegion } from '../StatusLiveRegion';
 
 interface Props {
   // Every project that can be picked. An empty list disables the tab: there
@@ -101,6 +104,11 @@ export const LabelColorPalette: React.FC<PaletteProps> = ({ value, onChange, dis
 
 export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLabelsChanged }) => {
   const { t } = useTranslation();
+  const { confirm, confirmDialog } = useConfirmDialog();
+  // Announces a delete (DFLT-00197, as DFLT-00194 did for node types,
+  // projects and tickets): focus moves to a neighbor afterwards, and this
+  // says why -- which label is gone.
+  const { message: deleteNotice, announce: announceDelete } = useTransientAnnouncement();
   // Start on the app's current project, but fall back to the first one that
   // exists: an app with no project selected yet would otherwise open this
   // tab disabled even though there are projects whose labels could be
@@ -277,7 +285,10 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       setLabels(fresh);
       const current = fresh.find(l => l.id === label.id);
       if (!current) {
-        // Already deleted by someone else: nothing to confirm.
+        // Already deleted by someone else: nothing to confirm. The row still
+        // vanishes and focus still moves because of the user's click, so say
+        // what happened -- but not "deleted", since this user did not.
+        announceDelete(t('settings.labels.deleteAlreadyGone', { name: label.name }));
         focusAfterRemoval(label, fresh);
         onLabelsChanged?.();
         return;
@@ -286,7 +297,18 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
         current.ticket_count > 0
           ? t('settings.labels.confirmDeleteInUse', { name: current.name, count: current.ticket_count })
           : t('settings.labels.confirmDelete', { name: current.name });
-      if (!window.confirm(message)) {
+      // The in-app ConfirmDialog (DFLT-00148), on top of the settings modal.
+      // The row stays busy (its buttons disabled) while it is open, so the
+      // dialog cannot put focus back on the delete button when it closes;
+      // pendingFocus does, once busyId is cleared below.
+      const confirmed = await confirm({
+        title: t('settings.labels.confirmDeleteTitle'),
+        message,
+        confirmLabel: t('settings.labels.confirmDeleteButton'),
+        tone: 'danger',
+        testIdPrefix: 'label-delete-confirm'
+      });
+      if (!confirmed) {
         setPendingFocus(deleteButtonKey(label.id));
         return;
       }
@@ -297,6 +319,9 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
         setPendingFocus(deleteButtonKey(label.id));
         return;
       }
+      // Named as the confirmation named it: the re-read name, which may be
+      // newer than the row the user clicked.
+      announceDelete(t('settings.labels.deleteSuccess', { name: current.name }));
       const remaining = fresh.filter(l => l.id !== label.id);
       setLabels(prev => prev.filter(l => l.id !== label.id));
       focusAfterRemoval(label, remaining);
@@ -310,6 +335,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
 
   return (
     <div ref={containerRef} className="h-full overflow-y-auto space-y-4 text-xs">
+      {confirmDialog}
       <div>
         <h3 className="flex items-center gap-1.5 font-bold text-sm text-slate-800 dark:text-slate-200">
           <Tag className="w-4 h-4 text-slate-500 dark:text-slate-400" aria-hidden="true" />
@@ -517,6 +543,15 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
           })}
         </ul>
       )}
+
+      {/* Outside the list: deleting the last label unmounts the <ul>, and
+          the announcement must outlive it. Last child on purpose: this
+          container spaces its children with space-y-4, whose sibling
+          selector gives every child after the first a top margin even
+          though the region is absolutely positioned. As the first child it
+          would push the heading down by 1rem; as the last one only the
+          region itself takes that margin, so nothing visible moves. */}
+      <StatusLiveRegion message={deleteNotice} />
     </div>
   );
 };

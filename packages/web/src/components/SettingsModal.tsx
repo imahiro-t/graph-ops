@@ -19,6 +19,8 @@ import { useTranslation } from 'react-i18next';
 import { Settings, X } from 'lucide-react';
 import { Project } from '../types';
 import { useModalDialog } from '../hooks/useModalDialog';
+import { useConfirmDialog } from '../hooks/useConfirmDialog';
+import { unsavedChangesConfirmOptions } from './settings/unsavedChangesConfirm';
 import { NodeTypesEditor } from './settings/NodeTypesEditor';
 import { ReviewGatesEditor } from './settings/ReviewGatesEditor';
 import { SkillsEditor } from './settings/SkillsEditor';
@@ -65,17 +67,24 @@ export const SettingsModal: React.FC<Props> = ({
   const [dirty, setDirty] = useState(false);
   const titleId = useId();
 
+  // The unsaved-changes question is the in-app ConfirmDialog (DFLT-00148),
+  // opened on top of this modal. useModalDialog lets only the topmost dialog
+  // handle keys, so while it is open Escape and Tab belong to it, and closing
+  // it puts focus back on the button in this modal that asked (a tab, or the
+  // close button).
+  const { confirm, confirmDialog } = useConfirmDialog();
+
   // Defined before the early return below so the dialog hook can take
   // handleClose: Escape goes through the same unsaved-changes confirmation
   // as the close (X) button. useModalDialog reads onEscape through a ref, so
   // this per-render function always sees the current `dirty`.
-  const confirmDiscardIfDirty = (): boolean => {
+  const confirmDiscardIfDirty = async (): Promise<boolean> => {
     if (!dirty) return true;
-    return window.confirm(t('settings.unsavedChanges.confirmMessage'));
+    return confirm(unsavedChangesConfirmOptions(t, 'settings-discard-confirm'));
   };
 
-  const handleClose = () => {
-    if (!confirmDiscardIfDirty()) return;
+  const handleClose = async () => {
+    if (!(await confirmDiscardIfDirty())) return;
     setDirty(false);
     onClose();
   };
@@ -83,13 +92,18 @@ export const SettingsModal: React.FC<Props> = ({
   // No initialFocusRef: the fixed part of the modal has no text input and
   // the tab contents load asynchronously, so focus lands on the first
   // focusable element (the close button).
-  const dialogRef = useModalDialog({ isOpen, onEscape: handleClose });
+  const dialogRef = useModalDialog({
+    isOpen,
+    onEscape: () => {
+      void handleClose();
+    }
+  });
 
   if (!isOpen) return null;
 
-  const changeTab = (next: Tab) => {
+  const changeTab = async (next: Tab) => {
     if (next === tab) return;
-    if (!confirmDiscardIfDirty()) return;
+    if (!(await confirmDiscardIfDirty())) return;
     setDirty(false);
     setTab(next);
   };
@@ -106,6 +120,7 @@ export const SettingsModal: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+      {confirmDialog}
       <div
         ref={dialogRef}
         role="dialog"
@@ -122,7 +137,7 @@ export const SettingsModal: React.FC<Props> = ({
           </h2>
           <button
             type="button"
-            onClick={handleClose}
+            onClick={() => void handleClose()}
             aria-label={t('common.closeDialog')}
             className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition"
           >
@@ -135,7 +150,7 @@ export const SettingsModal: React.FC<Props> = ({
           {tabs.map(tb => (
             <button
               key={tb.key}
-              onClick={() => changeTab(tb.key)}
+              onClick={() => void changeTab(tb.key)}
               className={`px-3 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition ${
                 tab === tb.key
                   ? 'border-blue-600 text-blue-700 dark:text-blue-400'

@@ -16,6 +16,8 @@ import {
 import { getNodeTypeMeta } from '../../nodeTypeMeta';
 import { TemplateFetcher, TemplateSaver, TemplateTextEditor } from './TemplateTextEditor';
 import { ReportTemplateEditor } from './ReportTemplateEditor';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 
 type TemplateKey = 'plan' | 'review' | 'report';
 
@@ -59,14 +61,20 @@ export const TemplatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // same way SettingsModal's tab/scope switches do.
   const [childDirty, setChildDirty] = useState(false);
 
+  // In-app confirmation (DFLT-00148), on top of the settings modal.
+  const { confirm, confirmDialog } = useConfirmDialog();
+
   const handleDirtyChange = useCallback((dirty: boolean) => {
     setChildDirty(dirty);
     onDirtyChange(dirty);
   }, [onDirtyChange]);
 
-  const select = (next: TemplateKey) => {
+  const select = async (next: TemplateKey) => {
     if (next === selected) return;
-    if (childDirty && !window.confirm(t('settings.unsavedChanges.confirmMessage'))) return;
+    if (childDirty) {
+      const discard = await confirm(unsavedChangesConfirmOptions(t, 'template-discard-confirm'));
+      if (!discard) return;
+    }
     // Discarding: clear the relayed dirty flag now so the next switch (or a
     // tab change in SettingsModal) does not ask again. The new editor
     // remounts (key={selected}) and reports its own clean state as well.
@@ -79,6 +87,7 @@ export const TemplatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
   return (
     <div className="flex h-full min-h-0 gap-4">
+      {confirmDialog}
       {/* Left: template list */}
       <nav
         aria-labelledby={listTitleId}
@@ -100,7 +109,7 @@ export const TemplatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                     shown on the right. */}
                 <button
                   type="button"
-                  onClick={() => select(key)}
+                  onClick={() => void select(key)}
                   aria-current={isSelected ? 'true' : undefined}
                   className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${
                     isSelected

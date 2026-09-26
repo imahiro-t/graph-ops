@@ -12,6 +12,8 @@ import { fetchSettingsSkill, fetchSettingsSkills, saveSettingsSkill } from '../.
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 
 interface Props {
   onDirtyChange: (dirty: boolean) => void;
@@ -31,6 +33,8 @@ const skillNameKeys: Record<string, string> = {
 
 export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const { t } = useTranslation();
+  // In-app confirmation (DFLT-00148), on top of the settings modal.
+  const { confirm, confirmDialog } = useConfirmDialog();
   // See src/hooks/useLatest.ts -- keeps loadSkills/loadSelected below
   // insensitive to language changes (F-1).
   const tRef = useLatest(t);
@@ -84,10 +88,14 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
   // Switches the selected skill, asking first when the current one has
   // unsaved edits -- mirrors NodeTypesEditor's / TemplatesEditor's select.
-  // Returns whether the switch happened, like NodeTypesEditor's.
-  const select = (next: string): boolean => {
+  // Returns whether the switch happened, like NodeTypesEditor's, and is
+  // asynchronous like it too (the question is the in-app ConfirmDialog).
+  const select = async (next: string): Promise<boolean> => {
     if (next === selected) return true;
-    if (isDirty && !window.confirm(t('settings.unsavedChanges.confirmMessage'))) return false;
+    if (isDirty) {
+      const discard = await confirm(unsavedChangesConfirmOptions(t, 'skill-discard-confirm'));
+      if (!discard) return false;
+    }
     // Discarding: reset the text first so isDirty is already false while the
     // next skill loads (see NodeTypesEditor's select for why).
     setTierText(savedTierText);
@@ -115,6 +123,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
   return (
     <div className="flex h-full min-h-0 gap-4">
+      {confirmDialog}
       {/* Left: skill list */}
       <div className="w-56 shrink-0 border border-slate-200 dark:border-slate-800 rounded-lg overflow-y-auto bg-slate-50 dark:bg-slate-800">
         <div className="px-3 py-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-slate-50 dark:bg-slate-800">
@@ -131,7 +140,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
           return (
             <button
               key={info.name}
-              onClick={() => select(info.name)}
+              onClick={() => void select(info.name)}
               className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 border-b border-slate-100 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-900 transition ${
                 selected === info.name ? 'bg-white dark:bg-slate-900 font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'
               }`}

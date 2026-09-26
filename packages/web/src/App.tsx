@@ -39,7 +39,9 @@ import { localizedApiErrorMessage } from './lib/apiError';
 import { apiFetch } from './lib/apiFetch';
 import { fetchPendingApprovalCounts } from './lib/pendingApprovals';
 import { fetchAppSettings } from './lib/settingsApi';
+import { focusIfLost, focusKeySelector, neighborAfterRemoval } from './lib/focusAfterRemoval';
 import { useLatest } from './hooks/useLatest';
+import { useTransientAnnouncement } from './hooks/useTransientAnnouncement';
 
 // Cycles through the three-way theme preference in a fixed order, used by
 // the header toggle button (light -> dark -> system -> light -> ...).
@@ -899,22 +901,7 @@ export const App: React.FC = () => {
   // The live announcement of what opening a related ticket changed (the
   // filters it cleared), cleared after a while so the same message can be
   // announced again.
-  const [openNotice, setOpenNotice] = useState('');
-  const openNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const announceOpenNotice = (message: string) => {
-    if (openNoticeTimer.current !== null) clearTimeout(openNoticeTimer.current);
-    setOpenNotice(message);
-    openNoticeTimer.current = setTimeout(() => {
-      openNoticeTimer.current = null;
-      setOpenNotice('');
-    }, 5000);
-  };
-  useEffect(
-    () => () => {
-      if (openNoticeTimer.current !== null) clearTimeout(openNoticeTimer.current);
-    },
-    []
-  );
+  const { message: openNotice, announce: announceOpenNotice } = useTransientAnnouncement();
   const handleOpenTicket = (id: string) => {
     // Every ticket of the current project is loaded (paging is client-side),
     // so a ticket missing here is gone or in another project: nothing to open.
@@ -1011,6 +998,73 @@ export const App: React.FC = () => {
     (currentPage - 1) * ticketsPerPage,
     currentPage * ticketsPerPage
   );
+
+  // Where keyboard focus goes after a ticket is deleted (DFLT-00191). The
+  // deleted card -- focused delete button included -- disappears with the
+  // re-fetch, which would drop focus to <body>. It moves to the ticket that
+  // took the deleted one's place in the (filtered) list, else the one before
+  // it, else the header's "new ticket" button -- LabelsEditor's rule (see
+  // lib/focusAfterRemoval). `before` is the filtered list's ids when the
+  // delete succeeded. The move waits for the deleted id to actually leave
+  // the list, however long that takes: the re-fetch that follows the delete
+  // can fail, or be discarded as superseded by a newer fetch, and leave the
+  // card on screen until a later fetch (the next poll, say) drops it.
+  // Meanwhile TicketItem keeps focus on the card's own delete button (which
+  // was disabled during the request), and when the card finally goes,
+  // focusIfLost moves focus on -- without taking it from wherever the user
+  // has put it in the meantime. Only a project switch drops the move.
+  const [pendingTicketFocus, setPendingTicketFocus] = useState<{
+    removedId: string;
+    projectId: string;
+    before: string[];
+  } | null>(null);
+  const ticketListRef = useRef<HTMLDivElement>(null);
+  const newTicketButtonRef = useRef<HTMLButtonElement>(null);
+  const filteredTicketsRef = useLatest(filteredTickets);
+  const { message: ticketDeleteNotice, announce: announceTicketDelete } = useTransientAnnouncement();
+
+  // TicketItem's onDeleted: called once the DELETE has succeeded. When the
+  // list has already dropped the ticket (a poll got there first), `before`
+  // no longer holds it and neighborAfterRemoval picks the first ticket.
+  // The delete is announced here rather than in the card, whose own live
+  // region leaves with it (DFLT-00194).
+  const handleTicketDeleted = async (ticketId: string, ticketTitle: string) => {
+    announceTicketDelete(t('ticketItem.delete.success', { id: ticketId, title: ticketTitle }));
+    const projectId = currentProjectIdRef.current;
+    setPendingTicketFocus({ removedId: ticketId, projectId, before: filteredTicketsRef.current.map(ticket => ticket.id) });
+    await refreshTickets();
+  };
+
+  useEffect(() => {
+    if (pendingTicketFocus === null) return;
+    const { removedId, projectId, before } = pendingTicketFocus;
+    // Another project's list is on screen now: this move no longer applies.
+    if (projectId !== currentProjectId) {
+      setPendingTicketFocus(null);
+      return;
+    }
+    const currentIds = filteredTickets.map(ticket => ticket.id);
+    // Still listed: wait (see above) -- the card, and TicketItem's hold on
+    // focus, are still there.
+    if (currentIds.includes(removedId)) return;
+    setPendingTicketFocus(null);
+    const pagedIds = pagedTickets.map(ticket => ticket.id);
+    const neighbor = neighborAfterRemoval(before, removedId, currentIds);
+    // The page clamps back when the deleted ticket was the last one on the
+    // last page, so the neighbor is normally on the page shown. If it is not
+    // (a filter or poll reshuffled the list meanwhile), the card now at the
+    // deleted one's position on this page, else the page's last, takes it.
+    let target: string | null = neighbor;
+    if (target === null || !pagedIds.includes(target)) {
+      const position = before.indexOf(removedId) - (currentPage - 1) * ticketsPerPage;
+      target = pagedIds[Math.max(position, 0)] ?? pagedIds[pagedIds.length - 1] ?? null;
+    }
+    const el =
+      target === null
+        ? newTicketButtonRef.current
+        : ticketListRef.current?.querySelector<HTMLElement>(focusKeySelector(`ticket-delete-${target}`));
+    focusIfLost(el);
+  }, [pendingTicketFocus, currentProjectId, filteredTickets, pagedTickets, currentPage, ticketsPerPage]);
 
   // Metrics
   const totalCount = tickets.length;
@@ -1186,6 +1240,7 @@ export const App: React.FC = () => {
             </button>
 
             <button
+              ref={newTicketButtonRef}
               onClick={() => {
                 // Clear any leftover status message from a previous create
                 // attempt before the form reopens -- the form's own request
@@ -1334,7 +1389,7 @@ export const App: React.FC = () => {
         </div>
 
         {/* Tickets Accordion List */}
-        <div>
+        <div ref={ticketListRef}>
           {/* Four states, not two (DFLT-00106). "No project has been
               created yet" plus a create button is only ever right when the
               answer is known to be "none": shown to somebody who does have
@@ -1348,6 +1403,7 @@ export const App: React.FC = () => {
               selected, its list not having arrived yet is "loading" too --
               not the empty state, and never the previous project's list. */}
           <StatusLiveRegion message={openNotice} />
+          <StatusLiveRegion message={ticketDeleteNotice} />
           {!isCurrentProjectResolved ? (
             <div
               className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm"
@@ -1411,6 +1467,7 @@ export const App: React.FC = () => {
                   onToggleExpand={() => handleToggleExpand(ticket.id)}
                   onOpenTicket={handleOpenTicket}
                   onRefresh={refreshTickets}
+                  onDeleted={handleTicketDeleted}
                   myName={myName}
                   projectLabels={projectLabels}
                   autopilot={ticketAutopilotView(autopilotRuns, ticket.id, descendantsOf)}

@@ -153,9 +153,13 @@ describe('TemplatesEditor', () => {
     expect(screen.getByText(i18n.t('settings.reviewTemplate.emptyOverrideHint'))).toBeInTheDocument();
   });
 
-  it('keeps the selection and the unsaved edit when the switch is cancelled', async () => {
+  // The question is the in-app ConfirmDialog since DFLT-00148.
+  it.each([
+    ['the cancel button', (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByTestId('template-discard-confirm-cancel'))],
+    ['Escape', (user: ReturnType<typeof userEvent.setup>) => user.keyboard('{Escape}')],
+    ['a click on the overlay', (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByTestId('template-discard-confirm-overlay'))]
+  ])('keeps the selection and the unsaved edit when the switch is cancelled with %s', async (_how, dismiss) => {
     const user = userEvent.setup();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     render(<TemplatesEditor onDirtyChange={vi.fn()} />);
 
     const textarea = await textareaOf('settings.planTemplate');
@@ -163,7 +167,12 @@ describe('TemplatesEditor', () => {
     await user.type(textarea, '# 編集途中');
     await user.click(listButton('review'));
 
-    expect(confirm).toHaveBeenCalledWith(i18n.t('settings.unsavedChanges.confirmMessage'));
+    const dialog = screen.getByRole('alertdialog', { name: i18n.t('settings.unsavedChanges.confirmTitle') });
+    expect(dialog).toHaveAccessibleDescription(i18n.t('settings.unsavedChanges.confirmMessage'));
+    await dismiss(user);
+
+    expect(screen.queryByTestId('template-discard-confirm')).not.toBeInTheDocument();
+    expect(listButton('review')).toHaveFocus();
     expect(listButton('plan')).toHaveAttribute('aria-current', 'true');
     expect(textarea).toHaveValue('# 編集途中');
     expect(fetchReview).not.toHaveBeenCalled();
@@ -172,31 +181,30 @@ describe('TemplatesEditor', () => {
   it('discards the edit on confirm and does not ask again on the next clean switch', async () => {
     const user = userEvent.setup();
     const onDirtyChange = vi.fn();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<TemplatesEditor onDirtyChange={onDirtyChange} />);
 
     const textarea = await textareaOf('settings.planTemplate');
     await user.type(textarea, ' edited');
     await user.click(listButton('review'));
+    await user.click(screen.getByTestId('template-discard-confirm-confirm'));
 
-    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('template-discard-confirm')).not.toBeInTheDocument();
     expect(await textareaOf('settings.reviewTemplate')).toHaveValue('review-tier');
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
 
     await user.click(listButton('report'));
-    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('template-discard-confirm')).not.toBeInTheDocument();
     expect(listButton('report')).toHaveAttribute('aria-current', 'true');
   });
 
   it('does not ask for confirmation when nothing was edited', async () => {
     const user = userEvent.setup();
-    const confirm = vi.spyOn(window, 'confirm');
     render(<TemplatesEditor onDirtyChange={vi.fn()} />);
     await textareaOf('settings.planTemplate');
 
     await user.click(listButton('review'));
 
-    expect(confirm).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('template-discard-confirm')).not.toBeInTheDocument();
     expect(listButton('review')).toHaveAttribute('aria-current', 'true');
   });
 

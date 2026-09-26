@@ -104,7 +104,7 @@ describe('App project scoping', () => {
       expect(new Set(ticketListRequests())).toEqual(new Set([`/api/tickets?project_id=${alpha.id}`]));
       expect(screen.getByText('ALP-00001')).toBeInTheDocument();
       expect(screen.queryByText('BETA-00001')).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /Alpha/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Alpha/ })).toBeInTheDocument();
     });
 
     it('re-points the list and the poll at the project the user switches to', async () => {
@@ -113,8 +113,8 @@ describe('App project scoping', () => {
       render(<App />);
       await screen.findByText('ALP-00001');
 
-      await user.click(screen.getByRole('button', { name: /Alpha/ }));
-      await user.click(screen.getByRole('button', { name: /Beta/ }));
+      await user.click(screen.getByRole('button', { name: /^Alpha/ }));
+      await user.click(screen.getByRole('button', { name: /^Beta/ }));
       await screen.findByText('BETA-00001');
       expect(ticketListRequests()).toContain(`/api/tickets?project_id=${beta.id}`);
 
@@ -186,17 +186,17 @@ describe('App project scoping', () => {
       };
 
       render(<App />);
-      await screen.findByRole('button', { name: /Alpha/ });
+      await screen.findByRole('button', { name: /^Alpha/ });
       expect(screen.queryByText('ALP-00001')).not.toBeInTheDocument();
 
-      await user.click(screen.getByRole('button', { name: /Alpha/ }));
-      await user.click(screen.getByRole('button', { name: /Beta/ }));
+      await user.click(screen.getByRole('button', { name: /^Alpha/ }));
+      await user.click(screen.getByRole('button', { name: /^Beta/ }));
       await screen.findByText('BETA-00001');
 
       releaseAlpha();
       await new Promise(r => setTimeout(r, 50));
 
-      expect(screen.getByRole('button', { name: /Beta/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Beta/ })).toBeInTheDocument();
       expect(screen.getByText('BETA-00001')).toBeInTheDocument();
       expect(screen.queryByText('ALP-00001')).not.toBeInTheDocument();
     });
@@ -222,9 +222,9 @@ describe('App project scoping', () => {
       };
 
       render(<App />);
-      await screen.findByRole('button', { name: /Alpha/ });
-      await user.click(screen.getByRole('button', { name: /Alpha/ }));
-      await user.click(screen.getByRole('button', { name: /Beta/ }));
+      await screen.findByRole('button', { name: /^Alpha/ });
+      await user.click(screen.getByRole('button', { name: /^Alpha/ }));
+      await user.click(screen.getByRole('button', { name: /^Beta/ }));
 
       // Alpha answers while Beta is still loading.
       releaseAlpha();
@@ -263,10 +263,9 @@ describe('App project scoping', () => {
         }
         return realFetch(input, init);
       };
-      vi.spyOn(window, 'confirm').mockReturnValue(true);
 
       render(<App />);
-      await screen.findByRole('button', { name: /Alpha/ });
+      await screen.findByRole('button', { name: /^Alpha/ });
       const refresh = screen.getByTitle(i18n.t('toolbar.refreshTitle'));
       await waitFor(() => expect(refresh).toBeDisabled());
 
@@ -274,6 +273,8 @@ describe('App project scoping', () => {
       await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.appSettings') }));
       const [deleteAlpha] = await screen.findAllByTitle(i18n.t('settings.appSettings.projects.delete'));
       await user.click(deleteAlpha);
+      // The in-app confirmation (DFLT-00148).
+      await user.click(screen.getByTestId('project-delete-confirm-confirm'));
       await screen.findByText(i18n.t('projectSwitcher.noProjectYet'));
 
       // Alpha's list finally answers, for a project that no longer exists.
@@ -305,9 +306,9 @@ describe('App project scoping', () => {
 
       render(<App />);
       await screen.findByText('ALP-00001');
-      await user.click(screen.getByRole('button', { name: /Alpha/ }));
-      await user.click(screen.getByRole('button', { name: /Beta/ }));
-      await screen.findByRole('button', { name: /Beta/ });
+      await user.click(screen.getByRole('button', { name: /^Alpha/ }));
+      await user.click(screen.getByRole('button', { name: /^Beta/ }));
+      await screen.findByRole('button', { name: /^Beta/ });
       await new Promise(r => setTimeout(r, 50));
 
       expect(screen.queryByText('ALP-00001')).not.toBeInTheDocument();
@@ -364,9 +365,9 @@ describe('App project scoping', () => {
       expect(assigneeOptions()).toContain('alice');
       await user.click(assigneeButton());
 
-      await user.click(screen.getByRole('button', { name: /Alpha/ }));
-      await user.click(screen.getByRole('button', { name: /Beta/ }));
-      await screen.findByRole('button', { name: /Beta/ });
+      await user.click(screen.getByRole('button', { name: /^Alpha/ }));
+      await user.click(screen.getByRole('button', { name: /^Beta/ }));
+      await screen.findByRole('button', { name: /^Beta/ });
       await new Promise(r => setTimeout(r, 50));
 
       // Beta's list is still on its way: nothing of Alpha's may be counted.
@@ -419,8 +420,8 @@ describe('App project scoping', () => {
       );
       await user.click(labelButton());
 
-      await user.click(screen.getByRole('button', { name: /Alpha/ }));
-      await user.click(screen.getByRole('button', { name: /Beta/ }));
+      await user.click(screen.getByRole('button', { name: /^Alpha/ }));
+      await user.click(screen.getByRole('button', { name: /^Beta/ }));
       await screen.findByText('BETA-00001');
 
       await user.click(labelButton());
@@ -456,7 +457,7 @@ describe('App project scoping', () => {
       };
 
       render(<App />);
-      await screen.findByRole('button', { name: /Alpha/ });
+      await screen.findByRole('button', { name: /^Alpha/ });
       await waitFor(() => expect(ticketListRequests()).toHaveLength(1));
       const refresh = screen.getByTitle(i18n.t('toolbar.refreshTitle'));
       expect(refresh).toBeDisabled();
@@ -496,7 +497,7 @@ describe('App project scoping', () => {
         };
 
         render(<App />);
-        await screen.findByRole('button', { name: /Alpha/ });
+        await screen.findByRole('button', { name: /^Alpha/ });
         await waitFor(() => expect(ticketListRequests()).toHaveLength(1));
 
         visibility = 'hidden';
@@ -548,14 +549,14 @@ describe('App project scoping', () => {
       await user.click(await screen.findByText('ALP-00001'));
       await waitFor(() => expect(fetchMock.mock.calls.map(c => String(c[0]))).toContain('/api/tickets/ALP-00001'));
 
-      await user.click(screen.getByRole('button', { name: /Alpha/ }));
-      await user.click(screen.getByRole('button', { name: /Beta/ }));
+      await user.click(screen.getByRole('button', { name: /^Alpha/ }));
+      await user.click(screen.getByRole('button', { name: /^Beta/ }));
       await screen.findByText('BETA-00001');
 
       releaseDetail();
       await new Promise(r => setTimeout(r, 50));
 
-      expect(screen.getByRole('button', { name: /Beta/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Beta/ })).toBeInTheDocument();
       expect(screen.getByText('BETA-00001')).toBeInTheDocument();
       expect(screen.queryByText('ALP-00001')).not.toBeInTheDocument();
     });
@@ -576,8 +577,8 @@ describe('App project scoping', () => {
       try {
         render(<App />);
         await screen.findByText('ALP-00001');
-        await user.click(screen.getByRole('button', { name: /Alpha/ }));
-        await user.click(screen.getByRole('button', { name: /Beta/ }));
+        await user.click(screen.getByRole('button', { name: /^Alpha/ }));
+        await user.click(screen.getByRole('button', { name: /^Beta/ }));
         await screen.findByText('BETA-00001');
 
         visibility = 'hidden';
@@ -695,10 +696,10 @@ describe('App project scoping', () => {
       await screen.findByText(i18n.t('projectSwitcher.loadFailed'));
 
       await user.click(screen.getByRole('button', { name: i18n.t('projectSwitcher.noProject') }));
-      await user.click(await screen.findByRole('button', { name: /Beta/ }));
+      await user.click(await screen.findByRole('button', { name: /^Beta/ }));
 
       await screen.findByText('BETA-00001');
-      expect(screen.getByRole('button', { name: /Beta/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Beta/ })).toBeInTheDocument();
       expect(screen.queryByText(i18n.t('projectSwitcher.loadFailed'))).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: i18n.t('projectSwitcher.retry') })).not.toBeInTheDocument();
     });
@@ -729,13 +730,13 @@ describe('App project scoping', () => {
 
       await user.click(screen.getByRole('button', { name: i18n.t('projectSwitcher.retry') }));
       await user.click(screen.getByRole('button', { name: i18n.t('projectSwitcher.noProject') }));
-      await user.click(await screen.findByRole('button', { name: /Beta/ }));
+      await user.click(await screen.findByRole('button', { name: /^Beta/ }));
       await screen.findByText('BETA-00001');
 
       releaseRead();
       await new Promise(r => setTimeout(r, 50));
 
-      expect(screen.getByRole('button', { name: /Beta/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Beta/ })).toBeInTheDocument();
       expect(screen.getByText('BETA-00001')).toBeInTheDocument();
       expect(screen.queryByText('ALP-00001')).not.toBeInTheDocument();
     });

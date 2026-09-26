@@ -8,8 +8,8 @@ import { useLatest } from './useLatest';
 // - On open: remember the element that had focus, then move focus into the
 //   dialog (initialFocusRef if given, else the first focusable element, else
 //   the panel itself -- give the panel tabIndex={-1} for that case).
-// - While open: Tab / Shift+Tab wrap around inside the panel, Escape calls
-//   onEscape.
+// - While open (and the topmost of the open dialogs, see below): Tab /
+//   Shift+Tab wrap around inside the panel, Escape calls onEscape.
 // - On close (isOpen -> false, or unmount for conditionally mounted modals):
 //   put focus back on the remembered element, or on returnFocusFallbackRef
 //   when that element is gone (removed from the DOM, or it was <body>) or
@@ -20,8 +20,22 @@ import { useLatest } from './useLatest';
 //
 // Assumptions / contracts:
 //
-// - Only one modal using this hook is open at a time. The keydown listener
-//   lives on `document`, so two open modals would both react to Escape.
+// - Modals using this hook may be stacked (DFLT-00148: a ConfirmDialog opened
+//   from inside SettingsModal). Every open dialog pushes a token onto a
+//   module-level stack when its effect runs and removes it in the cleanup,
+//   and only the dialog whose token is on top of the stack handles keys: the
+//   keydown listeners all live on `document`, and the one registered first
+//   (the dialog underneath) runs first, so without this it would take Escape
+//   (closing itself) and pull Tab focus back into its own panel -- a dialog
+//   rendered through a portal sits outside that panel. A dialog that is not
+//   on top returns from its handler without calling preventDefault, leaving
+//   the event to the topmost one. When the top dialog closes, its cleanup
+//   removes its token, so the one underneath handles keys again, and puts
+//   focus back on the element that opened it (inside the dialog underneath).
+//   The stack order is the order the effects last ran, so a dialog
+//   underneath must not re-run its effect while another is open above it
+//   (that would move its token back on top): pass stable refs for
+//   initialFocusRef / returnFocusFallbackRef, as every caller does.
 // - The listener is registered on `document` in the *bubble* phase. React 18
 //   delegates events to the root container, so React's onKeyDown handlers
 //   inside the dialog run before this listener. A child that handles a key
@@ -35,7 +49,9 @@ import { useLatest } from './useLatest';
 // - React.StrictMode runs the open effect twice in development (run ->
 //   cleanup -> run). The cleanup restores focus to the remembered element and
 //   the second run records that same element again before moving focus back
-//   into the dialog, so the end state is unchanged. Keep the cleanup's
+//   into the dialog, so the end state is unchanged. The same holds for the
+//   stack token: the cleanup removes it and the second run pushes a new one,
+//   so the order of the stack is unchanged too. Keep the cleanup's
 //   "restore focus" and the effect's "remember activeElement" symmetric if
 //   either is changed. One asymmetric case: if the remembered element cannot
 //   take focus at that intermediate cleanup (say, a caller disables its
@@ -111,6 +127,11 @@ function isSameTabStop(active: Element | null, stop: HTMLElement): boolean {
   );
 }
 
+// Tokens of the dialogs that are open, in the order they opened; the last one
+// is the topmost dialog, the only one that handles keys. See the contract at
+// the top of this file.
+const openDialogStack: object[] = [];
+
 // Reads ref.current at call time on purpose: the fallback element is looked
 // up when the dialog closes, not when it opened, since the one that exists at
 // close time is the one that can take focus.
@@ -135,6 +156,8 @@ export function useModalDialog<T extends HTMLElement = HTMLDivElement>({
     if (!isOpen) return;
 
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const token = {};
+    openDialogStack.push(token);
 
     const container = containerRef.current;
     if (container) {
@@ -143,6 +166,9 @@ export function useModalDialog<T extends HTMLElement = HTMLDivElement>({
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Checked before anything else, and without preventDefault: a dialog
+      // underneath another one leaves every key to the topmost dialog.
+      if (openDialogStack[openDialogStack.length - 1] !== token) return;
       if (e.defaultPrevented) return;
       const panel = containerRef.current;
       if (!panel) return;
@@ -190,6 +216,8 @@ export function useModalDialog<T extends HTMLElement = HTMLDivElement>({
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
+      const index = openDialogStack.indexOf(token);
+      if (index !== -1) openDialogStack.splice(index, 1);
       if (previouslyFocused && previouslyFocused.isConnected && previouslyFocused !== document.body) {
         previouslyFocused.focus();
         // focus() is a silent no-op on an element that cannot take focus

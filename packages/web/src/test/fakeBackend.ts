@@ -225,6 +225,12 @@ export function createFakeBackend(seed: FakeBackendSeed): FakeBackend {
         const tk = backend.tickets.find(x => x.id === id);
         return tk ? respond(200, ticketDetailJSON(tk)) : respond(404, { error: { code: 'TICKET_NOT_FOUND', message: '' } });
       }
+      if ((m = url.match(/^\/api\/tickets\/([^/?]+)$/)) && method === 'DELETE') {
+        const id = decodeURIComponent(m[1]);
+        if (!backend.tickets.some(x => x.id === id)) return respond(404, { error: { code: 'TICKET_NOT_FOUND', message: '' } });
+        backend.tickets = backend.tickets.filter(x => x.id !== id);
+        return respond(200, { success: true });
+      }
       if (url === '/api/projects/pending-approvals' && method === 'GET') {
         const res = backend.pendingApprovals();
         if (res instanceof Response || res instanceof Promise) return res;

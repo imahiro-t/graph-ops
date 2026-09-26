@@ -1,7 +1,7 @@
 // Regression coverage for behaviour DFLT-00023 left unverified (5-5) and for
 // F-1's structural non-regression (language switch must never re-trigger
 // this tab's load). See this ticket's plan section 4-2.
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, waitForElementToBeRemoved, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
@@ -64,6 +64,18 @@ function renderEditor() {
       onMyNameChanged={vi.fn()}
     />
   );
+}
+
+// DFLT-00198 (same reason as DFLT-00192): fetchAppSettings is called from the
+// mount effect inside render()'s act, so waiting for that call waits for
+// nothing -- under load the assertions then run against the loading spinner.
+// Wait for the spinner to go away instead. It is always showing when render()
+// returns (load() sets loading before awaiting the fetch), so if that ever
+// stops being true this fails loudly rather than passing without waiting.
+// Call it right after render(), with no await in between.
+async function waitForAppSettingsLoaded() {
+  await waitForElementToBeRemoved(() => screen.queryByText(i18n.t('settings.common.loading')));
+  expect(mockedFetchAppSettings).toHaveBeenCalledTimes(1);
 }
 
 describe('AppSettingsEditor', () => {
@@ -260,7 +272,7 @@ describe('AppSettingsEditor', () => {
         onMyNameChanged={vi.fn()}
       />
     );
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    await waitForAppSettingsLoaded();
 
     const names = screen.getAllByLabelText(i18n.t('settings.appSettings.projects.nameLabel'));
     expect(names.map(el => (el as HTMLInputElement).value)).toEqual(['Alpha', 'Beta']);
@@ -337,7 +349,7 @@ describe('AppSettingsEditor project local paths', () => {
 
   it('shows "not set" for a project without a local path and the path for one that has it', async () => {
     renderWithProjects([alpha, beta]);
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    await waitForAppSettingsLoaded();
 
     expect(localPathInput('p-alpha')).toHaveValue('/work/alpha');
     expect(localPathInput('p-beta')).toHaveValue('');
@@ -347,7 +359,7 @@ describe('AppSettingsEditor project local paths', () => {
 
   it('labels the field as this environment only and explains it is not stored in the DB', async () => {
     renderWithProjects([alpha]);
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    await waitForAppSettingsLoaded();
 
     expect(row('p-alpha').getByText(i18n.t('settings.appSettings.projects.localPathLabel'))).toBeInTheDocument();
     expect(i18n.t('settings.appSettings.projects.localPathLabel')).toBe('ローカルパス（この環境）');
@@ -358,7 +370,7 @@ describe('AppSettingsEditor project local paths', () => {
     const user = userEvent.setup();
     const onProjectsChanged = vi.fn();
     const { rerenderWith } = renderWithProjects([beta], onProjectsChanged);
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    await waitForAppSettingsLoaded();
 
     await user.type(localPathInput('p-beta'), '/work/beta');
     await user.click(saveButton('p-beta'));
@@ -373,7 +385,7 @@ describe('AppSettingsEditor project local paths', () => {
     const user = userEvent.setup();
     const onProjectsChanged = vi.fn();
     const { rerenderWith } = renderWithProjects([alpha], onProjectsChanged);
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    await waitForAppSettingsLoaded();
 
     await user.clear(localPathInput('p-alpha'));
     await user.type(localPathInput('p-alpha'), '/work/alpha2');
@@ -389,7 +401,7 @@ describe('AppSettingsEditor project local paths', () => {
     const user = userEvent.setup();
     const onProjectsChanged = vi.fn();
     const { rerenderWith } = renderWithProjects([alpha], onProjectsChanged);
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    await waitForAppSettingsLoaded();
 
     await user.clear(localPathInput('p-alpha'));
     expect(saveButton('p-alpha')).toBeEnabled();
@@ -402,6 +414,268 @@ describe('AppSettingsEditor project local paths', () => {
     expect(row('p-alpha').getAllByText(i18n.t('settings.appSettings.projects.notSet')).length).toBeGreaterThan(0);
   });
 
+  // DFLT-00148: deleting a project is confirmed through the in-app
+  // ConfirmDialog, not window.confirm.
+  describe('deleting a project', () => {
+    const deleteButton = () => row('p-alpha').getByTitle(i18n.t('settings.appSettings.projects.delete'));
+    const deleteCalls = () =>
+      (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([url, init]) => String(url) === '/api/projects/p-alpha' && (init as RequestInit | undefined)?.method === 'DELETE'
+      );
+
+    it('asks in a danger dialog naming the project, then deletes and reports the change on confirm', async () => {
+      const user = userEvent.setup();
+      const onProjectsChanged = vi.fn();
+      const confirmSpy = vi.spyOn(window, 'confirm');
+      renderWithProjects([alpha], onProjectsChanged);
+      await waitForAppSettingsLoaded();
+
+      await user.click(deleteButton());
+
+      const dialog = screen.getByRole('alertdialog', { name: i18n.t('settings.appSettings.projects.confirmDeleteTitle') });
+      expect(dialog).toHaveAttribute('data-testid', 'project-delete-confirm');
+      expect(dialog).toHaveAccessibleDescription(
+        i18n.t('settings.appSettings.projects.confirmDelete', { name: 'Alpha', id: 'p-alpha' })
+      );
+      expect(screen.getByTestId('project-delete-confirm-confirm')).toHaveTextContent(
+        i18n.t('settings.appSettings.projects.confirmDeleteButton')
+      );
+      expect(deleteCalls()).toHaveLength(0);
+
+      await user.click(screen.getByTestId('project-delete-confirm-confirm'));
+
+      await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
+      expect(deleteCalls()).toHaveLength(1);
+      expect(screen.queryByTestId('project-delete-confirm')).not.toBeInTheDocument();
+      expect(confirmSpy).not.toHaveBeenCalled();
+      confirmSpy.mockRestore();
+    });
+
+    it.each([
+      ['the cancel button', (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByTestId('project-delete-confirm-cancel'))],
+      ['Escape', (user: ReturnType<typeof userEvent.setup>) => user.keyboard('{Escape}')],
+      ['a click on the overlay', (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByTestId('project-delete-confirm-overlay'))]
+    ])('does nothing on %s and returns focus to the delete button', async (_how, dismiss) => {
+      const user = userEvent.setup();
+      const onProjectsChanged = vi.fn();
+      renderWithProjects([alpha], onProjectsChanged);
+      await waitForAppSettingsLoaded();
+
+      await user.click(deleteButton());
+      await dismiss(user);
+
+      expect(screen.queryByTestId('project-delete-confirm')).not.toBeInTheDocument();
+      expect(deleteCalls()).toHaveLength(0);
+      expect(onProjectsChanged).not.toHaveBeenCalled();
+      expect(deleteButton()).toHaveFocus();
+    });
+
+    // DFLT-00191: once the parent has re-fetched the list without the
+    // deleted project, focus moves to the row that took its place (else the
+    // one before it, else the section heading) instead of dropping to <body>.
+    describe('focus after the delete', () => {
+      const gamma: Project = { id: 'p-gamma', name: 'Gamma', prefix: 'GAMMA', local_path: '', created_at: '', updated_at: '' };
+      const deleteButtonOf = (id: string) => row(id).getByTitle(i18n.t('settings.appSettings.projects.delete'));
+      const heading = () => screen.getByRole('heading', { name: i18n.t('settings.appSettings.projects.title') });
+
+      async function confirmDelete(id: string, user: ReturnType<typeof userEvent.setup>) {
+        await user.click(deleteButtonOf(id));
+        await user.click(screen.getByTestId('project-delete-confirm-confirm'));
+      }
+
+      it('moves focus to the next project\'s delete button once the list no longer has the deleted one', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        const { rerenderWith } = renderWithProjects([alpha, beta, gamma], onProjectsChanged);
+        await waitForAppSettingsLoaded();
+
+        await confirmDelete('p-beta', user);
+        await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
+        // Nothing moves while the re-fetch is still on its way.
+        expect(deleteButtonOf('p-beta')).toHaveFocus();
+
+        rerenderWith([alpha, gamma]);
+
+        await waitFor(() => expect(deleteButtonOf('p-gamma')).toHaveFocus());
+        expect(document.activeElement).not.toBe(document.body);
+      });
+
+      it('moves focus to the previous project\'s delete button when the last one is deleted', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        const { rerenderWith } = renderWithProjects([alpha, beta], onProjectsChanged);
+        await waitForAppSettingsLoaded();
+
+        await confirmDelete('p-beta', user);
+        await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
+        rerenderWith([alpha]);
+
+        await waitFor(() => expect(deleteButtonOf('p-alpha')).toHaveFocus());
+        expect(document.activeElement).not.toBe(document.body);
+      });
+
+      it('moves focus to the "projects" heading when no project is left', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        const { rerenderWith } = renderWithProjects([alpha], onProjectsChanged);
+        await waitForAppSettingsLoaded();
+
+        await confirmDelete('p-alpha', user);
+        await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
+        rerenderWith([]);
+
+        await waitFor(() => expect(heading()).toHaveFocus());
+        expect(heading()).toHaveAttribute('tabindex', '-1');
+        expect(document.activeElement).not.toBe(document.body);
+      });
+
+      it('keeps focus on the delete button while the list still has the project, and moves on once a later list drops it', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        const { rerenderWith } = renderWithProjects([alpha, beta, gamma], onProjectsChanged);
+        await waitForAppSettingsLoaded();
+        // Like a browser that drops focus from a button while it is disabled
+        // (jsdom keeps it there), the button loses focus during the request.
+        (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+          (document.activeElement as HTMLElement | null)?.blur();
+          return { ok: true, status: 200, json: async () => ({}) };
+        });
+
+        await confirmDelete('p-beta', user);
+        await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
+        // The re-fetch is still on its way: the row is there, so focus is
+        // back on its (re-enabled) delete button rather than on <body>.
+        await waitFor(() => expect(deleteButtonOf('p-beta')).toHaveFocus());
+        expect(deleteButtonOf('p-beta')).toBeEnabled();
+
+        // A re-fetched list (a new array) that still has the project -- it
+        // raced the delete: the row stayed, and so does focus.
+        rerenderWith([alpha, beta, gamma]);
+        expect(deleteButtonOf('p-beta')).toHaveFocus();
+        expect(document.activeElement).not.toBe(document.body);
+
+        // A later list drops it: the removed button takes focus with it, and
+        // the pending move puts it on the row that took its place.
+        rerenderWith([alpha, gamma]);
+        await waitFor(() => expect(deleteButtonOf('p-gamma')).toHaveFocus());
+        expect(document.activeElement).not.toBe(document.body);
+      });
+
+      it('does not take focus back from where the user moved it while the list still had the project', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        const { rerenderWith } = renderWithProjects([alpha, beta, gamma], onProjectsChanged);
+        await waitForAppSettingsLoaded();
+
+        await confirmDelete('p-beta', user);
+        await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
+        deleteButtonOf('p-alpha').focus();
+
+        rerenderWith([alpha, beta, gamma]);
+        rerenderWith([alpha, gamma]);
+
+        expect(deleteButtonOf('p-alpha')).toHaveFocus();
+        expect(deleteButtonOf('p-gamma')).not.toHaveFocus();
+      });
+
+      it('puts focus back on the delete button when the delete request fails', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        renderWithProjects([alpha, beta], onProjectsChanged);
+        await waitForAppSettingsLoaded();
+        // Like a browser that drops focus from a button while it is disabled
+        // (jsdom keeps it there), the button loses focus during the request.
+        (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+          (document.activeElement as HTMLElement | null)?.blur();
+          return { ok: false, status: 500, json: async () => ({ error: { code: 'INTERNAL', message: 'boom' } }) };
+        });
+
+        await confirmDelete('p-alpha', user);
+
+        await waitFor(() => expect(row('p-alpha').getByText(i18n.t('errors.UNKNOWN'))).toBeInTheDocument());
+        await waitFor(() => expect(deleteButtonOf('p-alpha')).toHaveFocus());
+        expect(deleteButtonOf('p-alpha')).toBeEnabled();
+        expect(onProjectsChanged).not.toHaveBeenCalled();
+      });
+    });
+
+    // DFLT-00194: a delete that succeeded is announced, naming the project,
+    // through a live region outside the project list -- which swaps to its
+    // empty state when the last project goes -- without taking focus.
+    describe('announcing the delete', () => {
+      const successText = (name: string) => i18n.t('settings.appSettings.projects.deleteSuccess', { name });
+      const statusTexts = () => screen.getAllByRole('status').map(el => el.textContent ?? '');
+      const heading = () => screen.getByRole('heading', { name: i18n.t('settings.appSettings.projects.title') });
+
+      it('announces the deleted project in a live region that outlives the list, and still moves focus', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        const { rerenderWith } = renderWithProjects([alpha], onProjectsChanged);
+        await waitForAppSettingsLoaded();
+        // The editor itself must be on screen before the negative assertion
+        // below means anything -- it would also pass against the spinner.
+        expect(deleteButton()).toBeInTheDocument();
+        expect(statusTexts()).not.toContain(successText('Alpha'));
+
+        await user.click(deleteButton());
+        await user.click(screen.getByTestId('project-delete-confirm-confirm'));
+
+        await waitFor(() => expect(statusTexts()).toContain(successText('Alpha')));
+        rerenderWith([]);
+
+        expect(screen.getByText(i18n.t('settings.appSettings.projects.empty'))).toBeInTheDocument();
+        expect(statusTexts()).toContain(successText('Alpha'));
+        await waitFor(() => expect(heading()).toHaveFocus());
+        const region = screen.getAllByRole('status').find(el => el.textContent === successText('Alpha'))!;
+        expect(region).toHaveAttribute('aria-live', 'polite');
+        expect(region.contains(document.activeElement)).toBe(false);
+      });
+
+      it('names the project by its id when it has no name', async () => {
+        const user = userEvent.setup();
+        renderWithProjects([{ ...alpha, name: '' }]);
+        await waitForAppSettingsLoaded();
+
+        await user.click(row('p-alpha').getByTitle(i18n.t('settings.appSettings.projects.delete')));
+        await user.click(screen.getByTestId('project-delete-confirm-confirm'));
+
+        await waitFor(() => expect(statusTexts()).toContain(successText('p-alpha')));
+      });
+
+      it('announces nothing when the user cancels', async () => {
+        const user = userEvent.setup();
+        renderWithProjects([alpha]);
+        await waitForAppSettingsLoaded();
+
+        await user.click(deleteButton());
+        await user.click(screen.getByTestId('project-delete-confirm-cancel'));
+
+        expect(deleteButton()).toHaveFocus();
+        expect(statusTexts()).not.toContain(successText('Alpha'));
+      });
+
+      it('announces nothing when the delete fails, and keeps the row error and focus as they were', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        renderWithProjects([alpha, beta], onProjectsChanged);
+        await waitForAppSettingsLoaded();
+        (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+          ok: false,
+          status: 500,
+          json: async () => ({ error: { code: 'INTERNAL', message: 'boom' } })
+        });
+
+        await user.click(deleteButton());
+        await user.click(screen.getByTestId('project-delete-confirm-confirm'));
+
+        await waitFor(() => expect(row('p-alpha').getByText(i18n.t('errors.UNKNOWN'))).toBeInTheDocument());
+        await waitFor(() => expect(deleteButton()).toHaveFocus());
+        expect(onProjectsChanged).not.toHaveBeenCalled();
+        expect(statusTexts()).not.toContain(successText('Alpha'));
+      });
+    });
+  });
+
   // DFLT-00165: the icon-only delete button rests at text-slate-500 /
   // dark:text-slate-400 for WCAG 1.4.11's 3:1 on the project row's white /
   // slate-900 (4.76:1 / 6.96:1; the old text-slate-400 / dark:text-slate-500
@@ -409,13 +683,49 @@ describe('AppSettingsEditor project local paths', () => {
   // deleting (a disabled control is exempt from 1.4.11) are kept.
   it('rests the project delete button at slate-500 / dark:slate-400, keeping the red hover and disabled opacity', async () => {
     renderWithProjects([alpha]);
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    await waitForAppSettingsLoaded();
 
     const del = row('p-alpha').getByTitle(i18n.t('settings.appSettings.projects.delete'));
     expect(del).toHaveClass('text-slate-500', 'dark:text-slate-400');
     expect(del).not.toHaveClass('text-slate-400');
     expect(del).not.toHaveClass('dark:text-slate-500');
     expect(del).toHaveClass('hover:text-red-600', 'dark:hover:text-red-400', 'disabled:opacity-40');
+  });
+
+  // DFLT-00193: after a delete, focus lands on a neighboring row's delete
+  // button, so each one's accessible name carries its project -- in the
+  // "<action>: <target>" form LabelsEditor uses -- while the tooltip stays.
+  describe('delete button names', () => {
+    afterEach(async () => {
+      await i18n.changeLanguage('ja');
+    });
+
+    it.each([
+      ['ja', 'プロジェクトを削除: Alpha', 'プロジェクトを削除: Beta', 'プロジェクトを削除'],
+      ['en', 'Delete project: Alpha', 'Delete project: Beta', 'Delete project']
+    ])('names each delete button after its project in %s, keeping the tooltip', async (lng, alphaName, betaName, tooltip) => {
+      await i18n.changeLanguage(lng);
+      renderWithProjects([alpha, beta]);
+      await waitForAppSettingsLoaded();
+
+      const alphaDelete = screen.getByRole('button', { name: alphaName });
+      const betaDelete = screen.getByRole('button', { name: betaName });
+      expect(row('p-alpha').getByTitle(tooltip)).toBe(alphaDelete);
+      expect(row('p-beta').getByTitle(tooltip)).toBe(betaDelete);
+    });
+
+    it('keeps the saved name while the name is being edited, and falls back to the ID when the name is empty', async () => {
+      const user = userEvent.setup();
+      renderWithProjects([alpha, { ...beta, name: '' }]);
+      await waitForAppSettingsLoaded();
+
+      const nameInput = row('p-alpha').getByLabelText(i18n.t('settings.appSettings.projects.nameLabel'));
+      await user.clear(nameInput);
+      await user.type(nameInput, 'Alpha renamed');
+
+      expect(row('p-alpha').getByRole('button', { name: 'プロジェクトを削除: Alpha' })).toBeInTheDocument();
+      expect(row('p-beta').getByRole('button', { name: 'プロジェクトを削除: p-beta' })).toBeInTheDocument();
+    });
   });
 });
 

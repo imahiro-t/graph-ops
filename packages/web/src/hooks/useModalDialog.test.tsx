@@ -1,5 +1,6 @@
 // DFLT-00074: shared focus management for the modal dialogs.
 import React, { useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -443,5 +444,129 @@ describe('useModalDialog', () => {
     const notPrevented = fireEvent.keyDown(btn('open'), { key: 'Tab' });
     expect(notPrevented).toBe(true);
     expect(btn('open')).toHaveFocus();
+  });
+});
+
+// DFLT-00148: a dialog opened from inside another one (ConfirmDialog over
+// SettingsModal). The inner dialog is portalled to document.body, like
+// ConfirmDialog, so it sits outside the outer panel in the DOM.
+describe('useModalDialog with stacked dialogs', () => {
+  const InnerDialog: React.FC<{ onEscape: () => void }> = ({ onEscape }) => {
+    const ref = useModalDialog({ onEscape });
+    return createPortal(
+      <div ref={ref} role="dialog" aria-modal="true" aria-label="inner" tabIndex={-1} data-testid="inner">
+        <button type="button">inner-first</button>
+        <button type="button" onClick={onEscape}>
+          inner-last
+        </button>
+      </div>,
+      document.body
+    );
+  };
+
+  const NestedHarness: React.FC<{ onOuterEscape: () => void; onInnerEscape?: () => void }> = ({
+    onOuterEscape,
+    onInnerEscape
+  }) => {
+    const [innerOpen, setInnerOpen] = useState(false);
+    const ref = useModalDialog({ onEscape: onOuterEscape });
+    return (
+      <div ref={ref} role="dialog" aria-modal="true" aria-label="outer" tabIndex={-1} data-testid="outer">
+        <button type="button">outer-first</button>
+        <button type="button" onClick={() => setInnerOpen(true)}>
+          open-inner
+        </button>
+        <button type="button">outer-last</button>
+        {innerOpen && (
+          <InnerDialog
+            onEscape={() => {
+              onInnerEscape?.();
+              setInnerOpen(false);
+            }}
+          />
+        )}
+      </div>
+    );
+  };
+
+  it('lets only the topmost dialog handle Escape', async () => {
+    const user = userEvent.setup();
+    const onOuterEscape = vi.fn();
+    const onInnerEscape = vi.fn();
+    render(<NestedHarness onOuterEscape={onOuterEscape} onInnerEscape={onInnerEscape} />);
+
+    await user.click(btn('open-inner'));
+    expect(btn('inner-first')).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(onInnerEscape).toHaveBeenCalledTimes(1);
+    expect(onOuterEscape).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('inner')).not.toBeInTheDocument();
+    expect(screen.getByTestId('outer')).toBeInTheDocument();
+  });
+
+  it('keeps Tab and Shift+Tab inside the topmost dialog', async () => {
+    const user = userEvent.setup();
+    render(<NestedHarness onOuterEscape={vi.fn()} />);
+
+    await user.click(btn('open-inner'));
+    expect(btn('inner-first')).toHaveFocus();
+
+    await user.tab();
+    expect(btn('inner-last')).toHaveFocus();
+    await user.tab();
+    expect(btn('inner-first')).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(btn('inner-last')).toHaveFocus();
+  });
+
+  it('returns focus to the element inside the dialog underneath, which then handles keys again', async () => {
+    const user = userEvent.setup();
+    const onOuterEscape = vi.fn();
+    render(<NestedHarness onOuterEscape={onOuterEscape} />);
+
+    await user.click(btn('open-inner'));
+    await user.click(btn('inner-last'));
+    expect(screen.queryByTestId('inner')).not.toBeInTheDocument();
+    expect(btn('open-inner')).toHaveFocus();
+
+    btn('outer-last').focus();
+    await user.tab();
+    expect(btn('outer-first')).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(onOuterEscape).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the event alone (no preventDefault) in the dialog underneath', async () => {
+    const user = userEvent.setup();
+    render(<NestedHarness onOuterEscape={vi.fn()} />);
+    await user.click(btn('open-inner'));
+
+    // Tab between two elements of the topmost dialog needs no wrapping, so
+    // nothing prevents it: the dialog underneath, which would see focus
+    // outside its own panel, does not step in.
+    const notPrevented = fireEvent.keyDown(btn('inner-first'), { key: 'Tab' });
+    expect(notPrevented).toBe(true);
+    expect(btn('inner-first')).toHaveFocus();
+  });
+
+  it('keeps the stack order under React.StrictMode', async () => {
+    const user = userEvent.setup();
+    const onOuterEscape = vi.fn();
+    const onInnerEscape = vi.fn();
+    render(
+      <React.StrictMode>
+        <NestedHarness onOuterEscape={onOuterEscape} onInnerEscape={onInnerEscape} />
+      </React.StrictMode>
+    );
+
+    await user.click(btn('open-inner'));
+    await user.keyboard('{Escape}');
+    expect(onInnerEscape).toHaveBeenCalledTimes(1);
+    expect(onOuterEscape).not.toHaveBeenCalled();
+
+    await user.keyboard('{Escape}');
+    expect(onOuterEscape).toHaveBeenCalledTimes(1);
   });
 });

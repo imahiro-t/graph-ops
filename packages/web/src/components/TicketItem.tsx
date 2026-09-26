@@ -38,10 +38,12 @@ import { AutopilotControls } from './AutopilotControls';
 import { AutopilotDecisions } from './AutopilotDecisions';
 import { NO_AUTOPILOT, TicketAutopilotView } from '../lib/autopilotApi';
 import { useClaudeLaunch } from '../hooks/useClaudeLaunch';
+import { useConfirmDialog } from '../hooks/useConfirmDialog';
 import { formatDateTime, formatTime } from '../i18n/formatDate';
 import { localizedApiErrorMessage, errorMessage } from '../lib/apiError';
 import { apiFetch } from '../lib/apiFetch';
 import { isSubmitShortcut } from '../lib/keyboardShortcuts';
+import { focusIfLost } from '../lib/focusAfterRemoval';
 
 interface Props {
   ticket: TicketDetail;
@@ -51,6 +53,12 @@ interface Props {
   // children links. Optional so a caller without a list can omit it.
   onOpenTicket?: (id: string) => void;
   onRefresh: () => void | Promise<void>;
+  // Called in place of onRefresh once this ticket has been deleted
+  // (DFLT-00191), so the list can refresh itself and move focus off the card
+  // that is about to disappear. Omitted means onRefresh is called instead.
+  // The title comes along so the list can announce the delete (DFLT-00194)
+  // even when a poll has already dropped the ticket from its own copy.
+  onDeleted?: (ticketId: string, ticketTitle: string) => void | Promise<void>;
   // The viewer's own display name (from "アプリ設定", GET /api/settings/app's
   // "myName"). Powers the "assign to me"/"unassign" action buttons below; an
   // empty string hides only those actions (there is no "me" to act as), not
@@ -279,6 +287,7 @@ export const TicketItem: React.FC<Props> = ({
   onToggleExpand,
   onOpenTicket,
   onRefresh,
+  onDeleted,
   myName,
   projectLabels = [],
   autopilot = NO_AUTOPILOT,
@@ -599,16 +608,41 @@ export const TicketItem: React.FC<Props> = ({
   });
 
   // Ticket deletion. A confirm dialog gates it (this is unrecoverable --
-  // there's no undo/trash), same pattern as the approval_gate reject
-  // confirmation below.
+  // there's no undo/trash): the in-app ConfirmDialog through
+  // useConfirmDialog (DFLT-00148), not window.confirm, so browser automation
+  // and tests can drive it. Its overlay stops click propagation, so
+  // answering it never toggles the card. On cancel focus goes back to the
+  // delete button. After a successful delete the re-fetch removes the card
+  // itself, so where focus goes then is the list's call: onDeleted (App)
+  // moves it to a neighboring card (DFLT-00191). After a failed one -- or a
+  // successful one whose re-fetch still shows this card (the re-fetch failed,
+  // or its result was discarded as superseded) -- focus is put back on the
+  // delete button once it is re-enabled: a browser may drop focus from a
+  // button while it is disabled. In the latter case App keeps its move
+  // pending, and takes focus on to a neighbor when a later fetch drops the
+  // card. When the card is gone this effect never runs, and focusIfLost
+  // leaves alone a neighbor App has already focused.
   const [isDeletingTicket, setIsDeletingTicket] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const { confirm: confirmDelete, confirmDialog: deleteConfirmDialog } = useConfirmDialog();
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
+  const [refocusDeleteButton, setRefocusDeleteButton] = useState(false);
+  useEffect(() => {
+    if (!refocusDeleteButton || isDeletingTicket) return;
+    setRefocusDeleteButton(false);
+    focusIfLost(deleteButtonRef.current);
+  }, [refocusDeleteButton, isDeletingTicket]);
 
   const handleDeleteTicket = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm(t('ticketItem.delete.confirm', { id: ticket.id, title: ticket.title }))) {
-      return;
-    }
+    const confirmed = await confirmDelete({
+      title: t('ticketItem.delete.confirmTitle'),
+      message: t('ticketItem.delete.confirm', { id: ticket.id, title: ticket.title }),
+      confirmLabel: t('ticketItem.delete.confirmButton'),
+      tone: 'danger',
+      testIdPrefix: 'ticket-delete-confirm'
+    });
+    if (!confirmed) return;
     setIsDeletingTicket(true);
     setDeleteError('');
     try {
@@ -616,9 +650,11 @@ export const TicketItem: React.FC<Props> = ({
       if (!res.ok) {
         throw new Error(await localizedApiErrorMessage(t, res));
       }
-      await onRefresh();
+      await (onDeleted ? onDeleted(ticket.id, ticket.title) : onRefresh());
+      setRefocusDeleteButton(true);
     } catch (err) {
       setDeleteError(errorMessage(err, t('errors.UNKNOWN')));
+      setRefocusDeleteButton(true);
     } finally {
       setIsDeletingTicket(false);
     }
@@ -1037,6 +1073,11 @@ export const TicketItem: React.FC<Props> = ({
           header row and the expandable panel, which each keep their own
           region -- so it exists before its text changes. */}
       <StatusLiveRegion message={approvalAnnouncement} />
+      {/* The ticket-delete confirmation (portalled to document.body). Placed
+          here rather than next to the delete button so that no event from
+          the dialog bubbles (through the React tree) into the header row's
+          mouse handlers. */}
+      {deleteConfirmDialog}
       {/* Header Row. gap-4 keeps a fixed space between the left group and
           the right-hand group (DFLT-00141): justify-between alone leaves no
           space once a long title stretches the flex-1 left group all the way
@@ -1349,10 +1390,13 @@ export const TicketItem: React.FC<Props> = ({
           )}
 
           <button
+            ref={deleteButtonRef}
             type="button"
+            data-focus-key={`ticket-delete-${ticket.id}`}
             onClick={handleDeleteTicket}
             disabled={isDeletingTicket}
             title={t('ticketItem.delete.button')}
+            aria-label={t('ticketItem.delete.ariaLabel', { id: ticket.id, title: ticket.title })}
             className="text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
           >
             {isDeletingTicket ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <Trash2 aria-hidden="true" className="w-4 h-4" />}

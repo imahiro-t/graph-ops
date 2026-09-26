@@ -1,7 +1,11 @@
 {
   "common": {
     "justNow": "たった今",
-    "closeDialog": "閉じる"
+    "closeDialog": "閉じる",
+    "confirmDialog": {
+      "confirm": "OK",
+      "cancel": "キャンセル"
+    }
   },
   "header": {
     "subtitle": "チケット・実行グラフ管理",
@@ -228,7 +232,11 @@
     "noArtifactsYet": "成果物はまだ登録されていません",
     "delete": {
       "button": "チケットを削除",
-      "confirm": "チケット {{id}}「{{title}}」を削除します。この操作は取り消せません。本当に削除しますか？"
+      "ariaLabel": "チケットを削除: {{id}} {{title}}",
+      "confirm": "チケット {{id}}「{{title}}」を削除します。この操作は取り消せません。本当に削除しますか？",
+      "confirmTitle": "チケットの削除",
+      "confirmButton": "削除する",
+      "success": "チケット {{id}}「{{title}}」を削除しました。"
     },
     "close": {
       "button": "クローズ（対応せず終了）",
@@ -336,7 +344,9 @@
       "labels": "ラベル"
     },
     "unsavedChanges": {
-      "confirmMessage": "未保存の変更があります。このまま続けると変更内容は失われます。続けますか？"
+      "confirmMessage": "未保存の変更があります。このまま続けると変更内容は失われます。続けますか？",
+      "confirmTitle": "未保存の変更",
+      "discardButton": "変更を破棄"
     },
     "common": {
       "save": "保存",
@@ -361,10 +371,14 @@
       "newTypeLabel": "新しいノード種別名",
       "invalidTypeName": "「/」「\\」「.」「..」を含まない名前を入力してください。",
       "deleteType": "このノード種別の上書きを削除",
+      "deleteTypeAriaLabel": "ノード種別の上書きを削除: {{name}}",
+      "deleteTypeSuccess": "ノード種別「{{name}}」の上書きを削除しました。",
       "confirmDeleteType": "ノード種別「{{name}}」の上書きを削除します。保存済みの指示文は元に戻せません。削除しますか？",
       "defaultBadge": "既定",
       "defaultBadgeHint": "まだ上書きしていない、プラグイン既定のノード種別です。下の欄に入力すると上書きされます。",
-      "cannotDeleteDefaultHint": "プラグイン既定のノード種別のため削除できません（上書き、またはそのままにすることのみ可能です）。"
+      "cannotDeleteDefaultHint": "プラグイン既定のノード種別のため削除できません（上書き、またはそのままにすることのみ可能です）。",
+      "confirmDeleteTypeTitle": "ノード種別の上書きの削除",
+      "confirmDeleteTypeButton": "削除する"
     },
     "reviewGates": {
       "intro": "review_gate ノードが gate id で参照するレビューゲート定義です。",
@@ -376,6 +390,7 @@
       "additionalCriteriaLabel": "追加合格基準（additional_criteria、継承内容に追記）",
       "enabledLabel": "有効",
       "deleteGate": "削除",
+      "deleteGateAriaLabel": "ゲートを削除: {{name}}",
       "defaultBadge": "既定",
       "defaultBadgeHint": "まだ上書きしていない、プラグイン既定のレビューゲートです。いずれかの項目を編集すると上書きされます。",
       "cannotDeleteDefaultHint": "プラグイン既定であり、ユーザー上書きではないため削除できません。先にいずれかの項目を編集して上書きしてください。",
@@ -518,11 +533,15 @@
         "description": "各プロジェクトの名前とローカルパス（Claude Codeを起動するフォルダ）の編集、プロジェクトの削除ができます。",
         "empty": "プロジェクトがまだありません。",
         "delete": "プロジェクトを削除",
+        "deleteAriaLabel": "プロジェクトを削除: {{name}}",
+        "deleteSuccess": "プロジェクト「{{name}}」を削除しました。",
         "nameLabel": "プロジェクト名",
         "localPathLabel": "ローカルパス（この環境）",
         "localPathHint": "ローカルパスはDBには保存されず、この環境のホーム設定ファイル（$HOME/.graph-ops/config.json）にだけ保存されます。同じDBを使う他のメンバーには影響しません。空にして保存すると未設定に戻ります。",
         "notSet": "未設定",
-        "confirmDelete": "プロジェクト「{{name}}」（{{id}}）を削除します。このプロジェクトに属するすべてのチケット・ノード・成果物が完全に削除され、この操作は取り消せません。本当に削除しますか？"
+        "confirmDelete": "プロジェクト「{{name}}」（{{id}}）を削除します。このプロジェクトに属するすべてのチケット・ノード・成果物が完全に削除され、この操作は取り消せません。本当に削除しますか？",
+        "confirmDeleteTitle": "プロジェクトの削除",
+        "confirmDeleteButton": "削除する"
       }
     },
     "labels": {
@@ -547,7 +566,11 @@
       "confirmDeleteInUse": "ラベル「{{name}}」は{{count}}件のチケットで使用中です。削除すると、すべてのチケットからこのラベルが外れます。削除しますか？",
       "projectLabel": "プロジェクト",
       "projectPlaceholder": "プロジェクトを選択",
-      "noProjects": "プロジェクトがまだありません。先にプロジェクトを作成してください。"
+      "noProjects": "プロジェクトがまだありません。先にプロジェクトを作成してください。",
+      "confirmDeleteTitle": "ラベルの削除",
+      "confirmDeleteButton": "削除する",
+      "deleteSuccess": "ラベル「{{name}}」を削除しました。",
+      "deleteAlreadyGone": "ラベル「{{name}}」は既に削除されていました。"
     },
     "autopilot": {
       "title": "オートパイロット設定（{{project}}）",

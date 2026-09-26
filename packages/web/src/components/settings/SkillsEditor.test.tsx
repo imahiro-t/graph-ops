@@ -3,7 +3,7 @@
 // ticket's plan sections 3-2 (#7/#8) and 4-2.
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { SkillsEditor } from './SkillsEditor';
 import { SettingsSkillInfo } from '../../types';
@@ -109,21 +109,19 @@ describe('SkillsEditor', () => {
     expect(mockedFetchSkill).toHaveBeenCalledTimes(1);
   });
 
-  // DFLT-00137: switching the selected skill with unsaved edits asks first.
+  // DFLT-00137: switching the selected skill with unsaved edits asks first --
+  // through the in-app ConfirmDialog since DFLT-00148.
   describe('switching the selection with unsaved edits', () => {
-    let confirmSpy: MockInstance<typeof window.confirm>;
-    beforeEach(() => {
-      confirmSpy = vi.spyOn(window, 'confirm');
-    });
-    afterEach(() => {
-      confirmSpy.mockRestore();
-    });
+    const dialog = () => screen.queryByTestId('skill-discard-confirm');
 
     const refineButton = () => screen.getByRole('button', { name: i18n.t('settings.skills.names.refineTicket') });
     const createButton = () => screen.getByRole('button', { name: i18n.t('settings.skills.names.createTicket') });
 
-    it('keeps the selection and the edit when the user cancels', async () => {
-      confirmSpy.mockReturnValue(false);
+    it.each([
+      ['the cancel button', (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByTestId('skill-discard-confirm-cancel'))],
+      ['Escape', (user: ReturnType<typeof userEvent.setup>) => user.keyboard('{Escape}')],
+      ['a click on the overlay', (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByTestId('skill-discard-confirm-overlay'))]
+    ])('keeps the selection and the edit when the user dismisses the dialog with %s', async (_how, dismiss) => {
       const user = userEvent.setup();
       render(<SkillsEditor onDirtyChange={vi.fn()} />);
       const textarea = await screen.findByDisplayValue('create-ticket-tier-text');
@@ -132,13 +130,17 @@ describe('SkillsEditor', () => {
 
       await user.click(refineButton());
 
-      expect(confirmSpy).toHaveBeenCalledWith(i18n.t('settings.unsavedChanges.confirmMessage'));
+      const opened = screen.getByRole('alertdialog', { name: i18n.t('settings.unsavedChanges.confirmTitle') });
+      expect(opened).toHaveAccessibleDescription(i18n.t('settings.unsavedChanges.confirmMessage'));
+      await dismiss(user);
+
+      expect(dialog()).not.toBeInTheDocument();
       expect(mockedFetchSkill).not.toHaveBeenCalledWith(expect.anything(), 'refine-ticket');
       expect(screen.getByDisplayValue('unsaved edit')).toBeInTheDocument();
+      expect(refineButton()).toHaveFocus();
     });
 
     it('switches and clears the relayed dirty flag when the user confirms', async () => {
-      confirmSpy.mockReturnValue(true);
       const onDirtyChange = vi.fn();
       const user = userEvent.setup();
       render(<SkillsEditor onDirtyChange={onDirtyChange} />);
@@ -148,8 +150,9 @@ describe('SkillsEditor', () => {
       expect(onDirtyChange).toHaveBeenLastCalledWith(true);
 
       await user.click(refineButton());
+      await user.click(screen.getByTestId('skill-discard-confirm-confirm'));
 
-      expect(confirmSpy).toHaveBeenCalledTimes(1);
+      expect(dialog()).not.toBeInTheDocument();
       expect(await screen.findByDisplayValue('refine-ticket-tier-text')).toBeInTheDocument();
       expect(onDirtyChange).toHaveBeenLastCalledWith(false);
       const values = onDirtyChange.mock.calls.map(c => c[0]);
@@ -170,7 +173,7 @@ describe('SkillsEditor', () => {
       await user.type(textarea, ' more');
       await user.click(refineButton());
 
-      expect(confirmSpy).not.toHaveBeenCalled();
+      expect(dialog()).not.toBeInTheDocument();
       expect(screen.getByDisplayValue('refine-ticket-tier-text more')).toBeInTheDocument();
     });
   });

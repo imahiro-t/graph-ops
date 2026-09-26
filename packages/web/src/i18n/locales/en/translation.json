@@ -1,7 +1,11 @@
 {
   "common": {
     "justNow": "just now",
-    "closeDialog": "Close"
+    "closeDialog": "Close",
+    "confirmDialog": {
+      "confirm": "OK",
+      "cancel": "Cancel"
+    }
   },
   "header": {
     "subtitle": "Ticket & Execution Graph Management",
@@ -229,7 +233,11 @@
     "noArtifactsYet": "No artifacts registered yet",
     "delete": {
       "button": "Delete ticket",
-      "confirm": "This will delete ticket {{id}} \"{{title}}\". This action cannot be undone. Are you sure you want to delete it?"
+      "ariaLabel": "Delete ticket: {{id}} {{title}}",
+      "confirm": "This will delete ticket {{id}} \"{{title}}\". This action cannot be undone. Are you sure you want to delete it?",
+      "confirmTitle": "Delete ticket",
+      "confirmButton": "Delete",
+      "success": "Deleted ticket {{id}} \"{{title}}\"."
     },
     "close": {
       "button": "Close (withdraw without completing)",
@@ -337,7 +345,9 @@
       "labels": "Labels"
     },
     "unsavedChanges": {
-      "confirmMessage": "You have unsaved changes. They will be lost if you continue. Continue anyway?"
+      "confirmMessage": "You have unsaved changes. They will be lost if you continue. Continue anyway?",
+      "confirmTitle": "Unsaved changes",
+      "discardButton": "Discard changes"
     },
     "common": {
       "save": "Save",
@@ -362,10 +372,14 @@
       "newTypeLabel": "New node type name",
       "invalidTypeName": "Enter a name with no \"/\", \"\\\", \".\" or \"..\".",
       "deleteType": "Delete this node type's override",
+      "deleteTypeAriaLabel": "Delete node type override: {{name}}",
+      "deleteTypeSuccess": "Deleted the override for the node type \"{{name}}\".",
       "confirmDeleteType": "Delete the override for the node type \"{{name}}\"? Its saved instructions cannot be restored.",
       "defaultBadge": "Default",
       "defaultBadgeHint": "This is a plugin-default node type you have not overridden. Edit the text below to override it.",
-      "cannotDeleteDefaultHint": "This is a plugin-default node type -- it can't be removed, only overridden (or left as-is)."
+      "cannotDeleteDefaultHint": "This is a plugin-default node type -- it can't be removed, only overridden (or left as-is).",
+      "confirmDeleteTypeTitle": "Delete node type override",
+      "confirmDeleteTypeButton": "Delete"
     },
     "reviewGates": {
       "intro": "Review gates referenced by review_gate nodes (via their gate id).",
@@ -377,6 +391,7 @@
       "additionalCriteriaLabel": "Additional criteria (appended to the inherited criteria)",
       "enabledLabel": "Enabled",
       "deleteGate": "Delete",
+      "deleteGateAriaLabel": "Delete review gate: {{name}}",
       "defaultBadge": "Default",
       "defaultBadgeHint": "This is a plugin-default review gate you have not overridden. Edit any field to override it.",
       "cannotDeleteDefaultHint": "This is a plugin default, not one of your overrides -- there's nothing to remove. Edit a field first to override it, then it can be deleted.",
@@ -519,11 +534,15 @@
         "description": "Edit each project's name and local path (the folder Claude Code is launched in), or delete a project.",
         "empty": "No projects yet.",
         "delete": "Delete project",
+        "deleteAriaLabel": "Delete project: {{name}}",
+        "deleteSuccess": "Deleted the project \"{{name}}\".",
         "nameLabel": "Project name",
         "localPathLabel": "Local path (this environment)",
         "localPathHint": "The local path is not stored in the DB -- only in this environment's home config file ($HOME/.graph-ops/config.json) -- so it never affects teammates sharing the same DB. Save it empty to unset it.",
         "notSet": "Not set",
-        "confirmDelete": "This will delete project \"{{name}}\" ({{id}}). Every ticket, node, and artifact under this project will be permanently deleted, and this action cannot be undone. Are you sure you want to delete it?"
+        "confirmDelete": "This will delete project \"{{name}}\" ({{id}}). Every ticket, node, and artifact under this project will be permanently deleted, and this action cannot be undone. Are you sure you want to delete it?",
+        "confirmDeleteTitle": "Delete project",
+        "confirmDeleteButton": "Delete"
       }
     },
     "labels": {
@@ -548,7 +567,11 @@
       "confirmDeleteInUse": "The label \"{{name}}\" is in use on {{count}} ticket(s). Deleting it removes it from all of them. Delete it?",
       "projectLabel": "Project",
       "projectPlaceholder": "Select a project",
-      "noProjects": "There are no projects yet. Create one before adding labels."
+      "noProjects": "There are no projects yet. Create one before adding labels.",
+      "confirmDeleteTitle": "Delete label",
+      "confirmDeleteButton": "Delete",
+      "deleteSuccess": "Deleted the label \"{{name}}\".",
+      "deleteAlreadyGone": "The label \"{{name}}\" had already been deleted."
     },
     "autopilot": {
       "title": "Autopilot settings ({{project}})",
