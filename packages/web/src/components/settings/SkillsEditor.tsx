@@ -13,6 +13,7 @@ import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 
 interface Props {
   onDirtyChange: (dirty: boolean) => void;
@@ -92,13 +93,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const select = async (next: string): Promise<boolean> => {
     if (next === selected) return true;
     if (isDirty) {
-      const discard = await confirm({
-        title: t('settings.unsavedChanges.confirmTitle'),
-        message: t('settings.unsavedChanges.confirmMessage'),
-        confirmLabel: t('settings.unsavedChanges.discardButton'),
-        tone: 'danger',
-        testIdPrefix: 'skill-discard-confirm'
-      });
+      const discard = await confirm(unsavedChangesConfirmOptions(t, 'skill-discard-confirm'));
       if (!discard) return false;
     }
     // Discarding: reset the text first so isDirty is already false while the

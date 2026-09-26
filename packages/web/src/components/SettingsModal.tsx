@@ -20,6 +20,7 @@ import { Settings, X } from 'lucide-react';
 import { Project } from '../types';
 import { useModalDialog } from '../hooks/useModalDialog';
 import { useConfirmDialog } from '../hooks/useConfirmDialog';
+import { unsavedChangesConfirmOptions } from './settings/unsavedChangesConfirm';
 import { NodeTypesEditor } from './settings/NodeTypesEditor';
 import { ReviewGatesEditor } from './settings/ReviewGatesEditor';
 import { SkillsEditor } from './settings/SkillsEditor';
@@ -79,13 +80,7 @@ export const SettingsModal: React.FC<Props> = ({
   // this per-render function always sees the current `dirty`.
   const confirmDiscardIfDirty = async (): Promise<boolean> => {
     if (!dirty) return true;
-    return confirm({
-      title: t('settings.unsavedChanges.confirmTitle'),
-      message: t('settings.unsavedChanges.confirmMessage'),
-      confirmLabel: t('settings.unsavedChanges.discardButton'),
-      tone: 'danger',
-      testIdPrefix: 'settings-discard-confirm'
-    });
+    return confirm(unsavedChangesConfirmOptions(t, 'settings-discard-confirm'));
   };
 
   const handleClose = async () => {

@@ -12,6 +12,7 @@ import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 
 // Mirrors config.isSafeExtensionName (packages/core-go/internal/config/
 // extensions.go) so an obviously-invalid name is rejected here with a clear
@@ -102,8 +103,9 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   useEffect(() => { if (selected) loadSelected(selected); }, [selected, loadSelected]);
 
   // Switches the selected type, asking first when the current one has
-  // unsaved edits -- same shape and wording as TemplatesEditor's select, so
-  // every list in the settings modal behaves alike. Returns whether the
+  // unsaved edits -- same shape as TemplatesEditor's select and the same
+  // wording (unsavedChangesConfirmOptions), so every list in the settings
+  // modal behaves alike. Returns whether the
   // switch happened (confirmAddType keeps its input row open on a cancel).
   // Asynchronous since DFLT-00148: the question is the in-app ConfirmDialog.
   // The code after the await uses the values from when it was asked
@@ -112,13 +114,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const select = async (next: string): Promise<boolean> => {
     if (next === selected) return true;
     if (isDirty) {
-      const discard = await confirm({
-        title: t('settings.unsavedChanges.confirmTitle'),
-        message: t('settings.unsavedChanges.confirmMessage'),
-        confirmLabel: t('settings.unsavedChanges.discardButton'),
-        tone: 'danger',
-        testIdPrefix: 'node-type-discard-confirm'
-      });
+      const discard = await confirm(unsavedChangesConfirmOptions(t, 'node-type-discard-confirm'));
       if (!discard) return false;
     }
     // Discarding: put the text back to its saved value first so isDirty is

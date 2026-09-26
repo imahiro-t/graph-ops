@@ -17,6 +17,7 @@ import { getNodeTypeMeta } from '../../nodeTypeMeta';
 import { TemplateFetcher, TemplateSaver, TemplateTextEditor } from './TemplateTextEditor';
 import { ReportTemplateEditor } from './ReportTemplateEditor';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 
 type TemplateKey = 'plan' | 'review' | 'report';
 
@@ -71,13 +72,7 @@ export const TemplatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const select = async (next: TemplateKey) => {
     if (next === selected) return;
     if (childDirty) {
-      const discard = await confirm({
-        title: t('settings.unsavedChanges.confirmTitle'),
-        message: t('settings.unsavedChanges.confirmMessage'),
-        confirmLabel: t('settings.unsavedChanges.discardButton'),
-        tone: 'danger',
-        testIdPrefix: 'template-discard-confirm'
-      });
+      const discard = await confirm(unsavedChangesConfirmOptions(t, 'template-discard-confirm'));
       if (!discard) return;
     }
     // Discarding: clear the relayed dirty flag now so the next switch (or a
