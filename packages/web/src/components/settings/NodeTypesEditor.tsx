@@ -13,6 +13,7 @@ import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
+import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
 
 // Mirrors config.isSafeExtensionName (packages/core-go/internal/config/
 // extensions.go) so an obviously-invalid name is rejected here with a clear
@@ -20,6 +21,12 @@ import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 function isValidTypeName(name: string): boolean {
   return name !== '' && name !== '.' && name !== '..' && !/[/\\]/.test(name);
 }
+
+// data-focus-key values of the list's controls, which removeType moves focus
+// to once the deleted type's row is gone (see pendingFocus).
+const selectButtonKey = (type: string) => `select-${type}`;
+const deleteButtonKey = (type: string) => `delete-${type}`;
+const ADD_TYPE_FOCUS_KEY = 'add-type';
 
 interface Props {
   onDirtyChange: (dirty: boolean) => void;
@@ -54,6 +61,20 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // In-app confirmations (DFLT-00148), opened on top of the settings modal.
   const { confirm, confirmDialog } = useConfirmDialog();
   const tierTextId = useId();
+  const listRef = useRef<HTMLDivElement>(null);
+  // Where keyboard focus goes once the next render has settled (DFLT-00191):
+  // deleting a type removes its row, focused delete button included, which
+  // would otherwise drop focus to <body>. Same pattern as LabelsEditor's.
+  const [pendingFocus, setPendingFocus] = useState<string | null>(null);
+  useEffect(() => {
+    if (pendingFocus === null) return;
+    const el = listRef.current?.querySelector<HTMLElement>(focusKeySelector(pendingFocus));
+    if (el && (el as HTMLButtonElement).disabled) return; // retry once re-enabled
+    focusIfLost(el);
+    setPendingFocus(null);
+    // types/isAddingType are what mount and unmount the targets; they are
+    // listed so the effect re-runs on them.
+  }, [pendingFocus, types, isAddingType]);
 
   const isDirty = tierText !== savedTierText;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
@@ -64,7 +85,9 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     if (!document.activeElement || document.activeElement === document.body) addTypeButtonRef.current?.focus();
   }, [isAddingType]);
 
-  const loadTypes = useCallback(async () => {
+  // Resolves to the refreshed list, or null when it could not be fetched
+  // (the error is shown and the list on screen is left as it was).
+  const loadTypes = useCallback(async (): Promise<SettingsNodeTypeInfo[] | null> => {
     try {
       const list = await fetchSettingsNodeTypes(tRef.current);
       setTypes(list);
@@ -78,8 +101,10 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       // change loadTypes's identity and re-fetch the whole list for no
       // reason (#3).
       setSelected(prev => (list.length > 0 && !list.some(info => info.type === prev) ? list[0].type : prev));
+      return list;
     } catch (e) {
       setError(errorMessage(e, tRef.current('errors.UNKNOWN')));
+      return null;
     }
   }, [tRef]);
 
@@ -183,7 +208,15 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // (the same in-app ConfirmDialog as AppSettingsEditor's handleDeleteProject).
   // Only custom types reach here and they have no translated label, so the
   // type name itself is what the user sees in the list.
+  // Once the row is gone, focus moves to the row that took its place (else
+  // the one before it, else the "add node type" button) -- the same rule as
+  // LabelsEditor (lib/focusAfterRemoval). On a cancel or a failed request the
+  // row stays, and the dialog has already put focus back on its delete
+  // button (which is never disabled here), so nothing is moved then.
   const removeType = async (type: string) => {
+    // The list as it was when the user asked: the dialog keeps it out of
+    // reach until it closes, so this is also the list as of the confirm.
+    const before = types.map(info => info.type);
     const confirmed = await confirm({
       title: t('settings.nodeTypes.confirmDeleteTypeTitle'),
       message: t('settings.nodeTypes.confirmDeleteType', { name: type }),
@@ -200,7 +233,20 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         setSavedTierText('');
         setMergedText('');
       }
-      await loadTypes();
+      const list = await loadTypes();
+      // null: the refresh failed, so the row is still on screen with focus
+      // on its button. Still listed: another tier still defines the type,
+      // so its row (and focused button) stays.
+      if (list === null || list.some(info => info.type === type)) return;
+      const neighbor = neighborAfterRemoval(before, type, list.map(info => info.type));
+      const neighborInfo = list.find(info => info.type === neighbor);
+      if (!neighborInfo) {
+        setPendingFocus(ADD_TYPE_FOCUS_KEY);
+      } else {
+        // A plugin-default neighbor's delete button is disabled, so its
+        // select button (the row's other control) takes focus instead.
+        setPendingFocus(neighborInfo.has_default ? selectButtonKey(neighborInfo.type) : deleteButtonKey(neighborInfo.type));
+      }
     } catch (e) {
       setError(errorMessage(e, t('errors.UNKNOWN')));
     }
@@ -210,7 +256,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     <div className="flex h-full min-h-0 gap-4">
       {confirmDialog}
       {/* Left: type list */}
-      <div className="w-56 shrink-0 border border-slate-200 dark:border-slate-800 rounded-lg overflow-y-auto bg-slate-50 dark:bg-slate-800 flex flex-col">
+      <div ref={listRef} className="w-56 shrink-0 border border-slate-200 dark:border-slate-800 rounded-lg overflow-y-auto bg-slate-50 dark:bg-slate-800 flex flex-col">
         <div className="px-3 py-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-slate-50 dark:bg-slate-800">
           {t('settings.nodeTypes.listTitle')}
         </div>
@@ -235,6 +281,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               }`}
             >
               <button
+                data-focus-key={selectButtonKey(info.type)}
                 onClick={() => void select(info.type)}
                 className={`flex-1 min-w-0 text-left pl-3 pr-1 py-2 text-xs flex items-center gap-2 ${
                   selected === info.type ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'
@@ -255,6 +302,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 )}
               </button>
               <button
+                data-focus-key={deleteButtonKey(info.type)}
                 onClick={() => removeType(info.type)}
                 disabled={!canDelete}
                 title={info.has_default ? t('settings.nodeTypes.cannotDeleteDefaultHint') : t('settings.nodeTypes.deleteType')}
@@ -312,6 +360,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           ) : (
             <button
               ref={addTypeButtonRef}
+              data-focus-key={ADD_TYPE_FOCUS_KEY}
               onClick={() => setIsAddingType(true)}
               className="w-full px-2 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 rounded text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition border border-slate-200 dark:border-slate-700"
             >

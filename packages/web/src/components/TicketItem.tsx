@@ -43,6 +43,7 @@ import { formatDateTime, formatTime } from '../i18n/formatDate';
 import { localizedApiErrorMessage, errorMessage } from '../lib/apiError';
 import { apiFetch } from '../lib/apiFetch';
 import { isSubmitShortcut } from '../lib/keyboardShortcuts';
+import { focusIfLost } from '../lib/focusAfterRemoval';
 
 interface Props {
   ticket: TicketDetail;
@@ -52,6 +53,10 @@ interface Props {
   // children links. Optional so a caller without a list can omit it.
   onOpenTicket?: (id: string) => void;
   onRefresh: () => void | Promise<void>;
+  // Called in place of onRefresh once this ticket has been deleted
+  // (DFLT-00191), so the list can refresh itself and move focus off the card
+  // that is about to disappear. Omitted means onRefresh is called instead.
+  onDeleted?: (ticketId: string) => void | Promise<void>;
   // The viewer's own display name (from "アプリ設定", GET /api/settings/app's
   // "myName"). Powers the "assign to me"/"unassign" action buttons below; an
   // empty string hides only those actions (there is no "me" to act as), not
@@ -280,6 +285,7 @@ export const TicketItem: React.FC<Props> = ({
   onToggleExpand,
   onOpenTicket,
   onRefresh,
+  onDeleted,
   myName,
   projectLabels = [],
   autopilot = NO_AUTOPILOT,
@@ -604,11 +610,21 @@ export const TicketItem: React.FC<Props> = ({
   // useConfirmDialog (DFLT-00148), not window.confirm, so browser automation
   // and tests can drive it. Its overlay stops click propagation, so
   // answering it never toggles the card. On cancel focus goes back to the
-  // delete button; after a successful delete onRefresh() removes the card
-  // itself, so there is no fallback to return focus to.
+  // delete button. After a successful delete the re-fetch removes the card
+  // itself, so where focus goes then is the list's call: onDeleted (App)
+  // moves it to a neighboring card (DFLT-00191). After a failed one, focus
+  // is put back on the delete button once it is re-enabled -- a browser may
+  // drop focus from a button while it is disabled.
   const [isDeletingTicket, setIsDeletingTicket] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const { confirm: confirmDelete, confirmDialog: deleteConfirmDialog } = useConfirmDialog();
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
+  const [refocusDeleteButton, setRefocusDeleteButton] = useState(false);
+  useEffect(() => {
+    if (!refocusDeleteButton || isDeletingTicket) return;
+    setRefocusDeleteButton(false);
+    focusIfLost(deleteButtonRef.current);
+  }, [refocusDeleteButton, isDeletingTicket]);
 
   const handleDeleteTicket = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -627,9 +643,10 @@ export const TicketItem: React.FC<Props> = ({
       if (!res.ok) {
         throw new Error(await localizedApiErrorMessage(t, res));
       }
-      await onRefresh();
+      await (onDeleted ? onDeleted(ticket.id) : onRefresh());
     } catch (err) {
       setDeleteError(errorMessage(err, t('errors.UNKNOWN')));
+      setRefocusDeleteButton(true);
     } finally {
       setIsDeletingTicket(false);
     }
@@ -1356,7 +1373,9 @@ export const TicketItem: React.FC<Props> = ({
           )}
 
           <button
+            ref={deleteButtonRef}
             type="button"
+            data-focus-key={`ticket-delete-${ticket.id}`}
             onClick={handleDeleteTicket}
             disabled={isDeletingTicket}
             title={t('ticketItem.delete.button')}

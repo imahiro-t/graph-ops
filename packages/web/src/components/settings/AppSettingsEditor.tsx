@@ -8,7 +8,7 @@
 // 以前は artifactsDir だけが別のファイル（ホーム設定）に書かれ、残りは解決
 // された作業ディレクトリ側のファイルに書かれていたため、「保存先」の表示も
 // 2 つ必要だった。
-import React, { useCallback, useEffect, useId, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Save, CheckCircle2, XCircle, Trash2, FolderCog, PlugZap } from 'lucide-react';
 import {
@@ -28,6 +28,7 @@ import { StatusLiveRegion } from '../StatusLiveRegion';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
 
 interface Props {
   projects: Project[];
@@ -54,6 +55,11 @@ interface FormState {
   paginationPageSize: number;
   myName: string;
 }
+
+// data-focus-key values in the project list, which a project delete moves
+// focus to (see pendingProjectFocus).
+const projectDeleteButtonKey = (id: string) => `project-delete-${id}`;
+const PROJECTS_HEADING_FOCUS_KEY = 'projects-heading';
 
 // Mirrors defaultMySQLPort / newMySQLTarget in
 // packages/core-go/internal/httpserver/app_settings.go. An emptied port field
@@ -186,6 +192,44 @@ export const AppSettingsEditor: React.FC<Props> = ({
   const [projectSavingId, setProjectSavingId] = useState<string | null>(null);
   const [projectDeletingId, setProjectDeletingId] = useState<string | null>(null);
   const [projectErrors, setProjectErrors] = useState<Record<string, string>>({});
+  // Where keyboard focus goes after a project delete (DFLT-00191). A
+  // confirmed delete removes the row, focused delete button included, but
+  // only once the parent has re-fetched `projects` (onProjectsChanged is not
+  // awaited), so the move waits for the deleted id to leave the list:
+  // `before` is the list the delete was made against, used both to place the
+  // neighbor and to tell a refreshed list from the one still on screen.
+  // A failed delete (removedId null) puts focus back on its own button once
+  // projectDeletingId has re-enabled it -- a browser may drop focus from a
+  // button while it is disabled.
+  const [pendingProjectFocus, setPendingProjectFocus] = useState<
+    { removedId: string; before: Project[] } | { removedId: null; key: string } | null
+  >(null);
+  const projectsSectionRef = useRef<HTMLDivElement>(null);
+  const projectsRef = useLatest(projects);
+  useEffect(() => {
+    if (pendingProjectFocus === null) return;
+    let key: string;
+    if (pendingProjectFocus.removedId === null) {
+      key = pendingProjectFocus.key;
+    } else {
+      const { removedId, before } = pendingProjectFocus;
+      if (projects.some(p => p.id === removedId)) {
+        // Still the list from before the delete: wait for the re-fetch. A
+        // list that has been re-fetched and still has the project (the
+        // re-fetch raced the delete, say) means its row is still there, so
+        // there is nothing to move.
+        if (projects === before) return;
+        setPendingProjectFocus(null);
+        return;
+      }
+      const neighbor = neighborAfterRemoval(before.map(p => p.id), removedId, projects.map(p => p.id));
+      key = neighbor === null ? PROJECTS_HEADING_FOCUS_KEY : projectDeleteButtonKey(neighbor);
+    }
+    const el = projectsSectionRef.current?.querySelector<HTMLElement>(focusKeySelector(key));
+    if (el && (el as HTMLButtonElement).disabled) return; // retry once re-enabled
+    focusIfLost(el);
+    setPendingProjectFocus(null);
+  }, [pendingProjectFocus, projects, projectDeletingId]);
 
   const localPathValue = (p: Project) => (p.id in localPathDrafts ? localPathDrafts[p.id] : p.local_path);
   const nameValue = (p: Project) => (p.id in nameDrafts ? nameDrafts[p.id] : p.name);
@@ -409,7 +453,8 @@ export const AppSettingsEditor: React.FC<Props> = ({
 
   // Confirmed through the in-app ConfirmDialog (DFLT-00148), opened on top of
   // the settings modal; see useModalDialog for how the two dialogs share the
-  // keyboard.
+  // keyboard. On a cancel the dialog puts focus back on the delete button;
+  // after the request, pendingProjectFocus places it (see above).
   const handleDeleteProject = async (p: Project) => {
     const confirmed = await confirm({
       title: t('settings.appSettings.projects.confirmDeleteTitle'),
@@ -423,9 +468,11 @@ export const AppSettingsEditor: React.FC<Props> = ({
     try {
       const res = await apiFetch(`/api/projects/${p.id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(await localizedApiErrorMessage(t, res));
+      setPendingProjectFocus({ removedId: p.id, before: projectsRef.current });
       onProjectsChanged();
     } catch (e) {
       setProjectErrors(prev => ({ ...prev, [p.id]: errorMessage(e, t('errors.UNKNOWN')) }));
+      setPendingProjectFocus({ removedId: null, key: projectDeleteButtonKey(p.id) });
     } finally {
       setProjectDeletingId(null);
     }
@@ -968,8 +1015,14 @@ export const AppSettingsEditor: React.FC<Props> = ({
       </div>
 
       {/* Project management */}
-      <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2">
-        <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+      <div ref={projectsSectionRef} className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2">
+        {/* tabIndex -1: where focus goes when the last project is deleted
+            (this section has no "add" button to take it instead). */}
+        <h3
+          tabIndex={-1}
+          data-focus-key={PROJECTS_HEADING_FOCUS_KEY}
+          className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5"
+        >
           <FolderCog aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.appSettings.projects.title')}
         </h3>
         <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.appSettings.projects.description')}</p>
@@ -1003,6 +1056,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                     />
                   </div>
                   <button
+                    data-focus-key={projectDeleteButtonKey(p.id)}
                     onClick={() => handleDeleteProject(p)}
                     disabled={projectDeletingId === p.id}
                     title={t('settings.appSettings.projects.delete')}

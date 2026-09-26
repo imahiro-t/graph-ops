@@ -39,6 +39,7 @@ import { localizedApiErrorMessage } from './lib/apiError';
 import { apiFetch } from './lib/apiFetch';
 import { fetchPendingApprovalCounts } from './lib/pendingApprovals';
 import { fetchAppSettings } from './lib/settingsApi';
+import { focusIfLost, focusKeySelector, neighborAfterRemoval } from './lib/focusAfterRemoval';
 import { useLatest } from './hooks/useLatest';
 
 // Cycles through the three-way theme preference in a fixed order, used by
@@ -1012,6 +1013,69 @@ export const App: React.FC = () => {
     currentPage * ticketsPerPage
   );
 
+  // Where keyboard focus goes after a ticket is deleted (DFLT-00191). The
+  // deleted card -- focused delete button included -- disappears with the
+  // re-fetch, which would drop focus to <body>. It moves to the ticket that
+  // took the deleted one's place in the (filtered) list, else the one before
+  // it, else the header's "new ticket" button -- LabelsEditor's rule (see
+  // lib/focusAfterRemoval). `before` is the filtered list's ids when the
+  // delete succeeded; `refreshed` is set once the re-fetch has settled, so a
+  // list that still has the ticket then (a failed re-fetch) drops the move
+  // instead of waiting for ever.
+  const [pendingTicketFocus, setPendingTicketFocus] = useState<{
+    removedId: string;
+    projectId: string;
+    before: string[];
+    refreshed: boolean;
+  } | null>(null);
+  const ticketListRef = useRef<HTMLDivElement>(null);
+  const newTicketButtonRef = useRef<HTMLButtonElement>(null);
+  const filteredTicketIdsRef = useLatest(filteredTickets.map(ticket => ticket.id));
+
+  // TicketItem's onDeleted: called once the DELETE has succeeded. When the
+  // list has already dropped the ticket (a poll got there first), `before`
+  // no longer holds it and neighborAfterRemoval picks the first ticket.
+  const handleTicketDeleted = async (ticketId: string) => {
+    const projectId = currentProjectIdRef.current;
+    setPendingTicketFocus({ removedId: ticketId, projectId, before: filteredTicketIdsRef.current, refreshed: false });
+    await refreshTickets();
+    setPendingTicketFocus(prev => (prev && prev.removedId === ticketId ? { ...prev, refreshed: true } : prev));
+  };
+
+  useEffect(() => {
+    if (pendingTicketFocus === null) return;
+    const { removedId, projectId, before, refreshed } = pendingTicketFocus;
+    // Another project's list is on screen now: this move no longer applies.
+    if (projectId !== currentProjectId) {
+      setPendingTicketFocus(null);
+      return;
+    }
+    const currentIds = filteredTickets.map(ticket => ticket.id);
+    if (currentIds.includes(removedId)) {
+      // Wait for the re-fetch; after it, the card is still there (the
+      // re-fetch failed), so it keeps its focus and nothing moves.
+      if (refreshed) setPendingTicketFocus(null);
+      return;
+    }
+    setPendingTicketFocus(null);
+    const pagedIds = pagedTickets.map(ticket => ticket.id);
+    const neighbor = neighborAfterRemoval(before, removedId, currentIds);
+    // The page clamps back when the deleted ticket was the last one on the
+    // last page, so the neighbor is normally on the page shown. If it is not
+    // (a filter or poll reshuffled the list meanwhile), the card now at the
+    // deleted one's position on this page, else the page's last, takes it.
+    let target: string | null = neighbor;
+    if (target === null || !pagedIds.includes(target)) {
+      const position = before.indexOf(removedId) - (currentPage - 1) * ticketsPerPage;
+      target = pagedIds[Math.max(position, 0)] ?? pagedIds[pagedIds.length - 1] ?? null;
+    }
+    const el =
+      target === null
+        ? newTicketButtonRef.current
+        : ticketListRef.current?.querySelector<HTMLElement>(focusKeySelector(`ticket-delete-${target}`));
+    focusIfLost(el);
+  }, [pendingTicketFocus, currentProjectId, filteredTickets, pagedTickets, currentPage, ticketsPerPage]);
+
   // Metrics
   const totalCount = tickets.length;
   const inProgressCount = tickets.filter(t => t.status === 'IN PROGRESS').length;
@@ -1186,6 +1250,7 @@ export const App: React.FC = () => {
             </button>
 
             <button
+              ref={newTicketButtonRef}
               onClick={() => {
                 // Clear any leftover status message from a previous create
                 // attempt before the form reopens -- the form's own request
@@ -1334,7 +1399,7 @@ export const App: React.FC = () => {
         </div>
 
         {/* Tickets Accordion List */}
-        <div>
+        <div ref={ticketListRef}>
           {/* Four states, not two (DFLT-00106). "No project has been
               created yet" plus a create button is only ever right when the
               answer is known to be "none": shown to somebody who does have
@@ -1408,6 +1473,7 @@ export const App: React.FC = () => {
                   onToggleExpand={() => handleToggleExpand(ticket.id)}
                   onOpenTicket={handleOpenTicket}
                   onRefresh={refreshTickets}
+                  onDeleted={handleTicketDeleted}
                   myName={myName}
                   projectLabels={projectLabels}
                   autopilot={ticketAutopilotView(autopilotRuns, ticket.id, descendantsOf)}

@@ -46,7 +46,7 @@ const deleteCalls = () =>
     ([url, init]) => String(url) === `/api/tickets/${TICKET_ID}` && (init as RequestInit | undefined)?.method === 'DELETE'
   );
 
-const renderItem = () => {
+const renderItem = (onDeleted?: (ticketId: string) => void | Promise<void>) => {
   const onToggleExpand = vi.fn();
   const onRefresh = vi.fn();
   const confirmSpy = vi.spyOn(window, 'confirm');
@@ -56,6 +56,7 @@ const renderItem = () => {
       isExpanded={false}
       onToggleExpand={onToggleExpand}
       onRefresh={onRefresh}
+      onDeleted={onDeleted}
       myName=""
       projectLabels={[]}
     />
@@ -65,9 +66,9 @@ const renderItem = () => {
 
 const deleteButton = () => screen.getByRole('button', { name: i18n.t('ticketItem.delete.button') });
 
-async function openConfirm() {
+async function openConfirm(onDeleted?: (ticketId: string) => void | Promise<void>) {
   const user = userEvent.setup();
-  const utils = renderItem();
+  const utils = renderItem(onDeleted);
   await user.click(deleteButton());
   return { user, ...utils };
 }
@@ -111,5 +112,38 @@ describe('TicketItem ticket deletion', () => {
     expect(onRefresh).not.toHaveBeenCalled();
     expect(onToggleExpand).not.toHaveBeenCalled();
     expect(deleteButton()).toHaveFocus();
+  });
+
+  // DFLT-00191: the list (App) decides where focus goes once the card is
+  // gone, so a successful delete hands over to onDeleted when it is given.
+  it('calls onDeleted with the ticket id instead of onRefresh when it is given', async () => {
+    const onDeleted = vi.fn();
+    const { user, onRefresh } = await openConfirm(onDeleted);
+
+    await user.click(screen.getByTestId('ticket-delete-confirm-confirm'));
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(TICKET_ID));
+    expect(onRefresh).not.toHaveBeenCalled();
+    expect(deleteCalls()).toHaveLength(1);
+  });
+
+  // DFLT-00191: the button is disabled while the request runs, and a browser
+  // may drop focus from it then; a failed delete puts focus back on it.
+  it('puts focus back on the delete button when the delete request fails', async () => {
+    const onDeleted = vi.fn();
+    const { user, onRefresh } = await openConfirm(onDeleted);
+    fetchMock.mockImplementation(async () => {
+      // What such a browser does (jsdom keeps focus on a disabled button).
+      (document.activeElement as HTMLElement | null)?.blur();
+      return new Response(JSON.stringify({ error: { code: 'INTERNAL', message: 'boom' } }), { status: 500 });
+    });
+
+    await user.click(screen.getByTestId('ticket-delete-confirm-confirm'));
+
+    expect(await screen.findByText(i18n.t('errors.UNKNOWN'))).toBeInTheDocument();
+    await waitFor(() => expect(deleteButton()).toHaveFocus());
+    expect(deleteButton()).toBeEnabled();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(onDeleted).not.toHaveBeenCalled();
+    expect(onRefresh).not.toHaveBeenCalled();
   });
 });

@@ -292,6 +292,98 @@ describe('NodeTypesEditor', () => {
   });
 });
 
+// DFLT-00191: once a confirmed delete has removed the row, focus moves to
+// the row that took its place (else the one before, else the "add node type"
+// button) instead of dropping to <body>.
+describe('NodeTypesEditor focus after deleting a type', () => {
+  const custom = (type: string): SettingsNodeTypeInfo => ({ type, has_default: false, has_user_override: true });
+  const byKey = (container: HTMLElement, key: string) => container.querySelector<HTMLElement>(`[data-focus-key="${key}"]`);
+
+  beforeEach(() => {
+    mockedFetchTypes.mockReset();
+    mockedFetchType.mockReset();
+    mockedSaveType.mockReset();
+    mockedSaveType.mockResolvedValue({ type: 'x', tier_text: '', merged_text: '' });
+    stubFetchType();
+  });
+
+  // Serves `initial` until the delete request goes out, then the list
+  // without the deleted type.
+  function serveList(initial: SettingsNodeTypeInfo[]) {
+    let current = initial;
+    mockedFetchTypes.mockImplementation(async () => current);
+    mockedSaveType.mockImplementation(async (_t, type: string) => {
+      current = current.filter(info => info.type !== type);
+      return { type, tier_text: '', merged_text: '' };
+    });
+  }
+
+  // selectedFirst: the type the editor selects (and loads) on mount.
+  async function deleteAndConfirm(container: HTMLElement, type: string, selectedFirst = 'implementation') {
+    const user = userEvent.setup();
+    await screen.findByDisplayValue(`${selectedFirst}-tier-text`);
+    await user.click(byKey(container, `delete-${type}`)!);
+    await user.click(screen.getByTestId('node-type-delete-confirm-confirm'));
+    await waitFor(() => expect(byKey(container, `delete-${type}`)).not.toBeInTheDocument());
+  }
+
+  it('moves focus to the next custom type\'s delete button', async () => {
+    serveList([...TYPES, custom('custom_a'), custom('custom_b')]);
+    const { container } = render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+
+    await deleteAndConfirm(container, 'custom_a');
+
+    await waitFor(() => expect(byKey(container, 'delete-custom_b')).toHaveFocus());
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('moves focus to the next row\'s select button when that row is a plugin default (its delete button is disabled)', async () => {
+    serveList([TYPES[0], custom('custom_a'), TYPES[1]]);
+    const { container } = render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+
+    await deleteAndConfirm(container, 'custom_a');
+
+    await waitFor(() => expect(byKey(container, 'select-review')).toHaveFocus());
+    expect(byKey(container, 'delete-review')).toBeDisabled();
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('moves focus to the previous row when the last one is deleted', async () => {
+    serveList([...TYPES, custom('custom_a'), custom('custom_b')]);
+    const { container } = render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+
+    await deleteAndConfirm(container, 'custom_b');
+
+    await waitFor(() => expect(byKey(container, 'delete-custom_a')).toHaveFocus());
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('moves focus to the "add node type" button when the list is now empty', async () => {
+    serveList([custom('custom_a')]);
+    const { container } = render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+
+    await deleteAndConfirm(container, 'custom_a', 'custom_a');
+
+    await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') })).toHaveFocus());
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('keeps focus on the delete button when the delete request fails', async () => {
+    mockedFetchTypes.mockResolvedValue([...TYPES, custom('custom_a'), custom('custom_b')]);
+    mockedSaveType.mockRejectedValue(new Error('boom'));
+    const user = userEvent.setup();
+    const { container } = render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    await user.click(byKey(container, 'delete-custom_a')!);
+    await user.click(screen.getByTestId('node-type-delete-confirm-confirm'));
+
+    expect(await screen.findByText('boom')).toBeInTheDocument();
+    expect(byKey(container, 'delete-custom_a')).toHaveFocus();
+    expect(mockedFetchTypes).toHaveBeenCalledTimes(1);
+  });
+});
+
 // DFLT-00166: the list's icons are decorative and aria-hidden; the icon-only
 // buttons (delete, and the yes/no of the add row) are named by their title.
 describe('NodeTypesEditor icon accessibility', () => {

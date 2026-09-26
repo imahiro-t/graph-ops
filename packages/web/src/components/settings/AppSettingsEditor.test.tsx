@@ -457,6 +457,103 @@ describe('AppSettingsEditor project local paths', () => {
       expect(onProjectsChanged).not.toHaveBeenCalled();
       expect(deleteButton()).toHaveFocus();
     });
+
+    // DFLT-00191: once the parent has re-fetched the list without the
+    // deleted project, focus moves to the row that took its place (else the
+    // one before it, else the section heading) instead of dropping to <body>.
+    describe('focus after the delete', () => {
+      const gamma: Project = { id: 'p-gamma', name: 'Gamma', prefix: 'GAMMA', local_path: '', created_at: '', updated_at: '' };
+      const deleteButtonOf = (id: string) => row(id).getByTitle(i18n.t('settings.appSettings.projects.delete'));
+      const heading = () => screen.getByRole('heading', { name: i18n.t('settings.appSettings.projects.title') });
+
+      async function confirmDelete(id: string, user: ReturnType<typeof userEvent.setup>) {
+        await user.click(deleteButtonOf(id));
+        await user.click(screen.getByTestId('project-delete-confirm-confirm'));
+      }
+
+      it('moves focus to the next project\'s delete button once the list no longer has the deleted one', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        const { rerenderWith } = renderWithProjects([alpha, beta, gamma], onProjectsChanged);
+        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+        await confirmDelete('p-beta', user);
+        await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
+        // Nothing moves while the re-fetch is still on its way.
+        expect(deleteButtonOf('p-beta')).toHaveFocus();
+
+        rerenderWith([alpha, gamma]);
+
+        await waitFor(() => expect(deleteButtonOf('p-gamma')).toHaveFocus());
+        expect(document.activeElement).not.toBe(document.body);
+      });
+
+      it('moves focus to the previous project\'s delete button when the last one is deleted', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        const { rerenderWith } = renderWithProjects([alpha, beta], onProjectsChanged);
+        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+        await confirmDelete('p-beta', user);
+        await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
+        rerenderWith([alpha]);
+
+        await waitFor(() => expect(deleteButtonOf('p-alpha')).toHaveFocus());
+        expect(document.activeElement).not.toBe(document.body);
+      });
+
+      it('moves focus to the "projects" heading when no project is left', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        const { rerenderWith } = renderWithProjects([alpha], onProjectsChanged);
+        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+        await confirmDelete('p-alpha', user);
+        await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
+        rerenderWith([]);
+
+        await waitFor(() => expect(heading()).toHaveFocus());
+        expect(heading()).toHaveAttribute('tabindex', '-1');
+        expect(document.activeElement).not.toBe(document.body);
+      });
+
+      it('leaves focus alone when the re-fetched list still has the project', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        const { rerenderWith } = renderWithProjects([alpha, beta], onProjectsChanged);
+        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+        await confirmDelete('p-alpha', user);
+        await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
+        rerenderWith([alpha, beta]);
+        expect(deleteButtonOf('p-alpha')).toHaveFocus();
+
+        // A later list without it no longer moves focus: the pending move
+        // was dropped with the refreshed list above.
+        rerenderWith([beta]);
+        expect(deleteButtonOf('p-beta')).not.toHaveFocus();
+      });
+
+      it('puts focus back on the delete button when the delete request fails', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        renderWithProjects([alpha, beta], onProjectsChanged);
+        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+        // Like a browser that drops focus from a button while it is disabled
+        // (jsdom keeps it there), the button loses focus during the request.
+        (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+          (document.activeElement as HTMLElement | null)?.blur();
+          return { ok: false, status: 500, json: async () => ({ error: { code: 'INTERNAL', message: 'boom' } }) };
+        });
+
+        await confirmDelete('p-alpha', user);
+
+        await waitFor(() => expect(row('p-alpha').getByText(i18n.t('errors.UNKNOWN'))).toBeInTheDocument());
+        await waitFor(() => expect(deleteButtonOf('p-alpha')).toHaveFocus());
+        expect(deleteButtonOf('p-alpha')).toBeEnabled();
+        expect(onProjectsChanged).not.toHaveBeenCalled();
+      });
+    });
   });
 
   // DFLT-00165: the icon-only delete button rests at text-slate-500 /
