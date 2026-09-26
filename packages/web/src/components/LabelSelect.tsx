@@ -4,6 +4,7 @@ import { Loader2, Tag } from 'lucide-react';
 import { Label } from '../types';
 import { setTicketLabels } from '../lib/labelsApi';
 import { errorMessage } from '../lib/apiError';
+import { submittingProps, useSubmittingLabel } from './Submitting';
 
 interface Props {
   ticketId: string;
@@ -27,6 +28,9 @@ interface Props {
 // row, so picking labels can't expand/collapse it.
 export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, onSaved }) => {
   const { t } = useTranslation();
+  // The trigger stays usable while labels save (it only toggles the panel),
+  // but it shows the spinner, so it carries the submitting state (DFLT-00206).
+  const submittingLabel = useSubmittingLabel();
   const [isOpen, setIsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -78,7 +82,8 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
         onClick={() => setIsOpen(v => !v)}
         aria-expanded={isOpen}
         aria-controls={panelId}
-        aria-label={`${t('ticket.labels.edit')}: ${ticketId}`}
+        aria-label={submittingLabel(`${t('ticket.labels.edit')}: ${ticketId}`, saving)}
+        {...submittingProps(saving)}
         className="px-2 py-0.5 rounded-full border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 text-[11px] font-semibold flex items-center gap-1 transition"
       >
         {saving ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" /> : <Tag className="w-3 h-3" aria-hidden="true" />}

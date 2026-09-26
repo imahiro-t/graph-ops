@@ -115,6 +115,48 @@ describe('NodeTypesEditor', () => {
     expect(mockedFetchType).toHaveBeenCalledTimes(1);
   });
 
+  // DFLT-00206: the save button is aria-busy while saving. Its visible label
+  // already switches to "Saving...", which is in the accessible name, so it
+  // gets aria-busy only -- no "(submitting)" suffix on top, which would read
+  // the same thing twice.
+  describe('save button while saving (aria-busy only, the visible "Saving..." already names it)', () => {
+    for (const ok of [true, false]) {
+      it(`is busy only while saving and clears after ${ok ? 'success' : 'failure'}, without a duplicated "(submitting)"`, async () => {
+        let settle: () => void = () => {};
+        mockedSaveType.mockReset();
+        mockedSaveType.mockImplementation(
+          () =>
+            new Promise((resolve, reject) => {
+              settle = () =>
+                ok
+                  ? resolve({ type: 'implementation', tier_text: 'saved edit', merged_text: 'merged' })
+                  : reject(new Error(i18n.t('errors.UNKNOWN')));
+            })
+        );
+        const user = userEvent.setup();
+        render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+        const textarea = await screen.findByDisplayValue('implementation-tier-text');
+        await user.clear(textarea);
+        await user.type(textarea, 'saved edit');
+
+        const button = screen.getByRole('button', { name: i18n.t('settings.common.save') });
+        expect(button).not.toHaveAttribute('aria-busy');
+        await user.click(button);
+
+        expect(button).toHaveAttribute('aria-busy', 'true');
+        expect(button).toHaveAccessibleName(i18n.t('settings.common.saving'));
+        expect(button).not.toHaveTextContent(i18n.t('common.submitting'));
+
+        await act(async () => {
+          settle();
+        });
+
+        expect(button).not.toHaveAttribute('aria-busy');
+        expect(button).toHaveAccessibleName(i18n.t('settings.common.save'));
+      });
+    }
+  });
+
   // DFLT-00137: switching the selected type with unsaved edits asks first --
   // through the in-app ConfirmDialog since DFLT-00148.
   describe('switching the selection with unsaved edits', () => {

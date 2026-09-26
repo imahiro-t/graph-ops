@@ -15,9 +15,15 @@ export const REANNOUNCE_GAP_MS = 100;
 // with the same wording -- is a change the screen reader picks up. An
 // announcement that repeats the text still on screen (before that clear) first
 // empties the region and puts the text back REANNOUNCE_GAP_MS later, so it is
-// read out again too (DFLT-00204). clear() empties the region at once, for a
-// caller whose later actions make the last announcement stale (e.g. an edit
-// after a local, unsaved delete).
+// read out again too (DFLT-00204).
+//
+// clear() empties the region at once, for a status that no longer holds, such
+// as "saving..." after the save failed (DFLT-00210), or a caller whose later
+// actions make the last announcement stale (e.g. an edit after a local,
+// unsaved delete). Given the text it expects, it clears only while that text
+// is still the one announced (shown, or waiting out the re-announce gap), so a
+// newer announcement made in the meantime (another row's save or delete) is
+// left alone.
 //
 // Only one timer is ever pending (timerRef): the gap before a repeated text
 // or the clear after the display duration. It is owned here so it never
@@ -29,6 +35,10 @@ export function useTransientAnnouncement(durationMs: number = TRANSIENT_ANNOUNCE
   const [message, setMessageState] = useState('');
   // The text last set, readable from the stable callbacks below.
   const messageRef = useRef('');
+  // The text being announced: the one shown, or the one waiting out the
+  // re-announce gap while the region is empty. clear(expected) compares
+  // against it.
+  const announcedRef = useRef('');
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setMessage = useCallback((text: string) => {
@@ -51,6 +61,7 @@ export function useTransientAnnouncement(durationMs: number = TRANSIENT_ANNOUNCE
       setMessage(text);
       timerRef.current = setTimeout(() => {
         timerRef.current = null;
+        announcedRef.current = '';
         setMessage('');
       }, durationMs);
     },
@@ -60,6 +71,7 @@ export function useTransientAnnouncement(durationMs: number = TRANSIENT_ANNOUNCE
   const announce = useCallback(
     (text: string) => {
       cancelPendingTimer();
+      announcedRef.current = text;
       if (text !== '' && text === messageRef.current) {
         setMessage('');
         timerRef.current = setTimeout(() => {
@@ -73,10 +85,15 @@ export function useTransientAnnouncement(durationMs: number = TRANSIENT_ANNOUNCE
     [cancelPendingTimer, setMessage, showFor]
   );
 
-  const clear = useCallback(() => {
-    cancelPendingTimer();
-    setMessage('');
-  }, [cancelPendingTimer, setMessage]);
+  const clear = useCallback(
+    (expected?: string) => {
+      if (expected !== undefined && announcedRef.current !== expected) return;
+      cancelPendingTimer();
+      announcedRef.current = '';
+      setMessage('');
+    },
+    [cancelPendingTimer, setMessage]
+  );
 
   return { message, announce, clear };
 }

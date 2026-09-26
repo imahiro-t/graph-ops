@@ -33,6 +33,7 @@ import { LabelChip } from './LabelChip';
 import { LabelSelect } from './LabelSelect';
 import { StatusLiveRegion } from './StatusLiveRegion';
 import { IconButton } from './IconButton';
+import { SubmittingText, submittingProps } from './Submitting';
 import { TicketFamily } from './TicketFamily';
 import { AutopilotBadges } from './AutopilotBadges';
 import { AutopilotControls } from './AutopilotControls';
@@ -218,11 +219,14 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
 
   // DFLT-00174: a submit that ends while this prompt is still mounted has
   // failed -- a successful rejection closes the prompt before its submitting
-  // state is cleared, so this component is gone by then. The confirm button
-  // turning disabled mid-submit may have dropped focus to <body> (browser
-  // dependent), so bring it back to the reason field, where the user can fix
-  // the reason or retry. Only when focus is nowhere or still inside the
-  // prompt: a user who moved elsewhere during the submit is left there.
+  // state is cleared, so this component is gone by then. Bring focus back to
+  // the reason field, where the user can fix the reason or retry. Since
+  // DFLT-00207 the confirm button is only aria-disabled while submitting, so
+  // focus normally stays on it (inside the prompt) throughout the submit;
+  // "nowhere" (<body>) is still accepted as a safety net for focus lost some
+  // other way (a DOM update, a browser quirk). Only when focus is nowhere or
+  // still inside the prompt: a user who moved elsewhere during the submit is
+  // left there.
   const wasSubmittingRef = useRef(isSubmitting);
   useEffect(() => {
     const submitEnded = wasSubmittingRef.current && !isSubmitting;
@@ -245,6 +249,18 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
     e.preventDefault();
     e.stopPropagation();
     onCancel();
+  };
+
+  // DFLT-00207: the confirm button is only aria-disabled while submitting,
+  // so clicks, Enter and Space still reach it -- ignore them here (and an
+  // empty reason, for good measure). handleApprovalDecision's own in-flight
+  // guard stays behind this as well.
+  const handleConfirm = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (isSubmitting || draft.trim() === '') {
+      e.preventDefault();
+      return;
+    }
+    onConfirm();
   };
 
   return (
@@ -270,11 +286,20 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
         aria-describedby={errorId}
         className="flex-1 text-[11px] border border-red-300 dark:border-red-800 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-red-400"
       />
+      {/* DFLT-00207: while submitting the confirm button is aria-disabled, not
+          disabled, so the focus the user put on it stays there (a disabled
+          button drops focus to <body> in some browsers) and its busy name is
+          read out as the focused element. handleConfirm ignores presses
+          meanwhile. An empty reason still disables it natively, but not
+          mid-submit: clearing the field while sending must not drop focus
+          either. */}
       <button
         type="button"
-        onClick={onConfirm}
-        disabled={isSubmitting || draft.trim() === ''}
-        className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition shrink-0"
+        onClick={handleConfirm}
+        disabled={!isSubmitting && draft.trim() === ''}
+        aria-disabled={isSubmitting || undefined}
+        {...submittingProps(isSubmitting)}
+        className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition shrink-0"
       >
         {isSubmitting ? (
           <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
@@ -282,6 +307,8 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
           <X aria-hidden="true" className="w-3 h-3" />
         )}
         {t('ticketItem.approvalGate.confirmReject')}
+        {/* DFLT-00176: aria-busy and "(submitting)" in the name while sending (see Submitting.tsx). */}
+        <SubmittingText busy={isSubmitting} />
       </button>
       <button
         type="button"
@@ -474,7 +501,8 @@ export const TicketItem: React.FC<Props> = ({
   const [submittingApprovalNodeIds, setSubmittingApprovalNodeIds] = useState<ReadonlySet<string>>(() => new Set());
   // The same set, readable synchronously: handleApprovalDecision refuses a
   // second decision on a gate whose first one is still in flight, without
-  // relying on the buttons' disabled state having been rendered yet.
+  // relying on the buttons' aria-disabled state (DFLT-00207) having been
+  // rendered yet.
   const approvalsInFlightRef = useRef<Set<string>>(new Set());
   const [approvalErrors, setApprovalErrors] = useState<Record<string, string>>({});
   // DFLT-00177: prefix for the approval error elements' ids (one per gate
@@ -567,6 +595,19 @@ export const TicketItem: React.FC<Props> = ({
   const gateName = (nodeId: string) => ticket.nodes.find(n => n.id === nodeId)?.name ?? nodeId;
   const announceRejected = (nodeId: string) =>
     setApprovalAnnouncement(t('ticketItem.approvalGate.rejectedAnnouncement', { name: gateName(nodeId) }));
+  const announceApproved = (nodeId: string) =>
+    setApprovalAnnouncement(t('ticketItem.approvalGate.approvedAnnouncement', { name: gateName(nodeId) }));
+  // DFLT-00215: whether focus is on this gate's own decision buttons. While
+  // an approval is in flight both stay focusable (the Reject button is only
+  // aria-disabled, DFLT-00207), so a user may have tabbed from Approve to
+  // Reject -- and a successful approval removes both.
+  const focusIsOnGateButtons = (nodeId: string) => {
+    const active = document.activeElement;
+    return active !== null && (
+      active === findInTicket(`[data-testid="node-approve-${nodeId}"]`) ||
+      active === findInTicket(`[data-testid="node-reject-${nodeId}"]`)
+    );
+  };
   // `deferred`: the prompt unmounted earlier (a poll removed it while its
   // reject POST was in flight) and is only being settled now, when the
   // response arrives. hadFocus describes the moment it unmounted, not now:
@@ -585,9 +626,10 @@ export const TicketItem: React.FC<Props> = ({
     setApprovalAnnouncement(t('ticketItem.approvalGate.noLongerPendingAnnouncement', { name: gateName(nodeId) }));
   };
   // Our rejection went through. Focus follows unless the user has already
-  // moved somewhere else on purpose; "nowhere" counts as not having moved,
-  // since the confirm button turning disabled mid-submit drops focus to
-  // <body> in some browsers.
+  // moved somewhere else on purpose. The confirm button stays focusable while
+  // submitting (aria-disabled, DFLT-00207), so a user who pressed it normally
+  // had focus inside the prompt (hadFocus); "nowhere" (<body>) still counts
+  // as not having moved, as a safety net for focus lost some other way.
   const settleSubmitted = (nodeId: string, hadFocus: boolean, deferred = false) => {
     if (deferred ? focusIsNowhere() : hadFocus || focusIsNowhere()) focusNodeToggle(nodeId);
     announceRejected(nodeId);
@@ -732,7 +774,7 @@ export const TicketItem: React.FC<Props> = ({
   // (the same convention the CLI's `complete-node --reason` flag uses --
   // see engine.CompleteNode's doc comment and handleCompleteNode). Approving
   // never takes a reason. reason is validated by the caller (the reject
-  // button is disabled while empty, see the reason-prompt JSX below) rather
+  // button is disabled while empty, see RejectReasonPrompt) rather
   // than here, so this function has one job: send the request.
   const handleApprovalDecision = async (nodeId: string, passed: boolean, reason?: string) => {
     // One decision per gate at a time (DFLT-00173). Checked before anything
@@ -741,12 +783,19 @@ export const TicketItem: React.FC<Props> = ({
     approvalsInFlightRef.current.add(nodeId);
     setSubmittingApprovalNodeIds(prev => new Set(prev).add(nodeId));
     if (!passed) rejectsInFlightRef.current.add(nodeId);
+    // DFLT-00215: an empty announcement slot, so that approving a gate with
+    // the same name again is still a change the live region reads out.
+    // (Rejecting already clears it when its prompt opens, in startRejecting.)
+    if (passed) setApprovalAnnouncement('');
     setApprovalErrors(prev => {
       if (!(nodeId in prev)) return prev;
       const next = { ...prev };
       delete next[nodeId];
       return next;
     });
+    // Whether the POST itself went through: an exception after that point
+    // (from onRefresh) is not a failed decision (DFLT-00216).
+    let requestSucceeded = false;
     try {
       const body: { passed: boolean; artifacts?: Array<{ name: string; type: string; content: string }> } = { passed };
       if (!passed) {
@@ -760,6 +809,7 @@ export const TicketItem: React.FC<Props> = ({
       if (!res.ok) {
         throw new Error(await localizedApiErrorMessage(t, res));
       }
+      requestSucceeded = true;
       if (!passed) {
         // DFLT-00172: how the rejection's focus/announcement is settled
         // depends on whether its prompt is still on screen.
@@ -777,6 +827,22 @@ export const TicketItem: React.FC<Props> = ({
           // user is typing there, so only announce.
           announceRejected(nodeId);
         }
+      } else {
+        // DFLT-00215: the approval went through, so this gate's Approve and
+        // Reject buttons are about to disappear, and focus on either would
+        // fall to <body>. Move it to the node's toggle, which is rendered in
+        // every state -- but only while it is on those buttons or already
+        // nowhere (<body>, e.g. a poll removed them first); a user who moved
+        // on to some other control while the request was in flight keeps
+        // their place. Both buttons count as "where the user pressed", not as
+        // somewhere they moved to on purpose: neither survives the approval
+        // (the same reasoning as the reject prompt's hadFocus). This runs
+        // before onRefresh on purpose: its re-render is what removes the
+        // buttons, and it is not guaranteed to be committed when onRefresh
+        // resolves, so waiting for it would not be reliable. The toggle
+        // exists before and after, so moving early loses nothing.
+        if (focusIsOnGateButtons(nodeId) || focusIsNowhere()) focusNodeToggle(nodeId);
+        announceApproved(nodeId);
       }
       // Close this gate's prompt (and drop its draft) only if it is the one
       // open: another gate's prompt may be open with a draft in progress.
@@ -788,6 +854,25 @@ export const TicketItem: React.FC<Props> = ({
       // stopped being pending some other way.
       const deferred = deferredClosuresRef.current.get(nodeId);
       if (deferred) settleNoLongerPending(nodeId, deferred.hadFocus, true);
+      // DFLT-00216: the approval failed after a poll had already removed this
+      // gate's Approve and Reject buttons (it stopped being pending some other
+      // way -- decided elsewhere, the ticket closed), so focus on them fell to
+      // <body>. Settle it the way the reject side does: move to the node's
+      // toggle and say the gate is no longer awaiting approval. Checked on the
+      // committed DOM, not pendingApprovalNodeIds: this closure holds the
+      // render from the click. Both buttons are rendered under the same
+      // condition, so Approve alone tells. Only while focus is still nowhere:
+      // a user who has moved on to some other control keeps their place and
+      // hears nothing about a gate they have left. With the buttons still
+      // there, focus stays where it is and the error shows (DFLT-00207).
+      if (
+        passed &&
+        !requestSucceeded &&
+        findInTicket(`[data-testid="node-approve-${nodeId}"]`) === null &&
+        focusIsNowhere()
+      ) {
+        settleNoLongerPending(nodeId, true);
+      }
     } finally {
       if (!passed) {
         // Only this gate's entries: another gate's reject may still be in
@@ -807,6 +892,10 @@ export const TicketItem: React.FC<Props> = ({
   // Opens the reject-with-reason prompt for nodeId, closing it for whatever
   // other node had it open (only one at a time -- see rejectingNodeId).
   const startRejecting = (nodeId: string) => {
+    // DFLT-00207: the Reject button is only aria-disabled while this gate's
+    // decision is in flight, so its clicks still arrive -- don't open a
+    // prompt for a gate that is being approved.
+    if (approvalsInFlightRef.current.has(nodeId)) return;
     // DFLT-00172: a fresh prompt starts with no leftover close reason, and
     // an announcement slot that is empty so the next one is a change.
     closeReasonRef.current = null;
@@ -1290,6 +1379,7 @@ export const TicketItem: React.FC<Props> = ({
                   <IconButton
                     onClick={handleToggleAssignedToMe}
                     disabled={assignToMeSaving}
+                    busy={assignToMeSaving}
                     label={t('ticketItem.selfAssign.unassign')}
                     className="p-0.5 text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-200 disabled:opacity-50 rounded-full"
                   >
@@ -1315,10 +1405,12 @@ export const TicketItem: React.FC<Props> = ({
                   type="button"
                   onClick={handleToggleAssignedToMe}
                   disabled={assignToMeSaving}
+                  {...submittingProps(assignToMeSaving)}
                   className="px-2 py-0.5 rounded-full border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 disabled:opacity-50 text-[11px] font-semibold flex items-center gap-1 transition"
                 >
                   {assignToMeSaving ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <UserPlus aria-hidden="true" className="w-3 h-3" />}
                   {t('ticketItem.selfAssign.assign')}
+                  <SubmittingText busy={assignToMeSaving} />
                 </button>
               ) : null}
               {assignToMeError && (
@@ -1379,6 +1471,7 @@ export const TicketItem: React.FC<Props> = ({
             <IconButton
               onClick={handleReopenTicket}
               disabled={isReopeningTicket}
+              busy={isReopeningTicket}
               label={t('ticketItem.reopen.button')}
               wrapperClassName="-m-1"
               className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 rounded"
@@ -1410,6 +1503,7 @@ export const TicketItem: React.FC<Props> = ({
             data-focus-key={`ticket-delete-${ticket.id}`}
             onClick={handleDeleteTicket}
             disabled={isDeletingTicket}
+            busy={isDeletingTicket}
             label={t('ticketItem.delete.ariaLabel', { id: ticket.id, title: ticket.title })}
             tooltip={t('ticketItem.delete.button')}
             wrapperClassName="-m-1"
@@ -1446,10 +1540,12 @@ export const TicketItem: React.FC<Props> = ({
             type="button"
             onClick={handleCloseTicket}
             disabled={isClosingTicket}
+            {...submittingProps(isClosingTicket)}
             className="px-2 py-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-xs font-bold flex items-center gap-1 transition shrink-0"
           >
             {isClosingTicket ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Archive aria-hidden="true" className="w-3.5 h-3.5" />}
             {t('ticketItem.close.confirm')}
+            <SubmittingText busy={isClosingTicket} />
           </button>
           <button
             type="button"
@@ -1793,6 +1889,7 @@ export const TicketItem: React.FC<Props> = ({
                     {ticket.nodes.map((node, index) => {
                       const nodeArtifacts = ticket.artifacts.filter(a => a.node_id === node.id);
                       const isNodeExpanded = expandedNodeIds.has(node.id);
+                      const isApprovalSubmitting = submittingApprovalNodeIds.has(node.id);
 
                       return (
                         <div
@@ -1879,29 +1976,44 @@ export const TicketItem: React.FC<Props> = ({
                                   DFLT ticket for blinking-gate fix. */}
                               {pendingApprovalNodeIds.has(node.id) && rejectingNodeId !== node.id && (
                                 <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                                  {/* DFLT-00207: aria-disabled, not disabled,
+                                      while the decision is sent: the pressed
+                                      button keeps focus (a disabled one drops
+                                      it to <body> in some browsers), so its
+                                      busy name is read out. Presses meanwhile
+                                      are ignored by the handlers' guards. */}
                                   <button
                                     type="button"
-                                    onClick={() => handleApprovalDecision(node.id, true)}
-                                    disabled={submittingApprovalNodeIds.has(node.id)}
+                                    onClick={() => {
+                                      if (!isApprovalSubmitting) handleApprovalDecision(node.id, true);
+                                    }}
+                                    aria-disabled={isApprovalSubmitting || undefined}
+                                    {...submittingProps(isApprovalSubmitting)}
                                     data-testid={`node-approve-${node.id}`}
-                                    className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition"
+                                    className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition"
                                   >
-                                    {submittingApprovalNodeIds.has(node.id) ? (
+                                    {isApprovalSubmitting ? (
                                       <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
                                     ) : (
                                       <Check aria-hidden="true" className="w-3 h-3" />
                                     )}
                                     {t('ticketItem.approvalGate.approve')}
+                                    {/* DFLT-00176: "submitting" in the accessible name (see Submitting.tsx). */}
+                                    <SubmittingText busy={isApprovalSubmitting} />
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => startRejecting(node.id)}
-                                    disabled={submittingApprovalNodeIds.has(node.id)}
+                                    onClick={() => {
+                                      if (!isApprovalSubmitting) startRejecting(node.id);
+                                    }}
+                                    aria-disabled={isApprovalSubmitting || undefined}
+                                    {...submittingProps(isApprovalSubmitting)}
                                     data-testid={`node-reject-${node.id}`}
-                                    className="px-2 py-1 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50 disabled:cursor-not-allowed text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800 rounded text-[11px] font-bold flex items-center gap-1 transition"
+                                    className="px-2 py-1 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800 rounded text-[11px] font-bold flex items-center gap-1 transition"
                                   >
                                     <X aria-hidden="true" className="w-3 h-3" />
                                     {t('ticketItem.approvalGate.reject')}
+                                    <SubmittingText busy={isApprovalSubmitting} />
                                   </button>
                                 </div>
                               )}
@@ -1915,7 +2027,7 @@ export const TicketItem: React.FC<Props> = ({
 
                           {/* Reject-with-reason prompt (DFLT-00016). A free-
                               text reason is required -- the confirm button
-                              stays disabled until it's non-empty, which is
+                              is disabled while it's empty, which is
                               this flow's confirmation step (no window.confirm
                               dialog). Kept outside the clickable header row
                               so typing/clicking here doesn't toggle the
@@ -1931,7 +2043,7 @@ export const TicketItem: React.FC<Props> = ({
                               onDraftChange={setRejectReasonDraft}
                               onConfirm={() => handleApprovalDecision(node.id, false, rejectReasonDraft)}
                               onCancel={cancelRejecting}
-                              isSubmitting={submittingApprovalNodeIds.has(node.id)}
+                              isSubmitting={isApprovalSubmitting}
                               errorId={approvalErrors[node.id] ? approvalErrorId(node.id) : undefined}
                               onMount={handlePromptMount}
                               onUnmount={handlePromptUnmount}
@@ -2164,18 +2276,22 @@ export const TicketItem: React.FC<Props> = ({
                 <button
                   onClick={() => handleRunClaude(t('claudePrompts.refineTicket', { ticketId: ticket.id }), ticket.id)}
                   disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
+                  {...submittingProps(isRunning)}
                   className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
                 >
                   {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 text-indigo-600" />}
                   {t('ticketItem.actions.refine')}
+                  <SubmittingText busy={isRunning} />
                 </button>
                 <button
                   onClick={() => handleRunClaude(t('claudePrompts.processTicket', { ticketId: ticket.id }), ticket.id)}
                   disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
+                  {...submittingProps(isRunning)}
                   className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
                 >
                   {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5" />}
                   {t('ticketItem.actions.run')}
+                  <SubmittingText busy={isRunning} />
                 </button>
               </div>
             </div>
@@ -2212,10 +2328,12 @@ export const TicketItem: React.FC<Props> = ({
               <button
                 onClick={handleSendPrompt}
                 disabled={isRunning || !promptText.trim()}
+                {...submittingProps(isRunning)}
                 className="px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition"
               >
                 {isRunning ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <Send aria-hidden="true" className="w-4 h-4" />}
                 {t('ticketItem.send')}
+                <SubmittingText busy={isRunning} />
               </button>
             </div>
 

@@ -66,8 +66,14 @@
 //     capture phase so a handler that stops propagation cannot keep the
 //     tooltip from being dismissed.
 //   With the tooltip closed, Escape is left alone as before.
+//
+// - `busy` marks the button as sending the user's own action (DFLT-00206,
+//   see Submitting.tsx): aria-busy="true" and the shared "(submitting)"
+//   suffix joined to the aria-label. The visible tooltip keeps the plain
+//   label (or `tooltip`), so nothing on screen changes.
 import React, { forwardRef, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { submittingProps, useSubmittingLabel } from './Submitting';
 
 const CLOSE_DELAY_MS = 100;
 const VIEWPORT_MARGIN = 4;
@@ -85,6 +91,9 @@ export interface IconButtonProps extends ButtonProps {
   describeWithTooltip?: boolean;
   tooltipSide?: 'top' | 'bottom';
   wrapperClassName?: string;
+  // The user's own action is being sent (the button shows a spinner):
+  // adds aria-busy and the "(submitting)" suffix to the accessible name.
+  busy?: boolean;
 }
 
 interface Position {
@@ -117,6 +126,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     describeWithTooltip = false,
     tooltipSide = 'bottom',
     wrapperClassName,
+    busy = false,
     type,
     'aria-describedby': ariaDescribedBy,
     onClick,
@@ -126,6 +136,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
   forwardedRef
 ) {
   const tooltipText = tooltip ?? label;
+  const submittingLabel = useSubmittingLabel();
   const tooltipId = useId();
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -258,8 +269,9 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       <button
         ref={setButtonRef}
         type={type ?? 'button'}
-        aria-label={label}
+        aria-label={submittingLabel(label, busy)}
         aria-describedby={describedBy}
+        {...submittingProps(busy)}
         {...buttonProps}
         onClick={handleClick}
       >

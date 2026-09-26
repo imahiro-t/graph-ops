@@ -6,6 +6,7 @@ import { startAutopilot, TicketAutopilotView } from '../lib/autopilotApi';
 import { errorMessage } from '../lib/apiError';
 import { StatusLiveRegion } from './StatusLiveRegion';
 import { ConfirmDialog } from './ConfirmDialog';
+import { SubmittingText, submittingProps } from './Submitting';
 
 interface Props {
   ticketId: string;
@@ -242,6 +243,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
               data-testid={`autopilot-start-${mode}`}
               onClick={() => handleClick(mode)}
               disabled={starting !== null || reason !== ''}
+              {...submittingProps(starting === mode)}
               title={reason || undefined}
               aria-describedby={reasonId}
               className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-slate-700 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
@@ -254,6 +256,8 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
                 <Bot className="w-3.5 h-3.5" aria-hidden="true" />
               )}
               {t(`autopilot.buttons.${mode}`)}
+              {/* Only the mode being started shows the spinner, so only it is busy. */}
+              <SubmittingText busy={starting === mode} />
             </button>
           );
         })}

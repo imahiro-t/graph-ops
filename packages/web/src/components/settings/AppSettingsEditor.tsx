@@ -31,6 +31,7 @@ import { useSavedFlash } from '../../hooks/useSavedFlash';
 import { useTransientAnnouncement } from '../../hooks/useTransientAnnouncement';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
+import { SubmittingText, submittingProps } from '../Submitting';
 
 interface Props {
   projects: Project[];
@@ -800,6 +801,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                   handleTestConnection();
                 }}
                 aria-disabled={testConnectionBlocked}
+                {...submittingProps(testingConnection)}
                 aria-describedby={
                   mysqlRequiredMissing
                     ? 'mysql-required-fields-hint'
@@ -1017,6 +1019,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
             handleSave();
           }}
           aria-disabled={saveBlocked}
+          {...submittingProps(saving)}
           aria-describedby={saveBlockedReason ? 'save-blocked-reason' : undefined}
           className={`px-4 py-1.5 bg-blue-600 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition ${
             saveBlocked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'
@@ -1072,6 +1075,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                     data-focus-key={projectDeleteButtonKey(p.id)}
                     onClick={() => handleDeleteProject(p)}
                     disabled={projectDeletingId === p.id}
+                    busy={projectDeletingId === p.id}
                     label={t('settings.appSettings.projects.deleteAriaLabel', { name: p.name || p.id })}
                     tooltip={t('settings.appSettings.projects.delete')}
                     wrapperClassName="ml-auto mb-0.5 shrink-0"
@@ -1101,10 +1105,12 @@ export const AppSettingsEditor: React.FC<Props> = ({
                   <button
                     onClick={() => handleSaveProject(p)}
                     disabled={!isProjectDirty(p) || isProjectInvalid(p) || projectSavingId === p.id}
+                    {...submittingProps(projectSavingId === p.id)}
                     className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 rounded text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1 shrink-0 transition"
                   >
                     {projectSavingId === p.id ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <Save aria-hidden="true" className="w-3 h-3" />}
                     {t('settings.common.save')}
+                    <SubmittingText busy={projectSavingId === p.id} />
                   </button>
                 </div>
                 {projectErrors[p.id] && <p className="text-[10px] text-red-600 dark:text-red-400">{projectErrors[p.id]}</p>}

@@ -7,6 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { ProjectSetupModal } from './ProjectSetupModal';
+import { submittingName } from '../test/submittingName';
 import { Project } from '../types';
 
 const fetchMock = () => fetch as unknown as ReturnType<typeof vi.fn>;
@@ -453,7 +454,11 @@ describe('ProjectSetupModal', () => {
       const oldRadio = screen.getByRole('radio', { name: 'Theta' });
       expect(oldRadio).not.toBeChecked();
       expect(screen.getByTestId('project-setup-overwrite-status')).toBeEmptyDOMElement();
-      expect(screen.getByRole('button', { name: i18n.t('projectSetupModal.confirmExisting') })).toBeDisabled();
+      // Still saving while the re-fetch is pending, so the button is busy and
+      // says so in its name (DFLT-00206).
+      expect(
+        screen.getByRole('button', { name: submittingName(i18n.t('projectSetupModal.confirmExisting')) })
+      ).toBeDisabled();
 
       await act(async () => {
         finishRefetch();
