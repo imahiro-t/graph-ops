@@ -33,7 +33,8 @@ const (
 
 // DBFingerprint hashes the parts of a ticket that move while its graph is
 // being worked on: the ticket's and every node's updated_at, and the number
-// and newest created_at of its artifacts.
+// and newest created_at of its artifacts (newest as a time, not as a string:
+// see domain.TimestampKey).
 func DBFingerprint(d *domain.TicketDetail) string {
 	if d == nil {
 		return ""
@@ -45,7 +46,7 @@ func DBFingerprint(d *domain.TicketDetail) string {
 	}
 	latest := ""
 	for _, a := range d.Artifacts {
-		if a.CreatedAt > latest {
+		if latest == "" || domain.CompareTimestamps(a.CreatedAt, latest) > 0 {
 			latest = a.CreatedAt
 		}
 	}
