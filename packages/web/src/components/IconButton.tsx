@@ -21,12 +21,23 @@
 //   always resolves. A referenced element counts for the description even
 //   when it is hidden.
 //
+// - A button that is unavailable but still has to explain why (a default
+//   entry's delete button, say) takes aria-disabled="true" rather than the
+//   native disabled: a disabled button cannot be focused, so its tooltip
+//   and description could only ever be reached by mouse hover (DFLT-00203).
+//   With aria-disabled the button stays in the Tab order and opens its
+//   tooltip on keyboard focus like any other, while a click -- including
+//   the click that Enter and Space turn into -- is swallowed here
+//   (preventDefault, and onClick is not called). The caller still styles
+//   the unavailable state itself (Tailwind's disabled: variant does not
+//   match aria-disabled) and should guard its handler as well.
+//
 // Layout and behaviour details:
 //
 // - Hover is tracked on a wrapping <span>, not on the button, because some
-//   browsers deliver no mouse events to a disabled button -- and a disabled
-//   delete button is exactly where the "cannot delete" tooltip matters.
-//   Put classes that position the button within its parent's flex layout
+//   browsers deliver no mouse events to a natively disabled button, and a
+//   caller may still use the native disabled where no reason needs to be
+//   reachable by keyboard. Put classes that position the button within its parent's flex layout
 //   (ml-auto, shrink-0, negative margins, ...) on `wrapperClassName`.
 // - The tooltip is rendered into document.body through a portal with fixed
 //   positioning, so a scrolling list or an overflow-hidden card cannot clip
@@ -48,8 +59,8 @@
 //     without stopPropagation -- so useModalDialog, which ignores a
 //     defaultPrevented key, leaves a surrounding modal open for that press.
 //   - With focus elsewhere (the tooltip was opened by hover alone, which is
-//     the only way to open one on a disabled button), a document listener
-//     registered only while the tooltip is open closes it without
+//     the only way to open one on a natively disabled button), a document
+//     listener registered only while the tooltip is open closes it without
 //     preventDefault, so the press still does whatever it does where focus
 //     is -- cancelling an input's edit, closing a modal. It listens in the
 //     capture phase so a handler that stops propagation cannot keep the
@@ -108,6 +119,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     wrapperClassName,
     type,
     'aria-describedby': ariaDescribedBy,
+    onClick,
     children,
     ...buttonProps
   },
@@ -219,6 +231,15 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     return () => document.removeEventListener('keydown', onDocumentKeyDown, true);
   }, [open, dismiss]);
 
+  const ariaDisabled = buttonProps['aria-disabled'] === true || buttonProps['aria-disabled'] === 'true';
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (ariaDisabled) {
+      e.preventDefault();
+      return;
+    }
+    onClick?.(e);
+  };
+
   const describedBy = [ariaDescribedBy, describeWithTooltip ? tooltipId : undefined].filter(Boolean).join(' ') || undefined;
   const renderTooltip = open || describeWithTooltip;
 
@@ -240,6 +261,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
         aria-label={label}
         aria-describedby={describedBy}
         {...buttonProps}
+        onClick={handleClick}
       >
         {children}
       </button>

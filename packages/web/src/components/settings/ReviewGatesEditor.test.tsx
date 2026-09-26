@@ -3,8 +3,10 @@
 // (see cannotRenameDefaultHint), while a gate already overridden in this
 // scope (isOverridden === true, whether newly added or an existing
 // override) must keep working exactly as before. See this ticket's plan --
-// the guard/tooltip pattern mirrors the existing delete button
-// (disabled={!canEdit || !g.isOverridden} + cannotDeleteDefaultHint).
+// the guard/tooltip pattern mirrored the delete button of the time
+// (disabled + cannotDeleteDefaultHint). Since DFLT-00203 that delete button
+// is aria-disabled={!g.isOverridden} instead, so it keeps keyboard focus
+// and shows its reason there too.
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -623,8 +625,11 @@ describe('ReviewGatesEditor', () => {
 // DFLT-00165: the icon-only delete button rests at text-slate-500 /
 // dark:text-slate-400 for WCAG 1.4.11's 3:1 on the gate row's white /
 // slate-900 (4.76:1 / 6.96:1; the old text-slate-400 / dark:text-slate-500
-// was 2.56:1 / 3.75:1). The red hover and the disabled opacity (a disabled
-// control is exempt from 1.4.11) are kept.
+// was 2.56:1 / 3.75:1). The red hover and the dimmed look of an unavailable
+// button (a disabled control is exempt from 1.4.11) are kept. DFLT-00203: a
+// default gate's button is aria-disabled rather than disabled, so its
+// dimming is a plain opacity-40 (the disabled: variant no longer matches)
+// and it gets no red hover.
 describe('ReviewGatesEditor delete button contrast (WCAG 1.4.11)', () => {
   beforeEach(async () => {
     mockedFetchCatalog.mockReset();
@@ -639,13 +644,19 @@ describe('ReviewGatesEditor delete button contrast (WCAG 1.4.11)', () => {
     const enabled = screen.getByRole('button', { name: i18n.t('settings.reviewGates.deleteGateAriaLabel', { name: 'qa_review' }) });
     const disabled = screen.getByRole('button', { name: i18n.t('settings.reviewGates.deleteGateAriaLabel', { name: 'code_review' }) });
     expect(enabled).toBeEnabled();
-    expect(disabled).toBeDisabled();
+    expect(enabled).not.toHaveAttribute('aria-disabled');
+    expect(disabled).toBeEnabled();
+    expect(disabled).toHaveAttribute('aria-disabled', 'true');
     for (const b of [enabled, disabled]) {
       expect(b).toHaveClass('text-slate-500', 'dark:text-slate-400');
       expect(b).not.toHaveClass('text-slate-400');
       expect(b).not.toHaveClass('dark:text-slate-500');
-      expect(b).toHaveClass('hover:text-red-600', 'dark:hover:text-red-400', 'disabled:opacity-40');
     }
+    expect(enabled).toHaveClass('hover:text-red-600', 'dark:hover:text-red-400');
+    expect(enabled).not.toHaveClass('opacity-40');
+    expect(disabled).toHaveClass('opacity-40');
+    expect(disabled).not.toHaveClass('hover:text-red-600');
+    expect(disabled).not.toHaveClass('dark:hover:text-red-400');
   });
 });
 
@@ -681,7 +692,7 @@ describe('ReviewGatesEditor delete button accessible name', () => {
     );
 
     const [defaultGate, overridden, custom] = buttons;
-    expect(defaultGate).toBeDisabled();
+    expect(defaultGate).toHaveAttribute('aria-disabled', 'true');
     expect(defaultGate).not.toHaveAttribute('title');
     expect(defaultGate).toHaveAccessibleDescription(i18n.t('settings.reviewGates.cannotDeleteDefaultHint'));
     for (const b of [overridden, custom]) {
@@ -704,6 +715,44 @@ describe('ReviewGatesEditor delete button accessible name', () => {
     const defaultGate = screen.getByRole('button', { name: deleteName('code_review') });
     await user.hover(defaultGate.parentElement as HTMLElement);
     expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.reviewGates.cannotDeleteDefaultHint'));
+  });
+
+  // DFLT-00203: a default gate's delete button is aria-disabled rather than
+  // disabled, so Tab reaches it and keyboard focus shows the same reason.
+  it('shows why a default gate cannot be deleted on keyboard focus', async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+
+    const defaultGate = screen.getByRole('button', { name: deleteName('code_review') });
+    // Tab to it from the row's "enabled" checkbox, the control just before it.
+    const enabledBox = within(defaultGate.closest('div')!).getByRole('checkbox');
+    act(() => enabledBox.focus());
+    await user.tab();
+    expect(defaultGate).toHaveFocus();
+    expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.reviewGates.cannotDeleteDefaultHint'));
+    expect(defaultGate).toHaveAccessibleDescription(i18n.t('settings.reviewGates.cannotDeleteDefaultHint'));
+  });
+
+  // DFLT-00203: neither a click nor Enter nor Space removes a default gate.
+  it('keeps a default gate when its delete button is clicked or activated from the keyboard', async () => {
+    const onDirtyChange = vi.fn();
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={onDirtyChange} />);
+    await screen.findByDisplayValue('Code Review');
+    const idCount = () => screen.getAllByLabelText(i18n.t('settings.reviewGates.idLabel')).length;
+    const before = idCount();
+
+    const defaultGate = screen.getByRole('button', { name: deleteName('code_review') });
+    await user.click(defaultGate);
+    expect(defaultGate).toHaveFocus();
+    await user.keyboard('{Enter}');
+    await user.keyboard(' ');
+
+    expect(idCount()).toBe(before);
+    expect(screen.getByDisplayValue('Code Review')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: deleteName('code_review') })).toBe(defaultGate);
+    expect(onDirtyChange).not.toHaveBeenCalledWith(true);
   });
 
   it.each(['ja', 'en'])('falls back from the ID to the name, then to the plain delete text, on a new row in %s', async lang => {

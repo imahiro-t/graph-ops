@@ -25,9 +25,8 @@ function isValidTypeName(name: string): boolean {
   return name !== '' && name !== '.' && name !== '..' && !/[/\\]/.test(name);
 }
 
-// data-focus-key values of the list's controls, which removeType moves focus
-// to once the deleted type's row is gone (see pendingFocus).
-const selectButtonKey = (type: string) => `select-${type}`;
+// data-focus-key values of the controls removeType moves focus to once the
+// deleted type's row is gone (see pendingFocus).
 const deleteButtonKey = (type: string) => `delete-${type}`;
 const ADD_TYPE_FOCUS_KEY = 'add-type';
 
@@ -205,11 +204,13 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
   // Clears this scope's own override text for type, which is what actually
   // "deletes" a node type here (there's no separate delete endpoint -- see
-  // WriteExtensionText's "empty text deletes the file" contract). Only ever
-  // reachable for a non-default type (the delete button is disabled
-  // otherwise, see the JSX below): a plugin-default type has no "removed"
-  // state to fall back to, only an overridden/not-yet-overridden one, exactly
-  // like レビューゲート's default rows.
+  // WriteExtensionText's "empty text deletes the file" contract). Only for a
+  // non-default type: a plugin-default type has no "removed" state to fall
+  // back to, only an overridden/not-yet-overridden one, exactly like
+  // レビューゲート's default rows. Its delete button is aria-disabled (see the
+  // JSX below) and IconButton swallows its clicks; the check at the top of
+  // this function keeps a default type from being deleted even if it is
+  // reached some other way.
   // The saved instructions cannot be restored afterwards, so ask first
   // (the same in-app ConfirmDialog as AppSettingsEditor's handleDeleteProject).
   // Only custom types reach here and they have no translated label, so the
@@ -218,8 +219,9 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // the one before it, else the "add node type" button) -- the same rule as
   // LabelsEditor (lib/focusAfterRemoval). On a cancel or a failed request the
   // row stays, and the dialog has already put focus back on its delete
-  // button (which is never disabled here), so nothing is moved then.
+  // button, so nothing is moved then.
   const removeType = async (type: string) => {
+    if (types.find(info => info.type === type)?.has_default) return;
     // The list as it was when the user asked: the dialog keeps it out of
     // reach until it closes, so this is also the list as of the confirm.
     const before = types.map(info => info.type);
@@ -247,15 +249,12 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       // on its button. Still listed: another tier still defines the type,
       // so its row (and focused button) stays.
       if (list === null || list.some(info => info.type === type)) return;
+      // Same column, next row: the neighbor's delete button, even on a
+      // plugin-default row -- that button is aria-disabled, not disabled, so
+      // it takes focus and tells (tooltip and description) why that row
+      // cannot be deleted.
       const neighbor = neighborAfterRemoval(before, type, list.map(info => info.type));
-      const neighborInfo = list.find(info => info.type === neighbor);
-      if (!neighborInfo) {
-        setPendingFocus(ADD_TYPE_FOCUS_KEY);
-      } else {
-        // A plugin-default neighbor's delete button is disabled, so its
-        // select button (the row's other control) takes focus instead.
-        setPendingFocus(neighborInfo.has_default ? selectButtonKey(neighborInfo.type) : deleteButtonKey(neighborInfo.type));
-      }
+      setPendingFocus(neighbor === null ? ADD_TYPE_FOCUS_KEY : deleteButtonKey(neighbor));
     } catch (e) {
       setError(errorMessage(e, t('errors.UNKNOWN')));
     }
@@ -294,7 +293,6 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               }`}
             >
               <button
-                data-focus-key={selectButtonKey(info.type)}
                 onClick={() => void select(info.type)}
                 className={`flex-1 min-w-0 text-left pl-3 pr-1 py-2 text-xs flex items-center gap-2 ${
                   selected === info.type ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'
@@ -316,8 +314,13 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               </button>
               <IconButton
                 data-focus-key={deleteButtonKey(info.type)}
-                onClick={() => removeType(info.type)}
-                disabled={!canDelete}
+                onClick={() => {
+                  if (canDelete) void removeType(info.type);
+                }}
+                // aria-disabled rather than disabled, so the button still
+                // takes keyboard focus and shows why it cannot be deleted
+                // (IconButton swallows the click).
+                aria-disabled={canDelete ? undefined : true}
                 // The name carries the type so a screen reader can tell which
                 // row focus is on. The tooltip says "delete" -- already part
                 // of the name -- or, on a type with a plugin default, why it
@@ -327,7 +330,9 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 tooltip={info.has_default ? t('settings.nodeTypes.cannotDeleteDefaultHint') : t('settings.nodeTypes.deleteType')}
                 describeWithTooltip={info.has_default}
                 wrapperClassName="shrink-0 mr-1"
-                className="p-1 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-30 rounded"
+                className={`p-1 text-slate-500 dark:text-slate-400 rounded ${
+                  canDelete ? 'hover:text-red-600 dark:hover:text-red-400' : 'opacity-30 cursor-not-allowed'
+                }`}
               >
                 <Trash2 aria-hidden="true" className="w-3 h-3" />
               </IconButton>

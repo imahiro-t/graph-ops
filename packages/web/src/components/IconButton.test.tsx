@@ -1,6 +1,6 @@
 // DFLT-00171: the icon-only button with a visible tooltip that replaces the
 // native title attribute.
-import { createRef } from 'react';
+import { createRef, type FormEvent } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -114,6 +114,62 @@ describe('IconButton', () => {
     expect(wrapper).toHaveClass('inline-flex', 'shrink-0');
     await user.hover(wrapper);
     expect(openIconButtonTooltip()).toHaveTextContent('Defaults cannot be deleted');
+  });
+
+  // DFLT-00203: aria-disabled keeps the button focusable, so its tooltip
+  // and description are reachable from the keyboard, while IconButton
+  // swallows every click -- including the ones Enter and Space turn into.
+  describe('aria-disabled', () => {
+    it.each([true, 'true'] as const)('takes Tab focus and shows the tooltip and description (aria-disabled=%s)', async value => {
+      const user = userEvent.setup();
+      render(
+        <IconButton label="Delete type: plan" tooltip="Defaults cannot be deleted" describeWithTooltip aria-disabled={value}>
+          <Icon />
+        </IconButton>
+      );
+      const button = screen.getByRole('button', { name: 'Delete type: plan' });
+      expect(button).toBeEnabled();
+      expect(button).toHaveAttribute('aria-disabled', 'true');
+
+      await user.tab();
+      expect(button).toHaveFocus();
+      expect(openIconButtonTooltip()).toHaveTextContent('Defaults cannot be deleted');
+      expect(button).toHaveAccessibleDescription('Defaults cannot be deleted');
+    });
+
+    it.each([true, 'true'] as const)('calls onClick on neither a click nor Enter nor Space (aria-disabled=%s)', async value => {
+      const user = userEvent.setup();
+      const onClick = vi.fn();
+      const onSubmit = vi.fn((e: FormEvent) => e.preventDefault());
+      render(
+        <form onSubmit={onSubmit}>
+          <IconButton label="Delete" aria-disabled={value} type="submit" onClick={onClick}>
+            <Icon />
+          </IconButton>
+        </form>
+      );
+      const button = screen.getByRole('button', { name: 'Delete' });
+
+      await user.click(button);
+      expect(button).toHaveFocus();
+      await user.keyboard('{Enter}');
+      await user.keyboard(' ');
+
+      expect(onClick).not.toHaveBeenCalled();
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it.each([false, 'false', undefined] as const)('calls onClick as usual when aria-disabled is %s', async value => {
+      const user = userEvent.setup();
+      const onClick = vi.fn();
+      render(
+        <IconButton label="Delete" aria-disabled={value} onClick={onClick}>
+          <Icon />
+        </IconButton>
+      );
+      await user.click(screen.getByRole('button', { name: 'Delete' }));
+      expect(onClick).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('closes the tooltip on Escape, marking only that Escape as handled', async () => {

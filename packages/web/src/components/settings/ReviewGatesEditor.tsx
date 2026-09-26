@@ -240,9 +240,11 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     setGates(prev => [...prev, { id: '', name: '', criteria: '', enabled: true, isOverridden: true, origin: 'new', baseline: {}, hasDefault: false }]);
   };
 
-  // Only ever called from a button that's disabled unless g.isOverridden
-  // (see the JSX below); guarded here too so this can't remove a
-  // not-yet-overridden default row even if triggered some other way.
+  // Only ever called for an overridden row: a not-yet-overridden default
+  // row's delete button is aria-disabled (see the JSX below), IconButton
+  // swallows its clicks and its onClick checks g.isOverridden too. Guarded
+  // here as well so this can't remove such a row even if triggered some
+  // other way.
   const removeGate = (idx: number) => {
     setGates(prev => (prev[idx]?.isOverridden ? prev.filter((_, i) => i !== idx) : prev));
   };
@@ -433,8 +435,13 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 {t('settings.reviewGates.enabledLabel')}
               </label>
               <IconButton
-                onClick={() => removeGate(idx)}
-                disabled={!g.isOverridden}
+                onClick={() => {
+                  if (g.isOverridden) removeGate(idx);
+                }}
+                // aria-disabled rather than disabled, so a default gate's
+                // button still takes keyboard focus and shows why it cannot
+                // be deleted (IconButton swallows the click).
+                aria-disabled={g.isOverridden ? undefined : true}
                 // The name carries the gate (its ID, or its name on a new row
                 // with no ID yet) so a screen reader can tell which row focus
                 // is on. With neither an ID nor a name there is nothing to
@@ -447,7 +454,9 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 tooltip={deleteTooltip}
                 describeWithTooltip={Boolean(deleteTarget) && !g.isOverridden}
                 wrapperClassName="mb-0.5 shrink-0"
-                className="p-1 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40"
+                className={`p-1 text-slate-500 dark:text-slate-400 ${
+                  g.isOverridden ? 'hover:text-red-600 dark:hover:text-red-400' : 'opacity-40 cursor-not-allowed'
+                }`}
               >
                 <Trash2 aria-hidden="true" className="w-3.5 h-3.5" />
               </IconButton>
