@@ -217,6 +217,7 @@
       "reasonPlaceholder": "Reason for rejection (required)",
       "confirmReject": "Confirm rejection",
       "cancelReject": "Cancel",
+      "submitting": "(submitting)",
       "pendingStatus": "Awaiting approval",
       "rejectedHint": "Rejected -- blocked until process-ticket triages the rejection reason (reopening specific nodes) or a human resolves it.",
       "rejectedBadgeOne": "Rejected: {{name}}",

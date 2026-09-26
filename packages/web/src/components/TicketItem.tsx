@@ -261,6 +261,7 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
         type="button"
         onClick={onConfirm}
         disabled={isSubmitting || draft.trim() === ''}
+        aria-busy={isSubmitting || undefined}
         className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition shrink-0"
       >
         {isSubmitting ? (
@@ -269,6 +270,10 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
           <X aria-hidden="true" className="w-3 h-3" />
         )}
         {t('ticketItem.approvalGate.confirmReject')}
+        {/* DFLT-00176: the spinner is aria-hidden and disabled alone reads as
+            "unavailable", so while submitting the accessible name also says
+            so (with aria-busy as the standard hint alongside). */}
+        {isSubmitting && <span className="sr-only">{t('ticketItem.approvalGate.submitting')}</span>}
       </button>
       <button
         type="button"
@@ -1773,6 +1778,7 @@ export const TicketItem: React.FC<Props> = ({
                     {ticket.nodes.map((node, index) => {
                       const nodeArtifacts = ticket.artifacts.filter(a => a.node_id === node.id);
                       const isNodeExpanded = expandedNodeIds.has(node.id);
+                      const isApprovalSubmitting = submittingApprovalNodeIds.has(node.id);
 
                       return (
                         <div
@@ -1862,26 +1868,31 @@ export const TicketItem: React.FC<Props> = ({
                                   <button
                                     type="button"
                                     onClick={() => handleApprovalDecision(node.id, true)}
-                                    disabled={submittingApprovalNodeIds.has(node.id)}
+                                    disabled={isApprovalSubmitting}
+                                    aria-busy={isApprovalSubmitting || undefined}
                                     data-testid={`node-approve-${node.id}`}
                                     className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition"
                                   >
-                                    {submittingApprovalNodeIds.has(node.id) ? (
+                                    {isApprovalSubmitting ? (
                                       <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
                                     ) : (
                                       <Check aria-hidden="true" className="w-3 h-3" />
                                     )}
                                     {t('ticketItem.approvalGate.approve')}
+                                    {/* DFLT-00176: "submitting" in the accessible name (see RejectReasonPrompt). */}
+                                    {isApprovalSubmitting && <span className="sr-only">{t('ticketItem.approvalGate.submitting')}</span>}
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => startRejecting(node.id)}
-                                    disabled={submittingApprovalNodeIds.has(node.id)}
+                                    disabled={isApprovalSubmitting}
+                                    aria-busy={isApprovalSubmitting || undefined}
                                     data-testid={`node-reject-${node.id}`}
                                     className="px-2 py-1 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50 disabled:cursor-not-allowed text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800 rounded text-[11px] font-bold flex items-center gap-1 transition"
                                   >
                                     <X aria-hidden="true" className="w-3 h-3" />
                                     {t('ticketItem.approvalGate.reject')}
+                                    {isApprovalSubmitting && <span className="sr-only">{t('ticketItem.approvalGate.submitting')}</span>}
                                   </button>
                                 </div>
                               )}
@@ -1911,7 +1922,7 @@ export const TicketItem: React.FC<Props> = ({
                               onDraftChange={setRejectReasonDraft}
                               onConfirm={() => handleApprovalDecision(node.id, false, rejectReasonDraft)}
                               onCancel={cancelRejecting}
-                              isSubmitting={submittingApprovalNodeIds.has(node.id)}
+                              isSubmitting={isApprovalSubmitting}
                               onMount={handlePromptMount}
                               onUnmount={handlePromptUnmount}
                             />

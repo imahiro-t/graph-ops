@@ -96,10 +96,27 @@ const gateTick = (container: HTMLElement) => {
 };
 
 const pendingLabel = () => i18n.t('ticketItem.approvalGate.pendingStatus');
-const approveButton = () => screen.queryByRole('button', { name: i18n.t('ticketItem.approvalGate.approve') });
-const rejectButton = () => screen.queryByRole('button', { name: i18n.t('ticketItem.approvalGate.reject') });
-const confirmRejectButton = () =>
-  screen.queryByRole('button', { name: i18n.t('ticketItem.approvalGate.confirmReject') });
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// DFLT-00176: while a decision is being submitted the gate's buttons carry a
+// visually hidden "(submitting)" text in their accessible name. Match the
+// visible label plus that optional suffix exactly (anchored at both ends):
+// a prefix match would let 却下 (reject) also match 却下を確定 (confirm reject)
+// under the ja locale the tests run in.
+//   submitting omitted -> the suffix is optional
+//   submitting: true   -> the suffix is required
+//   submitting: false  -> no suffix
+type ButtonKey = 'approve' | 'reject' | 'confirmReject';
+const buttonName = (key: ButtonKey, { submitting }: { submitting?: boolean } = {}) => {
+  const label = escapeRegExp(i18n.t(`ticketItem.approvalGate.${key}`));
+  const sub = escapeRegExp(i18n.t('ticketItem.approvalGate.submitting'));
+  if (submitting === true) return new RegExp(`^${label}\\s*${sub}$`);
+  if (submitting === false) return new RegExp(`^${label}$`);
+  return new RegExp(`^${label}\\s*(?:${sub})?$`);
+};
+const approveButton = () => screen.queryByRole('button', { name: buttonName('approve') });
+const rejectButton = () => screen.queryByRole('button', { name: buttonName('reject') });
+const confirmRejectButton = () => screen.queryByRole('button', { name: buttonName('confirmReject') });
 
 beforeEach(() => {
   // Expanded rows may fetch (autopilot decisions etc.); keep them quiet.
@@ -769,5 +786,117 @@ describe('TicketItem reject prompt focus and announcements', () => {
     await respond(GATE_ID, new Response('{}', { status: 200 }));
     await waitFor(() => expect(approveOf(GATE_ID).disabled).toBe(false));
     expect(completeCalls(GATE_ID)).toBe(1);
+  });
+
+  // DFLT-00176: while a decision is in flight the buttons it disables tell
+  // assistive technology "submitting" -- aria-busy plus a visually hidden
+  // suffix in the accessible name -- not just "unavailable". Derived from the
+  // per-gate in-flight state only, so it clears when the response arrives and
+  // never shows on another gate.
+  describe('tells assistive technology a decision is being submitted', () => {
+    const rejectOf = (nodeId: string) => screen.getByTestId(`node-reject-${nodeId}`) as HTMLButtonElement;
+    const expectSubmitting = (button: HTMLElement, key: ButtonKey) => {
+      expect(button).toHaveAttribute('aria-busy', 'true');
+      expect(button).toHaveAccessibleName(buttonName(key, { submitting: true }));
+    };
+    const expectIdle = (button: HTMLElement, key: ButtonKey) => {
+      expect(button).not.toHaveAttribute('aria-busy');
+      expect(button).toHaveAccessibleName(buttonName(key, { submitting: false }));
+    };
+
+    it('marks the approve and reject buttons busy while an approval is in flight, and clears it once it responds', async () => {
+      const respond = stubHeldCompletes();
+      renderTicket('IN REVIEW');
+      expectIdle(approveOf(GATE_ID), 'approve');
+      expectIdle(rejectOf(GATE_ID), 'reject');
+
+      fireEvent.click(approveOf(GATE_ID));
+
+      expectSubmitting(approveOf(GATE_ID), 'approve');
+      expectSubmitting(rejectOf(GATE_ID), 'reject');
+      // The visual spinner is still there.
+      expect(isSpinning(approveOf(GATE_ID))).toBe(true);
+
+      await respond(GATE_ID, new Response('{}', { status: 200 }));
+
+      // onRefresh leaves the ticket as is, so the gate is still pending.
+      await waitFor(() => expect(approveOf(GATE_ID).disabled).toBe(false));
+      expectIdle(approveOf(GATE_ID), 'approve');
+      expectIdle(rejectOf(GATE_ID), 'reject');
+      expect(isSpinning(approveOf(GATE_ID))).toBe(false);
+    });
+
+    it('marks the reject confirm button busy while a rejection is in flight, and clears it when it fails', async () => {
+      const respond = stubHeldCompletes();
+      renderTicket('IN REVIEW');
+      expect(rejectButton()).not.toBeNull();
+      fireEvent.click(rejectButton() as HTMLElement);
+      const input = reasonInput() as HTMLInputElement;
+      fireEvent.change(input, { target: { value: '理由' } });
+      expectIdle(confirmRejectButton() as HTMLElement, 'confirmReject');
+
+      fireEvent.click(confirmRejectButton() as HTMLElement);
+
+      const confirm = confirmRejectButton() as HTMLButtonElement;
+      expect(confirm.disabled).toBe(true);
+      expectSubmitting(confirm, 'confirmReject');
+      expect(isSpinning(confirm)).toBe(true);
+      // The cancel button keeps its plain name.
+      expect(screen.getByRole('button', { name: i18n.t('ticketItem.approvalGate.cancelReject') })).not.toHaveAttribute(
+        'aria-busy'
+      );
+
+      await respond(GATE_ID, new Response('{}', { status: 500 }));
+
+      await waitFor(() => expect((confirmRejectButton() as HTMLButtonElement).disabled).toBe(false));
+      expectIdle(confirmRejectButton() as HTMLElement, 'confirmReject');
+      expect(isSpinning(confirmRejectButton() as HTMLElement)).toBe(false);
+      // The prompt stays open with its reason, and focus is in the reason field.
+      expect(reasonInput()).toBe(input);
+      expect(input.value).toBe('理由');
+      expect(document.activeElement).toBe(input);
+    });
+
+    it("shows it only on the gate whose decision is in flight", async () => {
+      const respond = stubHeldCompletes();
+      renderTicket('IN REVIEW', { ticket: twoGateTicket('IN REVIEW') });
+
+      fireEvent.click(approveOf(GATE_ID));
+
+      expectSubmitting(approveOf(GATE_ID), 'approve');
+      expectSubmitting(rejectOf(GATE_ID), 'reject');
+      expectIdle(approveOf(GATE_B_ID), 'approve');
+      expectIdle(rejectOf(GATE_B_ID), 'reject');
+
+      fireEvent.click(approveOf(GATE_B_ID));
+      await respond(GATE_ID, new Response('{}', { status: 200 }));
+
+      // A is done; B is still in flight.
+      await waitFor(() => expect(approveOf(GATE_ID).disabled).toBe(false));
+      expectIdle(approveOf(GATE_ID), 'approve');
+      expectIdle(rejectOf(GATE_ID), 'reject');
+      expectSubmitting(approveOf(GATE_B_ID), 'approve');
+      expectSubmitting(rejectOf(GATE_B_ID), 'reject');
+
+      await respond(GATE_B_ID, new Response('{}', { status: 200 }));
+      await waitFor(() => expect(approveOf(GATE_B_ID).disabled).toBe(false));
+      expectIdle(approveOf(GATE_B_ID), 'approve');
+      expectIdle(rejectOf(GATE_B_ID), 'reject');
+    });
+
+    it("does not mark another gate's open reject prompt busy while one gate's approval is in flight", async () => {
+      const respond = stubHeldCompletes();
+      renderTicket('IN REVIEW', { ticket: twoGateTicket('IN REVIEW') });
+      fireEvent.click(approveOf(GATE_ID));
+      fireEvent.click(rejectOf(GATE_B_ID));
+      fireEvent.change(reasonInput() as HTMLInputElement, { target: { value: '理由' } });
+
+      expectSubmitting(approveOf(GATE_ID), 'approve');
+      expectIdle(confirmRejectButton() as HTMLElement, 'confirmReject');
+
+      await respond(GATE_ID, new Response('{}', { status: 200 }));
+      await waitFor(() => expect(approveOf(GATE_ID).disabled).toBe(false));
+      expectIdle(confirmRejectButton() as HTMLElement, 'confirmReject');
+    });
   });
 });
