@@ -215,6 +215,7 @@
       "approve": "Approve",
       "reject": "Reject",
       "reasonPlaceholder": "Reason for rejection (required)",
+      "reasonLabel": "Reason for rejection",
       "confirmReject": "Confirm rejection",
       "cancelReject": "Cancel",
       "pendingStatus": "Awaiting approval",
@@ -244,6 +245,7 @@
     "close": {
       "button": "Close (withdraw without completing)",
       "reasonPlaceholder": "Reason (optional)",
+      "reasonInputLabel": "Reason for closing",
       "confirm": "Close",
       "cancel": "Cancel",
       "reasonLabel": "Closed reason"
@@ -256,6 +258,7 @@
       "refine": "Refine",
       "run": "Run"
     },
+    "promptLabel": "Prompt for Claude",
     "promptPlaceholder": "e.g. Now that it's released, move the remaining steps forward and set the status to in review (newlines allowed; press Send, or Cmd/Ctrl+Enter, to submit)",
     "send": "Send"
   },

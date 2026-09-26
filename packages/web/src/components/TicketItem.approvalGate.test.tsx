@@ -770,4 +770,115 @@ describe('TicketItem reject prompt focus and announcements', () => {
     await waitFor(() => expect(approveOf(GATE_ID).disabled).toBe(false));
     expect(completeCalls(GATE_ID)).toBe(1);
   });
+
+  // DFLT-00177: the approval error is announced (role="alert") and, while the
+  // reject prompt is open, tied to the reason field, which has a persistent
+  // accessible name of its own.
+  describe('screen reader semantics', () => {
+    const reasonLabel = () => i18n.t('ticketItem.approvalGate.reasonLabel');
+    const failure = () =>
+      new Response(JSON.stringify({ error: { code: 'INVALID_NODE_STATE', message: 'refused' } }), { status: 409 });
+    const errorText = () => i18n.t('errors.INVALID_NODE_STATE');
+    const expectNotInvalid = (input: HTMLElement) => {
+      expect(input.hasAttribute('aria-invalid')).toBe(false);
+      expect(input.hasAttribute('aria-describedby')).toBe(false);
+    };
+
+    it('names the reason field apart from its placeholder, and marks it required', () => {
+      renderTicket('IN REVIEW');
+      const input = openPrompt();
+      expect(reasonLabel()).not.toBe(i18n.t('ticketItem.approvalGate.reasonPlaceholder'));
+      expect(screen.getByRole('textbox', { name: reasonLabel() })).toBe(input);
+      expect(input).toHaveAccessibleName(reasonLabel());
+      expect(input.getAttribute('aria-required')).toBe('true');
+      // The placeholder is still there, unchanged.
+      expect(input.getAttribute('placeholder')).toBe(i18n.t('ticketItem.approvalGate.reasonPlaceholder'));
+    });
+
+    it('does not mark the reason field invalid while there is no error', () => {
+      renderTicket('IN REVIEW');
+      const input = openPrompt();
+      expectNotInvalid(input);
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    it('announces a failed rejection and ties the error to the reason field', async () => {
+      const respond = stubHeldCompletes();
+      renderTicket('IN REVIEW');
+      rejectWithReason(GATE_ID);
+
+      await respond(GATE_ID, failure());
+
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toBe(errorText());
+      expect(alert.id).not.toBe('');
+      const input = screen.getByRole('textbox', { name: reasonLabel() });
+      expect(input.getAttribute('aria-invalid')).toBe('true');
+      expect(input.getAttribute('aria-describedby')).toBe(alert.id);
+      expect(document.getElementById(alert.id)).toBe(alert);
+      expect(input).toHaveAccessibleDescription(errorText());
+      // DFLT-00174's focus return still happens.
+      await waitFor(() => expect(document.activeElement).toBe(input));
+    });
+
+    it('clears the invalid state as soon as the retry starts, keeping the prompt open', async () => {
+      const respond = stubHeldCompletes();
+      renderTicket('IN REVIEW');
+      rejectWithReason(GATE_ID);
+      await respond(GATE_ID, failure());
+      await screen.findByRole('alert');
+
+      // Retry, and hold the POST open: the prompt stays, the error is gone.
+      fireEvent.click(confirmRejectButton() as HTMLElement);
+
+      await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+      const input = screen.getByRole('textbox', { name: reasonLabel() });
+      expectNotInvalid(input);
+
+      // A second failure with the same text is announced again, by a new
+      // alert element.
+      await respond(GATE_ID, failure());
+      const again = await screen.findByRole('alert');
+      expect(again.textContent).toBe(errorText());
+      expect(input.getAttribute('aria-describedby')).toBe(again.id);
+    });
+
+    it('announces a failed approval with the reject prompt closed', async () => {
+      stubComplete(async () => failure());
+      renderTicket('IN REVIEW');
+
+      fireEvent.click(approveButton() as HTMLElement);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toBe(errorText());
+      expect(reasonInput()).toBeNull();
+    });
+
+    it('describes the reason field by the error when the prompt is opened after a failed approval', async () => {
+      stubComplete(async () => failure());
+      renderTicket('IN REVIEW');
+      fireEvent.click(approveButton() as HTMLElement);
+      const alert = await screen.findByRole('alert');
+
+      const input = openPrompt();
+
+      expect(input.getAttribute('aria-invalid')).toBe('true');
+      expect(input.getAttribute('aria-describedby')).toBe(alert.id);
+    });
+
+    it("gives each gate's error its own id and ties only that gate's field to it", async () => {
+      stubComplete(async () => failure());
+      renderTicket('IN REVIEW', { ticket: twoGateTicket('IN REVIEW') });
+      fireEvent.click(approveOf(GATE_ID));
+      fireEvent.click(approveOf(GATE_B_ID));
+      await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(2));
+      const [alertA, alertB] = screen.getAllByRole('alert');
+      expect(alertA.id).not.toBe(alertB.id);
+
+      fireEvent.click(screen.getByTestId(`node-reject-${GATE_B_ID}`));
+
+      const input = screen.getByRole('textbox', { name: reasonLabel() });
+      expect(input.getAttribute('aria-describedby')).toBe(alertB.id);
+    });
+  });
 });
