@@ -873,9 +873,14 @@ export const TicketItem: React.FC<Props> = ({
       // updater (updaters may run twice under StrictMode).
       let announcedWithStatus = false;
       // The prompt vanished mid-submit and the rejection failed: the gate
-      // stopped being pending some other way.
+      // stopped being pending some other way. Only when the POST itself
+      // failed (DFLT-00221, as on the approval side below): if it went
+      // through and onRefresh threw afterwards, settleSubmitted has already
+      // announced the rejection, and that must not be overwritten with "no
+      // longer awaiting approval" -- the refresh error is announced as an
+      // alert instead.
       const deferred = deferredClosuresRef.current.get(nodeId);
-      if (deferred) announcedWithStatus = settleNoLongerPending(nodeId, deferred.hadFocus, true, message);
+      if (deferred && !requestSucceeded) announcedWithStatus = settleNoLongerPending(nodeId, deferred.hadFocus, true, message);
       // DFLT-00216: the approval failed after a poll had already removed this
       // gate's Approve and Reject buttons (it stopped being pending some other
       // way -- decided elsewhere, the ticket closed), so focus on them fell to

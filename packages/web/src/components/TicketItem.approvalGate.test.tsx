@@ -1423,6 +1423,83 @@ describe('TicketItem reject prompt focus and announcements', () => {
     });
   });
 
+  // DFLT-00221: a decision whose POST succeeded is announced as done
+  // ("Rejected <name>" / "Approved <name>") before onRefresh runs. If that
+  // refresh then throws, the decision did not fail: the announcement must not
+  // be overwritten with "<name> is no longer awaiting approval. <error>", and
+  // the refresh error is announced as an alert like any other error. Only a
+  // failed POST settles as "no longer awaiting approval" -- the approval side
+  // already guarded this (DFLT-00216); the reject side now does too.
+  describe('keeps a successful decision announced when the refresh after it fails', () => {
+    const refreshError = 'refresh failed';
+    const failingRefresh = () => vi.fn().mockRejectedValue(new Error(refreshError));
+    const approvedText = (name = GATE_NAME) => i18n.t('ticketItem.approvalGate.approvedAnnouncement', { name });
+    const expectRefreshErrorAlerted = () => {
+      const alerts = screen.getAllByRole('alert');
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0].textContent).toBe(refreshError);
+    };
+
+    it('keeps "rejected" when a poll removed the reject prompt, the rejection succeeded and the refresh failed', async () => {
+      const respond = stubHeldCompletes();
+      const onRefresh = failingRefresh();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { onRefresh, strict: true });
+      rejectWithReason(GATE_ID);
+      rerenderTicket(makeTicket('IN REVIEW', 'REJECTED'));
+      expect(reasonInput()).toBeNull();
+
+      await respond(GATE_ID, new Response('{}', { status: 200 }));
+
+      await waitFor(() => expect(screen.queryAllByRole('alert')).toHaveLength(1));
+      expectRefreshErrorAlerted();
+      expect(announcement(rejectedText())).toHaveLength(1);
+      expect(screen.queryByText(noLongerPendingText())).toBeNull();
+      expect(screen.queryByText(noLongerPendingWithErrorText(refreshError))).toBeNull();
+      expect(document.activeElement).toBe(toggleOf(GATE_ID));
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('still says "no longer awaiting approval" with the reason when the rejection itself fails that way', async () => {
+      const respond = stubHeldCompletes();
+      const onRefresh = failingRefresh();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { onRefresh, strict: true });
+      rejectWithReason(GATE_ID);
+      rerenderTicket(makeTicket('IN REVIEW', 'REJECTED'));
+      expect(reasonInput()).toBeNull();
+
+      await respond(
+        GATE_ID,
+        new Response(JSON.stringify({ error: { code: 'INVALID_NODE_STATE', message: 'refused' } }), { status: 409 })
+      );
+
+      await waitFor(() => expect(document.activeElement).toBe(toggleOf(GATE_ID)));
+      expect(announcement(noLongerPendingWithErrorText(i18n.t('errors.INVALID_NODE_STATE')))).toHaveLength(1);
+      expect(screen.queryAllByRole('alert')).toHaveLength(0);
+      expect(screen.queryByText(rejectedText())).toBeNull();
+      expect(onRefresh).not.toHaveBeenCalled();
+    });
+
+    it('keeps "approved" when a poll removed the buttons, the approval succeeded and the refresh failed', async () => {
+      const user = userEvent.setup();
+      const respond = stubHeldCompletes();
+      const onRefresh = failingRefresh();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { onRefresh, strict: true });
+      await user.click(approveOf(GATE_ID));
+      rerenderTicket(makeTicket('IN REVIEW', 'DONE'));
+      expect(document.activeElement).toBe(document.body);
+
+      await respond(GATE_ID, new Response('{}', { status: 200 }));
+
+      await waitFor(() => expect(screen.queryAllByRole('alert')).toHaveLength(1));
+      expectRefreshErrorAlerted();
+      expect(announcement(approvedText())).toHaveLength(1);
+      expect(screen.queryByText(noLongerPendingText())).toBeNull();
+      expect(screen.queryByText(noLongerPendingWithErrorText(refreshError))).toBeNull();
+      expect(document.activeElement).toBe(toggleOf(GATE_ID));
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+    });
+  });
+
   // DFLT-00177: the approval error is announced (role="alert") and, while the
   // reject prompt is open, tied to the reason field, which has a persistent
   // accessible name of its own.
