@@ -36,6 +36,14 @@ func writeConfig(t *testing.T, home string, content string) {
 	}
 }
 
+// writeGitFile writes a linked worktree's or submodule's .git file.
+func writeGitFile(t *testing.T, dir, gitdir string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: "+gitdir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // projectsJSON builds a ~/.claude.json with the given hasTrustDialogAccepted
 // values (a nil value leaves the key out of the entry).
 func projectsJSON(t *testing.T, entries map[string]any) string {
@@ -97,13 +105,115 @@ func TestCheck(t *testing.T) {
 			},
 		},
 		{
-			name: "a parent is trusted (a worktree under the checkout), the folder has a false entry",
+			name: "a parent is trusted outside any repository, the folder has a false entry",
+			prepare: func(t *testing.T, s setup) string {
+				parent := mkdir(t, filepath.Join(s.root, "dev"))
+				dir := mkdir(t, filepath.Join(parent, "notes", "sub"))
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{parent: true, dir: false}))
+				return dir
+			},
+		},
+		{
+			name: "a worktree under the trusted main checkout (the autopilot's layout), the worktree has a false entry",
 			prepare: func(t *testing.T, s setup) string {
 				repo := mkdir(t, filepath.Join(s.root, "repo"))
+				mkdir(t, filepath.Join(repo, ".git", "worktrees", "T-1"))
 				wt := mkdir(t, filepath.Join(repo, ".claude", "worktrees", "T-1"))
+				writeGitFile(t, wt, filepath.Join(repo, ".git", "worktrees", "T-1"))
 				writeConfig(t, s.home, projectsJSON(t, map[string]any{repo: true, wt: false}))
 				return wt
 			},
+		},
+		{
+			name: "a repository under a trusted folder that is not a repository (a clone under ~/dev)",
+			prepare: func(t *testing.T, s setup) string {
+				parent := mkdir(t, filepath.Join(s.root, "dev"))
+				repo := mkdir(t, filepath.Join(parent, "newrepo"))
+				mkdir(t, filepath.Join(repo, ".git"))
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{parent: true}))
+				return repo
+			},
+			untrusted: true,
+		},
+		{
+			name: "a subfolder of a repository under a trusted folder that is not a repository",
+			prepare: func(t *testing.T, s setup) string {
+				parent := mkdir(t, filepath.Join(s.root, "dev"))
+				repo := mkdir(t, filepath.Join(parent, "newrepo"))
+				mkdir(t, filepath.Join(repo, ".git"))
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{parent: true}))
+				return mkdir(t, filepath.Join(repo, "pkg", "sub"))
+			},
+			untrusted: true,
+		},
+		{
+			name: "a subfolder of a trusted repository root",
+			prepare: func(t *testing.T, s setup) string {
+				repo := mkdir(t, filepath.Join(s.root, "dev", "repo"))
+				mkdir(t, filepath.Join(repo, ".git"))
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{repo: true}))
+				return mkdir(t, filepath.Join(repo, "pkg", "sub"))
+			},
+		},
+		{
+			name: "a key between the folder and its repository root is trusted (kept on the silent side)",
+			prepare: func(t *testing.T, s setup) string {
+				repo := mkdir(t, filepath.Join(s.root, "repo"))
+				mkdir(t, filepath.Join(repo, ".git"))
+				pkg := mkdir(t, filepath.Join(repo, "pkg"))
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{pkg: true}))
+				return mkdir(t, filepath.Join(pkg, "sub"))
+			},
+		},
+		{
+			name: "a repository nested inside a trusted repository",
+			prepare: func(t *testing.T, s setup) string {
+				repo := mkdir(t, filepath.Join(s.root, "repo"))
+				mkdir(t, filepath.Join(repo, ".git"))
+				nested := mkdir(t, filepath.Join(repo, "vendor", "lib"))
+				mkdir(t, filepath.Join(nested, ".git"))
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{repo: true}))
+				return nested
+			},
+			untrusted: true,
+		},
+		{
+			name: "a submodule (.git file into .git/modules) inside a trusted repository",
+			prepare: func(t *testing.T, s setup) string {
+				repo := mkdir(t, filepath.Join(s.root, "repo"))
+				mkdir(t, filepath.Join(repo, ".git", "modules", "lib"))
+				sub := mkdir(t, filepath.Join(repo, "lib"))
+				writeGitFile(t, sub, "../.git/modules/lib")
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{repo: true}))
+				return sub
+			},
+			untrusted: true,
+		},
+		{
+			name: "a worktree outside the checkout under a trusted non-repository folder, main checkout not trusted",
+			prepare: func(t *testing.T, s setup) string {
+				repo := mkdir(t, filepath.Join(s.root, "repo"))
+				mkdir(t, filepath.Join(repo, ".git", "worktrees", "T-4"))
+				parent := mkdir(t, filepath.Join(s.root, "dev"))
+				wt := mkdir(t, filepath.Join(parent, "T-4"))
+				writeGitFile(t, wt, filepath.Join(repo, ".git", "worktrees", "T-4"))
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{parent: true}))
+				return wt
+			},
+			untrusted: true,
+		},
+		{
+			name: "a worktree whose main checkout is only covered by a trusted non-repository parent",
+			prepare: func(t *testing.T, s setup) string {
+				parent := mkdir(t, filepath.Join(s.root, "dev"))
+				repo := mkdir(t, filepath.Join(parent, "repo"))
+				mkdir(t, filepath.Join(repo, ".git", "worktrees", "T-5"))
+				wt := mkdir(t, filepath.Join(s.root, "elsewhere", "T-5"))
+				writeGitFile(t, wt, filepath.Join(repo, ".git", "worktrees", "T-5"))
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{parent: true}))
+				return wt
+			},
+			untrusted: true,
 		},
 		{
 			name: "a worktree outside the checkout whose main checkout is trusted",

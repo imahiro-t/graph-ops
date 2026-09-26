@@ -280,6 +280,7 @@ func TestAutopilotCLI_UntrustedFolderNotice(t *testing.T) {
 	}{
 		{name: "untrusted", trusted: func(string) string { return "/some/other/project" }, untrusted: true},
 		{name: "trusted", trusted: func(gitRepo string) string { return gitRepo }},
+		{name: "only a parent folder above the repository is trusted", trusted: func(gitRepo string) string { return filepath.Dir(gitRepo) }, untrusted: true},
 		{name: "no file", trusted: func(string) string { return "" }},
 	}
 	for _, tc := range cases {

@@ -68,7 +68,10 @@ func trustCases() []trustCase {
 	return []trustCase{
 		{name: "untrusted", config: func(h *harness) string { return claudeJSON(h.t, "/some/other/project") }, untrusted: true},
 		{name: "trusted", config: func(h *harness) string { return claudeJSON(h.t, h.gitRepo) }},
-		{name: "a trusted parent", config: func(h *harness) string { return claudeJSON(h.t, filepath.Dir(h.gitRepo)) }},
+		// Claude Code does not carry a trusted folder's trust into a git
+		// repository below it (a clone under a trusted ~/dev), so the
+		// project's repository is still untrusted.
+		{name: "only a parent folder above the repository is trusted", config: func(h *harness) string { return claudeJSON(h.t, filepath.Dir(h.gitRepo)) }, untrusted: true},
 		{name: "no file", config: func(h *harness) string { return "" }},
 		{name: "unexpected format", config: func(h *harness) string { return `{"projects": {"/x": {"trusted": true}}}` }},
 		{name: "broken JSON", config: func(h *harness) string { return `{"projects":` }},

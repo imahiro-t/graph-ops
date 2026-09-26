@@ -1,6 +1,6 @@
 // DFLT-00142 accessibility review (iteration 1): unique ids per section,
 // label-in-name, decorative icons, and what a sighted keyboard user can read.
-import { act, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
@@ -110,26 +110,31 @@ describe('autopilot accessibility', () => {
     for (const lang of ['ja', 'en']) {
       await i18n.changeLanguage(lang);
       vi.useFakeTimers({ shouldAdvanceTime: true });
-      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-        new Response(
-          JSON.stringify({ run_id: 'run-1', mode: 'tree', root: 'T', state: 'starting', created: true, resumed: false, untrusted_folder: '/work/t' }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        )
-      );
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-      const { unmount } = render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
-      await user.click(screen.getByTestId('autopilot-start-tree'));
-      await user.click(screen.getByRole('button', { name: i18n.t('autopilot.confirm.start') }));
-      const notice = await screen.findByTestId('autopilot-untrusted');
-      expect(notice).toHaveTextContent(i18n.t('autopilot.untrustedFolder', { path: '/work/t' }));
-      await act(async () => {
-        vi.advanceTimersByTime(20000);
-      });
-      expect(screen.queryByTestId('autopilot-message')).not.toBeInTheDocument();
-      expect(screen.getByTestId('autopilot-untrusted')).toBeInTheDocument();
-      unmount();
-      vi.restoreAllMocks();
-      vi.useRealTimers();
+      // Restore the fake timers and the fetch mock even when an assertion
+      // fails, so a failure here does not leak into the later tests.
+      try {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+          new Response(
+            JSON.stringify({ run_id: 'run-1', mode: 'tree', root: 'T', state: 'starting', created: true, resumed: false, untrusted_folder: '/work/t' }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        );
+        const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+        render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
+        await user.click(screen.getByTestId('autopilot-start-tree'));
+        await user.click(screen.getByRole('button', { name: i18n.t('autopilot.confirm.start') }));
+        const notice = await screen.findByTestId('autopilot-untrusted');
+        expect(notice).toHaveTextContent(i18n.t('autopilot.untrustedFolder', { path: '/work/t' }));
+        await act(async () => {
+          vi.advanceTimersByTime(20000);
+        });
+        expect(screen.queryByTestId('autopilot-message')).not.toBeInTheDocument();
+        expect(screen.getByTestId('autopilot-untrusted')).toBeInTheDocument();
+      } finally {
+        cleanup();
+        vi.restoreAllMocks();
+        vi.useRealTimers();
+      }
     }
   });
 

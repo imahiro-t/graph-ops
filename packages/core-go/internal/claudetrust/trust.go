@@ -7,9 +7,10 @@
 // Claude Code documentation names this key, but the file as a whole is
 // Claude Code's own and has no published schema). Inside a git repository
 // the key is the repository root -- for a worktree, the main checkout's
-// root -- and outside one, a trusted folder covers its subfolders. There is
-// no command or flag that answers the question, so this package reads the
-// file.
+// root -- and outside one, a trusted folder covers its subfolders, except
+// for a git repository nested inside it (a clone under a trusted ~/dev
+// still shows the dialog). There is no command or flag that answers the
+// question, so this package reads the file.
 //
 // Because the file can change shape with any Claude Code update, Check is
 // deliberately one-sided: it answers Untrusted only when the file looks
@@ -80,13 +81,9 @@ func Check(homeDir, dir string) (res Result) {
 	if !ok {
 		return Result{}
 	}
-	candidates := ancestors(real)
-	mainRoot, ok := worktreeMainRoot(real)
+	candidates, ok := candidateKeys(real)
 	if !ok {
 		return Result{}
-	}
-	if mainRoot != "" {
-		candidates = append(candidates, ancestors(mainRoot)...)
 	}
 	for _, c := range candidates {
 		for _, k := range trusted {
@@ -188,30 +185,36 @@ func trustedKeys(path string) (keys []string, ok bool) {
 	return keys, true
 }
 
-// worktreeMainRoot finds the git repository dir is in and, when it is a
-// linked worktree (its .git is a file pointing into
-// <main>/.git/worktrees/<name>), returns <main>: Claude Code keys a
-// worktree's trust on the main checkout's root, which need not be an
-// ancestor of the worktree. It returns "" when dir is in an ordinary
-// checkout, a submodule or no repository at all, and ok=false when a .git
-// file is there but cannot be read or points into a worktree layout whose
-// main checkout cannot be told (a bare repository's worktree, say).
-func worktreeMainRoot(dir string) (mainRoot string, ok bool) {
-	for _, p := range ancestors(dir) {
+// candidateKeys returns the projects keys whose trust would cover dir.
+// Outside a git repository that is dir and every parent up to the root.
+// Inside one, a trusted folder above the repository does not cover it
+// (Claude Code shows the dialog for a repository nested under a trusted
+// folder), so the candidates stop at the repository root: dir, its parents
+// up to and including the repository root -- the keys between dir and the
+// root are kept so that an entry keyed on a subfolder can only make the
+// notice disappear, never appear -- and, for a linked worktree, the main
+// checkout's root, which Claude Code keys a worktree's trust on and which
+// need not be an ancestor of the worktree. ok is false when a .git file is
+// there but cannot be read, or points into a worktree layout whose main
+// checkout cannot be told (a bare repository's worktree, say).
+func candidateKeys(dir string) (candidates []string, ok bool) {
+	all := ancestors(dir)
+	for i, p := range all {
 		gitPath := filepath.Join(p, ".git")
 		fi, err := os.Lstat(gitPath)
 		if err != nil {
 			continue
 		}
+		inRepo := all[:i+1]
 		if fi.IsDir() {
-			return "", true
+			return inRepo, true
 		}
 		if !fi.Mode().IsRegular() {
-			return "", false
+			return nil, false
 		}
 		gitdir, gok := readGitdir(gitPath)
 		if !gok {
-			return "", false
+			return nil, false
 		}
 		if !filepath.IsAbs(gitdir) {
 			gitdir = filepath.Join(p, gitdir)
@@ -219,21 +222,22 @@ func worktreeMainRoot(dir string) (mainRoot string, ok bool) {
 		gitdir = filepath.Clean(gitdir)
 		sep := string(filepath.Separator)
 		marker := sep + ".git" + sep + "worktrees" + sep
-		if i := strings.LastIndex(gitdir, marker); i > 0 {
-			root := gitdir[:i]
+		if j := strings.LastIndex(gitdir, marker); j > 0 {
+			root := gitdir[:j]
 			if r, rok := resolve(root); rok {
 				root = r
 			}
-			return root, true
+			return append(inRepo, root), true
 		}
 		if filepath.Base(filepath.Dir(gitdir)) == "worktrees" {
-			return "", false
+			return nil, false
 		}
-		// A submodule or a separate git dir: the folder's own repository
-		// root (p) is already among the candidates.
-		return "", true
+		// A submodule or a separate git dir: Claude Code keys it on its own
+		// root (p), and the trust of the repository around a submodule does
+		// not cover it.
+		return inRepo, true
 	}
-	return "", true
+	return all, true
 }
 
 func readGitdir(path string) (string, bool) {
