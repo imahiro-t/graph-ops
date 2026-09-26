@@ -142,8 +142,27 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   // Inline rename: which row is being renamed, and its draft.
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
-  // The row with a request in flight, if any.
-  const [busyId, setBusyId] = useState<string | null>(null);
+  // The rows with a request in flight (DFLT-00211). A set, not a single id:
+  // another row can be renamed, recolored or deleted while one is saving,
+  // and each row must stay busy until its own request settles -- neither
+  // another row's start nor another row's finish may change it.
+  const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(() => new Set());
+  // Always a new Set (React would not see an in-place change), and the
+  // previous one when nothing changes, so no re-render is spent on it.
+  const markBusy = (id: string) =>
+    setBusyIds(prev => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  const clearBusy = (id: string) =>
+    setBusyIds(prev => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
 
   // Where keyboard focus goes once the next render has settled: finishing a
   // rename unmounts its input and buttons, and deleting removes the focused
@@ -156,9 +175,9 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
     if (el && (el as HTMLButtonElement).disabled) return; // retry once re-enabled
     el?.focus();
     setPendingFocus(null);
-    // labels/renamingId/busyId/creating are what mount, unmount, disable and
+    // labels/renamingId/busyIds/creating are what mount, unmount, disable and
     // re-enable the target; they are listed so the effect re-runs on them.
-  }, [pendingFocus, labels, renamingId, busyId, creating]);
+  }, [pendingFocus, labels, renamingId, busyIds, creating]);
 
   // The project whose response may still be applied. Switching the selector
   // starts a new fetch without cancelling the previous one, so a slow backend
@@ -227,7 +246,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   };
 
   const applyUpdate = async (label: LabelUsage, patch: { name?: string; color?: LabelColor }) => {
-    setBusyId(label.id);
+    markBusy(label.id);
     setError('');
     setCreateFailed(false);
     // Named by the current name, not the rename draft: the draft may be empty
@@ -248,7 +267,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       clearRowNotice(savingText);
       return false;
     } finally {
-      setBusyId(null);
+      clearBusy(label.id);
     }
   };
 
@@ -258,7 +277,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   };
 
   const handleRenameSave = async (label: LabelUsage) => {
-    if (busyId === label.id) return;
+    if (busyIds.has(label.id)) return;
     if (await applyUpdate(label, { name: renameDraft })) {
       finishRename(label);
     } else {
@@ -277,8 +296,8 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   };
 
   const handleDelete = async (label: LabelUsage) => {
-    if (busyId === label.id) return;
-    setBusyId(label.id);
+    if (busyIds.has(label.id)) return;
+    markBusy(label.id);
     setError('');
     setCreateFailed(false);
     try {
@@ -315,7 +334,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       // The in-app ConfirmDialog (DFLT-00148), on top of the settings modal.
       // The row stays busy (its buttons disabled) while it is open, so the
       // dialog cannot put focus back on the delete button when it closes;
-      // pendingFocus does, once busyId is cleared below.
+      // pendingFocus does, once the row leaves busyIds below.
       const confirmed = await confirm({
         title: t('settings.labels.confirmDeleteTitle'),
         message,
@@ -342,7 +361,9 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       focusAfterRemoval(label, remaining);
       onLabelsChanged?.();
     } finally {
-      setBusyId(null);
+      // Only this row: a row that is still saving stays busy. After a
+      // successful delete the id is simply dropped from the set.
+      clearBusy(label.id);
     }
   };
 
@@ -463,7 +484,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       {labels.length > 0 && (
         <ul className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg">
           {labels.map(label => {
-            const busy = busyId === label.id;
+            const busy = busyIds.has(label.id);
             const renaming = renamingId === label.id;
             return (
               // aria-busy (DFLT-00210): the row is being saved or deleted --
