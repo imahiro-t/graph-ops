@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -37,15 +38,18 @@ func fakeCommands(t *testing.T, respond func(ctx context.Context, name string, a
 	return &calls
 }
 
-// onDarwin fakes macOS outside tmux, with the generated scripts in a
-// per-test temp dir.
-func onDarwin(t *testing.T) {
+// onDarwin fakes macOS outside tmux, with the generated scripts and the
+// tab lock in a per-test temp dir. It returns the lock file's path.
+func onDarwin(t *testing.T) string {
 	t.Helper()
 	t.Setenv("TMUX", "")
 	t.Setenv("TMPDIR", t.TempDir())
-	old := goos
+	lockPath := filepath.Join(t.TempDir(), "autopilot", "terminal-tab.lock")
+	oldGoos, oldLockPath := goos, tabLockPath
 	goos = "darwin"
-	t.Cleanup(func() { goos = old })
+	tabLockPath = func() (string, error) { return lockPath, nil }
+	t.Cleanup(func() { goos, tabLockPath = oldGoos, oldLockPath })
+	return lockPath
 }
 
 const testTTY = "/dev/ttys003"
@@ -176,6 +180,8 @@ func TestLaunchWithOptions_TabFailureFallsBackToTheSameScript(t *testing.T) {
 	}{
 		{name: "window not found", respond: exitFailure("0:1: execution error: graph-ops: no Terminal window has a tab on /dev/ttys003 (9101)"), wantDisable: false, wantInError: "9101"},
 		{name: "tab did not appear", respond: exitFailure("0:1: execution error: graph-ops: no new tab appeared in the Terminal window of /dev/ttys003 (9102)"), wantDisable: false, wantInError: "9102"},
+		{name: "Terminal not frontmost", respond: exitFailure("0:1: execution error: graph-ops: Terminal did not come to the front with the window of /dev/ttys003, so no key was sent (9103)"), wantDisable: false, wantInError: "9103"},
+		{name: "more than one new tab", respond: exitFailure("0:1: execution error: graph-ops: more than one new tab appeared in the Terminal window of /dev/ttys003 (9104)"), wantDisable: false, wantInError: "9104"},
 		{name: "no automation permission", respond: exitFailure("execution error: Not authorized to send Apple events to Terminal. (-1743)"), wantDisable: true, wantInError: "-1743"},
 		{name: "no accessibility permission", respond: exitFailure("execution error: System Events got an error: osascript is not allowed to send keystrokes. (-25211)"), wantDisable: true, wantInError: "-25211"},
 		{name: "assistive access", respond: exitFailure("execution error: System Events got an error: osascript is not allowed assistive access. (-1719)"), wantDisable: true, wantInError: "-1719"},
@@ -279,43 +285,230 @@ func TestLaunchWithOptions_TabQuotesAwkwardInput(t *testing.T) {
 }
 
 // TestAppleTerminalTabScript_Structure pins the script's shape: arguments
-// through `on run argv`, the window by id, a new tab by Cmd+T, the two
-// retryable errors, and `do script` as the very last statement (so a failure
-// never falls back after the session already started).
+// through `on run argv`, the window by id, the tabs' ttys recorded before
+// Cmd+T, Cmd+T sent only after Terminal is seen frontmost with the target
+// window in front, the command sent to the tab whose tty is new (never to
+// "the selected tab"), the retryable errors, and `do script` as the very
+// last statement (so a failure never falls back after the session already
+// started).
 //
 // For a manual check on a Mac, set GRAPH_OPS_TAB_SCRIPT_OUT to a file path:
 // the test writes the script there, to be run from a Terminal.app tab as
 // `osascript <file> "$(tty)" "echo hello"`.
 func TestAppleTerminalTabScript_Structure(t *testing.T) {
+	script := appleTerminalTabScript
 	for _, want := range []string{
 		"on run argv",
 		"item 1 of argv",
 		"item 2 of argv",
 		"window id targetID",
+		"set knownTTYs to tty of tabs of window id targetID",
+		`set frontmost of process "Terminal" to true`,
+		`frontmost of process "Terminal"`,
+		"id of front window",
+		"frontID is targetID",
 		`keystroke "t" using command down`,
+		"knownTTYs does not contain v",
+		"if tty of t is newTTY then",
 		"number 9101",
 		"number 9102",
-		"do script shellCommand in (selected tab of window id targetID)",
+		"number 9103",
+		"number 9104",
+		"do script shellCommand in newTab",
 	} {
-		if !strings.Contains(appleTerminalTabScript, want) {
+		if !strings.Contains(script, want) {
 			t.Errorf("the script lacks %q", want)
 		}
 	}
-	lines := strings.Split(strings.TrimSpace(appleTerminalTabScript), "\n")
+	if strings.Contains(script, "selected tab") {
+		t.Error("the command must go to the new tab found by its tty, never to the selected tab")
+	}
+	// Order: the ttys are recorded and the front checked (with its 9103)
+	// before the keystroke; the new tab is found (with its 9104 and 9102)
+	// after it and before do script.
+	order := []string{
+		"set knownTTYs to",
+		"frontID is targetID",
+		"number 9103",
+		`keystroke "t"`,
+		"knownTTYs does not contain v",
+		"number 9104",
+		"number 9102",
+		"do script",
+	}
+	last := -1
+	for _, marker := range order {
+		i := strings.Index(script, marker)
+		if i <= last {
+			t.Errorf("%q is out of order in the script (at %d, after %d)", marker, i, last)
+		}
+		last = i
+	}
+	if strings.Count(script, "keystroke") != 1 {
+		t.Error("keystroke must appear exactly once")
+	}
+	lines := strings.Split(strings.TrimSpace(script), "\n")
 	if len(lines) < 2 || strings.TrimSpace(lines[len(lines)-1]) != "end run" ||
 		!strings.Contains(lines[len(lines)-2], "do script") {
 		t.Errorf("do script must be the last statement; the script ends with %q", lines[len(lines)-2:])
 	}
-	if strings.Count(appleTerminalTabScript, "do script") != 1 {
+	if strings.Count(script, "do script") != 1 {
 		t.Error("do script must appear exactly once")
 	}
-	if tabErrWindowNotFound != 9101 || tabErrTabNotOpened != 9102 {
+	if tabErrWindowNotFound != 9101 || tabErrTabNotOpened != 9102 || tabErrNotFrontmost != 9103 || tabErrNewTabAmbiguous != 9104 {
 		t.Error("the Go constants must match the script's error numbers")
 	}
+	for _, n := range []int{tabErrWindowNotFound, tabErrTabNotOpened, tabErrNotFrontmost, tabErrNewTabAmbiguous} {
+		if classifyTabFailure(false, fmt.Sprintf("execution error: x (%d)", n)) {
+			t.Errorf("error %d must be retryable", n)
+		}
+	}
 	if out := os.Getenv("GRAPH_OPS_TAB_SCRIPT_OUT"); out != "" {
-		if err := os.WriteFile(out, []byte(appleTerminalTabScript+"\n"), 0o600); err != nil {
+		if err := os.WriteFile(out, []byte(script+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// holdLock takes the tab lock on its own file description, as another
+// process would, and releases it at the end of the test.
+func holdLock(t *testing.T, path string) *os.File {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	ok, err := tryFlock(f)
+	if err != nil || !ok {
+		t.Fatalf("could not take the lock: ok=%v err=%v", ok, err)
+	}
+	return f
+}
+
+// lockIsFree reports whether another file description could take the lock
+// right now.
+func lockIsFree(t *testing.T, path string) bool {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	ok, err := tryFlock(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ok
+}
+
+// The osascript run happens under the per-user tab lock, and the lock is
+// released afterwards whether the tab opened or not.
+func TestLaunchWithOptions_TabRunsUnderTheLock(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("fail=%v", fail), func(t *testing.T) {
+			lockPath := onDarwin(t)
+			var heldDuringScript *bool
+			fakeCommands(t, func(ctx context.Context, name string, args []string) ([]byte, error) {
+				if name == "osascript" {
+					held := !lockIsFree(t, lockPath)
+					heldDuringScript = &held
+					if fail {
+						return []byte("execution error: x (9102)"), errors.New("exit status 1")
+					}
+				}
+				return nil, nil
+			})
+			if _, err := launchTab(t, Config{}, LaunchOptions{AppleTerminalTTY: testTTY}); err != nil {
+				t.Fatal(err)
+			}
+			if heldDuringScript == nil || !*heldDuringScript {
+				t.Fatal("osascript ran without the tab lock held")
+			}
+			if !lockIsFree(t, lockPath) {
+				t.Fatal("the tab lock was not released after the launch")
+			}
+		})
+	}
+}
+
+// When another process holds the lock past tabLockWait, no osascript runs:
+// the session opens in a new window, and the tab stays enabled.
+func TestLaunchWithOptions_TabLockBusyFallsBack(t *testing.T) {
+	lockPath := onDarwin(t)
+	holdLock(t, lockPath)
+	oldWait := tabLockWait
+	tabLockWait = 30 * time.Millisecond
+	defer func() { tabLockWait = oldWait }()
+	calls := fakeCommands(t, nil)
+
+	out, err := launchTab(t, Config{}, LaunchOptions{AppleTerminalTTY: testTTY})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.UsedTab || out.DisableTab || !strings.Contains(out.TabError, "another graph-ops process") {
+		t.Fatalf("outcome = %+v, want a retryable fallback naming the lock", out)
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("calls = %+v, want only open", *calls)
+	}
+	openScriptOf(t, (*calls)[0])
+}
+
+// A lock that becomes free within tabLockWait is waited for.
+func TestLaunchWithOptions_TabLockWaitsForTheHolder(t *testing.T) {
+	lockPath := onDarwin(t)
+	holder := holdLock(t, lockPath)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = holder.Close()
+	}()
+	calls := fakeCommands(t, nil)
+	out, err := launchTab(t, Config{}, LaunchOptions{AppleTerminalTTY: testTTY})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.UsedTab || len(*calls) != 1 || (*calls)[0].Name != "osascript" {
+		t.Fatalf("outcome = %+v, calls = %+v", out, *calls)
+	}
+}
+
+// A lock file that cannot be created does not stop the tab from being
+// tried: the lock is a convenience, and the script itself refuses to guess
+// between two new tabs.
+func TestLaunchWithOptions_TabWithoutALockFile(t *testing.T) {
+	onDarwin(t)
+	blocker := filepath.Join(t.TempDir(), "a file")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tabLockPath = func() (string, error) { return filepath.Join(blocker, "terminal-tab.lock"), nil }
+	calls := fakeCommands(t, nil)
+	out, err := launchTab(t, Config{}, LaunchOptions{AppleTerminalTTY: testTTY})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.UsedTab || len(*calls) != 1 || (*calls)[0].Name != "osascript" {
+		t.Fatalf("outcome = %+v, calls = %+v", out, *calls)
+	}
+}
+
+// useAppleTerminalTab reads TMUX through the package's getenv.
+func TestUseAppleTerminalTab_ReadsTMUXThroughGetenv(t *testing.T) {
+	onDarwin(t)
+	old := getenv
+	getenv = func(k string) string {
+		if k == "TMUX" {
+			return "/tmp/tmux-1/default,1,0"
+		}
+		return ""
+	}
+	defer func() { getenv = old }()
+	if useAppleTerminalTab(Config{}, LaunchOptions{AppleTerminalTTY: testTTY}) {
+		t.Fatal("the tab path was chosen inside tmux")
 	}
 }
 

@@ -131,8 +131,10 @@ type LaunchOutcome struct {
 	// DisableTab: the tab failure is of a kind that will repeat (a missing
 	// Automation/Accessibility permission, a timeout waiting on a permission
 	// prompt, osascript not runnable, anything unexpected), so later
-	// launches of the same run should not try a tab again. A window that
-	// could not be found, or a tab that did not appear, leave it false.
+	// launches of the same run should not try a tab again. The quick,
+	// passing failures -- a window that could not be found, a tab that did
+	// not appear, Terminal not coming to the front, more than one new tab
+	// at once, another process still opening a tab -- leave it false.
 	DisableTab bool
 }
 
