@@ -13,14 +13,50 @@ interface Props {
   view: TicketAutopilotView;
   // Called once a start request settles (success or failure), so the caller
   // can refresh the runs (and the badges) right away rather than at the
-  // next poll. A returned promise is awaited before the buttons leave their
-  // "starting" state, so they come back with the refreshed view (and focus
-  // goes back to a button only if that view still leaves it enabled).
+  // next poll. A returned promise is awaited -- for at most
+  // SETTLE_TIMEOUT_MS -- before the buttons leave their "starting" state, so
+  // they come back with the refreshed view (and focus goes back to a button
+  // only if that view still leaves it enabled).
   onSettled?: () => void | Promise<void>;
 }
 
 // How long the result of a start stays on screen.
 const MESSAGE_CLEAR_MS = 8000;
+
+// DFLT-00149: the longest the buttons wait on onSettled after a start. A
+// refresh that hangs (a stalled request) or fails must not leave them in
+// their "starting" state until the page is reloaded: past this, they follow
+// the view they have, and the next poll brings the refreshed runs. Shorter
+// than the runs' poll interval, long enough for a normal refresh.
+export const SETTLE_TIMEOUT_MS = 10000;
+
+// Waits on onSettled, for at most SETTLE_TIMEOUT_MS. Never throws: a failure
+// or the timeout is only logged, since the next poll refreshes the runs
+// anyway.
+async function awaitSettled(onSettled: (() => void | Promise<void>) | undefined): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const settled = Promise.resolve(onSettled?.()).then(
+      () => 'settled' as const,
+      // Also catches a rejection that comes after the timeout won the race.
+      (e: unknown) => {
+        console.error('Failed to refresh after an autopilot start', e);
+        return 'failed' as const;
+      }
+    );
+    const timedOut = new Promise<'timeout'>(resolve => {
+      timeout = setTimeout(() => resolve('timeout'), SETTLE_TIMEOUT_MS);
+    });
+    if ((await Promise.race([settled, timedOut])) === 'timeout') {
+      console.warn(`The refresh after an autopilot start did not finish within ${SETTLE_TIMEOUT_MS} ms`);
+    }
+  } catch (e) {
+    // onSettled threw synchronously.
+    console.error('Failed to refresh after an autopilot start', e);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
 
 const MODES: AutopilotMode[] = ['ticket', 'tree'];
 
@@ -32,9 +68,9 @@ const MODES: AutopilotMode[] = ['ticket', 'tree'];
 // The confirmation is an in-app ConfirmDialog, not window.confirm
 // (DFLT-00147), so browser automation and tests can drive it:
 //
-// - Its title and text are fixed when it opens (resume or fresh start, from
-//   the view at that moment); a poll changing `resumable` while it is open
-//   does not swap the text under the reader. The server decides whether the
+// - Its title, text and confirm button label are fixed when it opens (resume
+//   or fresh start, from the view at that moment); a poll changing
+//   `resumable` while it is open does not swap the text under the reader. The server decides whether the
 //   run is actually resumed, and the result message follows its answer.
 // - If a poll shows the start would now be refused (the button gets a
 //   disabled reason), the dialog closes by itself without starting; the
@@ -50,7 +86,8 @@ const MODES: AutopilotMode[] = ['ticket', 'tree'];
 //   (tabIndex={-1}) instead of falling to <body>, and back to the clicked
 //   button once the request settles -- only if focus is still on the root
 //   and the button is enabled in the refreshed view (a successful start
-//   usually disables it: the new run owns the ticket).
+//   usually disables it: the new run owns the ticket). The refresh is waited
+//   on for at most SETTLE_TIMEOUT_MS.
 //
 // A button is disabled -- with the reason shown as text next to the buttons
 // and tied to it with aria-describedby, and as its tooltip -- when the start
@@ -69,7 +106,12 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
   // dismiss button or the next start.
   const [untrustedFolder, setUntrustedFolder] = useState('');
   const untrustedId = useId();
-  const [pending, setPending] = useState<{ mode: AutopilotMode; title: string; message: string } | null>(null);
+  const [pending, setPending] = useState<{
+    mode: AutopilotMode;
+    title: string;
+    message: string;
+    confirmLabel: string;
+  } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reasonIdBase = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -138,7 +180,8 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
       title: t(resume ? 'autopilot.confirm.resumeTitle' : 'autopilot.confirm.title'),
       message: resume
         ? t('autopilot.confirm.resume', { id: ticketId, mode: t(`autopilot.modes.${mode}`) })
-        : t(`autopilot.confirm.${mode}`, { id: ticketId })
+        : t(`autopilot.confirm.${mode}`, { id: ticketId }),
+      confirmLabel: t(resume ? 'autopilot.confirm.resumeStart' : 'autopilot.confirm.start')
     });
   };
 
@@ -153,12 +196,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
     } catch (e) {
       show(t('autopilot.failed', { message: errorMessage(e, t('errors.UNKNOWN')) }), true);
     } finally {
-      try {
-        await onSettled?.();
-      } catch (e) {
-        // The next poll refreshes the runs anyway.
-        console.error('Failed to refresh after an autopilot start', e);
-      }
+      await awaitSettled(onSettled);
       setStarting(null);
     }
   };
@@ -279,7 +317,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
         <ConfirmDialog
           title={pending.title}
           message={pending.message}
-          confirmLabel={t('autopilot.confirm.start')}
+          confirmLabel={pending.confirmLabel}
           cancelLabel={t('autopilot.confirm.cancel')}
           onConfirm={handleConfirm}
           onCancel={() => setPending(null)}

@@ -22,7 +22,7 @@ describe('autopilot confirmation translations', () => {
     const jaEntries = confirmEntries(ja as Tree);
     const enEntries = confirmEntries(en as Tree);
     expect([...jaEntries.keys()].sort()).toEqual([...enEntries.keys()].sort());
-    for (const key of ['title', 'resumeTitle', 'start', 'cancel', 'ticket', 'tree', 'resume']) {
+    for (const key of ['title', 'resumeTitle', 'start', 'resumeStart', 'cancel', 'ticket', 'tree', 'resume']) {
       for (const entries of [jaEntries, enEntries]) {
         expect(entries.get(`autopilot.confirm.${key}`)?.trim()).toBeTruthy();
       }
