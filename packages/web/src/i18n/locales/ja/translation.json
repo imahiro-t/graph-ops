@@ -388,6 +388,7 @@
       "additionalCriteriaLabel": "追加合格基準（additional_criteria、継承内容に追記）",
       "enabledLabel": "有効",
       "deleteGate": "削除",
+      "deleteGateAriaLabel": "ゲートを削除: {{name}}",
       "defaultBadge": "既定",
       "defaultBadgeHint": "まだ上書きしていない、プラグイン既定のレビューゲートです。いずれかの項目を編集すると上書きされます。",
       "cannotDeleteDefaultHint": "プラグイン既定であり、ユーザー上書きではないため削除できません。先にいずれかの項目を編集して上書きしてください。",

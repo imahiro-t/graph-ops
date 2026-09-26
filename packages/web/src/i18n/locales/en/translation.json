@@ -389,6 +389,7 @@
       "additionalCriteriaLabel": "Additional criteria (appended to the inherited criteria)",
       "enabledLabel": "Enabled",
       "deleteGate": "Delete",
+      "deleteGateAriaLabel": "Delete review gate: {{name}}",
       "defaultBadge": "Default",
       "defaultBadgeHint": "This is a plugin-default review gate you have not overridden. Edit any field to override it.",
       "cannotDeleteDefaultHint": "This is a plugin default, not one of your overrides -- there's nothing to remove. Edit a field first to override it, then it can be deleted.",
