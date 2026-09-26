@@ -29,3 +29,15 @@ describe('autopilot confirmation translations', () => {
     }
   });
 });
+
+// DFLT-00182: the untrusted-folder notice exists in both languages and names
+// the folder.
+describe('autopilot untrusted-folder translations', () => {
+  it('define the notice and its dismiss label in ja and en', () => {
+    for (const tree of [ja as Tree, en as Tree]) {
+      const entries = new Map(flatten(tree));
+      expect(entries.get('autopilot.untrustedFolder')).toContain('{{path}}');
+      expect(entries.get('autopilot.untrustedDismiss')?.trim()).toBeTruthy();
+    }
+  });
+});

@@ -63,6 +63,12 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
   const { t } = useTranslation();
   const [starting, setStarting] = useState<AutopilotMode | null>(null);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+  // DFLT-00182: the folder the server judged untrusted in its start
+  // response. Unlike `message` it is not cleared by a timer -- the terminal
+  // stays stuck at the trust prompt until someone acts -- only by its
+  // dismiss button or the next start.
+  const [untrustedFolder, setUntrustedFolder] = useState('');
+  const untrustedId = useId();
   const [pending, setPending] = useState<{ mode: AutopilotMode; title: string; message: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reasonIdBase = useId();
@@ -139,9 +145,11 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
   const runStart = async (mode: AutopilotMode) => {
     lastStarted.current = mode;
     setStarting(mode);
+    setUntrustedFolder('');
     try {
       const res = await startAutopilot(t, ticketId, mode);
       show(t(res.resumed ? 'autopilot.resumed' : 'autopilot.started', { runId: res.run_id }), false);
+      if (typeof res.untrusted_folder === 'string' && res.untrusted_folder !== '') setUntrustedFolder(res.untrusted_folder);
     } catch (e) {
       show(t('autopilot.failed', { message: errorMessage(e, t('errors.UNKNOWN')) }), true);
     } finally {
@@ -153,6 +161,13 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
       }
       setStarting(null);
     }
+  };
+
+  // The dismiss button unmounts with the notice: focus goes to the root
+  // rather than falling to <body>.
+  const dismissUntrusted = () => {
+    setUntrustedFolder('');
+    rootRef.current?.focus();
   };
 
   const handleConfirm = () => {
@@ -233,6 +248,31 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
           }`}
         >
           {message.text}
+        </div>
+      )}
+      {/* Always mounted (StatusLiveRegion): the notice is announced when it
+          appears, and the dismiss button is described by it. */}
+      <StatusLiveRegion
+        id={untrustedId}
+        message={untrustedFolder ? t('autopilot.untrustedFolder', { path: untrustedFolder }) : ''}
+      />
+      {untrustedFolder && (
+        <div
+          data-testid="autopilot-untrusted"
+          className="flex items-start gap-2 p-2 rounded-lg border text-[11px] bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100"
+        >
+          <p aria-hidden="true" className="flex-1 min-w-0 break-words [overflow-wrap:anywhere]">
+            {t('autopilot.untrustedFolder', { path: untrustedFolder })}
+          </p>
+          <button
+            type="button"
+            data-testid="autopilot-untrusted-dismiss"
+            onClick={dismissUntrusted}
+            aria-describedby={untrustedId}
+            className="shrink-0 px-2 py-0.5 rounded border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 font-semibold hover:bg-amber-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+          >
+            {t('autopilot.untrustedDismiss')}
+          </button>
         </div>
       )}
       {pending && (
