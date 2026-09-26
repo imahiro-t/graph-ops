@@ -678,3 +678,87 @@ describe('NodeTypesEditor add row button names', () => {
     expect(screen.queryByRole('button', { name: cancelName })).toBeNull();
   });
 });
+
+// DFLT-00212: the merged preview's heading was a <label> with no form control
+// to label, and the scrolling <pre> could not be reached by keyboard. The
+// heading is now a paragraph that names the <pre> as a focusable region (the
+// same structure as TemplateTextEditor / ReviewGatesEditor). Only the selected
+// type's preview is ever shown, so the heading alone keeps the name unique.
+describe('NodeTypesEditor merged preview region', () => {
+  beforeEach(() => {
+    mockedFetchTypes.mockReset();
+    mockedFetchType.mockReset();
+    mockedFetchTypes.mockResolvedValue(TYPES);
+    stubFetchType();
+  });
+
+  afterEach(async () => {
+    await i18n.changeLanguage('ja');
+  });
+
+  const region = () => screen.getByRole('region', { name: i18n.t('settings.nodeTypes.mergedPreviewLabel') });
+
+  it('exposes the preview as a region named by a paragraph heading, holding the merged text', async () => {
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    const preview = region();
+    expect(preview.tagName).toBe('PRE');
+    expect(preview).toHaveTextContent('implementation-merged-text');
+
+    // useId values contain colons, so resolve the reference with getElementById.
+    const heading = document.getElementById(preview.getAttribute('aria-labelledby') ?? '');
+    expect(heading).not.toBeNull();
+    expect(heading!.tagName).toBe('P');
+    expect(heading).toHaveTextContent(i18n.t('settings.nodeTypes.mergedPreviewLabel'));
+    expect(preview.parentElement!.querySelector('label')).toBeNull();
+  });
+
+  it('shows the inherited-from-default text inside the region when the merged text is empty', async () => {
+    mockedFetchType.mockImplementation(async (_t, type: string) => ({ type, tier_text: `${type}-tier-text`, merged_text: '' }));
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    expect(region()).toHaveTextContent(i18n.t('settings.common.inheritedFromDefault'));
+  });
+
+  it('is keyboard focusable and draws a focus ring', async () => {
+    const user = userEvent.setup();
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    const preview = region();
+    expect(preview).toHaveAttribute('tabindex', '0');
+    // jsdom computes no styles, so the focus ring classes are pinned.
+    expect(preview).toHaveClass('focus:outline-none', 'focus-visible:ring-2', 'focus-visible:ring-blue-500', 'max-h-40');
+
+    // The preview sits right before the tier text textarea in tab order.
+    const textarea = screen.getByLabelText(i18n.t('settings.nodeTypes.tierTextLabel'));
+    textarea.focus();
+    await user.tab({ shift: true });
+    expect(preview).toHaveFocus();
+  });
+
+  it('stays a single region whose content follows the selection', async () => {
+    const user = userEvent.setup();
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    await user.click(screen.getByRole('button', { name: new RegExp(`^${i18n.t('nodeType.review')}`) }));
+    await screen.findByDisplayValue('review-tier-text');
+
+    expect(screen.getAllByRole('region', { name: i18n.t('settings.nodeTypes.mergedPreviewLabel') })).toHaveLength(1);
+    expect(region()).toHaveTextContent('review-merged-text');
+  });
+
+  it('is named by the English heading after switching the language', async () => {
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    await act(async () => {
+      await i18n.changeLanguage('en');
+    });
+
+    expect(region()).toHaveTextContent('implementation-merged-text');
+  });
+});

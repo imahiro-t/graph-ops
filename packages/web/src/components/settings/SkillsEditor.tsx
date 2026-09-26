@@ -39,6 +39,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // insensitive to language changes (F-1).
   const tRef = useLatest(t);
   const tierTextId = useId();
+  const mergedPreviewLabelId = useId();
   const [skills, setSkills] = useState<SettingsSkillInfo[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [tierText, setTierText] = useState('');
@@ -164,8 +165,17 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
         ) : (
           <>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('settings.skills.mergedPreviewLabel')}</label>
-              <pre className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 max-h-40 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono">
+              {/* DFLT-00212: a paragraph, not a <label> -- there is no form control
+                  to label. It names the preview region below instead. */}
+              <p id={mergedPreviewLabelId} className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('settings.skills.mergedPreviewLabel')}</p>
+              {/* A named, focusable region so keyboard users can scroll the
+                  preview and screen readers announce what it contains. */}
+              <pre
+                role="region"
+                aria-labelledby={mergedPreviewLabelId}
+                tabIndex={0}
+                className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 max-h-40 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              >
                 {mergedText || t('settings.skills.emptyMergedHint')}
               </pre>
             </div>
