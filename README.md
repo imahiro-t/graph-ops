@@ -120,7 +120,7 @@ The following buttons open an external, interactive terminal running `claude`. Y
 - "Launch Claude" in the header opens a dialog where you can type any prompt and press "Launch".
 - "New Ticket" in the header opens a form with a single field where you describe the ticket you want. "Create" starts `claude`, which works out the title and description with the create-ticket skill and asks you to confirm them before creating the ticket.
 - "Refine" and "Run" on an expanded ticket start `claude` to refine or run that ticket.
-- "Autopilot (single)" and "Autopilot (tree)" on an expanded ticket start the autopilot on that ticket after a confirmation (see [Autopilot](#autopilot)). Unlike the other buttons, these run on their own: the terminal is opened with the project's autopilot permission mode, and each ticket's work continues in further terminals. They need the project's local path.
+- "Autopilot", at the right end of an expanded ticket's action row (set apart from "Refine" and "Run"), starts the autopilot on that ticket after a confirmation, in which you choose "Tree (this ticket and its descendants)" (the initial choice) or "This ticket only" (see [Autopilot](#autopilot)). Unlike the other buttons, it runs on its own: the terminal is opened with the project's autopilot permission mode, and each ticket's work continues in further terminals. They need the project's local path.
 - The prompt box on an expanded ticket sends any instruction about that ticket with "Send".
 
 The prompt fields accept multiple lines: press Enter for a new line, and press "Launch"/"Send"/"Create" or Cmd+Enter (macOS) / Ctrl+Enter to submit. A prompt with only spaces or blank lines is not sent.
@@ -150,11 +150,11 @@ Use the header buttons to switch the theme (light / dark / match system) and the
 
 The autopilot runs the refine-ticket -> process-ticket flow to the end without waiting for anyone. The [autopilot reference](docs/autopilot.md) has the details, including the `graph-engine autopilot` CLI, its output, the error codes, and the HTTP API.
 
-- **Starting it**: in Claude Code, in the project's directory, run `/graph-ops:autopilot-ticket <ticketId>` for one ticket or `/graph-ops:autopilot-tree <ticketId>` for a ticket and all of its descendants; or press "Autopilot (single)" / "Autopilot (tree)" on an expanded ticket in the Web UI. The project needs a local path (`PROJECT_LOCAL_PATH_NOT_SET` otherwise).
+- **Starting it**: in Claude Code, in the project's directory, run `/graph-ops:autopilot-ticket <ticketId>` for one ticket or `/graph-ops:autopilot-tree <ticketId>` for a ticket and all of its descendants; or press "Autopilot" on an expanded ticket in the Web UI and choose the tree or this ticket only in the confirmation. The project needs a local path (`PROJECT_LOCAL_PATH_NOT_SET` otherwise).
 - **What happens**: the session that starts the run (the orchestrator) does no ticket work. For each ticket, `graph-engine` opens a child Claude Code session in a new terminal, which refines the ticket (if it has not been refined), runs its execution graph, decides approval gates, releases it, decides which open items become follow-up tickets (created as its children), and reports a summary of at most three lines. The orchestrator keeps only those summaries, so a tree of 20 or more tickets fits in one session, and it prints a summary of the whole tree at the end. Tickets are processed one at a time, depth first.
 - **What it decides for you** is saved on the ticket as `autopilot-decision-*` artifacts with the reasons, shown in the ticket's "Automatic decisions" section.
 - **Which tickets**: a tree run skips `DONE` / `CLOSED` tickets (but processes their children) and tickets that are in progress elsewhere (with everything under them), and stops at `maxTickets` / `maxDepth`. The ticket you start from is always processed; a new run cannot start from a `DONE` / `CLOSED` ticket. Tickets created while the run goes are picked up.
-- **Progress in the Web UI**: badges show the run's root ("Autopilot running"), the ticket being worked on ("Processing"), a session waiting for your decision ("Waiting for a person"), and the tickets still to come ("Waiting"). The autopilot buttons are disabled on tickets an active run owns, so the same tree cannot be started twice (the CLI refuses it too, with `AUTOPILOT_ALREADY_RUNNING`). Runs in different projects do not interfere.
+- **Progress in the Web UI**: badges show the run's root ("Autopilot running"), the ticket being worked on ("Processing"), a session waiting for your decision ("Waiting for a person"), and the tickets still to come ("Waiting"). The "Autopilot" button is disabled on tickets an active run owns, so the same tree cannot be started twice (the CLI refuses it too, with `AUTOPILOT_ALREADY_RUNNING`). Runs in different projects do not interfere.
 - **Interrupted?** Run the same command (or press the same button) again: the run continues from where it stopped, recomputing what is left from the database. Close the child terminals left over from the interrupted run first. A run stopped by a failure is resumed the same way once you have removed the cause, and its failed tickets are retried once.
 
 #### Branch strategy
@@ -350,7 +350,7 @@ claude plugin update graph-ops@graph-ops
 - ヘッダーの「Claude 起動」は、任意のプロンプトを入力して「起動」を押すダイアログを開きます。
 - ヘッダーの「新規チケット」は、作成したいチケットの内容を書く入力欄 1 つのフォームを開きます。「作成」を押すと `claude` が起動し、create-ticket スキルでタイトルと説明を考え、確認を取ってからチケットを登録します。
 - 展開したチケットの「リファイン」「実行する」は、そのチケットのリファインや実行のために `claude` を起動します。
-- 展開したチケットの「オートパイロット（単一）」「オートパイロット（ツリー）」は、確認のあと、そのチケットでオートパイロットを起動します（「[オートパイロット](#オートパイロット)」を参照）。ほかのボタンと違い、起動後は人の操作なしで進みます。ターミナルはプロジェクトのオートパイロット設定の権限モードで開かれ、チケットごとの作業はさらに別のターミナルで行われます。プロジェクトのローカルパスが必要です。
+- 展開したチケットのアクション行の右端（「リファイン」「実行する」とは別枠）にある「オートパイロット」は、確認のあと、そのチケットでオートパイロットを起動します。確認ダイアログで「ツリー（このチケットと子孫）」（初期選択）か「このチケット単体」かを選びます（「[オートパイロット](#オートパイロット)」を参照）。ほかのボタンと違い、起動後は人の操作なしで進みます。ターミナルはプロジェクトのオートパイロット設定の権限モードで開かれ、チケットごとの作業はさらに別のターミナルで行われます。プロジェクトのローカルパスが必要です。
 - 展開したチケットのプロンプト欄からは、そのチケットに関する任意の指示を「送信」で送れます。
 
 プロンプト欄は複数行に対応しています。Enter で改行し、「起動」／「送信」／「作成」ボタンか、Cmd+Enter（macOS）／Ctrl+Enter で送信します。空白や空行だけのプロンプトは送信されません。
@@ -380,11 +380,11 @@ claude plugin update graph-ops@graph-ops
 
 オートパイロットは、refine-ticket → process-ticket の流れを、人の判断を待たずに最後まで進めます。`graph-engine autopilot` の CLI とその出力、エラーコード、HTTP API を含む詳細は、[オートパイロットのリファレンス](docs/autopilot.md)（英語）を参照してください。
 
-- **起動**: Claude Code をプロジェクトのディレクトリで開き、1 件なら `/graph-ops:autopilot-ticket <ticketId>`、チケットとその子孫すべてなら `/graph-ops:autopilot-tree <ticketId>` を実行します。Web UI では、展開したチケットの「オートパイロット（単一）」「オートパイロット（ツリー）」から起動できます。プロジェクトのローカルパスが必要です（未設定なら `PROJECT_LOCAL_PATH_NOT_SET`）。
+- **起動**: Claude Code をプロジェクトのディレクトリで開き、1 件なら `/graph-ops:autopilot-ticket <ticketId>`、チケットとその子孫すべてなら `/graph-ops:autopilot-tree <ticketId>` を実行します。Web UI では、展開したチケットの「オートパイロット」を押し、確認ダイアログでツリーかこのチケット単体かを選んで起動できます。プロジェクトのローカルパスが必要です（未設定なら `PROJECT_LOCAL_PATH_NOT_SET`）。
 - **動き方**: 起動したセッション（オーケストレーター）は、チケットの作業を自分では行いません。チケットごとに `graph-engine` が新しいターミナルで Claude Code の子セッションを開きます。子セッションは、チケットのリファイン（未リファインの場合）、実行グラフの実行、承認ゲートの判断、リリース、申し送りをチケットにするかどうかの判断（作るチケットはそのチケットの子になります）を行い、3 行以内の要約を報告します。オーケストレーターが持つのはこの要約だけなので、20 件以上のツリーでも 1 つのセッションで処理でき、最後にツリー全体のサマリを出力します。チケットは深さ優先で 1 件ずつ処理します。
 - **人の代わりに判断した内容**は、理由とともに `autopilot-decision-*` という成果物としてチケットに保存され、チケットの「自動判断」欄で確認できます。
 - **処理するチケット**: ツリーの処理では、`DONE`／`CLOSED` のチケットは飛ばし（その子は処理します）、ほかで進行中のチケットはその下の部分木ごと飛ばします。`maxTickets`／`maxDepth` に達したところで止まります。起点に指定したチケットは必ず処理します。`DONE`／`CLOSED` のチケットから新しい実行は始められません。実行中に作られたチケットも処理の対象になります。
-- **Web UI での進捗表示**: 実行の起点に「オートパイロット実行中」、作業中のチケットに「処理中」、判断を待っているセッションに「人の判断待ち」、これから処理するチケットに「待機中」のバッジが付きます。実行中の run が受け持つチケットではオートパイロットのボタンが無効になり、同じツリーを二重に起動できません（CLI からも `AUTOPILOT_ALREADY_RUNNING` で拒否されます）。別のプロジェクトの実行とは互いに干渉しません。
+- **Web UI での進捗表示**: 実行の起点に「オートパイロット実行中」、作業中のチケットに「処理中」、判断を待っているセッションに「人の判断待ち」、これから処理するチケットに「待機中」のバッジが付きます。実行中の run が受け持つチケットでは「オートパイロット」ボタンが無効になり、同じツリーを二重に起動できません（CLI からも `AUTOPILOT_ALREADY_RUNNING` で拒否されます）。別のプロジェクトの実行とは互いに干渉しません。
 - **中断したら**: 同じコマンドを再実行する（または同じボタンを押す）と、止まったところから続きます。残りの作業は DB から計算し直します。先に、中断した実行の子ターミナルが残っていれば閉じてください。失敗で停止した実行も、原因を取り除いてから同じ方法で再開でき、失敗したチケットは 1 回だけ再実行されます。
 
 #### ブランチ戦略
