@@ -667,6 +667,20 @@ describe('LabelsEditor announcing a delete', () => {
     await waitFor(() => expect(createForm().getByRole('textbox')).toHaveFocus());
   });
 
+  it('places the live region last in the space-y container, so the heading gains no top margin', async () => {
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    const region = screen.getAllByRole('status').find(el => el.getAttribute('aria-live') === 'polite')!;
+    const container = region.parentElement!;
+    expect(container).toHaveClass('space-y-4');
+    expect(container.lastElementChild).toBe(region);
+    // space-y-4 adds margin-top to every child that has a preceding sibling;
+    // the heading must stay the first child.
+    const heading = screen.getByRole('heading', { name: i18n.t('settings.labels.title') });
+    expect(container.firstElementChild).toContainElement(heading);
+  });
+
   it('clears the announcement after a while', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     mockedDelete.mockResolvedValue({ success: true, removed_ticket_count: 2 });
