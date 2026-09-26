@@ -1,7 +1,7 @@
 // Covers the #7 dependency-array fix (loadSkills must not re-run just
 // because `selected` changed) and F-1's structural non-regression. See this
 // ticket's plan sections 3-2 (#7/#8) and 4-2.
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
@@ -194,5 +194,89 @@ describe('SkillsEditor', () => {
       expect(label).not.toBe(`settings.skills.names.${key}`);
       expect(await screen.findByRole('button', { name: label })).toBeInTheDocument();
     }
+  });
+});
+
+// DFLT-00212: the merged preview's heading was a <label> with no form control
+// to label, and the scrolling <pre> could not be reached by keyboard. The
+// heading is now a paragraph that names the <pre> as a focusable region (the
+// same structure as TemplateTextEditor / ReviewGatesEditor). Only the selected
+// skill's preview is ever shown, so the heading alone keeps the name unique.
+describe('SkillsEditor merged preview region', () => {
+  beforeEach(() => {
+    mockedFetchSkills.mockReset();
+    mockedFetchSkill.mockReset();
+    mockedFetchSkills.mockResolvedValue(SKILLS);
+    stubFetchSkill();
+  });
+
+  afterEach(async () => {
+    await i18n.changeLanguage('ja');
+  });
+
+  const region = () => screen.getByRole('region', { name: i18n.t('settings.skills.mergedPreviewLabel') });
+
+  it('exposes the preview as a region named by a paragraph heading, holding the merged text', async () => {
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('create-ticket-tier-text');
+
+    const preview = region();
+    expect(preview.tagName).toBe('PRE');
+    expect(preview).toHaveTextContent('create-ticket-merged-text');
+
+    // useId values contain colons, so resolve the reference with getElementById.
+    const heading = document.getElementById(preview.getAttribute('aria-labelledby') ?? '');
+    expect(heading).not.toBeNull();
+    expect(heading!.tagName).toBe('P');
+    expect(heading).toHaveTextContent(i18n.t('settings.skills.mergedPreviewLabel'));
+    expect(preview.parentElement!.querySelector('label')).toBeNull();
+  });
+
+  it('shows the empty-merged hint inside the region when the merged text is empty', async () => {
+    mockedFetchSkill.mockImplementation(async (_t, name: string) => ({ name, tier_text: `${name}-tier-text`, merged_text: '' }));
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('create-ticket-tier-text');
+
+    expect(region()).toHaveTextContent(i18n.t('settings.skills.emptyMergedHint'));
+  });
+
+  it('is keyboard focusable and draws a focus ring', async () => {
+    const user = userEvent.setup();
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('create-ticket-tier-text');
+
+    const preview = region();
+    expect(preview).toHaveAttribute('tabindex', '0');
+    // jsdom computes no styles, so the focus ring classes are pinned.
+    expect(preview).toHaveClass('focus:outline-none', 'focus-visible:ring-2', 'focus-visible:ring-blue-500', 'max-h-40');
+
+    // The preview sits right before the tier text textarea in tab order.
+    const textarea = screen.getByLabelText(i18n.t('settings.skills.tierTextLabel'));
+    textarea.focus();
+    await user.tab({ shift: true });
+    expect(preview).toHaveFocus();
+  });
+
+  it('stays a single region whose content follows the selection', async () => {
+    const user = userEvent.setup();
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('create-ticket-tier-text');
+
+    await user.click(screen.getByRole('button', { name: new RegExp(i18n.t('settings.skills.names.refineTicket')) }));
+    await screen.findByDisplayValue('refine-ticket-tier-text');
+
+    expect(screen.getAllByRole('region', { name: i18n.t('settings.skills.mergedPreviewLabel') })).toHaveLength(1);
+    expect(region()).toHaveTextContent('refine-ticket-merged-text');
+  });
+
+  it('is named by the English heading after switching the language', async () => {
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('create-ticket-tier-text');
+
+    await act(async () => {
+      await i18n.changeLanguage('en');
+    });
+
+    expect(region()).toHaveTextContent('create-ticket-merged-text');
   });
 });
