@@ -9,8 +9,9 @@
 // keeps it open, and so does focus falling to <body> or off the page by a
 // click, blur() or a window switch, so the click on an item or the backdrop
 // is never lost. A Tab pressed with Ctrl, Meta or Alt, or one pressed during
-// an IME composition, is not taken as keyboard focus leaving (the IME case is
-// pinned by a test since DFLT-00160).
+// an IME composition (isComposing, or keyCode 229 since DFLT-00161), is not
+// taken as keyboard focus leaving (the IME cases are pinned by tests since
+// DFLT-00160 and DFLT-00161).
 //
 // DFLT-00158: the menu marks the current project's item with
 // aria-current="true" (and on no other item), and hides the decorative check
@@ -522,6 +523,25 @@ describe('project switcher accessibility', () => {
 
       switcher().focus();
       fireEvent.keyDown(switcher(), { key: 'Tab', isComposing: true });
+      act(() => switcher().blur());
+      expect(document.body).toHaveFocus();
+      expectOpen();
+
+      // Control: a plain Tab straight before the same focusout does close it.
+      switcher().focus();
+      fireEvent.keyDown(switcher(), { key: 'Tab' });
+      act(() => switcher().blur());
+      expectClosed();
+    });
+
+    it('does not take a Tab with keyCode 229 (isComposing false) as leaving by keyboard', async () => {
+      const user = await renderApp();
+      await user.click(switcher());
+
+      // Safari can report a keydown that belongs to an IME composition with
+      // isComposing still false and keyCode 229.
+      switcher().focus();
+      fireEvent.keyDown(switcher(), { key: 'Tab', keyCode: 229 });
       act(() => switcher().blur());
       expect(document.body).toHaveFocus();
       expectOpen();
