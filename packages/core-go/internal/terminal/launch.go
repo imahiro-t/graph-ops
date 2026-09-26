@@ -100,15 +100,81 @@ func Launch(cfg Config, workDir, claudeBin, prompt string) error {
 // an injection sink. claudeBin keeps its documented "shell fragment" contract
 // (see Launch) -- only the extra arguments and the prompt are quoted.
 func LaunchWithArgs(cfg Config, workDir, claudeBin string, extraArgs []string, prompt string) error {
+	_, err := LaunchWithOptions(cfg, workDir, claudeBin, extraArgs, prompt, LaunchOptions{})
+	return err
+}
+
+// LaunchOptions are the autopilot's additions to LaunchWithArgs (DFLT-00154).
+// The zero value is LaunchWithArgs exactly.
+type LaunchOptions struct {
+	// AppleTerminalTTY is the tty of the Terminal.app tab whose window the
+	// session should open in as a new tab (see DetectAppleTerminalTTY). ""
+	// never tries a tab.
+	AppleTerminalTTY string
+	// SkipAppleTerminalTab never tries a tab, whatever AppleTerminalTTY is:
+	// the run has already seen the tab path fail in a way that will not
+	// improve by itself (see LaunchOutcome.DisableTab).
+	SkipAppleTerminalTab bool
+}
+
+// LaunchOutcome says how LaunchWithOptions opened the session when it
+// returned no error. It is the zero value on every path other than the
+// Terminal.app tab path.
+type LaunchOutcome struct {
+	// UsedTab: the session opened as a new tab of the AppleTerminalTTY
+	// window.
+	UsedTab bool
+	// TabError is why the tab could not be opened, when it was tried and the
+	// session was opened in a new window instead; "" when no tab was tried
+	// or the tab opened.
+	TabError string
+	// DisableTab: the tab failure is of a kind that will repeat (a missing
+	// Automation/Accessibility permission, a timeout waiting on a permission
+	// prompt, osascript not runnable, anything unexpected), so later
+	// launches of the same run should not try a tab again. A window that
+	// could not be found, or a tab that did not appear, leave it false.
+	DisableTab bool
+}
+
+// LaunchWithOptions is LaunchWithArgs with the autopilot's options. The
+// error keeps LaunchWithArgs's meaning -- no terminal could be opened at
+// all -- so a tab that fails and falls back to a new window is not an
+// error: the outcome carries why the tab failed, and reporting it is the
+// caller's job (this package logs nothing).
+//
+// The tab path is taken only on darwin with no terminalCommand, outside
+// tmux, with SkipAppleTerminalTab unset and AppleTerminalTTY a valid
+// /dev/ttysN; everything else goes through exactly the argv
+// buildLaunchArgvWithArgs builds, as LaunchWithArgs always has.
+func LaunchWithOptions(cfg Config, workDir, claudeBin string, extraArgs []string, prompt string, opts LaunchOptions) (LaunchOutcome, error) {
+	if useAppleTerminalTab(cfg, opts) {
+		return launchAppleTerminalTab(workDir, claudeBin, extraArgs, prompt, opts.AppleTerminalTTY)
+	}
 	name, args, err := buildLaunchArgvWithArgs(cfg, workDir, claudeBin, extraArgs, prompt)
 	if err != nil {
-		return err
+		return LaunchOutcome{}, err
 	}
+	return LaunchOutcome{}, runLauncher(name, args)
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+// runCommand runs a launcher command and returns its combined output. A
+// package variable so tests can fake osascript and open instead of starting
+// real processes.
+var runCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+}
+
+// launcherTimeout bounds one launcher command (see Launch's doc comment). A
+// variable so tests can shorten it.
+var launcherTimeout = 10 * time.Second
+
+// runLauncher runs the launcher argv under launcherTimeout, turning a
+// failure into the error Launch has always returned.
+func runLauncher(name string, args []string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), launcherTimeout)
 	defer cancel()
 
-	output, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	output, err := runCommand(ctx, name, args...)
 	if err != nil {
 		msg := strings.TrimSpace(string(output))
 		if msg == "" {

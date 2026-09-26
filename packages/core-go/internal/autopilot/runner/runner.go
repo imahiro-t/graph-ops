@@ -33,18 +33,34 @@ import (
 	"github.com/graph-ops/core-go/internal/terminal"
 )
 
-// Launcher opens a terminal running claude with extraArgs and prompt in
-// workDir. The real one is terminal.LaunchWithArgs; tests pass a fake.
+// LaunchRequest is one terminal launch: claude with ExtraArgs and Prompt in
+// WorkDir.
+type LaunchRequest struct {
+	WorkDir   string
+	ExtraArgs []string
+	Prompt    string
+	// TerminalTTY is the run's Terminal.app tty (autopilot.Run.TerminalTTY):
+	// the session opens as a new tab of that window when it can. "" opens a
+	// new window as always (DFLT-00154).
+	TerminalTTY string
+	// SkipTab: the run has disabled the tab path (Run.TerminalTabDisabled).
+	SkipTab bool
+}
+
+// Launcher opens a terminal for a LaunchRequest. The real one is
+// terminal.LaunchWithOptions; tests pass a fake. The error means no terminal
+// opened at all; a tab that fell back to a new window is reported in the
+// outcome instead.
 type Launcher interface {
-	Launch(workDir string, extraArgs []string, prompt string) error
+	Launch(req LaunchRequest) (terminal.LaunchOutcome, error)
 }
 
 // LauncherFunc adapts a function to Launcher.
-type LauncherFunc func(workDir string, extraArgs []string, prompt string) error
+type LauncherFunc func(req LaunchRequest) (terminal.LaunchOutcome, error)
 
 // Launch calls f.
-func (f LauncherFunc) Launch(workDir string, extraArgs []string, prompt string) error {
-	return f(workDir, extraArgs, prompt)
+func (f LauncherFunc) Launch(req LaunchRequest) (terminal.LaunchOutcome, error) {
+	return f(req)
 }
 
 // TerminalLauncher launches through internal/terminal.
@@ -54,8 +70,9 @@ type TerminalLauncher struct {
 }
 
 // Launch implements Launcher.
-func (l TerminalLauncher) Launch(workDir string, extraArgs []string, prompt string) error {
-	return terminal.LaunchWithArgs(l.Config, workDir, l.ClaudeBin, extraArgs, prompt)
+func (l TerminalLauncher) Launch(req LaunchRequest) (terminal.LaunchOutcome, error) {
+	return terminal.LaunchWithOptions(l.Config, req.WorkDir, l.ClaudeBin, req.ExtraArgs, req.Prompt,
+		terminal.LaunchOptions{AppleTerminalTTY: req.TerminalTTY, SkipAppleTerminalTab: req.SkipTab})
 }
 
 // Service runs autopilot runs.
@@ -75,6 +92,14 @@ type Service struct {
 	// Sleep waits between polls; nil means time.Sleep. Tests replace it to
 	// advance a fake clock instead of sleeping.
 	Sleep func(time.Duration)
+	// TerminalTTY detects the Terminal.app tty of the orchestrator calling
+	// Start (terminal.DetectAppleTerminalTTY); nil means none. Only a start
+	// that is not a reservation asks it.
+	TerminalTTY func() string
+	// Logf receives operational warnings (a Terminal.app tab that fell back
+	// to a new window); nil discards them. The CLI sends them to stderr, out
+	// of the one-line JSON on stdout.
+	Logf func(format string, args ...any)
 }
 
 // Options are what New needs to build a Service from the runtime config.
@@ -104,9 +129,11 @@ func RegistryRoot(homeDir string) string {
 // the team autopilot.yaml) on every call, and the real terminal launcher.
 func New(o Options) *Service {
 	s := &Service{
-		Repo:     o.Repo,
-		Registry: &autopilot.Registry{Root: RegistryRoot(o.HomeDir), Logf: o.Logf},
-		Launcher: TerminalLauncher{Config: terminal.Config{TerminalCommand: o.TerminalCommand}, ClaudeBin: o.ClaudeBinary},
+		Repo:        o.Repo,
+		Registry:    &autopilot.Registry{Root: RegistryRoot(o.HomeDir), Logf: o.Logf},
+		Launcher:    TerminalLauncher{Config: terminal.Config{TerminalCommand: o.TerminalCommand}, ClaudeBin: o.ClaudeBinary},
+		TerminalTTY: terminal.DetectAppleTerminalTTY,
+		Logf:        o.Logf,
 	}
 	s.Settings = func(projectID string) (autopilot.Settings, error) {
 		fileCfg, _ := runtimeconfig.LoadHomeConfig(o.HomeDir)
@@ -125,6 +152,12 @@ func (s *Service) now() time.Time {
 		return s.Now()
 	}
 	return time.Now()
+}
+
+func (s *Service) logf(format string, args ...any) {
+	if s.Logf != nil {
+		s.Logf(format, args...)
+	}
 }
 
 func (s *Service) registry() *autopilot.Registry {
@@ -354,9 +387,18 @@ func (s *Service) Start(ticketID, mode, runID string, reserve bool) (StartResult
 		return StartResult{}, err
 	}
 	descendants := func(id string) ([]string, error) { return idx.descendants(id), nil }
+	// The Terminal.app window the run's child sessions open in as tabs
+	// (DFLT-00154) is the one of the orchestrator starting, taking over or
+	// adopting the run -- this process's caller. A reservation is made by
+	// the Web UI's server, which is not the orchestrator, so it asks nothing.
+	tty := ""
+	if !reserve && s.TerminalTTY != nil {
+		tty = s.TerminalTTY()
+	}
 	res, err := s.registry().Begin(autopilot.BeginRequest{
 		RootID: root.ID, ProjectID: root.ProjectID, RootStatus: root.Status,
 		Mode: mode, RunID: runID, Reserve: reserve, Settings: settings, Descendants: descendants,
+		TerminalTTY: tty,
 	})
 	if err != nil {
 		return StartResult{}, err
@@ -597,6 +639,8 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		prevTicket                        autopilot.TicketState
 		workDir, base, gitTicket, gitBase string
 		permissionMode                    string
+		terminalTTY                       string
+		skipTab                           bool
 	)
 	err = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
 		if run.IsFinal() || run.State == autopilot.RunStarting {
@@ -675,6 +719,7 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		autopilot.RecordActivity(st, autopilot.ActivityLaunch, now)
 		run.Heartbeat = now
 		permissionMode = run.Settings.PermissionMode
+		terminalTTY, skipTab = run.TerminalTTY, run.TerminalTabDisabled != ""
 		return nil
 	})
 	if err != nil {
@@ -682,6 +727,7 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 	}
 
 	// Outside the lock: git and the terminal can take seconds.
+	var outcome terminal.LaunchOutcome
 	launchErr := func() error {
 		if repoErr != nil {
 			return repoErr
@@ -694,8 +740,15 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		if s.Launcher == nil {
 			return errors.New("no terminal launcher configured")
 		}
-		return s.Launcher.Launch(workDir, []string{"--permission-mode", permissionMode}, WorkerPrompt(runID, ticketID, role))
+		outcome, err = s.Launcher.Launch(LaunchRequest{
+			WorkDir: workDir, ExtraArgs: []string{"--permission-mode", permissionMode}, Prompt: WorkerPrompt(runID, ticketID, role),
+			TerminalTTY: terminalTTY, SkipTab: skipTab,
+		})
+		return err
 	}()
+	// A launch that failed outright is put back as before, and does not
+	// disable the tab path: when not even a new window opens, the tab is not
+	// what is wrong.
 	if launchErr != nil {
 		return LaunchResult{}, s.launchFailed(projectID, runID, ticketID, role, &snapshot, prevTicket, launchErr)
 	}
@@ -713,6 +766,11 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		if role == autopilot.RoleWork {
 			st.Worktree = workDir
 		}
+		// In the same record as the launch itself: a tab failure that will
+		// repeat disables the tab path for the rest of the run.
+		if outcome.DisableTab && run.TerminalTabDisabled == "" {
+			run.TerminalTabDisabled = outcome.TabError
+		}
 		sample.observe(st, s.now())
 		out = LaunchResult{Launched: ticketID, Role: role, Worktree: workDir, Next: fmt.Sprintf("graph-engine autopilot wait %s %s", runID, ticketID)}
 		if role == autopilot.RoleWork {
@@ -720,6 +778,13 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		}
 		return nil
 	})
+	if outcome.TabError != "" {
+		if outcome.DisableTab {
+			s.logf("the %s session of %s opened in a new Terminal window because a tab could not be opened (%s); the rest of run %s opens its sessions in new windows", role, ticketID, outcome.TabError, runID)
+		} else {
+			s.logf("the %s session of %s opened in a new Terminal window because a tab could not be opened (%s)", role, ticketID, outcome.TabError)
+		}
+	}
 	return out, err
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
+	"github.com/graph-ops/core-go/internal/terminal"
 )
 
 // DFLT-00142 phase 3: the `graph-engine autopilot` run subcommands end to
@@ -66,9 +67,11 @@ func autopilotCLISetup(t *testing.T) (store.GraphRepository, runtimeConfig, stri
 	orig := newAutopilotService
 	newAutopilotService = func(repo store.GraphRepository, rc runtimeConfig) *runner.Service {
 		svc := orig(repo, rc)
-		svc.Launcher = runner.LauncherFunc(func(workDir string, args []string, prompt string) error {
-			launches = append(launches, fakeLaunch{workDir, append([]string(nil), args...), prompt})
-			return nil
+		// No real ps: the orchestrator's Terminal.app tty is faked.
+		svc.TerminalTTY = func() string { return "" }
+		svc.Launcher = runner.LauncherFunc(func(req runner.LaunchRequest) (terminal.LaunchOutcome, error) {
+			launches = append(launches, fakeLaunch{req.WorkDir, append([]string(nil), req.ExtraArgs...), req.Prompt})
+			return terminal.LaunchOutcome{}, nil
 		})
 		return svc
 	}
@@ -266,4 +269,44 @@ func TestAutopilotCLI_UsageErrors(t *testing.T) {
 	assertAPIErrorCode(t, err, autopilot.ErrCodeRunNotFound)
 	_, err = runAutopilot(t, repo, rc, "", "next", "../../etc")
 	assertAPIErrorCode(t, err, domain.ErrCodeValidation)
+}
+
+// DFLT-00154: a Terminal.app tab that falls back to a new window warns on
+// stderr only; launch's stdout stays the one JSON line the orchestrator
+// reads, and the start's tty reaches the launcher.
+func TestAutopilotCLI_TabFallbackWarnsOnStderrOnly(t *testing.T) {
+	repo, rc, projectID, _, _ := autopilotCLISetup(t)
+	var reqs []runner.LaunchRequest
+	withFakes := newAutopilotService
+	newAutopilotService = func(repo store.GraphRepository, rc runtimeConfig) *runner.Service {
+		svc := withFakes(repo, rc)
+		svc.TerminalTTY = func() string { return "/dev/ttys003" }
+		svc.Launcher = runner.LauncherFunc(func(req runner.LaunchRequest) (terminal.LaunchOutcome, error) {
+			reqs = append(reqs, req)
+			return terminal.LaunchOutcome{TabError: "osascript: not authorized (-1743)", DisableTab: true}, nil
+		})
+		return svc
+	}
+	t.Cleanup(func() { newAutopilotService = withFakes })
+
+	root, _ := engine.New(repo).CreateTicket(projectID, "Root", "")
+	start := mustAutopilot(t, repo, rc, "", "start", root.ID, "--mode", "ticket")
+	runID := start["run_id"].(string)
+	mustAutopilot(t, repo, rc, "", "next", runID)
+	var out string
+	var err error
+	stderr := captureStderr(t, func() { out, err = runAutopilot(t, repo, rc, "", "launch", runID, root.ID) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	launch := smallJSON(t, out)
+	if launch["launched"] != root.ID || strings.Contains(out, "osascript") {
+		t.Fatalf("launch stdout = %q", out)
+	}
+	if !strings.Contains(stderr, "graph-engine: warning: ") || !strings.Contains(stderr, "-1743") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if len(reqs) != 1 || reqs[0].TerminalTTY != "/dev/ttys003" || reqs[0].SkipTab {
+		t.Fatalf("launch requests = %+v", reqs)
+	}
 }
