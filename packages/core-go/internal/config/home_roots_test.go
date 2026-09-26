@@ -216,3 +216,48 @@ func TestLoadWithRoots_UserLanguageStillReadUnderHome(t *testing.T) {
 		t.Errorf("Language = %q, want \"ja\" from the user tier", cat.Language)
 	}
 }
+
+// TestLoadWithRoots_TeamTierPrecedence pins DFLT-00153's completion criterion
+// 3 at the catalog level: with teamExtensionsDir unset, or set to the user
+// root itself, there is no team tier (only the user tier's values apply);
+// set to a separate directory, the team tier's workflow.yaml wins over the
+// user tier for review gates and max_iterations.
+func TestLoadWithRoots_TeamTierPrecedence(t *testing.T) {
+	userDoc := "version: 1\nmax_iterations: 4\nreview_gates:\n  code_review:\n    name: \"USER-GATE-NAME\"\n"
+	teamDoc := "version: 1\nmax_iterations: 5\nreview_gates:\n  code_review:\n    name: \"TEAM-GATE-NAME\"\n"
+
+	cases := []struct {
+		name     string
+		teamDir  func(userDir string) string
+		wantName string
+		wantMax  int
+	}{
+		{"unset", func(string) string { return "" }, "USER-GATE-NAME", 4},
+		{"same as the user root", func(userDir string) string { return userDir }, "USER-GATE-NAME", 4},
+		{"separate directory", func(string) string {
+			dir := t.TempDir()
+			writeTierFile(t, dir, teamConfigFile, teamDoc)
+			return dir
+		}, "TEAM-GATE-NAME", 5},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			userDir := t.TempDir()
+			writeTierFile(t, userDir, userConfigFile, userDoc)
+			// A workflow.yaml in the user root too: with no separate team
+			// tier it must not be read as one.
+			writeTierFile(t, userDir, teamConfigFile, teamDoc)
+
+			cat, err := LoadWithRoots(userDir, tc.teamDir(userDir), "")
+			if err != nil {
+				t.Fatalf("LoadWithRoots: %v", err)
+			}
+			if got := cat.ReviewGates["code_review"].Name; got != tc.wantName {
+				t.Errorf("code_review name = %q, want %q", got, tc.wantName)
+			}
+			if cat.MaxIterations != tc.wantMax {
+				t.Errorf("MaxIterations = %d, want %d", cat.MaxIterations, tc.wantMax)
+			}
+		})
+	}
+}

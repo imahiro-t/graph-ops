@@ -86,7 +86,7 @@ func TestAppSettings_PutSavesThenGetReflectsIt(t *testing.T) {
 	rec := doJSON(t, s, http.MethodPut, "/api/settings/app", map[string]any{
 		"dbPath":             newDBPath,
 		"artifactsDir":       filepath.Join(workDir, "other-artifacts"),
-		"userExtensionsDir":  filepath.Join(workDir, "other-user-ext"),
+		"teamExtensionsDir":  filepath.Join(workDir, "team-ext"),
 		"paginationPageSize": 25,
 	})
 	if rec.Code != http.StatusOK {
@@ -96,7 +96,8 @@ func TestAppSettings_PutSavesThenGetReflectsIt(t *testing.T) {
 	rec = doJSON(t, s, http.MethodGet, "/api/settings/app", nil)
 	var got appSettingsResponse
 	mustDecode(t, rec, &got)
-	if got.File.DBPath != newDBPath || got.File.PaginationPageSize != 25 {
+	if got.File.DBPath != newDBPath || got.File.PaginationPageSize != 25 ||
+		got.File.TeamExtensionsDir != filepath.Join(workDir, "team-ext") {
 		t.Errorf("expected saved file config to persist, got %+v", got.File)
 	}
 

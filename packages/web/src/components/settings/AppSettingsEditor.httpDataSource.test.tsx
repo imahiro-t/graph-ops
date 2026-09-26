@@ -36,7 +36,7 @@ function makeResponse(overrides: Partial<AppSettingsResponse['file']> = {}): App
       httpDataSourceUrl: '',
       httpDataSourceToken: '',
       artifactsDir: '',
-      userExtensionsDir: '',
+      teamExtensionsDir: '',
       paginationPageSize: 10,
       myName: '',
       ...overrides
@@ -46,6 +46,7 @@ function makeResponse(overrides: Partial<AppSettingsResponse['file']> = {}): App
       dbPath: '/tmp/graph.db',
       artifactsDir: '/tmp/artifacts',
       userExtensionsDir: '/tmp/extensions',
+      teamExtensionsDir: '',
       paginationPageSize: 10
     },
     config_path: '/home/me/.graph-ops/config.json'
@@ -187,5 +188,133 @@ describe('AppSettingsEditor: HTTP custom data source', () => {
     const message = translateErrorCode(i18n.t, 'HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED');
     expect(message).toBe(i18n.t('errors.HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED'));
     expect(message).not.toBe(i18n.t('errors.UNKNOWN'));
+  });
+});
+
+// DFLT-00179: the URL/token hints and the URL's "currently in effect" line sit
+// on the bg-slate-50/50 box. slate-500 there is 4.64:1 (light) and slate-400 on
+// slate-900 is 6.96:1 (dark), both >= 4.5:1 (WCAG 1.4.3); the old slate-400 /
+// dark:slate-500 pair was 2.50:1 / 3.75:1. The font size stays text-[10px].
+describe('AppSettingsEditor: HTTP custom data source secondary text contrast (DFLT-00179)', () => {
+  beforeEach(() => {
+    mockedFetchAppSettings.mockReset();
+    mockedSaveAppSettings.mockReset();
+  });
+
+  it('the URL hint, the token hint and the URL in effect use colours that meet 4.5:1', async () => {
+    const response = makeResponse({ dbBackend: 'http', httpDataSourceUrl: 'https://a.example.com' });
+    response.effective.dbBackend = 'http';
+    response.effective.httpDataSourceUrl = 'https://a.example.com';
+    mockedFetchAppSettings.mockResolvedValueOnce(response);
+    renderEditor();
+
+    await screen.findByLabelText(urlLabel());
+    const lines = [
+      screen.getByText(i18n.t('settings.appSettings.storage.httpUrlHint')),
+      screen.getByText(i18n.t('settings.appSettings.storage.httpTokenPlaintextHint')),
+      screen.getByText(i18n.t('settings.appSettings.currentlyInEffect', { value: 'https://a.example.com' }))
+    ];
+    for (const el of lines) {
+      expect(el).toHaveClass('text-[10px]', 'text-slate-500', 'dark:text-slate-400');
+      expect(el).not.toHaveClass('text-slate-400');
+      expect(el).not.toHaveClass('dark:text-slate-500');
+    }
+  });
+});
+
+// DFLT-00180: the HTTP block's inline status messages are announced through
+// live regions that are in the DOM from the first render -- before the HTTP
+// backend is even selected -- and only their text changes (WCAG 2.2 SC 4.1.3).
+// The visible copy is aria-hidden, and aria-describedby points at the region.
+describe('AppSettingsEditor: HTTP inline status messages use always-mounted live regions (DFLT-00180)', () => {
+  beforeEach(() => {
+    mockedFetchAppSettings.mockReset();
+    mockedSaveAppSettings.mockReset();
+  });
+
+  afterEach(async () => {
+    await i18n.changeLanguage('ja');
+  });
+
+  const httpRadio = () => screen.getByRole('radio', { name: i18n.t('settings.appSettings.storage.dbBackendHttp') });
+  const regionEndingWith = (suffix: string) => document.querySelector(`[id$="${suffix}"]`) as HTMLElement | null;
+
+  function expectEmptyLiveRegion(el: HTMLElement | null): asserts el is HTMLElement {
+    expect(el).not.toBeNull();
+    expect(el).toHaveAttribute('role', 'status');
+    expect(el).toHaveAttribute('aria-live', 'polite');
+    expect(el!.textContent).toBe('');
+  }
+
+  function expectVisibleCopyIsAriaHidden(message: string, region: HTMLElement) {
+    const copies = screen
+      .getAllByText(message)
+      .filter((el) => el !== region && el.id !== 'save-blocked-reason');
+    expect(copies).toHaveLength(1);
+    expect(copies[0]).toHaveAttribute('aria-hidden', 'true');
+    expect(copies[0]).not.toHaveAttribute('role');
+    expect(copies[0]).not.toHaveAttribute('aria-live');
+    expect(copies[0]).not.toHaveAttribute('id');
+  }
+
+  it('token retype hint: the region exists before HTTP is selected and fills when the URL change empties the saved token', async () => {
+    const user = userEvent.setup();
+    mockedFetchAppSettings.mockResolvedValueOnce(
+      makeResponse({ dbBackend: 'sqlite', httpDataSourceUrl: 'https://a.example.com', httpDataSourceToken: REDACTED_SECRET_PLACEHOLDER })
+    );
+    renderEditor();
+    await screen.findByLabelText(i18n.t('settings.appSettings.storage.dbPathLabel'));
+
+    const region = regionEndingWith('-http-token-retype');
+    expectEmptyLiveRegion(region);
+
+    await user.click(httpRadio());
+    expect(region.textContent).toBe('');
+    const url = screen.getByLabelText(urlLabel());
+    await user.clear(url);
+    await user.type(url, 'https://b.example.com');
+
+    const hint = i18n.t('settings.appSettings.storage.httpTokenRetypeHint');
+    expect(regionEndingWith('-http-token-retype')).toBe(region);
+    expect(region).toHaveTextContent(hint);
+    expect(screen.getByLabelText(tokenLabel())).toHaveAccessibleDescription(expect.stringContaining(hint));
+    expectVisibleCopyIsAriaHidden(hint, region);
+
+    await user.clear(url);
+    await user.type(url, 'https://a.example.com');
+    expect(region.textContent).toBe('');
+  });
+
+  it('data source problem: the region exists before HTTP is selected and carries the current problem', async () => {
+    const user = userEvent.setup();
+    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse());
+    renderEditor();
+    await screen.findByLabelText(i18n.t('settings.appSettings.storage.dbPathLabel'));
+
+    const region = regionEndingWith('-http-problem');
+    expectEmptyLiveRegion(region);
+
+    // An empty URL is a problem as soon as HTTP is selected.
+    await user.click(httpRadio());
+    const urlRequired = i18n.t('settings.appSettings.storage.httpUrlRequiredHint');
+    expect(regionEndingWith('-http-problem')).toBe(region);
+    expect(region).toHaveTextContent(urlRequired);
+
+    const url = screen.getByLabelText(urlLabel());
+    await user.type(url, 'not a url');
+    const urlInvalid = i18n.t('settings.appSettings.storage.httpUrlInvalidHint');
+    expect(region).toHaveTextContent(urlInvalid);
+    expect(url).toHaveAccessibleDescription(expect.stringContaining(urlInvalid));
+    expectVisibleCopyIsAriaHidden(urlInvalid, region);
+
+    await user.clear(url);
+    await user.type(url, 'https://example.com');
+    const tokenRequired = i18n.t('settings.appSettings.storage.httpTokenRequiredHint');
+    expect(region).toHaveTextContent(tokenRequired);
+    expect(screen.getByLabelText(tokenLabel())).toHaveAccessibleDescription(expect.stringContaining(tokenRequired));
+    expectVisibleCopyIsAriaHidden(tokenRequired, region);
+
+    await user.type(screen.getByLabelText(tokenLabel()), 'secret');
+    expect(region.textContent).toBe('');
   });
 });

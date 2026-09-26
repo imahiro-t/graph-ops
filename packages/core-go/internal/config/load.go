@@ -185,6 +185,8 @@ func ResolveRoots(userDirOverride, teamDirOverride string) Roots {
 // team, team winning) into a single Catalog with no overrides at all -- so
 // the user tier is $HOME/.graph-ops and there is no team tier (see
 // ResolveRoots) -- and no explicit language override (see LoadWithRoots).
+// The language is the one exception to "team winning": it is personal, so a
+// team tier's language is ignored (see LoadWithRoots).
 func Load() (Catalog, error) {
 	return LoadWithRoots("", "", "")
 }
@@ -193,11 +195,18 @@ func Load() (Catalog, error) {
 // Roots and ResolveRoots) rather than always using the default locations,
 // plus languageOverride: a single call's explicit language choice (e.g. the
 // CLI's --language flag), which -- per ResolveLanguage's doc comment and the
-// execution plan's section 1.4 -- outranks both tiers' persistent
+// execution plan's section 1.4 -- outranks the user tier's persistent
 // Document.Language when non-empty. Passing "" reproduces the old
-// behavior exactly: the resolved language then comes solely from
-// userDoc/teamDoc, and an unset/unsupported one leaves the plugin default's
-// English names untouched (see LocalizedDefault).
+// behavior exactly: the resolved language then comes solely from userDoc,
+// and an unset/unsupported one leaves the plugin default's English names
+// untouched (see LocalizedDefault).
+//
+// The team tier's language is never used (DFLT-00153): the working language
+// is a personal setting. When the team workflow.yaml sets one, it is dropped
+// before resolving and merging, and a WarnTeamLanguageIgnored warning is
+// appended to the returned Catalog's Warnings (after Merge's own) so the CLI
+// reports it on stderr. Review gates and max_iterations still merge with the
+// team tier winning.
 func LoadWithRoots(userDirOverride, teamDirOverride, languageOverride string) (Catalog, error) {
 	roots := ResolveRoots(userDirOverride, teamDirOverride)
 
@@ -226,13 +235,21 @@ func LoadWithRoots(userDirOverride, teamDirOverride, languageOverride string) (C
 		return Catalog{}, err
 	}
 
-	lang := ResolveLanguage(languageOverride, userDoc, teamDoc)
+	// The working language is personal: the team tier's value is reported
+	// and then dropped, both from the resolution and from Merge (which would
+	// otherwise let it win Catalog.Language).
+	teamLanguageWarnings := TeamLanguageIgnoredWarnings(teamDoc)
+	teamDoc.Language = ""
+
+	lang := ResolveLanguage(languageOverride, userDoc)
 	def, err := LocalizedDefault(lang)
 	if err != nil {
 		return Catalog{}, err
 	}
 
-	return Merge(def, userDoc, teamDoc), nil
+	cat := Merge(def, userDoc, teamDoc)
+	cat.Warnings = append(cat.Warnings, teamLanguageWarnings...)
+	return cat, nil
 }
 
 // validateDocumentMaxIterations rejects a tier file whose top-level
