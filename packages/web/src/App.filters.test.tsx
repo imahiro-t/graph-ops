@@ -533,14 +533,39 @@ describe('App toolbar filters', () => {
     fetchMock = installFakeBackend(backend);
     const user = await renderApp();
 
-    // The pager's "next" button (the ticket rows' expand chevrons aren't rounded-md).
-    const nextPage = screen
-      .getAllByRole('button')
-      .find(b => b.querySelector('.lucide-chevron-right') && b.className.includes('rounded-md'))!;
+    // The pager's "next" button, found by its accessible name.
+    const nextPage = screen.getByRole('button', { name: i18n.t('pagination.next') });
     await user.click(nextPage);
     expect(screen.getByText(i18n.t('pagination.pageOf', { page: 2, total: 5 }))).toBeInTheDocument();
 
     await filterBy(user, 'status', [status('todo')]);
     expect(screen.getByText(i18n.t('pagination.pageOf', { page: 1, total: 2 }))).toBeInTheDocument();
+  });
+
+  describe('icon contrast', () => {
+    // WCAG 1.4.11 (3:1): slate-400 was about 2.5:1 on the slate-50 controls.
+    const expectContrastingIcon = (icon: Element | null) => {
+      expect(icon).not.toBeNull();
+      expect(icon).toHaveClass('text-slate-500', 'dark:text-slate-400');
+      expect(icon).not.toHaveClass('text-slate-400');
+      expect(icon).not.toHaveClass('dark:text-slate-500');
+      expect(icon).toHaveAttribute('aria-hidden', 'true');
+    };
+
+    it('draws the search field\'s magnifier in slate-500 (light) and slate-400 (dark)', async () => {
+      await renderApp();
+      const input = screen.getByPlaceholderText(i18n.t('toolbar.searchPlaceholder'));
+      const icon = input.parentElement!.querySelector('svg.lucide-search');
+      expectContrastingIcon(icon);
+      // Size and position inside the field are unchanged.
+      expect(icon).toHaveClass('w-3.5', 'h-3.5', 'absolute', 'left-2.5', 'top-2.5');
+    });
+
+    it.each(FILTER_NAMES)('draws the %s filter\'s dropdown arrow in slate-500 (light) and slate-400 (dark)', async f => {
+      await renderApp();
+      const arrow = trigger(f).querySelector('svg.lucide-chevron-down');
+      expectContrastingIcon(arrow);
+      expect(arrow).toHaveClass('w-3.5', 'h-3.5', 'shrink-0');
+    });
   });
 });

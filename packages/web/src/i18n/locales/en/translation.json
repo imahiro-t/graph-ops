@@ -55,16 +55,21 @@
   },
   "pagination": {
     "range": "Showing {{from}}-{{to}} of {{total}}",
-    "pageOf": "{{page}} / {{total}}"
+    "pageOf": "{{page}} / {{total}}",
+    "previous": "Previous page",
+    "next": "Next page"
   },
   "projectSwitcher": {
+    "menuLabel": "Switch project",
     "noProject": "Select a project",
     "empty": "No projects yet",
     "createNew": "New project...",
     "selectFirst": "Create or select a project first",
     "noProjectYet": "No project has been created yet. Create one to start managing tickets.",
     "loadFailed": "Could not load the current project setting. Check your home config file (~/.graph-ops/config.json) and try again.",
-    "retry": "Retry"
+    "retry": "Retry",
+    "pendingApprovals_one": "{{count}} ticket awaiting approval",
+    "pendingApprovals_other": "{{count}} tickets awaiting approval"
   },
   "createProjectModal": {
     "title": "Create New Project",
@@ -207,7 +212,9 @@
       "pendingStatus": "Awaiting approval",
       "rejectedHint": "Rejected -- blocked until process-ticket triages the rejection reason (reopening specific nodes) or a human resolves it.",
       "rejectedBadgeOne": "Rejected: {{name}}",
-      "rejectedBadgeMany": "{{count}} rejected"
+      "rejectedBadgeMany": "{{count}} rejected",
+      "rejectedAnnouncement": "Rejected {{name}}",
+      "noLongerPendingAnnouncement": "{{name}} is no longer awaiting approval"
     },
     "artifactsCount": "Artifacts {{count}}",
     "noArtifactsForNode": "No artifacts linked to this node yet",

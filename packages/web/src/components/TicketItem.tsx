@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronDown,
@@ -152,6 +152,126 @@ function isSelectionClick(
   if (pressSnapshot === undefined) return true;
   return !sameSelection(pressSnapshot, takeSelectionSnapshot());
 }
+
+interface RejectReasonPromptProps {
+  nodeId: string;
+  draft: string;
+  onDraftChange: (value: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+  isSubmitting: boolean;
+  // Must be stable (useCallback) -- they are this component's effect deps.
+  onMount: (nodeId: string) => void;
+  onUnmount: (nodeId: string, hadFocus: boolean) => void;
+}
+
+// An approval_gate's reject-with-reason prompt (DFLT-00016), split out of
+// TicketItem (DFLT-00172) only so that it can tell its parent, at the moment
+// it unmounts, whether focus was inside it.
+//
+// That has to happen in this component's own layout effect cleanup: React 18
+// runs the layout effect cleanups of a deleted subtree during the commit's
+// mutation phase, before it removes the subtree's host nodes from the DOM (and
+// before any layout effect of the same commit). So document.activeElement still
+// points into this prompt here, whereas by the time any effect of the parent
+// runs the input is gone and focus has fallen to <body>. Tracking focus with
+// onFocus/onBlur instead would not work either: whether removing a focused
+// element fires blur differs between browsers.
+//
+// Under React.StrictMode (development) this cleanup also runs for the fake
+// unmount StrictMode performs right after mounting, immediately followed by
+// the effect running again -- TicketItem's handlePromptMount discards the fake
+// closure for that reason.
+const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
+  nodeId,
+  draft,
+  onDraftChange,
+  onConfirm,
+  onCancel,
+  isSubmitting,
+  onMount,
+  onUnmount
+}) => {
+  const { t } = useTranslation();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    onMount(nodeId);
+    return () => onUnmount(nodeId, container?.contains(document.activeElement) ?? false);
+  }, [nodeId, onMount, onUnmount]);
+
+  // DFLT-00174: a submit that ends while this prompt is still mounted has
+  // failed -- a successful rejection closes the prompt before its submitting
+  // state is cleared, so this component is gone by then. The confirm button
+  // turning disabled mid-submit may have dropped focus to <body> (browser
+  // dependent), so bring it back to the reason field, where the user can fix
+  // the reason or retry. Only when focus is nowhere or still inside the
+  // prompt: a user who moved elsewhere during the submit is left there.
+  const wasSubmittingRef = useRef(isSubmitting);
+  useEffect(() => {
+    const submitEnded = wasSubmittingRef.current && !isSubmitting;
+    wasSubmittingRef.current = isSubmitting;
+    if (!submitEnded) return;
+    const active = document.activeElement;
+    const focusIsNowhere = active === null || active === document.body;
+    if (focusIsNowhere || containerRef.current?.contains(active)) inputRef.current?.focus();
+  }, [isSubmitting]);
+
+  // DFLT-00174: Escape anywhere in the prompt does what the Cancel button
+  // does (close, drop the draft, focus back to the Reject button). Not while
+  // submitting -- Cancel is disabled then -- nor while an IME composition is
+  // in progress (the Escape belongs to the IME). A handled Escape goes no
+  // further: stopPropagation for React ancestors, preventDefault for the
+  // document-level listeners (App, useModalDialog) that skip defaultPrevented
+  // events.
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Escape' || e.nativeEvent.isComposing || e.keyCode === 229 || isSubmitting) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onCancel();
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className="px-3 pb-3 -mt-1 flex items-center gap-2"
+      onClick={e => e.stopPropagation()}
+      onKeyDown={handleKeyDown}
+    >
+      <input
+        ref={inputRef}
+        type="text"
+        autoFocus
+        value={draft}
+        onChange={e => onDraftChange(e.target.value)}
+        placeholder={t('ticketItem.approvalGate.reasonPlaceholder')}
+        className="flex-1 text-[11px] border border-red-300 dark:border-red-800 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-red-400"
+      />
+      <button
+        type="button"
+        onClick={onConfirm}
+        disabled={isSubmitting || draft.trim() === ''}
+        className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition shrink-0"
+      >
+        {isSubmitting ? (
+          <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
+        ) : (
+          <X aria-hidden="true" className="w-3 h-3" />
+        )}
+        {t('ticketItem.approvalGate.confirmReject')}
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={isSubmitting}
+        className="px-2 py-1 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-50 text-[11px] font-semibold shrink-0"
+      >
+        {t('ticketItem.approvalGate.cancelReject')}
+      </button>
+    </div>
+  );
+};
 
 export const TicketItem: React.FC<Props> = ({
   ticket,
@@ -324,16 +444,159 @@ export const TicketItem: React.FC<Props> = ({
   // approval_gate approve/reject (DFLT-00012). Keyed by node id (rather than
   // one flat flag) so an in-flight decision on one approval_gate node
   // doesn't disable the buttons on another one in the same ticket.
-  const [approvalPendingNodeId, setApprovalPendingNodeId] = useState<string | null>(null);
+  // DFLT-00173: a set, not a single id -- decisions on different gates can be
+  // in flight at the same time, and one finishing must not make another,
+  // still in flight, look idle (and clickable again). Always updated
+  // functionally, and only for the gate in question.
+  const [submittingApprovalNodeIds, setSubmittingApprovalNodeIds] = useState<ReadonlySet<string>>(() => new Set());
+  // The same set, readable synchronously: handleApprovalDecision refuses a
+  // second decision on a gate whose first one is still in flight, without
+  // relying on the buttons' disabled state having been rendered yet.
+  const approvalsInFlightRef = useRef<Set<string>>(new Set());
   const [approvalErrors, setApprovalErrors] = useState<Record<string, string>>({});
   // DFLT-00016: rejecting an approval_gate now requires a free-text reason
   // (no more window.confirm -- the reason input itself, plus a distinctly
-  // labeled confirm button, is the confirmation step). rejectingNodeId
-  // tracks which node's reason prompt is currently open; at most one at a
-  // time keeps this simple and matches approvalPendingNodeId's one-in-flight
-  // assumption.
-  const [rejectingNodeId, setRejectingNodeId] = useState<string | null>(null);
-  const [rejectReasonDraft, setRejectReasonDraft] = useState('');
+  // labeled confirm button, is the confirmation step). rejectPrompt tracks
+  // which node's reason prompt is currently open, together with its draft;
+  // at most one at a time keeps this simple. DFLT-00173: the draft belongs
+  // to that one prompt, so closing the prompt and dropping the draft are a
+  // single update -- a decision on some other gate finishing can never wipe
+  // what is being typed here.
+  const [rejectPrompt, setRejectPrompt] = useState<{ nodeId: string; draft: string } | null>(null);
+  const rejectingNodeId = rejectPrompt?.nodeId ?? null;
+  const rejectReasonDraft = rejectPrompt?.draft ?? '';
+  const setRejectReasonDraft = useCallback(
+    (draft: string) => setRejectPrompt(prev => (prev ? { ...prev, draft } : prev)),
+    []
+  );
+
+  // DFLT-00172: where focus goes when the reject prompt unmounts, and what
+  // gets announced. Unmounting the prompt while focus is inside it would
+  // otherwise drop focus to <body> with no word about what happened (WCAG
+  // 2.4.3 / 4.1.3). By the time any effect of this component runs, the
+  // prompt's DOM is already gone and document.activeElement is <body>, so
+  // RejectReasonPrompt reports "was focus inside me?" from its own layout
+  // effect cleanup (see there) into these refs, and the layout effect below
+  // decides what the closure meant. Refs only -- the child's cleanup must
+  // not setState mid-commit.
+  //
+  // mountedPromptNodeRef: node id of the prompt currently mounted, if any.
+  const mountedPromptNodeRef = useRef<string | null>(null);
+  // promptClosureRef: the prompt that just unmounted and whether focus was
+  // inside it at that moment. Consumed (reset to null) by the layout effect.
+  const promptClosureRef = useRef<{ nodeId: string; hadFocus: boolean } | null>(null);
+  // closeReasonRef: why this component itself closed the prompt, tagged
+  // with the node id so it can never be applied to some other, later
+  // unmount. Anything else closing it (ticket CLOSED, gate judged
+  // elsewhere, a poll landing mid-submit) leaves this unset.
+  const closeReasonRef = useRef<{ nodeId: string; reason: 'submitted' | 'cancelled' | 'switched' } | null>(null);
+  // rejectsInFlightRef: node ids whose reject POST is in flight. A prompt
+  // that unmounts during it (App's polling can land the REJECTED gate before
+  // the POST's own response) is parked in deferredClosuresRef under its node
+  // id, and the response decides whether it was our rejection or the gate
+  // being judged elsewhere. Keyed per node because rejects on different
+  // gates can be in flight at the same time (approval decisions are only
+  // serialised per gate -- see submittingApprovalNodeIds), and one gate's
+  // response must never clear or settle another gate's state.
+  const rejectsInFlightRef = useRef<Set<string>>(new Set());
+  const deferredClosuresRef = useRef<Map<string, { hadFocus: boolean }>>(new Map());
+  // Announced through a StatusLiveRegion that is always mounted, placed
+  // directly under this component's root div (outside the header row and
+  // its own copy-id region). Cleared whenever a prompt opens so repeating
+  // the same text is still a change the screen reader picks up.
+  const [approvalAnnouncement, setApprovalAnnouncement] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  const handlePromptMount = useCallback((nodeId: string) => {
+    mountedPromptNodeRef.current = nodeId;
+    // React.StrictMode (main.tsx, development only) fakes an unmount and a
+    // remount of every newly mounted component right after the commit. The
+    // fake unmount records { nodeId, hadFocus: true } (the autoFocus input
+    // has focus), and nothing would consume it until the next commit -- the
+    // user's first keystroke -- which would then yank focus to the node
+    // toggle and announce "no longer awaiting approval". A real unmount is
+    // never followed by a mount of the same node's prompt, so a remount
+    // discarding its own closure only ever drops the fake one. (The layout
+    // effect below also ignores a closure whose prompt is still mounted, in
+    // case the order of StrictMode's double invocation ever changes.)
+    if (promptClosureRef.current?.nodeId === nodeId) promptClosureRef.current = null;
+  }, []);
+  const handlePromptUnmount = useCallback((nodeId: string, hadFocus: boolean) => {
+    // When one prompt replaces another in the same commit, the old one's
+    // cleanup (mutation phase) runs before the new one's mount (layout
+    // phase), so the new id survives.
+    if (mountedPromptNodeRef.current === nodeId) mountedPromptNodeRef.current = null;
+    promptClosureRef.current = { nodeId, hadFocus };
+  }, []);
+
+  const findInTicket = (selector: string) => rootRef.current?.querySelector<HTMLElement>(selector) ?? null;
+  // The node row's expand toggle is rendered in every state (DFLT-00152),
+  // which makes it the one stable place to land after the prompt is gone.
+  const focusNodeToggle = (nodeId: string) => findInTicket(`[data-testid="node-toggle-expand-${nodeId}"]`)?.focus();
+  const focusIsNowhere = () => {
+    const active = document.activeElement;
+    return active === null || active === document.body;
+  };
+  const gateName = (nodeId: string) => ticket.nodes.find(n => n.id === nodeId)?.name ?? nodeId;
+  const announceRejected = (nodeId: string) =>
+    setApprovalAnnouncement(t('ticketItem.approvalGate.rejectedAnnouncement', { name: gateName(nodeId) }));
+  // `deferred`: the prompt unmounted earlier (a poll removed it while its
+  // reject POST was in flight) and is only being settled now, when the
+  // response arrives. hadFocus describes the moment it unmounted, not now:
+  // in between the user may have moved on -- opened another gate's prompt,
+  // tabbed to some other control -- and a late response must not pull them
+  // back. So a deferred settle only moves focus while it is still nowhere
+  // (<body>), i.e. where the prompt's removal left it.
+  //
+  // The prompt closed because the gate stopped being pending for a reason
+  // other than our own rejection. Only a user who was inside the prompt
+  // gets moved and told -- a background refresh must not steal focus or
+  // read out something unrelated to what they are doing.
+  const settleNoLongerPending = (nodeId: string, hadFocus: boolean, deferred = false) => {
+    if (!hadFocus) return;
+    if (!deferred || focusIsNowhere()) focusNodeToggle(nodeId);
+    setApprovalAnnouncement(t('ticketItem.approvalGate.noLongerPendingAnnouncement', { name: gateName(nodeId) }));
+  };
+  // Our rejection went through. Focus follows unless the user has already
+  // moved somewhere else on purpose; "nowhere" counts as not having moved,
+  // since the confirm button turning disabled mid-submit drops focus to
+  // <body> in some browsers.
+  const settleSubmitted = (nodeId: string, hadFocus: boolean, deferred = false) => {
+    if (deferred ? focusIsNowhere() : hadFocus || focusIsNowhere()) focusNodeToggle(nodeId);
+    announceRejected(nodeId);
+  };
+
+  // No dependency array: runs after every commit, and consumes whatever
+  // RejectReasonPrompt's cleanup recorded in that same commit (its cleanup
+  // runs in the mutation phase, before this layout effect).
+  useLayoutEffect(() => {
+    const closure = promptClosureRef.current;
+    if (!closure) return;
+    promptClosureRef.current = null;
+    // Still mounted: a StrictMode fake unmount, not a real one (see
+    // handlePromptMount). Leave closeReasonRef for the real unmount.
+    if (mountedPromptNodeRef.current === closure.nodeId) return;
+    const closeReason = closeReasonRef.current;
+    if (closeReason?.nodeId === closure.nodeId) {
+      closeReasonRef.current = null;
+      if (closeReason.reason === 'cancelled') {
+        // Back to the Reject button that just reappeared in its place. No
+        // announcement: the user did this themselves.
+        findInTicket(`[data-testid="node-reject-${closure.nodeId}"]`)?.focus();
+      } else if (closeReason.reason === 'submitted') {
+        settleSubmitted(closure.nodeId, closure.hadFocus);
+      }
+      // 'switched': another gate's prompt took over and its autoFocus input
+      // already has focus -- nothing to move or announce.
+      return;
+    }
+    if (rejectsInFlightRef.current.has(closure.nodeId)) {
+      // Our reject POST is still in flight; its response settles this.
+      deferredClosuresRef.current.set(closure.nodeId, { hadFocus: closure.hadFocus });
+      return;
+    }
+    settleNoLongerPending(closure.nodeId, closure.hadFocus);
+  });
 
   // Ticket deletion. A confirm dialog gates it (this is unrecoverable --
   // there's no undo/trash), same pattern as the approval_gate reject
@@ -418,7 +681,12 @@ export const TicketItem: React.FC<Props> = ({
   // button is disabled while empty, see the reason-prompt JSX below) rather
   // than here, so this function has one job: send the request.
   const handleApprovalDecision = async (nodeId: string, passed: boolean, reason?: string) => {
-    setApprovalPendingNodeId(nodeId);
+    // One decision per gate at a time (DFLT-00173). Checked before anything
+    // else, so a refused second call leaves the first one's state alone.
+    if (approvalsInFlightRef.current.has(nodeId)) return;
+    approvalsInFlightRef.current.add(nodeId);
+    setSubmittingApprovalNodeIds(prev => new Set(prev).add(nodeId));
+    if (!passed) rejectsInFlightRef.current.add(nodeId);
     setApprovalErrors(prev => {
       if (!(nodeId in prev)) return prev;
       const next = { ...prev };
@@ -438,25 +706,66 @@ export const TicketItem: React.FC<Props> = ({
       if (!res.ok) {
         throw new Error(await localizedApiErrorMessage(t, res));
       }
-      setRejectingNodeId(prev => (prev === nodeId ? null : prev));
-      setRejectReasonDraft('');
+      if (!passed) {
+        // DFLT-00172: how the rejection's focus/announcement is settled
+        // depends on whether its prompt is still on screen.
+        const deferred = deferredClosuresRef.current.get(nodeId);
+        if (mountedPromptNodeRef.current === nodeId) {
+          // Still mounted: the setRejectPrompt below unmounts it in the
+          // next commit, and the layout effect settles it then.
+          closeReasonRef.current = { nodeId, reason: 'submitted' };
+        } else if (deferred) {
+          // A poll already removed it while the POST was in flight. The DOM
+          // is committed, so settle it right here -- once.
+          settleSubmitted(nodeId, deferred.hadFocus, true);
+        } else {
+          // Its prompt was replaced by another gate's while in flight: the
+          // user is typing there, so only announce.
+          announceRejected(nodeId);
+        }
+      }
+      // Close this gate's prompt (and drop its draft) only if it is the one
+      // open: another gate's prompt may be open with a draft in progress.
+      setRejectPrompt(prev => (prev?.nodeId === nodeId ? null : prev));
       await onRefresh();
     } catch (err) {
       setApprovalErrors(prev => ({ ...prev, [nodeId]: errorMessage(err, t('errors.UNKNOWN')) }));
+      // The prompt vanished mid-submit and the rejection failed: the gate
+      // stopped being pending some other way.
+      const deferred = deferredClosuresRef.current.get(nodeId);
+      if (deferred) settleNoLongerPending(nodeId, deferred.hadFocus, true);
     } finally {
-      setApprovalPendingNodeId(null);
+      if (!passed) {
+        // Only this gate's entries: another gate's reject may still be in
+        // flight, with its own parked closure.
+        rejectsInFlightRef.current.delete(nodeId);
+        deferredClosuresRef.current.delete(nodeId);
+      }
+      approvalsInFlightRef.current.delete(nodeId);
+      setSubmittingApprovalNodeIds(prev => {
+        const next = new Set(prev);
+        next.delete(nodeId);
+        return next;
+      });
     }
   };
 
   // Opens the reject-with-reason prompt for nodeId, closing it for whatever
   // other node had it open (only one at a time -- see rejectingNodeId).
   const startRejecting = (nodeId: string) => {
-    setRejectingNodeId(nodeId);
-    setRejectReasonDraft('');
+    // DFLT-00172: a fresh prompt starts with no leftover close reason, and
+    // an announcement slot that is empty so the next one is a change.
+    closeReasonRef.current = null;
+    const openPromptNodeId = mountedPromptNodeRef.current;
+    if (openPromptNodeId !== null && openPromptNodeId !== nodeId) {
+      closeReasonRef.current = { nodeId: openPromptNodeId, reason: 'switched' };
+    }
+    setApprovalAnnouncement('');
+    setRejectPrompt({ nodeId, draft: '' });
   };
   const cancelRejecting = () => {
-    setRejectingNodeId(null);
-    setRejectReasonDraft('');
+    if (rejectingNodeId !== null) closeReasonRef.current = { nodeId: rejectingNodeId, reason: 'cancelled' };
+    setRejectPrompt(null);
   };
 
   const toggleNodeExpand = (nodeId: string) => {
@@ -514,7 +823,7 @@ export const TicketItem: React.FC<Props> = ({
         rel="noreferrer"
         className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 text-[11px]"
       >
-        <ExternalLink className="w-3 h-3" />
+        <ExternalLink aria-hidden="true" className="w-3 h-3" />
         {t('ticketItem.openInNewTab')}
       </a>
     );
@@ -537,7 +846,7 @@ export const TicketItem: React.FC<Props> = ({
         href={`/api/artifacts/${artifact.id}/content?download=1`}
         className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1 text-[11px]"
       >
-        <Download className="w-3 h-3" />
+        <Download aria-hidden="true" className="w-3 h-3" />
         {t('ticketItem.download')}
       </a>
     );
@@ -578,7 +887,20 @@ export const TicketItem: React.FC<Props> = ({
   // currently stuck on is the same prerequisite check the engine itself
   // uses to decide what's executable (see GetExecutableNodes in
   // packages/core-go/internal/engine/engine.go): every non-loop edge
-  // feeding into it must come from a DONE node.
+  // feeding into it must come from a DONE node. The server's own copy of
+  // this "awaiting approval" definition is engine.HasPendingApproval, which
+  // drives both the ticket's IN REVIEW status and the project switcher's
+  // pending-approval counts (DFLT-00144); keep the two in step.
+  //
+  // DFLT-00157: a CLOSED ticket's gates are never pending here, however
+  // reached they look. The engine refuses to complete any node of a CLOSED
+  // ticket (INVALID_NODE_STATE), so approving or rejecting would always
+  // fail -- no blink, no "awaiting approval" tooltip, no approve/reject
+  // buttons. This is the same definition GET /api/projects/pending-approvals
+  // counts by (handlePendingApprovals in
+  // packages/core-go/internal/httpserver/pending_approvals.go leaves CLOSED
+  // tickets out, DFLT-00144 D-1); a DONE ticket is still counted by both.
+  // Change one only together with the other.
   const nodeById = new Map(ticket.nodes.map(n => [n.id, n]));
   const isNodeReached = (nodeId: string) =>
     ticket.edges.every(e => {
@@ -586,10 +908,22 @@ export const TicketItem: React.FC<Props> = ({
       return nodeById.get(e.from_node_id)?.status === 'DONE';
     });
   const pendingApprovalNodeIds = new Set(
-    ticket.nodes
-      .filter(n => n.type === 'approval_gate' && n.status === 'TODO' && isNodeReached(n.id))
-      .map(n => n.id)
+    ticket.status === 'CLOSED'
+      ? []
+      : ticket.nodes
+          .filter(n => n.type === 'approval_gate' && n.status === 'TODO' && isNodeReached(n.id))
+          .map(n => n.id)
   );
+  // DFLT-00157: once the gate an open reject prompt belongs to stops being
+  // pending (the ticket turned CLOSED, or the gate was judged elsewhere),
+  // actually close the prompt and drop its draft rather than just hiding it.
+  // Otherwise reopening the ticket (or the gate going back to TODO) would
+  // remount the autoFocus reason input with the stale draft and pull focus
+  // away from whatever the user was doing.
+  const rejectingGateNoLongerPending = rejectingNodeId !== null && !pendingApprovalNodeIds.has(rejectingNodeId);
+  useEffect(() => {
+    if (rejectingGateNoLongerPending) setRejectPrompt(null);
+  }, [rejectingGateNoLongerPending]);
   // DFLT-00016: a REJECTED approval_gate is a materially different state
   // from a never-judged one -- it's not waiting on a human clicking
   // approve/reject here, it's waiting on process-ticket's triage (deciding
@@ -698,7 +1032,11 @@ export const TicketItem: React.FC<Props> = ({
   const hiddenLabelCount = ticketLabels.length - headerLabels.length;
 
   return (
-    <div id={`ticket-${ticket.id}`} tabIndex={-1} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs transition-all overflow-clip mb-4">
+    <div ref={rootRef} id={`ticket-${ticket.id}`} tabIndex={-1} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs transition-all overflow-clip mb-4">
+      {/* Reject prompt closing (DFLT-00172). Always mounted -- outside the
+          header row and the expandable panel, which each keep their own
+          region -- so it exists before its text changes. */}
+      <StatusLiveRegion message={approvalAnnouncement} />
       {/* Header Row. gap-4 keeps a fixed space between the left group and
           the right-hand group (DFLT-00141): justify-between alone leaves no
           space once a long title stretches the flex-1 left group all the way
@@ -846,7 +1184,7 @@ export const TicketItem: React.FC<Props> = ({
               onClick={e => e.stopPropagation()}
               title={t('ticketItem.approvalGate.rejectedHint')}
             >
-              <X className="w-3 h-3 shrink-0" />
+              <X aria-hidden="true" className="w-3 h-3 shrink-0" />
               <span className="truncate max-w-[12rem]">
                 {rejectedApprovalNodes.length === 1
                   ? t('ticketItem.approvalGate.rejectedBadgeOne', { name: rejectedApprovalNodes[0].name })
@@ -889,7 +1227,7 @@ export const TicketItem: React.FC<Props> = ({
                     title={t('ticketItem.selfAssign.unassign')}
                     className="p-0.5 text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-200 disabled:opacity-50 rounded-full"
                   >
-                    {assignToMeSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <X className="w-3 h-3" />}
+                    {assignToMeSaving ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <X aria-hidden="true" className="w-3 h-3" />}
                   </button>
                 </span>
               ) : ticket.assignee ? (
@@ -913,7 +1251,7 @@ export const TicketItem: React.FC<Props> = ({
                   disabled={assignToMeSaving}
                   className="px-2 py-0.5 rounded-full border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 disabled:opacity-50 text-[11px] font-semibold flex items-center gap-1 transition"
                 >
-                  {assignToMeSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3 h-3" />}
+                  {assignToMeSaving ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <UserPlus aria-hidden="true" className="w-3 h-3" />}
                   {t('ticketItem.selfAssign.assign')}
                 </button>
               ) : null}
@@ -979,7 +1317,7 @@ export const TicketItem: React.FC<Props> = ({
               title={t('ticketItem.reopen.button')}
               className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
             >
-              {isReopeningTicket ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+              {isReopeningTicket ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <RotateCcw aria-hidden="true" className="w-4 h-4" />}
             </button>
           ) : (
             <button
@@ -991,7 +1329,7 @@ export const TicketItem: React.FC<Props> = ({
               title={t('ticketItem.close.button')}
               className="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition p-1 -m-1 rounded"
             >
-              <Archive className="w-4 h-4" />
+              <Archive aria-hidden="true" className="w-4 h-4" />
             </button>
           )}
 
@@ -1008,7 +1346,7 @@ export const TicketItem: React.FC<Props> = ({
             title={t('ticketItem.delete.button')}
             className="text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
           >
-            {isDeletingTicket ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+            {isDeletingTicket ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <Trash2 aria-hidden="true" className="w-4 h-4" />}
           </button>
         </div>
       </div>
@@ -1038,7 +1376,7 @@ export const TicketItem: React.FC<Props> = ({
             disabled={isClosingTicket}
             className="px-2 py-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-xs font-bold flex items-center gap-1 transition shrink-0"
           >
-            {isClosingTicket ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />}
+            {isClosingTicket ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Archive aria-hidden="true" className="w-3.5 h-3.5" />}
             {t('ticketItem.close.confirm')}
           </button>
           <button
@@ -1083,7 +1421,7 @@ export const TicketItem: React.FC<Props> = ({
             </div>
             {ticket.closed_reason && (
               <div className="flex items-center gap-1 text-slate-700 dark:text-slate-300">
-                <Archive className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
+                <Archive aria-hidden="true" className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
                 {t('ticketItem.close.reasonLabel')}: <span className="font-medium">{ticket.closed_reason}</span>
               </div>
             )}
@@ -1101,13 +1439,13 @@ export const TicketItem: React.FC<Props> = ({
           <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                <FileText className="w-3.5 h-3.5 text-indigo-500" />
+                <FileText aria-hidden="true" className="w-3.5 h-3.5 text-indigo-500" />
                 {t('ticketItem.description.title')}
               </span>
               <div className="flex items-center gap-3">
                 {ticket.refined_at && (
-                  <span className="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
-                    <History className="w-3 h-3" />
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                    <History aria-hidden="true" className="w-3 h-3" />
                     {t('ticketItem.description.refinedAt', { time: formatDateTime(ticket.refined_at, i18n.language) })}
                   </span>
                 )}
@@ -1124,7 +1462,7 @@ export const TicketItem: React.FC<Props> = ({
             </div>
 
             {description.length === 0 ? (
-              <div className="text-slate-400 dark:text-slate-500 italic text-xs">{t('ticketItem.description.empty')}</div>
+              <div className="text-slate-500 dark:text-slate-400 italic text-xs">{t('ticketItem.description.empty')}</div>
             ) : (
               <div className={isDescriptionExpanded ? '' : 'max-h-56 overflow-y-auto'}>
                 <MarkdownViewer content={description} />
@@ -1287,7 +1625,7 @@ export const TicketItem: React.FC<Props> = ({
               </svg>
               {hasParallelRows && (
                 <div className="w-full mt-2 text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold flex items-center gap-1 shrink-0">
-                  <Layers className="w-3 h-3" />
+                  <Layers aria-hidden="true" className="w-3 h-3" />
                   {t('ticketItem.parallelHint')}
                 </div>
               )}
@@ -1326,7 +1664,7 @@ export const TicketItem: React.FC<Props> = ({
                       : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                 >
-                  <GitBranch className="w-4 h-4" />
+                  <GitBranch aria-hidden="true" className="w-4 h-4" />
                   {t('ticketItem.tabs.nodes', { count: totalNodes })}
                 </button>
                 <button
@@ -1337,7 +1675,7 @@ export const TicketItem: React.FC<Props> = ({
                       : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                 >
-                  <FileCode className="w-4 h-4 text-amber-500" />
+                  <FileCode aria-hidden="true" className="w-4 h-4 text-amber-500" />
                   {t('ticketItem.tabs.gherkin', { count: gherkinArtifacts.length })}
                 </button>
                 <button
@@ -1348,7 +1686,7 @@ export const TicketItem: React.FC<Props> = ({
                       : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                 >
-                  <Globe className="w-4 h-4 text-cyan-500" />
+                  <Globe aria-hidden="true" className="w-4 h-4 text-cyan-500" />
                   {t('ticketItem.tabs.html', { count: htmlArtifacts.length })}
                 </button>
                 <button
@@ -1359,7 +1697,7 @@ export const TicketItem: React.FC<Props> = ({
                       : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                 >
-                  <FileText className="w-4 h-4 text-emerald-500" />
+                  <FileText aria-hidden="true" className="w-4 h-4 text-emerald-500" />
                   {t('ticketItem.tabs.artifacts', { count: ticket.artifacts.length })}
                 </button>
               </div>
@@ -1369,7 +1707,7 @@ export const TicketItem: React.FC<Props> = ({
                   className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:border-indigo-400 dark:hover:border-indigo-500 transition"
                   title={t('ticketItem.downloadAllArtifacts')}
                 >
-                  <Download className="w-3.5 h-3.5" />
+                  <Download aria-hidden="true" className="w-3.5 h-3.5" />
                   {t('ticketItem.downloadAllArtifacts')}
                 </a>
               )}
@@ -1401,20 +1739,37 @@ export const TicketItem: React.FC<Props> = ({
                               {/* Named toggle for the node row (DFLT-00152).
                                   No onClick of its own: its click bubbles to
                                   the row's toggleNodeExpand, so it toggles
-                                  exactly once. */}
+                                  exactly once.
+                                  DFLT-00175: focus returns here after an
+                                  approval gate's reject prompt closes
+                                  (DFLT-00172), so it draws its own
+                                  focus-visible ring instead of relying on the
+                                  browser outline, and none on a mouse click.
+                                  Dark mode uses blue-400: blue-500 is only
+                                  2.82:1 on the hovered slate-700 row, while
+                                  blue-400 keeps 4.07:1 (light blue-500:
+                                  3.52:1 / 3.36:1 on slate-50 / slate-100). */}
                               <button
                                 type="button"
                                 aria-expanded={isNodeExpanded}
                                 aria-label={t('ticketItem.toggleNode', { id: node.id })}
                                 data-testid={`node-toggle-expand-${node.id}`}
-                                className="text-slate-500 dark:text-slate-400 shrink-0"
+                                className="text-slate-500 dark:text-slate-400 shrink-0 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
                               >
                                 {isNodeExpanded
                                   ? <ChevronDown className="w-4 h-4" aria-hidden="true" />
                                   : <ChevronRight className="w-4 h-4" aria-hidden="true" />}
                               </button>
-                              <span className="font-mono text-slate-400 dark:text-slate-500 w-4 shrink-0">{index + 1}</span>
-                              <span className="font-mono font-bold text-slate-600 dark:text-slate-400 shrink-0 whitespace-nowrap">
+                              {/* DFLT-00162: this row's hover background is
+                                  slate-100 / slate-700, where slate-500 /
+                                  slate-400 text drops to 4.34:1 / 4.04:1, so
+                                  the sequence number (and the update time
+                                  below) use slate-600 / slate-300 to keep
+                                  WCAG 1.4.3's 4.5:1 in both states. The node
+                                  id uses the same pair for the same reason
+                                  (DFLT-00164). */}
+                              <span className="font-mono text-slate-600 dark:text-slate-300 w-4 shrink-0">{index + 1}</span>
+                              <span className="font-mono font-bold text-slate-600 dark:text-slate-300 shrink-0 whitespace-nowrap">
                                 {node.id}
                               </span>
                               <NodeTypeBadge type={node.type} theme="light" className="shrink-0" />
@@ -1438,7 +1793,7 @@ export const TicketItem: React.FC<Props> = ({
                               )}
                               {nodeArtifacts.length > 0 && (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold border border-indigo-200 dark:border-indigo-800 flex items-center gap-1 shrink-0 whitespace-nowrap">
-                                  <Layers className="w-3 h-3" />
+                                  <Layers aria-hidden="true" className="w-3 h-3" />
                                   {t('ticketItem.artifactsCount', { count: nodeArtifacts.length })}
                                 </span>
                               )}
@@ -1455,29 +1810,32 @@ export const TicketItem: React.FC<Props> = ({
                                   <button
                                     type="button"
                                     onClick={() => handleApprovalDecision(node.id, true)}
-                                    disabled={approvalPendingNodeId === node.id}
+                                    disabled={submittingApprovalNodeIds.has(node.id)}
+                                    data-testid={`node-approve-${node.id}`}
                                     className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition"
                                   >
-                                    {approvalPendingNodeId === node.id ? (
-                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    {submittingApprovalNodeIds.has(node.id) ? (
+                                      <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
                                     ) : (
-                                      <Check className="w-3 h-3" />
+                                      <Check aria-hidden="true" className="w-3 h-3" />
                                     )}
                                     {t('ticketItem.approvalGate.approve')}
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => startRejecting(node.id)}
-                                    disabled={approvalPendingNodeId === node.id}
+                                    disabled={submittingApprovalNodeIds.has(node.id)}
+                                    data-testid={`node-reject-${node.id}`}
                                     className="px-2 py-1 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50 disabled:cursor-not-allowed text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800 rounded text-[11px] font-bold flex items-center gap-1 transition"
                                   >
-                                    <X className="w-3 h-3" />
+                                    <X aria-hidden="true" className="w-3 h-3" />
                                     {t('ticketItem.approvalGate.reject')}
                                   </button>
                                 </div>
                               )}
                               {getNodeBadge(getDisplayStatus(node))}
-                              <span className="text-[11px] text-slate-400 dark:text-slate-500 font-mono">
+                              {/* slate-600 / slate-300 for the hover background (DFLT-00162, see the sequence number above). */}
+                              <span className="text-[11px] text-slate-600 dark:text-slate-300 font-mono">
                                 {formatTime(node.updated_at, i18n.language)}
                               </span>
                             </div>
@@ -1489,39 +1847,22 @@ export const TicketItem: React.FC<Props> = ({
                               this flow's confirmation step (no window.confirm
                               dialog). Kept outside the clickable header row
                               so typing/clicking here doesn't toggle the
-                              artifacts accordion. */}
-                          {rejectingNodeId === node.id && (
-                            <div className="px-3 pb-3 -mt-1 flex items-center gap-2" onClick={e => e.stopPropagation()}>
-                              <input
-                                type="text"
-                                autoFocus
-                                value={rejectReasonDraft}
-                                onChange={e => setRejectReasonDraft(e.target.value)}
-                                placeholder={t('ticketItem.approvalGate.reasonPlaceholder')}
-                                className="flex-1 text-[11px] border border-red-300 dark:border-red-800 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-red-400"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleApprovalDecision(node.id, false, rejectReasonDraft)}
-                                disabled={approvalPendingNodeId === node.id || rejectReasonDraft.trim() === ''}
-                                className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition shrink-0"
-                              >
-                                {approvalPendingNodeId === node.id ? (
-                                  <Loader2 className="w-3 h-3 animate-spin" />
-                                ) : (
-                                  <X className="w-3 h-3" />
-                                )}
-                                {t('ticketItem.approvalGate.confirmReject')}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={cancelRejecting}
-                                disabled={approvalPendingNodeId === node.id}
-                                className="px-2 py-1 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-50 text-[11px] font-semibold shrink-0"
-                              >
-                                {t('ticketItem.approvalGate.cancelReject')}
-                              </button>
-                            </div>
+                              artifacts accordion. Only while the gate is
+                              still pending, so a ticket that turns CLOSED
+                              (or a gate judged elsewhere) mid-edit doesn't
+                              keep offering a reject that must fail
+                              (DFLT-00157). */}
+                          {rejectingNodeId === node.id && pendingApprovalNodeIds.has(node.id) && (
+                            <RejectReasonPrompt
+                              nodeId={node.id}
+                              draft={rejectReasonDraft}
+                              onDraftChange={setRejectReasonDraft}
+                              onConfirm={() => handleApprovalDecision(node.id, false, rejectReasonDraft)}
+                              onCancel={cancelRejecting}
+                              isSubmitting={submittingApprovalNodeIds.has(node.id)}
+                              onMount={handlePromptMount}
+                              onUnmount={handlePromptUnmount}
+                            />
                           )}
 
                           {/* approval_gate approve/reject error (kept outside
@@ -1537,7 +1878,7 @@ export const TicketItem: React.FC<Props> = ({
                           {isNodeExpanded && (
                             <div className="border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 space-y-3">
                               {nodeArtifacts.length === 0 ? (
-                                <div className="text-slate-400 dark:text-slate-500 italic text-[11px]">
+                                <div className="text-slate-500 dark:text-slate-400 italic text-[11px]">
                                   {t('ticketItem.noArtifactsForNode')}
                                 </div>
                               ) : (
@@ -1545,9 +1886,9 @@ export const TicketItem: React.FC<Props> = ({
                                   <div key={art.id} className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 space-y-2">
                                     <div className="flex items-center justify-between font-bold text-slate-700 dark:text-slate-300 text-xs">
                                       <span className="flex items-center gap-1.5">
-                                        {art.type === 'gherkin' && <FileCode className="w-3.5 h-3.5 text-amber-500" />}
-                                        {art.type === 'html' && <Globe className="w-3.5 h-3.5 text-cyan-500" />}
-                                        {art.type === 'text' && <FileText className="w-3.5 h-3.5 text-indigo-500" />}
+                                        {art.type === 'gherkin' && <FileCode aria-hidden="true" className="w-3.5 h-3.5 text-amber-500" />}
+                                        {art.type === 'html' && <Globe aria-hidden="true" className="w-3.5 h-3.5 text-cyan-500" />}
+                                        {art.type === 'text' && <FileText aria-hidden="true" className="w-3.5 h-3.5 text-indigo-500" />}
                                         {art.name}
                                       </span>
                                       <span className="flex items-center gap-2">
@@ -1607,7 +1948,7 @@ export const TicketItem: React.FC<Props> = ({
                 {activeTab === 'gherkin' && (
                   <div className="space-y-4">
                     {gherkinArtifacts.length === 0 ? (
-                      <div className="text-slate-400 dark:text-slate-500 text-center py-8 text-xs">{t('ticketItem.noGherkinYet')}</div>
+                      <div className="text-slate-500 dark:text-slate-400 text-center py-8 text-xs">{t('ticketItem.noGherkinYet')}</div>
                     ) : (
                       gherkinArtifacts.map(g => (
                         <div key={g.id} className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50/40 dark:bg-amber-950/20 p-4">
@@ -1635,7 +1976,7 @@ export const TicketItem: React.FC<Props> = ({
                 {activeTab === 'html' && (
                   <div className="space-y-4">
                     {htmlArtifacts.length === 0 ? (
-                      <div className="text-slate-400 dark:text-slate-500 text-center py-8 text-xs">{t('ticketItem.noHtmlYet')}</div>
+                      <div className="text-slate-500 dark:text-slate-400 text-center py-8 text-xs">{t('ticketItem.noHtmlYet')}</div>
                     ) : (
                       htmlArtifacts.map(h => (
                         <div key={h.id} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 bg-white dark:bg-slate-800 shadow-xs">
@@ -1666,7 +2007,7 @@ export const TicketItem: React.FC<Props> = ({
                 {activeTab === 'artifacts' && (
                   <div className="space-y-2">
                     {ticket.artifacts.length === 0 ? (
-                      <div className="text-slate-400 dark:text-slate-500 text-center py-8 text-xs">{t('ticketItem.noArtifactsYet')}</div>
+                      <div className="text-slate-500 dark:text-slate-400 text-center py-8 text-xs">{t('ticketItem.noArtifactsYet')}</div>
                     ) : (
                       ticket.artifacts.map(a => (
                         <div
@@ -1675,7 +2016,7 @@ export const TicketItem: React.FC<Props> = ({
                         >
                           <div className="flex items-center justify-between font-semibold text-slate-800 dark:text-slate-200 mb-1">
                             <span className="flex items-center gap-2">
-                              <FileText className="w-4 h-4 text-indigo-500" />
+                              <FileText aria-hidden="true" className="w-4 h-4 text-indigo-500" />
                               {a.name}
                             </span>
                             <span className="flex items-center gap-2">
@@ -1741,7 +2082,7 @@ export const TicketItem: React.FC<Props> = ({
                   disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
                   className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
                 >
-                  {isRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ClipboardEdit className="w-3.5 h-3.5 text-indigo-600" />}
+                  {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 text-indigo-600" />}
                   {t('ticketItem.actions.refine')}
                 </button>
                 <button
@@ -1749,7 +2090,7 @@ export const TicketItem: React.FC<Props> = ({
                   disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
                   className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
                 >
-                  {isRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                  {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5" />}
                   {t('ticketItem.actions.run')}
                 </button>
               </div>
@@ -1786,7 +2127,7 @@ export const TicketItem: React.FC<Props> = ({
                 disabled={isRunning || !promptText.trim()}
                 className="px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition"
               >
-                {isRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {isRunning ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <Send aria-hidden="true" className="w-4 h-4" />}
                 {t('ticketItem.send')}
               </button>
             </div>

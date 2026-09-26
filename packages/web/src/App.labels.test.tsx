@@ -167,9 +167,8 @@ describe('App label filter', () => {
     }
     const user = await renderApp();
 
-    // The pager's "next" button (the ticket rows' expand chevrons aren't rounded-md).
-    const nextPage = () =>
-      screen.getAllByRole('button').find(b => b.querySelector('.lucide-chevron-right') && b.className.includes('rounded-md'))!;
+    // The pager's "next" button, found by its accessible name.
+    const nextPage = () => screen.getByRole('button', { name: i18n.t('pagination.next') });
     await user.click(nextPage());
     expect(screen.getByText(i18n.t('pagination.pageOf', { page: 2, total: 3 }))).toBeInTheDocument();
 

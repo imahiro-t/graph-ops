@@ -618,3 +618,32 @@ describe('ReviewGatesEditor', () => {
     });
   });
 });
+
+// DFLT-00165: the icon-only delete button rests at text-slate-500 /
+// dark:text-slate-400 for WCAG 1.4.11's 3:1 on the gate row's white /
+// slate-900 (4.76:1 / 6.96:1; the old text-slate-400 / dark:text-slate-500
+// was 2.56:1 / 3.75:1). The red hover and the disabled opacity (a disabled
+// control is exempt from 1.4.11) are kept.
+describe('ReviewGatesEditor delete button contrast (WCAG 1.4.11)', () => {
+  beforeEach(async () => {
+    mockedFetchCatalog.mockReset();
+    mockedFetchCatalog.mockResolvedValue(CATALOG_RESPONSE);
+    await i18n.changeLanguage('ja');
+  });
+
+  it('rests the enabled and disabled delete buttons at slate-500 / dark:slate-400', async () => {
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+
+    const enabled = screen.getByTitle(i18n.t('settings.reviewGates.deleteGate'));
+    const disabled = screen.getByTitle(i18n.t('settings.reviewGates.cannotDeleteDefaultHint'));
+    expect(enabled).toBeEnabled();
+    expect(disabled).toBeDisabled();
+    for (const b of [enabled, disabled]) {
+      expect(b).toHaveClass('text-slate-500', 'dark:text-slate-400');
+      expect(b).not.toHaveClass('text-slate-400');
+      expect(b).not.toHaveClass('dark:text-slate-500');
+      expect(b).toHaveClass('hover:text-red-600', 'dark:hover:text-red-400', 'disabled:opacity-40');
+    }
+  });
+});
