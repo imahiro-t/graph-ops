@@ -244,6 +244,7 @@
     "close": {
       "button": "クローズ（対応せず終了）",
       "reasonPlaceholder": "理由（任意）",
+      "reasonInputLabel": "クローズする理由",
       "confirm": "クローズする",
       "cancel": "キャンセル",
       "reasonLabel": "クローズ理由"
@@ -256,6 +257,7 @@
       "refine": "リファイン",
       "run": "実行する"
     },
+    "promptLabel": "Claude に送るプロンプト",
     "promptPlaceholder": "例: リリースしたので残りの工程を進めてステータスをレビュー中にしてください (改行できます。送信は「送信」ボタン、または Cmd/Ctrl+Enter)",
     "send": "送信"
   },

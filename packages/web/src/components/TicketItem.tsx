@@ -1437,6 +1437,9 @@ export const TicketItem: React.FC<Props> = ({
             value={closeReasonDraft}
             onChange={e => setCloseReasonDraft(e.target.value)}
             placeholder={t('ticketItem.close.reasonPlaceholder')}
+            // DFLT-00205: a persistent accessible name (the placeholder vanishes
+            // once typing starts). No aria-required: the reason is optional.
+            aria-label={t('ticketItem.close.reasonInputLabel')}
             className="flex-1 text-xs border border-slate-300 dark:border-slate-700 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-400"
           />
           <button
@@ -2201,6 +2204,9 @@ export const TicketItem: React.FC<Props> = ({
                   }
                 }}
                 placeholder={t('ticketItem.promptPlaceholder')}
+                // DFLT-00205: a persistent accessible name (the placeholder
+                // vanishes once typing starts).
+                aria-label={t('ticketItem.promptLabel')}
                 className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-800 resize-none font-sans"
               />
               <button
