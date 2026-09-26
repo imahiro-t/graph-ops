@@ -398,6 +398,8 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     `${idPrefix}-workflow-max-help`,
     maxIterationsInvalid && outOfRangeWarningIndex >= 0 ? warningItemId(outOfRangeWarningIndex) : null
   ].filter(Boolean).join(' ');
+  // Every row's preview toggle shows this text and starts its name with it.
+  const previewLabel = t('settings.reviewGates.mergedPreviewLabel');
 
   if (loading) {
     return (
@@ -474,7 +476,6 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           // What the delete button and the preview toggle name (see
           // gateDisplayName).
           const rowName = gateDisplayName(g);
-          const previewLabel = t('settings.reviewGates.mergedPreviewLabel');
           const deleteTooltip = g.isOverridden ? t('settings.reviewGates.deleteGate') : t('settings.reviewGates.cannotDeleteDefaultHint');
           const idInvalid = emptyIdErrorShown && g.id.trim() === '';
           return (

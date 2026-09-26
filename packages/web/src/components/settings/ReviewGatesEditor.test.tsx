@@ -98,11 +98,18 @@ const WITH_PARTIAL_DEFAULT_OVERRIDE: SettingsCatalogResponse = {
   }
 };
 
-// Each row's merged-preview toggle, in row order. Its name is the visible
-// label followed by the row's gate (DFLT-00200), so match the label as a
-// prefix rather than the whole name.
-const previewToggles = () =>
-  screen.queryAllByRole('button', { name: name => name.startsWith(i18n.t('settings.reviewGates.mergedPreviewLabel')) });
+// A merged-preview toggle's name is the visible label followed by the row's
+// gate (DFLT-00200), so match the label as a prefix rather than the whole
+// name. A regular expression (rather than a function) keeps the pattern
+// readable in Testing Library's "unable to find" message.
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const previewToggleName = () => new RegExp(`^${escapeRegExp(i18n.t('settings.reviewGates.mergedPreviewLabel'))}`);
+
+// Each row's merged-preview toggle, in row order. Like the getAllByRole it
+// replaced, this throws when there is none, so a loop over it cannot pass
+// vacuously; use queryPreviewToggles to assert that there is none.
+const previewToggles = () => screen.getAllByRole('button', { name: previewToggleName() });
+const queryPreviewToggles = () => screen.queryAllByRole('button', { name: previewToggleName() });
 
 describe('ReviewGatesEditor', () => {
   beforeEach(async () => {
@@ -1249,7 +1256,7 @@ describe('ReviewGatesEditor focus after deleting a gate', () => {
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByRole('button', { name: i18n.t('settings.reviewGates.addGate') }))
     );
-    expect(previewToggles()).toHaveLength(0);
+    expect(queryPreviewToggles()).toHaveLength(0);
   });
 
   it('moves focus to the neighbor when a newly added row is deleted', async () => {
