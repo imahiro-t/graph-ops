@@ -5,11 +5,12 @@
 // override) must keep working exactly as before. See this ticket's plan --
 // the guard/tooltip pattern mirrors the existing delete button
 // (disabled={!canEdit || !g.isOverridden} + cannotDeleteDefaultHint).
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { ReviewGatesEditor } from './ReviewGatesEditor';
+import { REANNOUNCE_GAP_MS, TRANSIENT_ANNOUNCEMENT_DURATION_MS } from '../../hooks/useTransientAnnouncement';
 import { SETTINGS_CATALOG_WARNINGS, SettingsCatalogResponse, SettingsCatalogWarning } from '../../types';
 
 vi.mock('../../lib/settingsApi', async () => {
@@ -984,5 +985,229 @@ describe('ReviewGatesEditor focus after deleting a gate', () => {
     await user.keyboard('{Enter}');
 
     await waitFor(() => expect(document.activeElement).toBe(deleteButton('custom_review')));
+  });
+});
+
+// Removing a row is announced through an always-mounted polite live region
+// (DFLT-00204), like NodeTypesEditor's and LabelsEditor's deletes: which gate
+// was removed, and that nothing is applied until the form is saved. The
+// notice is cleared by any other change to the form and never lingers, and
+// DFLT-00199's focus move and preview state still hold.
+describe('ReviewGatesEditor removal announcement', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockedFetchCatalog.mockResolvedValue(WITH_CUSTOM_GATE);
+    mockedSaveCatalog.mockResolvedValue(undefined);
+    await i18n.changeLanguage('ja');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const liveRegion = () => screen.getAllByRole('status').find(el => el.getAttribute('aria-live') === 'polite')!;
+  const deleteButton = (name: string) =>
+    screen.getByRole('button', { name: i18n.t('settings.reviewGates.deleteGateAriaLabel', { name }) });
+  // A row with neither an ID nor a name has no aria-label; its title names it.
+  const unnamedDeleteButtons = () => screen.getAllByRole('button', { name: i18n.t('settings.reviewGates.deleteGate') });
+  const removedText = (name: string) => i18n.t('settings.reviewGates.deleteGateAnnouncement', { name });
+  const unnamedRemovedText = () => i18n.t('settings.reviewGates.deleteUnnamedGateAnnouncement');
+  const addButton = () => screen.getByRole('button', { name: i18n.t('settings.reviewGates.addGate') });
+  const nameInputs = () => screen.getAllByLabelText(i18n.t('settings.reviewGates.nameLabel'));
+  const toggles = () => screen.getAllByRole('button', { name: i18n.t('settings.reviewGates.mergedPreviewLabel') });
+
+  it('keeps an empty polite status region mounted as the last child of the editor', async () => {
+    const { container } = render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+
+    const region = liveRegion();
+    expect(region).toHaveAttribute('role', 'status');
+    expect(region).toHaveTextContent('');
+    expect(region.parentElement).toBe(container.firstElementChild);
+    expect(region.parentElement!.lastElementChild).toBe(region);
+  });
+
+  it('announces the removed gate by its ID in the same region, saying it is not applied until saved', async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+    const region = liveRegion();
+
+    await user.click(deleteButton('qa_review'));
+
+    expect(liveRegion()).toBe(region);
+    expect(region).toHaveTextContent(removedText('qa_review'));
+    expect(region.textContent).toContain('qa_review');
+    expect(region.textContent).toContain('保存するまで反映されません');
+  });
+
+  it('says the same thing in English', async () => {
+    await i18n.changeLanguage('en');
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+
+    await user.click(deleteButton('custom_review'));
+
+    expect(liveRegion()).toHaveTextContent('Removed review gate "custom_review" from the list (not applied until you save).');
+  });
+
+  it('names a new row without an ID by its name, and one with neither by a wording without an empty name', async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+
+    await user.click(addButton());
+    await user.type(nameInputs()[nameInputs().length - 1], 'Draft gate');
+    await user.click(deleteButton('Draft gate'));
+    expect(liveRegion()).toHaveTextContent(removedText('Draft gate'));
+
+    await user.click(addButton());
+    await user.click(unnamedDeleteButtons()[0]);
+    expect(liveRegion()).toHaveTextContent(unnamedRemovedText());
+    expect(liveRegion().textContent).not.toContain('「」');
+  });
+
+  it('announces again when two removals in a row read the same', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+    await user.click(addButton());
+    await user.click(addButton());
+    const region = liveRegion();
+
+    await user.click(unnamedDeleteButtons()[0]);
+    expect(region).toHaveTextContent(unnamedRemovedText());
+
+    await user.click(unnamedDeleteButtons()[0]);
+    expect(region).toHaveTextContent('');
+    act(() => {
+      vi.advanceTimersByTime(REANNOUNCE_GAP_MS);
+    });
+    expect(region).toHaveTextContent(unnamedRemovedText());
+  });
+
+  it('clears the announcement after a while', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+
+    await user.click(deleteButton('qa_review'));
+    expect(liveRegion()).toHaveTextContent(removedText('qa_review'));
+
+    act(() => {
+      vi.advanceTimersByTime(TRANSIENT_ANNOUNCEMENT_DURATION_MS);
+    });
+    expect(liveRegion()).toHaveTextContent('');
+  });
+
+  it.each([
+    ['adding a gate', async (user: ReturnType<typeof userEvent.setup>) => user.click(addButton())],
+    ['editing a name', async (user: ReturnType<typeof userEvent.setup>) => user.type(screen.getByDisplayValue('Custom Review'), 'x')],
+    ['editing criteria', async (user: ReturnType<typeof userEvent.setup>) => user.type(screen.getByDisplayValue('custom criteria'), 'x')],
+    ['toggling enabled', async (user: ReturnType<typeof userEvent.setup>) =>
+      user.click(screen.getAllByRole('checkbox', { name: i18n.t('settings.reviewGates.enabledLabel') })[0])],
+    ['changing the iteration limit', async (user: ReturnType<typeof userEvent.setup>) =>
+      user.selectOptions(screen.getByLabelText(i18n.t('settings.reviewGates.workflowMaxIterationsLabel')), '4')]
+  ])('clears the announcement on %s', async (_label, act_) => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+    await user.click(deleteButton('qa_review'));
+    expect(liveRegion()).toHaveTextContent(removedText('qa_review'));
+
+    await act_(user);
+
+    expect(liveRegion()).toHaveTextContent('');
+  });
+
+  it('clears the announcement on save and keeps the same, empty region after the reload', async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+    const region = liveRegion();
+    await user.click(deleteButton('qa_review'));
+    expect(region).toHaveTextContent(removedText('qa_review'));
+
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
+
+    await waitFor(() => expect(mockedSaveCatalog).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockedFetchCatalog).toHaveBeenCalledTimes(3));
+    await screen.findByText(i18n.t('settings.common.saveSuccess'));
+    expect(liveRegion()).toBe(region);
+    expect(region).toHaveTextContent('');
+  });
+
+  it('clears the announcement when a save is refused for an empty ID', async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+    await user.click(addButton());
+    await user.click(addButton());
+    await user.click(unnamedDeleteButtons()[0]);
+    expect(liveRegion()).toHaveTextContent(unnamedRemovedText());
+
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(i18n.t('settings.reviewGates.emptyIdError'));
+    expect(liveRegion()).toHaveTextContent('');
+  });
+
+  it('starts from an empty region when the editor is shown again', async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+    await user.click(deleteButton('qa_review'));
+    expect(liveRegion()).toHaveTextContent(removedText('qa_review'));
+
+    unmount();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+
+    expect(liveRegion()).toHaveTextContent('');
+  });
+
+  it('keeps the announcement when a merged preview is opened or closed', async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+    await user.click(deleteButton('qa_review'));
+
+    await user.click(toggles()[0]);
+
+    expect(liveRegion()).toHaveTextContent(removedText('qa_review'));
+  });
+
+  it("still moves focus to the neighbor's delete button and keeps other rows' preview state", async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+    // Rows: code_review, qa_review, custom_review. Open custom_review's preview.
+    await user.click(toggles()[2]);
+    expect(toggles()[2]).toHaveAttribute('aria-expanded', 'true');
+
+    deleteButton('qa_review').focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(document.activeElement).toBe(deleteButton('custom_review')));
+    expect(liveRegion()).toHaveTextContent(removedText('qa_review'));
+    expect(toggles()).toHaveLength(2);
+    expect(toggles()[0]).toHaveAttribute('aria-expanded', 'false');
+    expect(toggles()[1]).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('announces nothing for a not-yet-overridden default row, whose delete button is disabled', async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+    const defaultDelete = screen.getByRole('button', { name: i18n.t('settings.reviewGates.deleteGateAriaLabel', { name: 'code_review' }) });
+    expect(defaultDelete).toBeDisabled();
+
+    await user.click(defaultDelete);
+
+    expect(screen.getByDisplayValue('code_review')).toBeInTheDocument();
+    expect(liveRegion()).toHaveTextContent('');
   });
 });

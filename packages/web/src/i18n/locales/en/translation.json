@@ -393,6 +393,8 @@
       "enabledLabel": "Enabled",
       "deleteGate": "Delete",
       "deleteGateAriaLabel": "Delete review gate: {{name}}",
+      "deleteGateAnnouncement": "Removed review gate \"{{name}}\" from the list (not applied until you save).",
+      "deleteUnnamedGateAnnouncement": "Removed a review gate with no ID from the list (not applied until you save).",
       "defaultBadge": "Default",
       "defaultBadgeHint": "This is a plugin-default review gate you have not overridden. Edit any field to override it.",
       "cannotDeleteDefaultHint": "This is a plugin default, not one of your overrides -- there's nothing to remove. Edit a field first to override it, then it can be deleted.",

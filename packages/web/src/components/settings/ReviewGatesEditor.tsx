@@ -16,6 +16,8 @@ import { fetchSettingsCatalog, saveSettingsCatalog } from '../../lib/settingsApi
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
+import { useTransientAnnouncement } from '../../hooks/useTransientAnnouncement';
+import { StatusLiveRegion } from '../StatusLiveRegion';
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
 
 interface Props {
@@ -146,6 +148,12 @@ const deleteButtonKey = (rowKey: string) => `delete-${rowKey}`;
 const previewToggleKey = (rowKey: string) => `preview-${rowKey}`;
 const ADD_GATE_FOCUS_KEY = 'add-gate';
 
+// What a row is called when naming it to a screen reader (its delete button's
+// name and the removal announcement): the ID, or on a new row that has none
+// yet, the name typed so far. Whitespace-only counts as empty, so '' means
+// the row has neither.
+const gateDisplayName = (g: Pick<GateRow, 'id' | 'name'>) => (g.id ?? '').trim() || (g.name ?? '').trim();
+
 const SMALL_LABEL_CLASS = 'block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5';
 
 export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
@@ -194,6 +202,16 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     // effect runs once the removed row is gone.
   }, [pendingFocus, gates]);
   const { savedFlash, showSavedFlash } = useSavedFlash();
+  // Announces a removed row (DFLT-00204) through the always-mounted
+  // StatusLiveRegion at the end of the editor, like NodeTypesEditor's and
+  // LabelsEditor's deletes. Removing a row only changes the list here -- it
+  // is not saved yet -- so the wording says so. Removing two rows that read
+  // the same (e.g. two empty new rows) is announced both times: the hook
+  // re-sets identical text after a short gap. The notice is cleared as soon as
+  // anything else changes the form (add, edit, iteration limit, save, reload),
+  // so a stale "removed" never lingers next to later changes; opening or
+  // closing a preview changes nothing and leaves it alone.
+  const { message: deleteNotice, announce: announceDelete, clear: clearDeleteNotice } = useTransientAnnouncement();
 
   const isDirty = JSON.stringify(gates) !== JSON.stringify(savedGates) || maxIterations !== savedMaxIterations;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
@@ -252,6 +270,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   }, []);
 
   const load = useCallback(async () => {
+    clearDeleteNotice();
     setLoading(true);
     setError('');
     setEmptyIdErrorShown(false);
@@ -262,17 +281,19 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     } finally {
       setLoading(false);
     }
-  }, [fetchRows, applyFetched, tRef]);
+  }, [fetchRows, applyFetched, tRef, clearDeleteNotice]);
 
   useEffect(() => { load(); }, [load]);
 
   // Editing any field on a not-yet-overridden default row is what actually
   // creates its override -- see GateRow's doc comment.
   const updateGate = (rowKey: string, patch: Partial<GateRow>) => {
+    clearDeleteNotice();
     setGates(prev => prev.map(g => (g.rowKey === rowKey ? { ...g, ...patch, isOverridden: true } : g)));
   };
 
   const addGate = () => {
+    clearDeleteNotice();
     setGates(prev => [...prev, { id: '', name: '', criteria: '', enabled: true, isOverridden: true, origin: 'new', baseline: {}, hasDefault: false, rowKey: newRowKey() }]);
   };
 
@@ -285,8 +306,11 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // new last row, else "Add Review Gate"): to its delete button, or -- when
   // that is disabled because the row is a not-yet-overridden default -- to
   // its merged preview toggle, the row's other always-enabled button.
+  // The removal is then announced (see deleteNotice); a guarded-out call
+  // removes nothing and announces nothing.
   const removeGate = (rowKey: string) => {
-    if (!gates.find(g => g.rowKey === rowKey)?.isOverridden) return;
+    const removed = gates.find(g => g.rowKey === rowKey);
+    if (!removed?.isOverridden) return;
     const remaining = gates.filter(g => g.rowKey !== rowKey);
     setGates(prev => prev.filter(g => g.rowKey !== rowKey));
     setExpandedPreview(prev => {
@@ -300,9 +324,16 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     } else {
       setPendingFocus(neighbor.isOverridden ? deleteButtonKey(neighbor.rowKey) : previewToggleKey(neighbor.rowKey));
     }
+    const removedName = gateDisplayName(removed);
+    announceDelete(
+      removedName
+        ? t('settings.reviewGates.deleteGateAnnouncement', { name: removedName })
+        : t('settings.reviewGates.deleteUnnamedGateAnnouncement')
+    );
   };
 
   const handleSave = async () => {
+    clearDeleteNotice();
     // A row without an ID cannot be saved; refuse the whole save (and keep
     // every input as typed) instead of silently dropping that row and still
     // reporting success.
@@ -401,7 +432,10 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           value={maxIterations === null ? '' : String(maxIterations)}
           aria-describedby={maxIterationsDescribedBy}
           aria-invalid={maxIterationsInvalid || undefined}
-          onChange={e => setMaxIterations(e.target.value === '' ? null : Number(e.target.value))}
+          onChange={e => {
+            clearDeleteNotice();
+            setMaxIterations(e.target.value === '' ? null : Number(e.target.value));
+          }}
           className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100"
         >
           <option value="">{t('settings.reviewGates.workflowMaxIterationsInherit', { value: inheritedMaxIterations })}</option>
@@ -432,9 +466,8 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           const idLocked = !g.isOverridden || g.hasDefault;
           const previewOpen = !!expandedPreview[g.rowKey];
           const previewId = `${idPrefix}-${g.rowKey}-preview`;
-          // What the delete button names: the ID, or on a new row that has
-          // none yet, the name typed so far. Whitespace-only counts as empty.
-          const deleteTarget = (g.id ?? '').trim() || (g.name ?? '').trim();
+          // What the delete button names (see gateDisplayName).
+          const deleteTarget = gateDisplayName(g);
           const idInvalid = emptyIdErrorShown && g.id.trim() === '';
           return (
           <div key={g.rowKey} className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2 bg-white dark:bg-slate-900">
@@ -592,6 +625,9 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           </button>
         </div>
       </div>
+      {/* Last child, so the empty sr-only region never shifts the layout; it
+          stays mounted even when the last row is removed (DFLT-00204). */}
+      <StatusLiveRegion message={deleteNotice} />
     </div>
   );
 };
