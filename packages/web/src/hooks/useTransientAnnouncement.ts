@@ -3,27 +3,50 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // How long an announcement stays in its live region before it is cleared.
 export const TRANSIENT_ANNOUNCEMENT_DURATION_MS = 5000;
 
+// How long the live region stays empty before the same wording is put back
+// when an announcement repeats the text still shown (DFLT-00204): emptying and
+// refilling it in one commit would leave the DOM unchanged, so nothing would be
+// read out again.
+export const REANNOUNCE_GAP_MS = 100;
+
 // Drives the text of an always-mounted StatusLiveRegion for one-off status
 // messages (a deletion that succeeded, filters cleared on the person's behalf).
 // The text is cleared again after a while so the next announcement -- even one
-// with the same wording -- is a change the screen reader picks up. The clear
-// timer is owned here so it never outlives the component (a timer firing after
-// the test environment is torn down surfaces as an unhandled "window is not
-// defined"), and a new announcement replaces the pending timer instead of
-// letting a stale one clear the newer text early.
+// with the same wording -- is a change the screen reader picks up. An
+// announcement that repeats the text still on screen (before that clear) first
+// empties the region and puts the text back REANNOUNCE_GAP_MS later, so it is
+// read out again too (DFLT-00204).
 //
-// clear() empties the region early -- for a status that no longer holds, such
-// as "saving..." after the save failed (DFLT-00210). Given the text it expects,
-// it clears only while that text is still shown, so a newer announcement made
-// in the meantime (another row's save or delete) is left alone.
+// clear() empties the region at once, for a status that no longer holds, such
+// as "saving..." after the save failed (DFLT-00210), or a caller whose later
+// actions make the last announcement stale (e.g. an edit after a local,
+// unsaved delete). Given the text it expects, it clears only while that text
+// is still the one announced (shown, or waiting out the re-announce gap), so a
+// newer announcement made in the meantime (another row's save or delete) is
+// left alone.
+//
+// Only one timer is ever pending (timerRef): the gap before a repeated text
+// or the clear after the display duration. It is owned here so it never
+// outlives the component (a timer firing after the test environment is torn
+// down surfaces as an unhandled "window is not defined"), and a new
+// announcement or clear() replaces it instead of letting a stale one clear the
+// newer text early or bring back an older one.
 export function useTransientAnnouncement(durationMs: number = TRANSIENT_ANNOUNCEMENT_DURATION_MS) {
-  const [message, setMessage] = useState('');
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // The text currently shown, for clear(expected) to compare against without
-  // putting side effects (clearing the timer) inside a state updater.
+  const [message, setMessageState] = useState('');
+  // The text last set, readable from the stable callbacks below.
   const messageRef = useRef('');
+  // The text being announced: the one shown, or the one waiting out the
+  // re-announce gap while the region is empty. clear(expected) compares
+  // against it.
+  const announcedRef = useRef('');
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const cancelPendingClear = useCallback(() => {
+  const setMessage = useCallback((text: string) => {
+    messageRef.current = text;
+    setMessageState(text);
+  }, []);
+
+  const cancelPendingTimer = useCallback(() => {
     if (timerRef.current !== null) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -31,30 +54,45 @@ export function useTransientAnnouncement(durationMs: number = TRANSIENT_ANNOUNCE
   }, []);
 
   // Make sure no timer outlives the component using this hook.
-  useEffect(() => cancelPendingClear, [cancelPendingClear]);
+  useEffect(() => cancelPendingTimer, [cancelPendingTimer]);
 
-  const announce = useCallback(
+  const showFor = useCallback(
     (text: string) => {
-      cancelPendingClear();
-      messageRef.current = text;
       setMessage(text);
       timerRef.current = setTimeout(() => {
         timerRef.current = null;
-        messageRef.current = '';
+        announcedRef.current = '';
         setMessage('');
       }, durationMs);
     },
-    [cancelPendingClear, durationMs]
+    [setMessage, durationMs]
+  );
+
+  const announce = useCallback(
+    (text: string) => {
+      cancelPendingTimer();
+      announcedRef.current = text;
+      if (text !== '' && text === messageRef.current) {
+        setMessage('');
+        timerRef.current = setTimeout(() => {
+          timerRef.current = null;
+          showFor(text);
+        }, REANNOUNCE_GAP_MS);
+        return;
+      }
+      showFor(text);
+    },
+    [cancelPendingTimer, setMessage, showFor]
   );
 
   const clear = useCallback(
     (expected?: string) => {
-      if (expected !== undefined && messageRef.current !== expected) return;
-      cancelPendingClear();
-      messageRef.current = '';
+      if (expected !== undefined && announcedRef.current !== expected) return;
+      cancelPendingTimer();
+      announcedRef.current = '';
       setMessage('');
     },
-    [cancelPendingClear]
+    [cancelPendingTimer, setMessage]
   );
 
   return { message, announce, clear };
