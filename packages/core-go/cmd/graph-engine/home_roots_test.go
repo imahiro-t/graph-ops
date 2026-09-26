@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/graph-ops/core-go/internal/config"
 )
 
 // DFLT-00068: $HOME/.graph-ops must be read as the user tier only, never also
@@ -124,18 +126,112 @@ func TestCmdGetLanguageSettings_RepoWorkflowYAMLIsNotRead(t *testing.T) {
 	}
 }
 
-// TestCmdGetLanguageSettings_TeamExtensionsDirIsRead is the supported way to
-// share a language choice across a team.
-func TestCmdGetLanguageSettings_TeamExtensionsDirIsRead(t *testing.T) {
-	_, proj := pinHome(t)
-	shared := t.TempDir()
-	if err := os.WriteFile(filepath.Join(shared, "workflow.yaml"), []byte("version: 1\nlanguage: en\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+// TestCmdGetLanguageSettings_TeamLanguageIsIgnored pins DFLT-00153: the
+// working language is a personal setting, so a team tier's workflow.yaml
+// language is never resolved and "source" is never "team". It is reported on
+// stderr instead, with the same message LoadWithRoots gives, and never in
+// the JSON on stdout.
+func TestCmdGetLanguageSettings_TeamLanguageIsIgnored(t *testing.T) {
+	wantWarning := "graph-ops: warning: " + config.Warning{Code: config.WarnTeamLanguageIgnored, Language: "en"}.Message()
 
-	resp := runGetLanguageSettings(t, runtimeConfig{WorkDir: proj, TeamExtensionsDir: shared}, nil)
-	if resp.Resolved != "en" || resp.Source != "team" {
-		t.Errorf("got %+v, want resolved en source team", resp)
+	t.Run("team tier only", func(t *testing.T) {
+		_, proj := pinHome(t)
+		// No user-tier language: replace pinHome's config.yaml.
+		emptyUser := t.TempDir()
+		shared := t.TempDir()
+		if err := os.WriteFile(filepath.Join(shared, "workflow.yaml"), []byte("version: 1\nlanguage: en\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		collect := captureConfigWarnings(t)
+		out := captureStdout(t, func() {
+			if err := cmdGetLanguageSettings(runtimeConfig{WorkDir: proj, UserExtensionsDir: emptyUser, TeamExtensionsDir: shared}, nil); err != nil {
+				t.Fatal(err)
+			}
+		})
+		var resp languageSettingsResp
+		if err := json.Unmarshal([]byte(out), &resp); err != nil {
+			t.Fatalf("decode: %v (%s)", err, out)
+		}
+		if resp.Resolved != "" || resp.Source != "none" {
+			t.Errorf("got %+v, want resolved \"\" source none (the team tier's language is ignored)", resp)
+		}
+		if strings.Contains(out, "warning") || strings.Contains(out, config.WarnTeamLanguageIgnored) {
+			t.Errorf("stdout carries the warning: %s", out)
+		}
+		if got := collect(); len(got) != 1 || got[0] != wantWarning {
+			t.Errorf("stderr warnings = %q, want exactly %q", got, wantWarning)
+		}
+	})
+
+	t.Run("user tier decides", func(t *testing.T) {
+		_, proj := pinHome(t)
+		shared := t.TempDir()
+		if err := os.WriteFile(filepath.Join(shared, "workflow.yaml"), []byte("version: 1\nlanguage: en\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		collect := captureConfigWarnings(t)
+		resp := runGetLanguageSettings(t, runtimeConfig{WorkDir: proj, TeamExtensionsDir: shared}, nil)
+		if resp.Resolved != "ja" || resp.Source != "user" {
+			t.Errorf("got %+v, want resolved ja source user", resp)
+		}
+		if got := collect(); len(got) != 1 || got[0] != wantWarning {
+			t.Errorf("stderr warnings = %q, want exactly %q", got, wantWarning)
+		}
+	})
+
+	t.Run("no team language, no warning", func(t *testing.T) {
+		_, proj := pinHome(t)
+		shared := t.TempDir()
+		if err := os.WriteFile(filepath.Join(shared, "workflow.yaml"), []byte("version: 1\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		collect := captureConfigWarnings(t)
+		resp := runGetLanguageSettings(t, runtimeConfig{WorkDir: proj, TeamExtensionsDir: shared}, nil)
+		if resp.Resolved != "ja" || resp.Source != "user" {
+			t.Errorf("got %+v, want resolved ja source user", resp)
+		}
+		if got := collect(); len(got) != 0 {
+			t.Errorf("stderr warnings = %q, want none", got)
+		}
+	})
+}
+
+// TestGetWorkflowCatalog_TeamLanguageIsIgnored: get-workflow-catalog neither
+// localizes nor reports the team tier's language, and warns on stderr with
+// the same message get-language-settings uses.
+func TestGetWorkflowCatalog_TeamLanguageIsIgnored(t *testing.T) {
+	env := newCatalogWarningEnv(t, "")
+	writeFile(t, filepath.Join(env.rc.TeamExtensionsDir, "workflow.yaml"), "version: 1\nlanguage: ja\n")
+	collect := captureConfigWarnings(t)
+	out := captureStdout(t, func() {
+		if err := cmdGetWorkflowCatalog(env.rc, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var resp struct {
+		Language string `json:"language"`
+		Nodes    []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"nodes"`
+	}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("decode: %v (%s)", err, out)
+	}
+	if resp.Language != "" {
+		t.Errorf("language = %q, want \"\" (the team tier's ja is ignored)", resp.Language)
+	}
+	for _, n := range resp.Nodes {
+		if n.ID == "impl" && n.Name != "Implementation" {
+			t.Errorf("impl node name = %q, want the English default", n.Name)
+		}
+	}
+	if strings.Contains(out, config.WarnTeamLanguageIgnored) {
+		t.Errorf("stdout carries the warning: %s", out)
+	}
+	want := "graph-ops: warning: " + config.Warning{Code: config.WarnTeamLanguageIgnored, Language: "ja"}.Message()
+	if got := collect(); len(got) != 1 || got[0] != want {
+		t.Errorf("stderr warnings = %q, want exactly %q", got, want)
 	}
 }
 

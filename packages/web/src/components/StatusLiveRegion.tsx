@@ -15,15 +15,22 @@
 //
 // 見た目を持つ側の要素には aria-hidden="true" を付け、同じ文言が支援技術に
 // 二重に現れないようにする（読み上げはこの器が担当する）。
+//
+// 入力欄の aria-describedby からメッセージを参照させたいときは、器のほうに id
+// を持たせる。見た目側は aria-hidden なので参照先にしない（aria-hidden の要素を
+// 説明として参照したときの扱いはブラウザ間で揺れる）。器はメッセージが出ている
+// 間いつも同じ文言を持つので、参照先が空になることもない。
 import React from 'react';
 
 interface Props {
   // 空文字は「通知なし」を表す。器は空のまま描画され続ける。
   message: string;
+  // aria-describedby の参照先にするときだけ渡す。
+  id?: string;
 }
 
-export const StatusLiveRegion: React.FC<Props> = ({ message }) => (
-  <span role="status" aria-live="polite" className="sr-only">
+export const StatusLiveRegion: React.FC<Props> = ({ message, id }) => (
+  <span id={id} role="status" aria-live="polite" className="sr-only">
     {message}
   </span>
 );

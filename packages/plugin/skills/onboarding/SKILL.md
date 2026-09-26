@@ -5,7 +5,7 @@ description: First-time setup for the GraphOps plugin. Asks which language the u
 
 # onboarding Skill
 
-Configures the plugin's working language. This is a personal (user-tier) setting: it writes only into the current user's extension root, never the team root, so it never overrides a team's shared conventions.
+Configures the plugin's working language. The working language is a personal (user-tier) setting: this skill writes only into the current user's extension root, never the team root, and the language cannot be set from the team tier at all -- a `language` in the team tier's `workflow.yaml` is ignored (the engine prints a warning on stderr when it finds one).
 
 ## 0. Check for user/team customization of this skill
 
@@ -30,7 +30,7 @@ Check what's already configured with:
 ```bash
 graph-engine get-language-settings
 ```
-This returns `{"resolved": "ja"|"", "source": "team"|"user"|"none", "supported_locales": ["ja"]}`. If `source` is `"user"` (or `"team"`, though this skill only ever writes the user tier), mention the currently-configured language and ask whether they want to keep it or change it, instead of assuming a fresh setup. If `<userDir>/config.yaml` already carries hand-translated `review_gates[].name` entries from an older install (pre-language-file), that still counts as "already configured" even if `get-language-settings` reports no `language:` field -- ask the same way.
+This returns `{"resolved": "ja"|"", "source": "user"|"none", "supported_locales": ["ja"]}`. If `source` is `"user"`, mention the currently-configured language and ask whether they want to keep it or change it, instead of assuming a fresh setup. If `<userDir>/config.yaml` already carries hand-translated `review_gates[].name` entries from an older install (pre-language-file), that still counts as "already configured" even if `get-language-settings` reports no `language:` field -- ask the same way.
 
 This setting does not change the Web UI's own language (that has its own i18n setting) -- it only affects what the CLI/agents write into the DB (ticket-adjacent text, node names) and into artifacts.
 
@@ -93,7 +93,7 @@ Never write a template into `teamDir`.
 
 ## 7. Confirm
 
-Report back to the user, in the chosen language, that the plugin's review-gate names, any node names its own sessions invent going forward, and future agent-authored content will now be written in that language, and that this is a personal (user-tier) setting living under `<userDir>` -- it applies across every project on this machine for this user, and can be re-run anytime by invoking this skill again. If a team `workflow.yaml` also sets a `language` or a `name` for one of the review-gate keys above, mention that the team layer wins over this personal one (for `language`, whichever tier's value was actually used; for an individual gate's `name`, that specific gate).
+Report back to the user, in the chosen language, that the plugin's review-gate names, any node names its own sessions invent going forward, and future agent-authored content will now be written in that language, and that this is a personal (user-tier) setting living under `<userDir>` -- it applies across every project on this machine for this user, and can be re-run anytime by invoking this skill again. If a team `workflow.yaml` also sets a `name` for one of the review-gate keys above, mention that the team layer wins over this personal one for that specific gate's `name`. A `language` in a team `workflow.yaml`, on the other hand, is ignored -- the language chosen here is the one used.
 
 If step 3 took Case A (a supported locale code), also mention that the fixed skeleton's display names (`plan`, `impl`, `report`, etc.) are now automatically shown in the chosen language too, via the `language: <code>` setting just saved -- this is new behavior beyond what earlier versions of this skill did (those could only translate review gates, never the skeleton). If step 3 took Case B (no supported locale yet), mention explicitly that the skeleton names will remain in English for now, even though the review gates were just translated, since no locale file exists yet for that language.
 

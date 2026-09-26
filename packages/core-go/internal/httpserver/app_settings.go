@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -85,9 +86,17 @@ type effectiveAppSettings struct {
 	DBPath    string `json:"dbPath"`
 	// HTTPDataSourceURL is the data source URL in effect when DBBackend is
 	// "http" (empty otherwise). The token is never part of this block.
-	HTTPDataSourceURL  string `json:"httpDataSourceUrl,omitempty"`
-	ArtifactsDir       string `json:"artifactsDir"`
-	UserExtensionsDir  string `json:"userExtensionsDir"`
+	HTTPDataSourceURL string `json:"httpDataSourceUrl,omitempty"`
+	ArtifactsDir      string `json:"artifactsDir"`
+	// UserExtensionsDir is the personal tier's directory in effect
+	// ($HOME/.graph-ops unless config.json's userExtensionsDir or
+	// GRAPH_USER_EXTENSIONS_DIR overrides it). It is reported for
+	// information only: the settings form does not edit it (DFLT-00153).
+	UserExtensionsDir string `json:"userExtensionsDir"`
+	// TeamExtensionsDir is the team tier's directory in effect, or "" when
+	// there is no team tier -- unset, or the same directory as the personal
+	// tier (config.ResolveRoots drops it then).
+	TeamExtensionsDir  string `json:"teamExtensionsDir"`
 	PaginationPageSize int    `json:"paginationPageSize"`
 }
 
@@ -415,6 +424,7 @@ func (s *Server) effectiveAppSettings() effectiveAppSettings {
 		HTTPDataSourceURL:  httpURL,
 		ArtifactsDir:       s.cfg.ArtifactsDir,
 		UserExtensionsDir:  roots.UserDir,
+		TeamExtensionsDir:  roots.TeamDir,
 		PaginationPageSize: s.cfg.PaginationPageSize,
 	}
 }
@@ -435,8 +445,9 @@ func (s *Server) loadHomeEffective() runtimeconfig.Effective {
 }
 
 // handleGetAppSettings backs the settings UI's app-settings tab (DB path,
-// artifacts dir, the node/workflow config directory override, ticket-list
-// pagination page size).
+// artifacts dir, the team settings directory (teamExtensionsDir), ticket-list
+// pagination page size). The personal tier's directory is reported in
+// `effective.userExtensionsDir` for information only; it is not edited here.
 //
 // This endpoint needs no CSRF header (it is a GET) and this server has no
 // authentication, so its response must be treated as world-readable by
@@ -450,10 +461,26 @@ func (s *Server) handleGetAppSettings(w http.ResponseWriter, r *http.Request) {
 // handlePutAppSettings saves the fields this endpoint owns
 // (dbBackend/dbPath/mysqlHost/mysqlPort/mysqlDatabase/mysqlUser/
 // mysqlPassword/mysqlTls/mysqlTlsCa/httpDataSourceUrl/httpDataSourceToken/
-// artifactsDir/userExtensionsDir/paginationPageSize/myName) into the home
+// artifactsDir/teamExtensionsDir/paginationPageSize/myName) into the home
 // config file, preserving every other field already in it
-// (port/host/claudeBinary/terminalCommand/workDir/teamExtensionsDir/
+// (port/host/claudeBinary/terminalCommand/workDir/userExtensionsDir/
 // projectPaths) untouched.
+//
+// userExtensionsDir used to be owned here; since DFLT-00153 the personal tier
+// is $HOME/.graph-ops unless config.json or GRAPH_USER_EXTENSIONS_DIR says
+// otherwise, and this endpoint neither writes nor clears it. A body that
+// still carries a userExtensionsDir field (an older client) has it ignored:
+// the decoder does not know the field.
+//
+// teamExtensionsDir is trimmed and saved as-is when non-empty. It must then
+// be an absolute path, and is a 400 otherwise: a relative one would depend on
+// the directory the process was started in, which the home config
+// deliberately does not (DFLT-00124). An explicit "" (or whitespace only)
+// removes the key from the file. Unlike the other owned fields, leaving
+// teamExtensionsDir out of the body keeps the saved value: until DFLT-00153
+// this endpoint did not own the key at all, so a client from before then
+// (say, a tab left open across a server upgrade) never sends it, and its save
+// must not silently drop a team directory configured by hand.
 //
 // It is one write, through runtimeconfig.UpdateHome, which serializes it with
 // every other in-process writer of that file -- in particular the project
@@ -469,7 +496,7 @@ func (s *Server) handleGetAppSettings(w http.ResponseWriter, r *http.Request) {
 // to write, so the request fails with HOME_CONFIG_UNAVAILABLE (500) rather
 // than returning 200 for a save that went nowhere (completion criterion 10).
 //
-// Those owned fields are a full replacement, not a patch: each one is
+// The other owned fields are a full replacement, not a patch: each one is
 // written from the request body as submitted, so a field the body leaves out
 // is saved as its zero value -- omitting it clears whatever was stored.
 // mysqlPassword is where that costs the most: leave it out and the saved
@@ -478,18 +505,18 @@ func (s *Server) handleGetAppSettings(w http.ResponseWriter, r *http.Request) {
 // stored one". Any client other than this repo's own settings form must
 // therefore send the complete set of owned fields on every PUT; the web UI
 // does (packages/web/src/lib/settingsApi.ts's saveAppSettings submits the
-// whole AppSettingsFile). The only fields an omission does not silently
-// clear are the validated ones, and they are rejected rather than preserved:
-// a paginationPageSize below 1 is a 400, as is a missing
+// whole AppSettingsFile). The only other fields an omission does not
+// silently clear are the validated ones, and they are rejected rather than
+// preserved: a paginationPageSize below 1 is a 400, as is a missing
 // mysqlHost/mysqlDatabase/mysqlUser, an unsupported mysqlTls value, or a
 // mysqlTls of "verify-ca" with no mysqlTlsCa, while dbBackend is "mysql".
 //
 // This is the endpoint's intended contract, not a defect -- reading an
-// absent field as "unchanged" would leave no way to clear one, and every
-// owned field behaves the same way. It is spelled out here, and in README.md
-// (EN and JA), because a PUT that quietly drops a stored secret is not
-// something the author of a second client would guess (ticket DFLT-00023
-// item S-5).
+// absent field as "unchanged" would leave no way to clear one (only
+// teamExtensionsDir, which has an explicit "" for that, reads it so). It is
+// spelled out here, and in README.md (EN and JA), because a PUT that quietly
+// drops a stored secret is not something the author of a second client would
+// guess (ticket DFLT-00023 item S-5).
 //
 // None of this takes effect for the currently-running process -- these are
 // all read once at startup (see cmd/graph-engine's loadRuntimeConfig) -- so
@@ -522,9 +549,11 @@ func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 		// resolveSubmittedHTTPDataSourceToken.
 		HTTPDataSourceToken string `json:"httpDataSourceToken"`
 		ArtifactsDir        string `json:"artifactsDir"`
-		UserExtensionsDir   string `json:"userExtensionsDir"`
-		PaginationPageSize  int    `json:"paginationPageSize"`
-		MyName              string `json:"myName"`
+		// TeamExtensionsDir is a pointer so an absent field (nil: keep the
+		// saved value) can be told apart from an explicit "" (remove it).
+		TeamExtensionsDir  *string `json:"teamExtensionsDir"`
+		PaginationPageSize int     `json:"paginationPageSize"`
+		MyName             string  `json:"myName"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -533,6 +562,15 @@ func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 	if body.PaginationPageSize < 1 {
 		writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeInvalidPaginationPageSize,
 			"pagination page size must be 1 or greater, got %d", body.PaginationPageSize))
+		return
+	}
+	var teamExtensionsDir string
+	if body.TeamExtensionsDir != nil {
+		teamExtensionsDir = strings.TrimSpace(*body.TeamExtensionsDir)
+	}
+	if teamExtensionsDir != "" && !filepath.IsAbs(teamExtensionsDir) {
+		writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation,
+			"teamExtensionsDir must be an absolute path, got %q", teamExtensionsDir))
 		return
 	}
 	dbBackend := body.DBBackend
@@ -612,7 +650,9 @@ func (s *Server) handlePutAppSettings(w http.ResponseWriter, r *http.Request) {
 		fileCfg.HTTPDataSourceURL = body.HTTPDataSourceURL
 		fileCfg.HTTPDataSourceToken = httpToken
 		fileCfg.ArtifactsDir = body.ArtifactsDir
-		fileCfg.UserExtensionsDir = body.UserExtensionsDir
+		if body.TeamExtensionsDir != nil {
+			fileCfg.TeamExtensionsDir = teamExtensionsDir
+		}
 		fileCfg.PaginationPageSize = body.PaginationPageSize
 		fileCfg.MyName = body.MyName
 		return nil

@@ -413,7 +413,7 @@
       }
     },
     "reportTemplate": {
-      "intro": "The fixed HTML template used for report artifacts. Saving replaces the whole template (it does not append). Leaving it empty falls back to the plugin default. A team tier configured with teamExtensionsDir is neither edited nor previewed on this screen, and it outranks this override for agents.",
+      "intro": "The fixed HTML template used for report artifacts. Saving replaces the whole template (it does not append). Leaving it empty falls back to the plugin default. A team tier set in the app settings' Team Settings Directory (teamExtensionsDir) is neither edited nor previewed on this screen, and it outranks this override for agents.",
       "tierTextLabel": "Your override (full HTML)",
       "tierTextPlaceholder": "Paste a full replacement HTML template (see `get-report-template` for the fixed structure)...",
       "mergedPreviewLabel": "Merged preview of the HTML source (plugin default + your override; a team tier is not included)",
@@ -428,14 +428,14 @@
       }
     },
     "planTemplate": {
-      "intro": "The Markdown template the plan node's agent fills in. The agent uses its headings exactly as written. Saving replaces the whole template (it does not append). The content is not checked, so you can write any Markdown. Leaving it empty falls back to the plugin default. A team tier configured with teamExtensionsDir is neither edited nor previewed on this screen, and it outranks this override for agents.",
+      "intro": "The Markdown template the plan node's agent fills in. The agent uses its headings exactly as written. Saving replaces the whole template (it does not append). The content is not checked, so you can write any Markdown. Leaving it empty falls back to the plugin default. A team tier set in the app settings' Team Settings Directory (teamExtensionsDir) is neither edited nor previewed on this screen, and it outranks this override for agents.",
       "tierTextLabel": "Your override (full Markdown)",
       "tierTextPlaceholder": "Write a full replacement plan template (see `get-plan-template` for the template currently in use)...",
       "mergedPreviewLabel": "Merged preview of the plan template (plugin default + your override; a team tier is not included)",
       "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the plugin default."
     },
     "reviewTemplate": {
-      "intro": "The Markdown template the review and review_gate nodes' agents use to write their verdicts. The agent uses its headings and verdict words exactly as written. Saving replaces the whole template (it does not append). The content is not checked, so you can write any Markdown. Leaving it empty falls back to the plugin default. A team tier configured with teamExtensionsDir is neither edited nor previewed on this screen, and it outranks this override for agents.",
+      "intro": "The Markdown template the review and review_gate nodes' agents use to write their verdicts. The agent uses its headings and verdict words exactly as written. Saving replaces the whole template (it does not append). The content is not checked, so you can write any Markdown. Leaving it empty falls back to the plugin default. A team tier set in the app settings' Team Settings Directory (teamExtensionsDir) is neither edited nor previewed on this screen, and it outranks this override for agents.",
       "tierTextLabel": "Your override (full Markdown)",
       "tierTextPlaceholder": "Write a full replacement review template (see `get-review-template` for the template currently in use)...",
       "mergedPreviewLabel": "Merged preview of the review template (plugin default + your override; a team tier is not included)",
@@ -505,9 +505,12 @@
         "pageSizeLabel": "Maximum tickets per page",
         "invalidPageSize": "Enter an integer of 1 or greater."
       },
-      "extensionsDir": {
-        "title": "Node/Workflow Config Directory",
-        "description": "The directory your node types/workflow/review gates are read from and written to. Leave blank to use the default, ~/.graph-ops."
+      "teamExtensionsDir": {
+        "title": "Team Settings Directory",
+        "description": "A settings directory shared by your team. When set, its node-type instructions, workflow and review gates (workflow.yaml), templates, skill instructions and autopilot settings (autopilot.yaml) take precedence over your personal settings. Leave it blank for no shared settings: only your personal settings (~/.graph-ops) are used. Personal settings such as the DB connection, project paths, your name and the language are never changed by the team directory. Enter an absolute path. Takes effect after the server restarts (the GRAPH_TEAM_EXTENSIONS_DIR environment variable, if set, takes precedence).",
+        "placeholder": "e.g. /path/to/shared/graph-ops",
+        "notSet": "Not set (personal settings only)",
+        "notAbsolute": "Enter an absolute path (e.g. /path/to/shared/graph-ops)."
       },
       "projects": {
         "title": "Project Management",

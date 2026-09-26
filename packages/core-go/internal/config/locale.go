@@ -119,11 +119,16 @@ func ApplyLocale(doc Document, locale Locale) Document {
 // non-empty, always wins over every tier: it represents a single call's
 // explicit, non-persistent choice (e.g. the CLI's --language flag), which
 // this ticket's execution plan (section 1.4) deliberately ranks above the
-// persistent user/team settings precisely because it is only ever supplied
-// when no persistent setting should be disturbed. With languageOverride
-// empty, the result is the last non-empty Document.Language found scanning
-// tiers front-to-back (so, called as ResolveLanguage("", userDoc, teamDoc),
-// teamDoc wins over userDoc). Returns "" if nothing is set anywhere.
+// persistent setting precisely because it is only ever supplied when no
+// persistent setting should be disturbed. With languageOverride empty, the
+// result is the last non-empty Document.Language found scanning tiers
+// front-to-back. Returns "" if nothing is set anywhere.
+//
+// The function itself is generic over whatever tiers it is handed; which
+// tiers count is the caller's decision. The working language is a personal
+// setting (DFLT-00153), so every production caller passes the user tier
+// alone -- never the team tier's workflow.yaml (see LoadWithRoots and the
+// CLI's get-language-settings, which warn about a team language instead).
 func ResolveLanguage(languageOverride string, tiers ...Document) string {
 	if languageOverride != "" {
 		return languageOverride

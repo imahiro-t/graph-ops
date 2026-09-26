@@ -52,11 +52,16 @@ type Document struct {
 	Workflow    WorkflowDef              `yaml:"workflow,omitempty" json:"workflow,omitempty"`
 	// Language is a short locale code (e.g. "ja") selecting which
 	// defaults/locales/<code>.yaml localizes the fixed workflow skeleton's
-	// node names and the default review gates' names -- see locale.go. Unlike
-	// Workflow.Nodes/Seed, this is a normal merge-across-tiers field (either
-	// tier may set it, later tier wins; see Merge's doc comment) rather than
-	// locked to the plugin default. Empty means "unset" -- no locale is
-	// applied and the English plugin defaults stand.
+	// node names and the default review gates' names -- see locale.go. Empty
+	// means "unset" -- no locale is applied and the English plugin defaults
+	// stand.
+	//
+	// The working language is a personal setting (DFLT-00153): only the user
+	// tier's config.yaml is consulted. A team tier's workflow.yaml that sets
+	// it is ignored with a WarnTeamLanguageIgnored warning -- LoadWithRoots
+	// and the CLI's get-language-settings drop it before resolving. Merge
+	// itself still treats the field generically (later non-empty wins) over
+	// whatever documents it is handed.
 	Language string `yaml:"language,omitempty" json:"language,omitempty"`
 	// MaxIterations is the workflow-wide review iteration limit: the maximum
 	// number of review rounds (counting the first review) a review loop may
@@ -91,8 +96,8 @@ type Catalog struct {
 	Nodes       []NodeDef                `json:"nodes"`
 	Seed        []string                 `json:"seed"`
 	// Language is the resolved locale code that produced this Catalog (see
-	// Document.Language and ResolveLanguage) -- "" if none of the merged
-	// tiers set one.
+	// Document.Language and ResolveLanguage) -- "" if the user tier does not
+	// set one (a team tier's language is never used; see Document.Language).
 	Language string `json:"language,omitempty"`
 	// MaxIterations is the resolved workflow-wide review iteration limit
 	// (see Document.MaxIterations); DefaultMaxIterations when no tier sets
@@ -119,15 +124,21 @@ const (
 	// a file outright; the settings API reports it with this code instead so
 	// the screen can show it and let the user pick a valid value.
 	WarnMaxIterationsOutOfRange = "MAX_ITERATIONS_OUT_OF_RANGE"
+	// WarnTeamLanguageIgnored: the team tier's workflow.yaml sets language
+	// (Language), which is ignored because the working language is a
+	// personal setting (DFLT-00153). Only the CLI reports it: the settings
+	// API merges the user tier alone, so this code never reaches the Web UI.
+	WarnTeamLanguageIgnored = "TEAM_LANGUAGE_IGNORED"
 )
 
 // Warning is one non-fatal configuration problem, as structured data so a
-// client can localize it: Code says what it is, GateID/Value carry the
-// details the message needs.
+// client can localize it: Code says what it is, GateID/Value/Language carry
+// the details the message needs.
 type Warning struct {
-	Code   string `json:"code"`
-	GateID string `json:"gate_id,omitempty"`
-	Value  *int   `json:"value,omitempty"`
+	Code     string `json:"code"`
+	GateID   string `json:"gate_id,omitempty"`
+	Value    *int   `json:"value,omitempty"`
+	Language string `json:"language,omitempty"`
 }
 
 // Message is the English, developer-facing text for w -- what the CLI prints
@@ -141,6 +152,8 @@ func (w Warning) Message() string {
 			return fmt.Sprintf("max_iterations must be 3, 4 or 5, got %d", *w.Value)
 		}
 		return "max_iterations must be 3, 4 or 5"
+	case WarnTeamLanguageIgnored:
+		return fmt.Sprintf("team workflow.yaml sets language %q, which is ignored: the working language is a personal setting (run the onboarding skill, or set language in your own config.yaml)", w.Language)
 	default:
 		return w.Code
 	}
@@ -164,6 +177,17 @@ func MaxIterationsWarnings(doc Document) []Warning {
 	}
 	v := *doc.MaxIterations
 	return []Warning{{Code: WarnMaxIterationsOutOfRange, Value: &v}}
+}
+
+// TeamLanguageIgnoredWarnings returns a WarnTeamLanguageIgnored warning when
+// the team tier's document sets language, and nothing otherwise. Callers that
+// resolve the language (LoadWithRoots, the CLI's get-language-settings) use
+// it so the same message is printed wherever the team value is dropped.
+func TeamLanguageIgnoredWarnings(teamDoc Document) []Warning {
+	if teamDoc.Language == "" {
+		return nil
+	}
+	return []Warning{{Code: WarnTeamLanguageIgnored, Language: teamDoc.Language}}
 }
 
 // EnabledReviewGates returns the catalog's review gates with Enabled=false

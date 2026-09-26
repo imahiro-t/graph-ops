@@ -90,7 +90,7 @@ func appSettingsBody(artifactsDir, dbPath string) map[string]any {
 		"dbBackend":          "sqlite",
 		"dbPath":             dbPath,
 		"artifactsDir":       artifactsDir,
-		"userExtensionsDir":  "",
+		"teamExtensionsDir":  "",
 		"paginationPageSize": 10,
 	}
 }

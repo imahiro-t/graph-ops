@@ -327,7 +327,9 @@ export interface SettingsDocument {
 // (merged_catalog), or the plugin default alone -- what the settings screen
 // would fall back to if the user tier's override were cleared
 // (inherited_catalog). Neither includes a teamExtensionsDir team tier, which
-// an agent does additionally see; see the server's handleGetSettingsCatalog.
+// an agent does additionally see (the app settings tab names that directory
+// but never shows or edits its contents); see the server's
+// handleGetSettingsCatalog.
 export interface SettingsCatalog {
   review_gates: Record<string, ReviewGateDef>;
   nodes: NodeDef[];
@@ -418,9 +420,11 @@ export type SettingsReportTemplateResponse = SettingsTemplateTextResponse;
 // AppSettingsFile mirrors packages/core-go/internal/runtimeconfig.FileConfig
 // (the home config file's shape) -- only the fields this tab edits are listed
 // here; the others (port/claudeBinary/terminalCommand/workDir/
-// teamExtensionsDir/projectPaths) are preserved server-side but never
+// userExtensionsDir/projectPaths) are preserved server-side but never
 // surfaced in this UI (projectPaths is edited through the project API as
-// Project.local_path instead). An empty string means "not set, falls back to an env var or a
+// Project.local_path instead; userExtensionsDir -- the personal tier, normally
+// $HOME/.graph-ops -- is only changed by hand or GRAPH_USER_EXTENSIONS_DIR,
+// and its effective value is shown read-only in EffectiveAppSettings). An empty string means "not set, falls back to an env var or a
 // hardcoded default".
 // 'http' is the HTTP custom data source (DFLT-00088): a plugin server that
 // implements docs/http-datasource/openapi.yaml.
@@ -469,7 +473,12 @@ export interface AppSettingsFile {
   httpDataSourceUrl?: string;
   httpDataSourceToken?: string;
   artifactsDir?: string;
-  userExtensionsDir?: string;
+  // The team settings directory (DFLT-00153): a shared directory whose
+  // node-type instructions, workflow.yaml, templates, skill instructions and
+  // autopilot.yaml outrank the personal tier. It must be an absolute path
+  // (the server answers 400 VALIDATION_ERROR otherwise); '' removes the key,
+  // leaving no team tier.
+  teamExtensionsDir?: string;
   paginationPageSize?: number;
   // The viewer's own display name, used by the per-ticket "assign to
   // me"/"unassign" buttons (see Ticket.assignee). Unlike every other
@@ -484,7 +493,12 @@ export interface EffectiveAppSettings {
   // Present only when dbBackend is 'http'. The token is never included.
   httpDataSourceUrl?: string;
   artifactsDir: string;
+  // The personal tier's directory in effect -- informational only, not
+  // edited by this UI.
   userExtensionsDir: string;
+  // The team tier in effect, or '' when there is none (unset, or the same
+  // directory as the personal tier).
+  teamExtensionsDir: string;
   paginationPageSize: number;
 }
 
