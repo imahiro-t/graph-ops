@@ -280,11 +280,19 @@ export const App: React.FC = () => {
   // Shift+Tab, without Ctrl/Meta/Alt, which switch tabs or apps) and
   // consumed by the very next focusout; any other key or a pointerdown
   // clears it, so a record left behind by a Tab that moved no focus never
-  // outlives the next interaction.
+  // outlives the next interaction. A Tab that is part of an IME composition
+  // (isComposing, or keyCode 229, which Safari reports with isComposing
+  // still false) is not recorded -- the same exclusion as the Escape
+  // handling above (DFLT-00161).
   const tabLeavingRef = useRef(false);
   const handleProjectSwitcherKeyDown = (e: React.KeyboardEvent) => {
     tabLeavingRef.current =
-      e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.nativeEvent.isComposing;
+      e.key === 'Tab' &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      !e.nativeEvent.isComposing &&
+      e.keyCode !== 229;
   };
   const handleProjectSwitcherPointerDown = () => {
     tabLeavingRef.current = false;
