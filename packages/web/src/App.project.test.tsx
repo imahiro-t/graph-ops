@@ -11,6 +11,15 @@
 // fetch is served by test/fakeBackend.ts, which since DFLT-00106 answers
 // /api/tickets purely from the request's own query, so an unscoped request
 // here comes back empty exactly as the real server's does.
+//
+// DFLT-00162: the list's empty and loading states, and the project
+// switcher's "no projects" line, are drawn in text-slate-500 /
+// dark:text-slate-400 (4.76:1 on white, 6.96:1 on slate-900), meeting WCAG
+// 1.4.3's 4.5:1. jsdom computes no colors, so those tests pin the classes.
+//
+// DFLT-00164: the load-failure retry button used to inherit that
+// text-slate-500, which drops to 4.34:1 on its slate-100 hover background,
+// so it sets text-slate-600 / dark:text-slate-300 of its own.
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -632,6 +641,18 @@ describe('App project scoping', () => {
       expect(ticketListRequests()).toEqual([`/api/tickets?project_id=${alpha.id}`]);
     });
 
+    it('draws the retry button in slate-600 / dark:slate-300, which also clear 4.5:1 on its hover background (DFLT-00164)', async () => {
+      render(<App />);
+      await screen.findByText(i18n.t('projectSwitcher.loadFailed'));
+
+      const retry = screen.getByRole('button', { name: i18n.t('projectSwitcher.retry') });
+      expect(retry).toHaveClass('text-slate-600', 'dark:text-slate-300');
+      expect(retry).not.toHaveClass('text-slate-500');
+      expect(retry).not.toHaveClass('dark:text-slate-400');
+      // The hover backgrounds (state colors) are unchanged.
+      expect(retry).toHaveClass('hover:bg-slate-100', 'dark:hover:bg-slate-800');
+    });
+
     // The failure screen deliberately keeps the header's switcher usable.
     // Picking a project there answers the question the failed read could
     // not, so the error has to go with it: before, "failed" was a flag of
@@ -767,6 +788,38 @@ describe('App project scoping', () => {
       await screen.findByText(i18n.t('projectSwitcher.noProjectYet'));
       expect(screen.queryByText(i18n.t('emptyState.loadingTickets'))).not.toBeInTheDocument();
       expect(ticketListRequests()).toEqual([]);
+    });
+  });
+
+  describe('secondary text contrast (DFLT-00162)', () => {
+    const expectContrastColors = (el: HTMLElement) => {
+      expect(el).toHaveClass('text-slate-500', 'dark:text-slate-400');
+      expect(el).not.toHaveClass('text-slate-400');
+      expect(el).not.toHaveClass('dark:text-slate-500');
+    };
+
+    it('draws the "no project yet" state in slate-500 / dark:slate-400', async () => {
+      seed({ currentProjectId: '' });
+      render(<App />);
+      const text = await screen.findByText(i18n.t('projectSwitcher.noProjectYet'));
+      expectContrastColors(text.parentElement!);
+    });
+
+    it('draws the "no tickets match" state in slate-500 / dark:slate-400', async () => {
+      seed({ tickets: [] });
+      render(<App />);
+      expectContrastColors(await screen.findByText(i18n.t('emptyState.noTicketsMatch')));
+    });
+
+    it('draws the project switcher\'s "no projects" line in slate-500 / dark:slate-400', async () => {
+      seed({ projects: [], currentProjectId: '', tickets: [] });
+      const user = userEvent.setup();
+      render(<App />);
+      await screen.findByText(i18n.t('projectSwitcher.noProjectYet'));
+      await user.click(screen.getByRole('button', { name: i18n.t('projectSwitcher.noProject') }));
+      const empty = await screen.findByText(i18n.t('projectSwitcher.empty'));
+      expectContrastColors(empty);
+      expect(empty).toHaveClass('text-xs');
     });
   });
 });

@@ -55,16 +55,20 @@
   },
   "pagination": {
     "range": "{{total}}件中 {{from}}〜{{to}}件を表示",
-    "pageOf": "{{page}} / {{total}}"
+    "pageOf": "{{page}} / {{total}}",
+    "previous": "前のページ",
+    "next": "次のページ"
   },
   "projectSwitcher": {
+    "menuLabel": "プロジェクトの切り替え",
     "noProject": "プロジェクトを選択",
     "empty": "プロジェクトがありません",
     "createNew": "新規プロジェクト...",
     "selectFirst": "先にプロジェクトを作成または選択してください",
     "noProjectYet": "まだプロジェクトが作成されていません。作成するとチケットの管理を始められます。",
     "loadFailed": "現在のプロジェクトの設定を読み込めませんでした。ホームの設定ファイル（~/.graph-ops/config.json）を確認してから再試行してください。",
-    "retry": "再試行"
+    "retry": "再試行",
+    "pendingApprovals": "承認待ち {{count}} 件"
   },
   "createProjectModal": {
     "title": "新規プロジェクト作成",
@@ -207,7 +211,9 @@
       "pendingStatus": "承認待ち",
       "rejectedHint": "却下済み。process-ticketが却下理由をトリアージし（対象ノードを再実行するか）、または人手で解決するまでブロックされたままです。",
       "rejectedBadgeOne": "却下済み: {{name}}",
-      "rejectedBadgeMany": "却下済み {{count}}件"
+      "rejectedBadgeMany": "却下済み {{count}}件",
+      "rejectedAnnouncement": "{{name}} を却下しました",
+      "noLongerPendingAnnouncement": "{{name}} は承認待ちではなくなりました"
     },
     "artifactsCount": "成果物 {{count}}",
     "noArtifactsForNode": "このノードに紐付く成果物はまだありません",

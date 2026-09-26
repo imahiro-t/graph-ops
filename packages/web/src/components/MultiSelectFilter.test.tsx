@@ -226,4 +226,15 @@ describe('MultiSelectFilter', () => {
     expect(screen.getByRole('checkbox', { name: '飾り' })).toHaveAttribute('aria-label', '飾り');
     expect(within(panel).getByTestId('chip')).toBeInTheDocument();
   });
+
+  it('draws the trigger\'s dropdown arrow in slate-500 (light) and slate-400 (dark) for WCAG 1.4.11', () => {
+    render(<Harness />);
+    const arrow = trigger().querySelector('svg.lucide-chevron-down');
+    expect(arrow).not.toBeNull();
+    expect(arrow).toHaveClass('text-slate-500', 'dark:text-slate-400');
+    expect(arrow).not.toHaveClass('text-slate-400');
+    expect(arrow).not.toHaveClass('dark:text-slate-500');
+    expect(arrow).toHaveClass('w-3.5', 'h-3.5', 'shrink-0');
+    expect(arrow).toHaveAttribute('aria-hidden', 'true');
+  });
 });

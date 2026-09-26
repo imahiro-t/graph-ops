@@ -423,8 +423,8 @@ export const AppSettingsEditor: React.FC<Props> = ({
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 text-xs py-8 justify-center">
-        <Loader2 className="w-4 h-4 animate-spin" /> {t('settings.common.loading')}
+      <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
+        <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> {t('settings.common.loading')}
       </div>
     );
   }
@@ -740,7 +740,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                   testConnectionBlocked ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-200 dark:hover:bg-slate-700'
                 }`}
               >
-                {testingConnection ? <Loader2 className="w-3 h-3 animate-spin" /> : <PlugZap className="w-3 h-3" />}
+                {testingConnection ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <PlugZap aria-hidden="true" className="w-3 h-3" />}
                 {testingConnection ? t('settings.appSettings.storage.testingConnection') : t('settings.appSettings.storage.testConnection')}
               </button>
               {/* 読み上げは Storage セクション末尾の常時マウントの live region（SC 4.1.3）。 */}
@@ -749,7 +749,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                   aria-hidden="true"
                   className={`text-[11px] flex items-center gap-1 ${connectionTestResult.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}
                 >
-                  {connectionTestResult.ok ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <XCircle className="w-3.5 h-3.5 shrink-0" />}
+                  {connectionTestResult.ok ? <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0" /> : <XCircle aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />}
                   {connectionTestResult.message}
                 </span>
               )}
@@ -924,7 +924,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
         <StatusLiveRegion message={savedFlash ? t('settings.common.saveSuccess') : ''} />
         {savedFlash && (
           <span aria-hidden="true" className="text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-1">
-            <CheckCircle2 className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}
+            <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}
           </span>
         )}
         {saveBlockedReason && (
@@ -951,7 +951,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
             saveBlocked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'
           }`}
         >
-          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+          {saving ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Save aria-hidden="true" className="w-3.5 h-3.5" />}
           {saving ? t('settings.common.saving') : t('settings.common.save')}
         </button>
       </div>
@@ -959,12 +959,12 @@ export const AppSettingsEditor: React.FC<Props> = ({
       {/* Project management */}
       <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2">
         <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-          <FolderCog className="w-3.5 h-3.5" /> {t('settings.appSettings.projects.title')}
+          <FolderCog aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.appSettings.projects.title')}
         </h3>
         <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.appSettings.projects.description')}</p>
         <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.appSettings.projects.localPathHint')}</p>
         {projects.length === 0 ? (
-          <div className="text-center text-slate-400 dark:text-slate-500 text-xs py-6 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
+          <div className="text-center text-slate-500 dark:text-slate-400 text-xs py-6 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
             {t('settings.appSettings.projects.empty')}
           </div>
         ) : (
@@ -995,9 +995,9 @@ export const AppSettingsEditor: React.FC<Props> = ({
                     onClick={() => handleDeleteProject(p)}
                     disabled={projectDeletingId === p.id}
                     title={t('settings.appSettings.projects.delete')}
-                    className="ml-auto mb-0.5 p-1 text-slate-400 dark:text-slate-500 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40 shrink-0"
+                    className="ml-auto mb-0.5 p-1 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40 shrink-0"
                   >
-                    {projectDeletingId === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    {projectDeletingId === p.id ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Trash2 aria-hidden="true" className="w-3.5 h-3.5" />}
                   </button>
                 </div>
                 <div className="flex items-end gap-2">
@@ -1023,7 +1023,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                     disabled={!isProjectDirty(p) || isProjectInvalid(p) || projectSavingId === p.id}
                     className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 rounded text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1 shrink-0 transition"
                   >
-                    {projectSavingId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                    {projectSavingId === p.id ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <Save aria-hidden="true" className="w-3 h-3" />}
                     {t('settings.common.save')}
                   </button>
                 </div>

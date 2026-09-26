@@ -253,7 +253,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
       )}
 
       {loading && !data ? (
-        <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 text-xs py-8 justify-center">
+        <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
           <Loader2 className="w-4 h-4 motion-safe:animate-spin" aria-hidden="true" /> {t('settings.common.loading')}
         </div>
       ) : (
@@ -320,7 +320,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
             <StatusLiveRegion message={savedFlash ? t('settings.common.saveSuccess') : ''} />
             {savedFlash && (
               <span aria-hidden="true" className="text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}
+                <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}
               </span>
             )}
             <button

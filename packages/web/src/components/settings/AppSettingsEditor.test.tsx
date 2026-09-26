@@ -401,6 +401,22 @@ describe('AppSettingsEditor project local paths', () => {
     expect(localPathInput('p-alpha')).toHaveValue('');
     expect(row('p-alpha').getAllByText(i18n.t('settings.appSettings.projects.notSet')).length).toBeGreaterThan(0);
   });
+
+  // DFLT-00165: the icon-only delete button rests at text-slate-500 /
+  // dark:text-slate-400 for WCAG 1.4.11's 3:1 on the project row's white /
+  // slate-900 (4.76:1 / 6.96:1; the old text-slate-400 / dark:text-slate-500
+  // was 2.56:1 / 3.75:1). The red hover and the disabled opacity shown while
+  // deleting (a disabled control is exempt from 1.4.11) are kept.
+  it('rests the project delete button at slate-500 / dark:slate-400, keeping the red hover and disabled opacity', async () => {
+    renderWithProjects([alpha]);
+    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+    const del = row('p-alpha').getByTitle(i18n.t('settings.appSettings.projects.delete'));
+    expect(del).toHaveClass('text-slate-500', 'dark:text-slate-400');
+    expect(del).not.toHaveClass('text-slate-400');
+    expect(del).not.toHaveClass('dark:text-slate-500');
+    expect(del).toHaveClass('hover:text-red-600', 'dark:hover:text-red-400', 'disabled:opacity-40');
+  });
 });
 
 // DFLT-00153: the former node/workflow config directory field now edits the

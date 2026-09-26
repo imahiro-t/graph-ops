@@ -221,6 +221,24 @@ describe('TicketItem node-row chevron', () => {
     fireEvent.click(nodeIdEl, { detail: 1 });
     expect(nodeChevron(NODE_1.id)).toHaveAttribute('aria-expanded', 'false');
   });
+
+  it('shows a focus-visible ring (lighter blue in dark mode) and no ring on a plain focus', () => {
+    renderItem(true);
+    for (const node of [NODE_1, NODE_2]) {
+      const tokens = nodeChevron(node.id).className.split(/\s+/);
+      for (const cls of [
+        'rounded',
+        'focus:outline-none',
+        'focus-visible:ring-2',
+        'focus-visible:ring-blue-500',
+        'dark:focus-visible:ring-blue-400',
+      ]) {
+        expect(tokens).toContain(cls);
+      }
+      // Only focus-visible draws a ring, so a mouse click shows none.
+      expect(tokens.filter(c => c.startsWith('focus:ring') || c.startsWith('dark:focus:ring'))).toEqual([]);
+    }
+  });
 });
 
 describe('Chevron translations', () => {

@@ -16,7 +16,7 @@ import {
   MonitorCog,
   Languages
 } from 'lucide-react';
-import { AutopilotRun, Label, TicketDetail, TicketGraph, TicketStatus, TicketPriority, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
+import { AutopilotRun, Label, TicketDetail, TicketGraph, TicketStatus, TicketPriority, PendingApprovalCounts, Project, TICKET_STATUSES, TICKET_PRIORITIES } from './types';
 import { descendantsIndex, fetchAutopilotRuns, ticketAutopilotView } from './lib/autopilotApi';
 import { getStatusMeta, matchesStatusFilter } from './statusMeta';
 import { getPriorityMeta, matchesPriorityFilter } from './priorityMeta';
@@ -31,11 +31,13 @@ import { ClaudeRunnerModal } from './components/ClaudeRunnerModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ProjectSetupModal } from './components/ProjectSetupModal';
 import { CreateTicketModal } from './components/CreateTicketModal';
+import { PendingApprovalBadge } from './components/PendingApprovalBadge';
 import { useClaudeLaunch } from './hooks/useClaudeLaunch';
 import { useTheme, ThemePreference } from './hooks/useTheme';
 import { formatTime } from './i18n/formatDate';
 import { localizedApiErrorMessage } from './lib/apiError';
 import { apiFetch } from './lib/apiFetch';
+import { fetchPendingApprovalCounts } from './lib/pendingApprovals';
 import { fetchAppSettings } from './lib/settingsApi';
 import { useLatest } from './hooks/useLatest';
 
@@ -75,6 +77,8 @@ interface ProjectScoped<T> {
 const NO_LABELS: Label[] = [];
 const NO_TICKETS: TicketDetail[] = [];
 const NO_RUNS: AutopilotRun[] = [];
+// The header project switcher's popup, referenced by its button's aria-controls.
+const PROJECT_MENU_ID = 'project-switcher-menu';
 
 // How often the dashboard re-reads the ticket list. Unchanged by DFLT-00112
 // (that ticket cut the number of requests per round, not their frequency);
@@ -201,6 +205,106 @@ export const App: React.FC = () => {
   // focus on close when the element that opened it is gone (the menu item
   // unmounts with the menu) or the dialog opened by itself (?newProject=1).
   const projectMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const projectMenuRef = useRef<HTMLDivElement>(null);
+  // Per-project count of tickets awaiting approval, badged on the switcher's
+  // menu items (DFLT-00144). Refetched every time the menu opens; empty
+  // while that fetch is in flight and after it fails, so the menu never
+  // shows a stale count and never depends on this request to be usable.
+  const [pendingApprovalCounts, setPendingApprovalCounts] = useState<PendingApprovalCounts>({});
+  // Only the latest open's answer is applied: an earlier, slower response
+  // arriving after a quick close-and-reopen would otherwise overwrite the
+  // fresh counts with old ones.
+  const pendingApprovalsSeqRef = useRef(0);
+  const refreshPendingApprovalCounts = async () => {
+    const seq = ++pendingApprovalsSeqRef.current;
+    setPendingApprovalCounts({});
+    try {
+      const counts = await fetchPendingApprovalCounts();
+      if (seq === pendingApprovalsSeqRef.current) setPendingApprovalCounts(counts);
+    } catch (e) {
+      console.error('Failed to load pending approval counts', e);
+    }
+  };
+  const toggleProjectMenu = () => {
+    if (isProjectMenuOpen) {
+      setIsProjectMenuOpen(false);
+      return;
+    }
+    setIsProjectMenuOpen(true);
+    void refreshPendingApprovalCounts();
+  };
+  // Escape closes the open switcher menu and puts focus back on its button
+  // (DFLT-00155) when focus is on the button, a menu item, or <body> (Safari
+  // does not focus a button on click). The listener only exists while the
+  // menu is open, so Escape elsewhere is untouched when it is closed. An
+  // Escape another handler already took, or one that cancels an IME
+  // composition, is left alone -- the same rules as useModalDialog.
+  //
+  // Focus anywhere else is left alone too. Tab past the button and the menu
+  // closes the menu (DFLT-00159, handleProjectSwitcherBlur below), but a
+  // click or blur() that drops focus to <body> leaves it open, so a modal
+  // can still end up open on top of it. The menu's listener was registered
+  // first and so runs before the modal's (useModalDialog), and taking that
+  // Escape would leave the modal open with focus pulled out of it behind it.
+  // Clicking the modal's backdrop also drops focus to <body>, which on its
+  // own counts as "on the switcher" below. So, as a defense, while any modal
+  // dialog (aria-modal="true" -- every modal in the app, dialog or
+  // alertdialog; the menu itself is non-modal) is open, the menu leaves
+  // Escape to it wherever focus is.
+  useEffect(() => {
+    if (!isProjectMenuOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.key !== 'Escape') return;
+      if (e.isComposing || e.keyCode === 229) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      const target = e.target;
+      const focusIsOnSwitcher =
+        !(target instanceof Node) ||
+        target === document ||
+        target === document.body ||
+        target === document.documentElement ||
+        projectMenuButtonRef.current?.contains(target) ||
+        projectMenuRef.current?.contains(target);
+      if (!focusIsOnSwitcher) return;
+      e.preventDefault();
+      setIsProjectMenuOpen(false);
+      projectMenuButtonRef.current?.focus();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isProjectMenuOpen]);
+  // DFLT-00159: the menu closes when keyboard focus leaves the button and the
+  // menu. Whether a focusout came from Tab is recorded on keydown (Tab, or
+  // Shift+Tab, without Ctrl/Meta/Alt, which switch tabs or apps) and
+  // consumed by the very next focusout; any other key or a pointerdown
+  // clears it, so a record left behind by a Tab that moved no focus never
+  // outlives the next interaction.
+  const tabLeavingRef = useRef(false);
+  const handleProjectSwitcherKeyDown = (e: React.KeyboardEvent) => {
+    tabLeavingRef.current =
+      e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.nativeEvent.isComposing;
+  };
+  const handleProjectSwitcherPointerDown = () => {
+    tabLeavingRef.current = false;
+  };
+  const handleProjectSwitcherBlur = (e: React.FocusEvent) => {
+    const viaTab = tabLeavingRef.current;
+    tabLeavingRef.current = false;
+    if (!isProjectMenuOpen) return;
+    const next = e.relatedTarget;
+    if (
+      next instanceof Node &&
+      (projectMenuButtonRef.current?.contains(next) || projectMenuRef.current?.contains(next))
+    ) {
+      return; // Moving between the button and the menu's items.
+    }
+    // No next element: focus left the page (Tab out of the first element, a
+    // window or tab switch) or fell to <body> (a click on something
+    // unfocusable, blur()). Only Tab closes here; closing on a click would
+    // unmount the menu before the click on an item or the backdrop lands.
+    if (next === null && !viaTab) return;
+    setIsProjectMenuOpen(false);
+  };
   // The directory `graph-engine ui` asked a project to be set up for (see
   // the newProject query effect below), or '' when the dialog was opened
   // from the header's "New project..." entry.
@@ -942,38 +1046,94 @@ export const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="relative">
+            <div
+              className="relative"
+              onKeyDown={handleProjectSwitcherKeyDown}
+              onPointerDown={handleProjectSwitcherPointerDown}
+              onBlur={handleProjectSwitcherBlur}
+            >
+              {/* aria-haspopup="dialog", not "menu" (DFLT-00155): the popup
+                  is a plain non-modal group of buttons walked with Tab, so it
+                  is a role="dialog". "menu" would promise the WAI-ARIA menu
+                  button pattern (menuitems, arrow-key focus, Tab closes),
+                  which this popup does not implement. Like one, though, it
+                  closes when keyboard focus leaves the button and the popup
+                  (DFLT-00159). aria-controls only while open: the popup is
+                  not rendered while closed. */}
               <button
                 ref={projectMenuButtonRef}
-                onClick={() => setIsProjectMenuOpen(v => !v)}
+                type="button"
+                onClick={toggleProjectMenu}
+                aria-expanded={isProjectMenuOpen}
+                aria-haspopup="dialog"
+                aria-controls={isProjectMenuOpen ? PROJECT_MENU_ID : undefined}
                 className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 shadow-xs transition max-w-[14rem]"
                 title={currentProject ? currentProject.local_path || t('settings.appSettings.projects.notSet') : undefined}
               >
-                <FolderOpen className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
+                <FolderOpen aria-hidden="true" className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
                 <span className="truncate">
                   {currentProject ? currentProject.name : t('projectSwitcher.noProject')}
                 </span>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                {/* DFLT-00163: WCAG 1.4.11 (3:1). The arrow is the only sign that this opens a menu.
+                    slate-500 is 4.76:1 on white and 4.55:1 on the slate-50 hover; slate-400 is
+                    6.96:1 on slate-900 and 5.71:1 on the slate-800 hover. */}
+                <ChevronDown aria-hidden="true" className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 shrink-0" />
               </button>
 
               {isProjectMenuOpen && (
                 <>
-                  <div className="fixed inset-0 z-40" onClick={() => setIsProjectMenuOpen(false)} />
-                  <div className="absolute left-0 mt-1.5 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-sm">
+                  {/* data-testid: jsdom has no hit testing, so tests click
+                      this backdrop directly to close the menu. */}
+                  <div
+                    className="fixed inset-0 z-40"
+                    data-testid="project-switcher-overlay"
+                    onClick={() => setIsProjectMenuOpen(false)}
+                  />
+                  <div
+                    ref={projectMenuRef}
+                    id={PROJECT_MENU_ID}
+                    role="dialog"
+                    aria-label={t('projectSwitcher.menuLabel')}
+                    className="absolute left-0 mt-1.5 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-sm"
+                  >
                     {projects.length === 0 && (
-                      <div className="px-3 py-2 text-xs text-slate-400 dark:text-slate-500">{t('projectSwitcher.empty')}</div>
+                      <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">{t('projectSwitcher.empty')}</div>
                     )}
-                    {projects.map(p => (
-                      <button
-                        key={p.id}
-                        onClick={() => switchToProject(p)}
-                        className="w-full text-left px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 text-slate-700 dark:text-slate-300"
-                      >
-                        <Check className={`w-3.5 h-3.5 shrink-0 ${p.id === currentProject?.id ? 'text-blue-600 dark:text-blue-400' : 'text-transparent'}`} />
-                        <span className="truncate">{p.name}</span>
-                        <span className="ml-auto text-[10px] text-slate-400 dark:text-slate-500 font-mono">{p.prefix}</span>
-                      </button>
-                    ))}
+                    {projects.map(p => {
+                      // DFLT-00158: the check mark shows the current project
+                      // by color alone, so the item also carries
+                      // aria-current and the icon is hidden from assistive
+                      // technology. Not menuitemradio/aria-checked: the popup
+                      // is a dialog of Tab-reachable buttons, not an ARIA
+                      // menu. The attribute is left out (undefined, never
+                      // false, which React would render as "false") on every
+                      // other item.
+                      const isCurrent = p.id === currentProject?.id;
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => switchToProject(p)}
+                          aria-current={isCurrent ? 'true' : undefined}
+                          className="w-full text-left px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 text-slate-700 dark:text-slate-300"
+                        >
+                          <Check
+                            aria-hidden="true"
+                            className={`w-3.5 h-3.5 shrink-0 ${isCurrent ? 'text-blue-600 dark:text-blue-400' : 'text-transparent'}`}
+                          />
+                          <span className="truncate">{p.name}</span>
+                          <span className="ml-auto flex items-center gap-2 shrink-0">
+                            {pendingApprovalCounts[p.id] > 0 && (
+                              <PendingApprovalBadge count={pendingApprovalCounts[p.id]} />
+                            )}
+                            {/* DFLT-00156: WCAG 1.4.3 (4.5:1) on every item background. slate-500 is
+                                4.76:1 on white and 4.55:1 on the slate-50 hover; slate-400 is 6.96:1
+                                on slate-900 and 5.71:1 on the slate-800 hover. The light hover margin
+                                is thin: recompute if the item backgrounds get darker. */}
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{p.prefix}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
                     <div className="border-t border-slate-100 dark:border-slate-800 mt-1 pt-1">
                       <button
                         onClick={() => {
@@ -983,7 +1143,7 @@ export const App: React.FC = () => {
                         }}
                         className="w-full text-left px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 text-blue-700 dark:text-blue-400 font-medium"
                       >
-                        <Plus className="w-3.5 h-3.5" />
+                        <Plus aria-hidden="true" className="w-3.5 h-3.5" />
                         {t('projectSwitcher.createNew')}
                       </button>
                     </div>
@@ -996,7 +1156,7 @@ export const App: React.FC = () => {
               onClick={() => setIsClaudeGlobalOpen(true)}
               className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-700 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 shadow-xs transition"
             >
-              <Terminal className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <Terminal aria-hidden="true" className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
               {t('header.launchClaude')}
             </button>
 
@@ -1005,7 +1165,7 @@ export const App: React.FC = () => {
               title={t('header.language.toggleTitle', { lang: t(`header.language.${currentLanguage}`) })}
               className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs transition flex items-center gap-1.5"
             >
-              <Languages className="w-4 h-4" />
+              <Languages aria-hidden="true" className="w-4 h-4" />
               <span className="text-xs font-semibold">{t(`header.language.${currentLanguage}`)}</span>
             </button>
 
@@ -1014,7 +1174,7 @@ export const App: React.FC = () => {
               title={t('header.theme.toggleTitle', { mode: t(`header.theme.${themePreference}`) })}
               className="p-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs transition"
             >
-              <ThemeIcon className="w-4 h-4" />
+              <ThemeIcon aria-hidden="true" className="w-4 h-4" />
             </button>
 
             <button
@@ -1022,7 +1182,7 @@ export const App: React.FC = () => {
               title={t('header.settings')}
               className="p-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs transition"
             >
-              <SettingsIcon className="w-4 h-4" />
+              <SettingsIcon aria-hidden="true" className="w-4 h-4" />
             </button>
 
             <button
@@ -1039,7 +1199,7 @@ export const App: React.FC = () => {
               title={currentProject ? undefined : t('projectSwitcher.selectFirst')}
               className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
             >
-              <Plus className="w-4 h-4" />
+              <Plus aria-hidden="true" className="w-4 h-4" />
               {t('header.newTicket')}
             </button>
           </div>
@@ -1049,7 +1209,10 @@ export const App: React.FC = () => {
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+              {/* DFLT-00163: WCAG 1.4.11 (3:1). The magnifier marks this as a search field once the
+                  placeholder is gone. slate-500 is 4.55:1 on the slate-50 input; slate-400 is
+                  5.71:1 on the slate-800 input. */}
+              <Search aria-hidden="true" className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-500 dark:text-slate-400" />
               <input
                 type="text"
                 value={filterQuery}
@@ -1124,7 +1287,7 @@ export const App: React.FC = () => {
               className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition"
               title={t('toolbar.refreshTitle')}
             >
-              <RotateCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <RotateCw aria-hidden="true" className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <span>
               {t('toolbar.updatedAt', {
@@ -1187,7 +1350,7 @@ export const App: React.FC = () => {
           <StatusLiveRegion message={openNotice} />
           {!isCurrentProjectResolved ? (
             <div
-              className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm"
+              className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm"
               aria-busy="true"
             >
               {t('emptyState.loadingTickets')}
@@ -1198,16 +1361,20 @@ export const App: React.FC = () => {
               role="alert"
             >
               <p>{t('projectSwitcher.loadFailed')}</p>
+              {/* DFLT-00164: the inherited slate-500 drops to 4.34:1 on the
+                  slate-100 hover background, so the button sets slate-600 /
+                  slate-300 (the DFLT-00162 pair) to keep WCAG 1.4.3's 4.5:1
+                  in both states and both themes. */}
               <button
                 onClick={retryCurrentProject}
-                className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold inline-flex items-center gap-1.5 transition"
+                className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold inline-flex items-center gap-1.5 transition"
               >
-                <RotateCw className="w-4 h-4" />
+                <RotateCw aria-hidden="true" className="w-4 h-4" />
                 {t('projectSwitcher.retry')}
               </button>
             </div>
           ) : !currentProject ? (
-            <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm space-y-3">
+            <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm space-y-3">
               <p>{t('projectSwitcher.noProjectYet')}</p>
               <button
                 onClick={() => {
@@ -1216,19 +1383,19 @@ export const App: React.FC = () => {
                 }}
                 className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-xs transition"
               >
-                <Plus className="w-4 h-4" />
+                <Plus aria-hidden="true" className="w-4 h-4" />
                 {t('projectSwitcher.createNew')}
               </button>
             </div>
           ) : isTicketListPending ? (
             <div
-              className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm"
+              className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm"
               aria-busy="true"
             >
               {t('emptyState.loadingTickets')}
             </div>
           ) : filteredTickets.length === 0 ? (
-            <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 text-sm">
+            <div className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm">
               {t('emptyState.noTicketsMatch')}
             </div>
           ) : (
@@ -1260,20 +1427,22 @@ export const App: React.FC = () => {
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => setPage(p => Math.max(1, p - 1))}
+                      aria-label={t('pagination.previous')}
                       disabled={currentPage <= 1}
                       className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-white dark:disabled:hover:bg-slate-900 transition"
                     >
-                      <ChevronLeft className="w-3.5 h-3.5" />
+                      <ChevronLeft aria-hidden="true" className="w-3.5 h-3.5" />
                     </button>
                     <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">
                       {t('pagination.pageOf', { page: currentPage, total: totalPages })}
                     </span>
                     <button
                       onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                      aria-label={t('pagination.next')}
                       disabled={currentPage >= totalPages}
                       className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-white dark:disabled:hover:bg-slate-900 transition"
                     >
-                      <ChevronRight className="w-3.5 h-3.5" />
+                      <ChevronRight aria-hidden="true" className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>

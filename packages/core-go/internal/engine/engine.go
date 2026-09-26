@@ -1666,6 +1666,40 @@ func (e *GraphEngine) UpdateNode(nodeID string, patch store.NodePatch) (domain.G
 	return updated, nil
 }
 
+// HasPendingApproval reports whether a ticket's graph has an approval_gate
+// waiting for a human decision: a gate still at TODO whose every
+// non-iteration_loop incoming edge comes from a DONE node (the same "reached"
+// check GetExecutableNodes uses -- see allNonLoopPrereqsDone). A REJECTED
+// gate, a gate not reached yet, and any other manual node (release, ...) do
+// not count.
+//
+// This is the single Go definition of "awaiting approval": deriveTicketStatus
+// uses it for a ticket's IN REVIEW status, and GET
+// /api/projects/pending-approvals uses it to count the tickets awaiting
+// approval per project (DFLT-00144). The Web UI implements the same check
+// independently as pendingApprovalNodeIds
+// (packages/web/src/components/TicketItem.tsx) for the ticket list's
+// "awaiting approval" blink; keep the two in step.
+func HasPendingApproval(nodes []domain.GraphNode, edges []domain.GraphEdge) bool {
+	byID := make(map[string]domain.GraphNode, len(nodes))
+	for _, n := range nodes {
+		byID[n.ID] = n
+	}
+	return hasPendingApproval(nodes, byID, edges)
+}
+
+// hasPendingApproval is HasPendingApproval for a caller that already has the
+// node index built.
+func hasPendingApproval(nodes []domain.GraphNode, byID map[string]domain.GraphNode, edges []domain.GraphEdge) bool {
+	for _, n := range nodes {
+		if n.Type == domain.NodeTypeApprovalGate && n.Status == domain.NodeTODO &&
+			allNonLoopPrereqsDone(n.ID, byID, edges) {
+			return true
+		}
+	}
+	return false
+}
+
 // deriveTicketStatus computes the ticket status implied by detail's ticket/
 // node state (DONE > IN RELEASE > IN REVIEW > IN PROGRESS, in that
 // precedence), with ok=false when none of those apply (e.g. no nodes, or
@@ -1683,7 +1717,9 @@ func (e *GraphEngine) UpdateNode(nodeID string, patch store.NodePatch) (domain.G
 // pendingApprovalNodeIds (packages/web/src/components/TicketItem.tsx) so the
 // ticket list's "awaiting approval" blink and this status agree. A
 // review/review_gate node IN REVIEW, or a REJECTED approval_gate, both fall
-// through to the IN PROGRESS catch-all instead.
+// through to the IN PROGRESS catch-all instead. That check lives in
+// HasPendingApproval, shared with the per-project pending-approval counts
+// (DFLT-00144).
 //
 // DONE additionally requires detail.GraphExpandedAt to be set: the seed
 // (plan/plan_review) being DONE, before ExpandGraph has ever run, must not
@@ -1698,7 +1734,7 @@ func deriveTicketStatus(detail domain.TicketDetail) (domain.TicketStatus, bool) 
 
 	allDone := len(detail.Nodes) > 0 && detail.GraphExpandedAt != nil
 	releaseInProgress := false
-	anyPendingApproval := false
+	anyPendingApproval := hasPendingApproval(detail.Nodes, byID, detail.Edges)
 	anyInProgressOrDone := false
 	for _, n := range detail.Nodes {
 		if n.Status != domain.NodeDone {
@@ -1706,10 +1742,6 @@ func deriveTicketStatus(detail domain.TicketDetail) (domain.TicketStatus, bool) 
 		}
 		if n.Type == domain.NodeTypeRelease && n.Status == domain.NodeInProgress {
 			releaseInProgress = true
-		}
-		if n.Type == domain.NodeTypeApprovalGate && n.Status == domain.NodeTODO &&
-			allNonLoopPrereqsDone(n.ID, byID, detail.Edges) {
-			anyPendingApproval = true
 		}
 		if n.Status == domain.NodeInProgress || n.Status == domain.NodeDone ||
 			n.Status == domain.NodeInReview || n.Status == domain.NodeRejected {

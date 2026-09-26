@@ -5,11 +5,32 @@
 // (white / slate-50 / slate-100 in light, slate-900 / slate-800 / slate-700
 // in dark). The old text-slate-400 / dark:text-slate-500 did not.
 //
+// DFLT-00162: the panel's secondary text (the "no description" and
+// "no artifacts yet" placeholders, among others) meets WCAG 1.4.3's 4.5:1
+// text contrast at text-slate-500 / dark:text-slate-400 against the white /
+// slate-900 panels. The node row's sequence number and update time sit on a
+// row whose hover background is slate-100 / slate-700, where that pair falls
+// short (4.34:1 / 4.04:1), so they use text-slate-600 / dark:text-slate-300
+// instead. The ratios per background are in the ticket's implementation
+// notes.
+//
+// DFLT-00164: the node row's node id sits on the same row, so it moves from
+// dark:text-slate-400 (4.04:1 on the slate-700 hover) to the same
+// text-slate-600 / dark:text-slate-300 pair.
+//
+// DFLT-00165: the expanded panel's closed-reason Archive icon is non-text
+// content that tells the ticket was closed, so it moves from text-slate-400 /
+// dark:text-slate-500 (2.51:1 / 3.56:1 on the translucent panel) to
+// text-slate-500 / dark:text-slate-400 (4.65:1 / 6.61:1), clearing WCAG
+// 1.4.11's 3:1.
+//
 // jsdom computes no colors, so these tests pin the Tailwind classes that
 // produce them, and check that the existing hover/disabled classes are kept.
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
+import { formatTime } from '../i18n/formatDate';
 import { GraphNode, TicketDetail, TicketStatus } from '../types';
 import { TicketItem } from './TicketItem';
 
@@ -57,7 +78,7 @@ const renderItem = (ticket: TicketDetail, isExpanded = false) =>
     />
   );
 
-const expectContrastColors = (el: HTMLElement) => {
+const expectContrastColors = (el: Element) => {
   expect(el).toHaveClass('text-slate-500', 'dark:text-slate-400');
   expect(el).not.toHaveClass('text-slate-400');
   expect(el).not.toHaveClass('dark:text-slate-500');
@@ -116,5 +137,62 @@ describe('TicketItem icon button contrast (WCAG 1.4.11)', () => {
     renderItem(makeTicket('IN PROGRESS', [NODE]), true);
     const chevron = screen.getByRole('button', { name: i18n.t('ticketItem.toggleNode', { id: NODE.id }) });
     expectContrastColors(chevron);
+  });
+
+  it('draws the closed-reason Archive icon in slate-500 / dark:slate-400 (DFLT-00165)', () => {
+    // The panel is bg-slate-50/50 over white (about #FCFDFE: 4.65:1) and
+    // dark:bg-slate-800/30 over slate-900 (about #141C2F: 6.61:1).
+    renderItem({ ...makeTicket('CLOSED'), closed_reason: '重複' }, true);
+    const row = screen.getByText('重複').parentElement!;
+    const icon = row.querySelector('svg');
+    expect(icon).not.toBeNull();
+    expectContrastColors(icon!);
+    expect(icon).toHaveClass('w-3.5', 'h-3.5');
+  });
+});
+
+describe('TicketItem secondary text contrast (WCAG 1.4.3, DFLT-00162)', () => {
+  const expectNoOldColors = (el: HTMLElement) => {
+    expect(el).not.toHaveClass('text-slate-400');
+    expect(el).not.toHaveClass('dark:text-slate-500');
+  };
+
+  it('draws the "no description" placeholder in slate-500 / dark:slate-400', () => {
+    renderItem({ ...makeTicket(), description: '' }, true);
+    const empty = screen.getByText(i18n.t('ticketItem.description.empty'));
+    expectContrastColors(empty);
+    // Size and style are unchanged.
+    expect(empty).toHaveClass('italic', 'text-xs');
+  });
+
+  it('draws the "no artifacts yet" placeholder in slate-500 / dark:slate-400', async () => {
+    const user = userEvent.setup();
+    renderItem(makeTicket(), true);
+    await user.click(screen.getByRole('button', { name: i18n.t('ticketItem.tabs.artifacts', { count: 0 }) }));
+    expectContrastColors(screen.getByText(i18n.t('ticketItem.noArtifactsYet')));
+  });
+
+  it('draws the node row\'s sequence number and update time in slate-600 / dark:slate-300, which also clear 4.5:1 on the hover background', () => {
+    renderItem(makeTicket('IN PROGRESS', [NODE]), true);
+    const chevron = screen.getByRole('button', { name: i18n.t('ticketItem.toggleNode', { id: NODE.id }) });
+    const row = chevron.parentElement!;
+    const seq = within(row).getByText('1', { exact: true });
+    const time = within(row.parentElement!).getByText(formatTime(NODE.updated_at, i18n.language));
+    for (const el of [seq, time]) {
+      expect(el).toHaveClass('text-slate-600', 'dark:text-slate-300', 'font-mono');
+      expectNoOldColors(el);
+    }
+    // The row's hover background (a state color) is unchanged.
+    expect(row.parentElement).toHaveClass('hover:bg-slate-100', 'dark:hover:bg-slate-700');
+  });
+
+  it('draws the node row\'s node id in slate-600 / dark:slate-300, which also clear 4.5:1 on the hover background (DFLT-00164)', () => {
+    renderItem(makeTicket('IN PROGRESS', [NODE]), true);
+    const chevron = screen.getByRole('button', { name: i18n.t('ticketItem.toggleNode', { id: NODE.id }) });
+    const row = chevron.parentElement!;
+    const id = within(row).getByText(NODE.id, { exact: true });
+    expect(id).toHaveClass('text-slate-600', 'dark:text-slate-300', 'font-mono', 'font-bold');
+    expect(id).not.toHaveClass('dark:text-slate-400');
+    expect(row.parentElement).toHaveClass('hover:bg-slate-100', 'dark:hover:bg-slate-700');
   });
 });

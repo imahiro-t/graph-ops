@@ -107,6 +107,10 @@ func (s *Server) Routes() http.Handler {
 
 	mux.HandleFunc("POST /api/projects", s.handleCreateProject)
 	mux.HandleFunc("GET /api/projects", s.handleListProjects)
+	// A literal path wins over the {id} pattern below (Go 1.22+ ServeMux
+	// precedence), and project IDs are proj-xxxx, so this never shadows a
+	// real project (DFLT-00144).
+	mux.HandleFunc("GET /api/projects/pending-approvals", s.handlePendingApprovals)
 	mux.HandleFunc("GET /api/projects/{id}", s.handleGetProject)
 	mux.HandleFunc("PATCH /api/projects/{id}", s.handleUpdateProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", s.handleDeleteProject)
