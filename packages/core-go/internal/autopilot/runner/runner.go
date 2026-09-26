@@ -235,8 +235,8 @@ func (s *Service) index(projectID string) (*projectIndex, error) {
 		return nil, err
 	}
 	sort.SliceStable(all, func(i, j int) bool {
-		if all[i].CreatedAt != all[j].CreatedAt {
-			return all[i].CreatedAt < all[j].CreatedAt
+		if c := domain.CompareTimestamps(all[i].CreatedAt, all[j].CreatedAt); c != 0 {
+			return c < 0
 		}
 		return all[i].ID < all[j].ID
 	})

@@ -1,7 +1,9 @@
 package store
 
 import (
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/graph-ops/core-go/internal/domain"
@@ -21,6 +23,10 @@ func mysqlTestConfig(t *testing.T) Config {
 	if host == "" {
 		t.Skip("GRAPH_TEST_MYSQL_HOST not set; skipping MySQLRepository tests (see mysqlTestConfig's doc comment)")
 	}
+	database := os.Getenv("GRAPH_TEST_MYSQL_DATABASE")
+	if err := checkMySQLTestDatabase(database); err != nil {
+		t.Fatalf("refusing to run MySQLRepository tests: %v", err)
+	}
 	port := 3306
 	if p := os.Getenv("GRAPH_TEST_MYSQL_PORT"); p != "" {
 		var err error
@@ -32,7 +38,7 @@ func mysqlTestConfig(t *testing.T) Config {
 		Backend:       "mysql",
 		MySQLHost:     host,
 		MySQLPort:     port,
-		MySQLDatabase: os.Getenv("GRAPH_TEST_MYSQL_DATABASE"),
+		MySQLDatabase: database,
 		MySQLUser:     os.Getenv("GRAPH_TEST_MYSQL_USER"),
 		MySQLPassword: os.Getenv("GRAPH_TEST_MYSQL_PASSWORD"),
 		// Deliberately no test-only lenient default: an unset
@@ -42,6 +48,48 @@ func mysqlTestConfig(t *testing.T) Config {
 		// default a real deployment gets, not a separately relaxed one.
 		MySQLTLSMode:   os.Getenv("GRAPH_TEST_MYSQL_TLS"),
 		MySQLTLSCAFile: os.Getenv("GRAPH_TEST_MYSQL_TLS_CA"),
+	}
+}
+
+// workingMySQLDatabase is the database name dev/mysql/compose.yaml creates
+// for day-to-day GraphOps use. The throwaway test databases live on the same
+// server, so the database name is the only thing telling them apart.
+const workingMySQLDatabase = "graph_ops"
+
+// checkMySQLTestDatabase rejects database names the MySQL tests must never
+// run against: newTestMySQLRepo deletes every row of every table before each
+// test and some tests alter the schema, so pointing GRAPH_TEST_MYSQL_DATABASE
+// at the working database would wipe it. An empty name is rejected too, so
+// the target is always stated explicitly (dev/mysql/test.sh and CI always set
+// one). This is a deny list rather than an allow list so that the names
+// test.sh (graph_ops_test_<epoch>_<pid>) and CI (graph_ops_ci) use keep
+// working without a shared naming rule.
+func checkMySQLTestDatabase(name string) error {
+	if name == "" {
+		return fmt.Errorf("GRAPH_TEST_MYSQL_DATABASE is empty; set it to a throwaway database (dev/mysql/test.sh creates one per run)")
+	}
+	if strings.EqualFold(name, workingMySQLDatabase) {
+		return fmt.Errorf("GRAPH_TEST_MYSQL_DATABASE is %q, the working database; the tests delete every row, so use a throwaway database (dev/mysql/test.sh creates one per run)", name)
+	}
+	return nil
+}
+
+func TestCheckMySQLTestDatabase(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		wantErr bool
+	}{
+		{"", true},
+		{"graph_ops", true},
+		{"GRAPH_OPS", true},
+		{"Graph_Ops", true},
+		{"graph_ops_ci", false},
+		{"graph_ops_test_1_2", false},
+	} {
+		err := checkMySQLTestDatabase(tc.name)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("checkMySQLTestDatabase(%q) = %v, want error: %v", tc.name, err, tc.wantErr)
+		}
 	}
 }
 

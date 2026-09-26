@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/graph-ops/core-go/internal/domain"
 )
@@ -150,15 +151,37 @@ func TestUpdateNode_EmptyPatchStillMovesUpdatedAt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("UpdateNode({}): %v", err)
 		}
-		if got.UpdatedAt <= node.UpdatedAt {
-			t.Errorf("updated_at = %s, want something after %s", got.UpdatedAt, node.UpdatedAt)
-		}
+		assertUpdatedAtMoved(t, node.UpdatedAt, got.UpdatedAt)
 		if got.Name != node.Name || got.Type != node.Type || got.Status != node.Status ||
 			got.IterationCount != node.IterationCount || got.MaxIterations != node.MaxIterations ||
 			got.IsManual != node.IsManual {
 			t.Errorf("an empty patch changed the row:\n before %+v\n after  %+v", node, got)
 		}
 	})
+}
+
+// assertUpdatedAtMoved fails the test unless after is a later instant than
+// before. The values are compared as parsed times, not as strings:
+// RFC3339Nano drops trailing zeros from the fraction, so a later time can
+// sort before an earlier one when its string extends the earlier one's --
+// "...43.1091Z" then "...43.10910002Z" puts '0' against 'Z', and the later
+// time compares as the smaller string.
+func assertUpdatedAtMoved(t *testing.T, before, after string) {
+	t.Helper()
+	b := mustParseRFC3339Nano(t, "updated_at before the update", before)
+	a := mustParseRFC3339Nano(t, "updated_at after the update", after)
+	if !a.After(b) {
+		t.Errorf("updated_at = %s, want something after %s", after, before)
+	}
+}
+
+func mustParseRFC3339Nano(t *testing.T, field, s string) time.Time {
+	t.Helper()
+	ts, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		t.Fatalf("%s = %q is not an RFC3339Nano timestamp: %v", field, s, err)
+	}
+	return ts
 }
 
 // TestUpdateNode_MissingNodeStillErrors: the not-found behaviour is part of
@@ -289,9 +312,7 @@ func TestUpdateProject_EmptyPatchStillMovesUpdatedAt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("UpdateProject({}): %v", err)
 		}
-		if got.UpdatedAt <= proj.UpdatedAt {
-			t.Errorf("updated_at = %s, want something after %s", got.UpdatedAt, proj.UpdatedAt)
-		}
+		assertUpdatedAtMoved(t, proj.UpdatedAt, got.UpdatedAt)
 		if got.Name != proj.Name || got.Prefix != proj.Prefix {
 			t.Errorf("an empty patch changed the row:\n before %+v\n after  %+v", proj, got)
 		}
