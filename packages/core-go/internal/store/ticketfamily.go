@@ -48,24 +48,32 @@ func ListChildTickets(repo GraphRepository, parent domain.Ticket) ([]domain.Tick
 	return out, nil
 }
 
-// sortTicketsByCreation orders tickets oldest first, ties broken by ID (IDs
+// sortTicketsByCreation orders tickets oldest first, comparing created_at as
+// times (not strings; see domain.TimestampKey), ties broken by ID (IDs
 // within a project are minted from a zero-padded sequence, so this is still
 // creation order when two timestamps collide).
 func sortTicketsByCreation(tickets []domain.Ticket) {
 	sort.SliceStable(tickets, func(i, j int) bool {
-		if tickets[i].CreatedAt != tickets[j].CreatedAt {
-			return tickets[i].CreatedAt < tickets[j].CreatedAt
+		if c := domain.CompareTimestamps(tickets[i].CreatedAt, tickets[j].CreatedAt); c != 0 {
+			return c < 0
 		}
 		return tickets[i].ID < tickets[j].ID
 	})
 }
 
 // listChildTickets is the shared SQLite/MySQL body of ListChildTickets
-// (idx_tickets_parent backs the WHERE).
+// (idx_tickets_parent backs the WHERE). The ORDER BY is string order, so the
+// rows are re-sorted by sortTicketsByCreation, which means the same
+// (created_at, then id) with created_at compared as a time.
 func listChildTickets(db *sql.DB, parentID string) ([]domain.Ticket, error) {
-	return listTicketsWithLabels(db,
+	out, err := listTicketsWithLabels(db,
 		`SELECT `+ticketSelectCols+` FROM tickets WHERE parent_ticket_id = ? ORDER BY created_at ASC, id ASC`, []any{parentID},
 		`JOIN tickets t ON t.id = tl.ticket_id WHERE t.parent_ticket_id = ?`, []any{parentID})
+	if err != nil {
+		return nil, err
+	}
+	sortTicketsByCreation(out)
+	return out, nil
 }
 
 // ensureTicketParentColumn is the backend-independent body of the DFLT-00142

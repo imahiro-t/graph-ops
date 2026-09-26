@@ -468,17 +468,17 @@ func (r *SQLiteRepository) GetTicketDetail(id string) (*domain.TicketDetail, err
 // ListTickets lists every ticket with its labels (one extra query in total,
 // not one per ticket).
 func (r *SQLiteRepository) ListTickets() ([]domain.Ticket, error) {
-	return listTicketsWithLabels(r.db,
+	return ticketsNewestFirst(listTicketsWithLabels(r.db,
 		`SELECT `+ticketSelectCols+` FROM tickets ORDER BY created_at DESC`, nil,
-		``, nil)
+		``, nil))
 }
 
 // ListTicketsByProject lists projectID's tickets with their labels (one
 // extra query in total, not one per ticket).
 func (r *SQLiteRepository) ListTicketsByProject(projectID string) ([]domain.Ticket, error) {
-	return listTicketsWithLabels(r.db,
+	return ticketsNewestFirst(listTicketsWithLabels(r.db,
 		`SELECT `+ticketSelectCols+` FROM tickets WHERE project_id = ? ORDER BY created_at DESC`, []any{projectID},
-		`JOIN tickets t ON t.id = tl.ticket_id WHERE t.project_id = ?`, []any{projectID})
+		`JOIN tickets t ON t.id = tl.ticket_id WHERE t.project_id = ?`, []any{projectID}))
 }
 
 // ListChildTickets: see TicketChildLister.
@@ -609,7 +609,7 @@ func (r *SQLiteRepository) ListNodesByTicket(ticketID string) ([]domain.GraphNod
 		}
 		out = append(out, *n)
 	}
-	return out, rows.Err()
+	return oldestFirst(out, rows.Err(), nodeCreatedAt)
 }
 
 func (r *SQLiteRepository) UpdateNode(id string, patch NodePatch) (domain.GraphNode, error) {
@@ -671,7 +671,7 @@ func (r *SQLiteRepository) ListEdgesByTicket(ticketID string) ([]domain.GraphEdg
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	return oldestFirst(out, rows.Err(), edgeCreatedAt)
 }
 
 // ListTicketGraphs implements TicketGraphLister; see that interface's doc
@@ -795,7 +795,7 @@ func (r *SQLiteRepository) ListArtifactsByTicket(ticketID string) ([]domain.Arti
 		}
 		out = append(out, *a)
 	}
-	return out, rows.Err()
+	return oldestFirst(out, rows.Err(), artifactCreatedAt)
 }
 
 func (r *SQLiteRepository) ListArtifactsByNode(nodeID string) ([]domain.Artifact, error) {
@@ -812,7 +812,7 @@ func (r *SQLiteRepository) ListArtifactsByNode(nodeID string) ([]domain.Artifact
 		}
 		out = append(out, *a)
 	}
-	return out, rows.Err()
+	return oldestFirst(out, rows.Err(), artifactCreatedAt)
 }
 
 // --- Projects ---
@@ -914,7 +914,7 @@ func (r *SQLiteRepository) ListProjects() ([]domain.Project, error) {
 		}
 		out = append(out, *p)
 	}
-	return out, rows.Err()
+	return oldestFirst(out, rows.Err(), projectCreatedAt)
 }
 
 func (r *SQLiteRepository) UpdateProject(id string, patch ProjectPatch) (domain.Project, error) {

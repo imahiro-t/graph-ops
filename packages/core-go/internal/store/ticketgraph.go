@@ -141,5 +141,13 @@ func listTicketGraphs(db *sql.DB, edgeCols string, ticketIDs []string) (map[stri
 			return nil, nil, err
 		}
 	}
+	// The ORDER BY above is string order; put each ticket's rows in time
+	// order (stable, so the id tiebreaker still settles equal instants).
+	for _, ns := range nodes {
+		sortByCreatedAt(ns, nodeCreatedAt, false)
+	}
+	for _, es := range edges {
+		sortByCreatedAt(es, edgeCreatedAt, false)
+	}
 	return nodes, edges, nil
 }

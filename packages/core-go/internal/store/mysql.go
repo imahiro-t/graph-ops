@@ -677,16 +677,16 @@ func (r *MySQLRepository) GetTicketDetail(id string) (*domain.TicketDetail, erro
 
 // ListTickets: see SQLiteRepository.ListTickets.
 func (r *MySQLRepository) ListTickets() ([]domain.Ticket, error) {
-	return listTicketsWithLabels(r.db,
+	return ticketsNewestFirst(listTicketsWithLabels(r.db,
 		`SELECT `+ticketSelectCols+` FROM tickets ORDER BY created_at DESC`, nil,
-		``, nil)
+		``, nil))
 }
 
 // ListTicketsByProject: see SQLiteRepository.ListTicketsByProject.
 func (r *MySQLRepository) ListTicketsByProject(projectID string) ([]domain.Ticket, error) {
-	return listTicketsWithLabels(r.db,
+	return ticketsNewestFirst(listTicketsWithLabels(r.db,
 		`SELECT `+ticketSelectCols+` FROM tickets WHERE project_id = ? ORDER BY created_at DESC`, []any{projectID},
-		`JOIN tickets t ON t.id = tl.ticket_id WHERE t.project_id = ?`, []any{projectID})
+		`JOIN tickets t ON t.id = tl.ticket_id WHERE t.project_id = ?`, []any{projectID}))
 }
 
 // ListChildTickets: see TicketChildLister.
@@ -785,7 +785,7 @@ func (r *MySQLRepository) ListNodesByTicket(ticketID string) ([]domain.GraphNode
 		}
 		out = append(out, *n)
 	}
-	return out, rows.Err()
+	return oldestFirst(out, rows.Err(), nodeCreatedAt)
 }
 
 func (r *MySQLRepository) UpdateNode(id string, patch NodePatch) (domain.GraphNode, error) {
@@ -847,7 +847,7 @@ func (r *MySQLRepository) ListEdgesByTicket(ticketID string) ([]domain.GraphEdge
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	return oldestFirst(out, rows.Err(), edgeCreatedAt)
 }
 
 // ListTicketGraphs implements TicketGraphLister; see that interface's doc
@@ -905,7 +905,7 @@ func (r *MySQLRepository) ListArtifactsByTicket(ticketID string) ([]domain.Artif
 		}
 		out = append(out, *a)
 	}
-	return out, rows.Err()
+	return oldestFirst(out, rows.Err(), artifactCreatedAt)
 }
 
 func (r *MySQLRepository) ListArtifactsByNode(nodeID string) ([]domain.Artifact, error) {
@@ -922,7 +922,7 @@ func (r *MySQLRepository) ListArtifactsByNode(nodeID string) ([]domain.Artifact,
 		}
 		out = append(out, *a)
 	}
-	return out, rows.Err()
+	return oldestFirst(out, rows.Err(), artifactCreatedAt)
 }
 
 // --- Projects ---
@@ -1012,7 +1012,7 @@ func (r *MySQLRepository) ListProjects() ([]domain.Project, error) {
 		}
 		out = append(out, *p)
 	}
-	return out, rows.Err()
+	return oldestFirst(out, rows.Err(), projectCreatedAt)
 }
 
 func (r *MySQLRepository) UpdateProject(id string, patch ProjectPatch) (domain.Project, error) {
