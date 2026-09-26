@@ -2,12 +2,13 @@
 // because `selected` changed) and F-1's structural non-regression (language
 // switch must never re-trigger a load and blow away an unsaved edit). See
 // this ticket's plan sections 3-2 (#3/#4) and 4-2.
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { NodeTypesEditor } from './NodeTypesEditor';
 import { SettingsNodeTypeInfo } from '../../types';
+import { openIconButtonTooltip } from '../../test/iconButtonTooltip';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -500,8 +501,8 @@ describe('NodeTypesEditor icon accessibility', () => {
     }
 
     await user.click(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') }));
-    const yes = screen.getByRole('button', { name: i18n.t('settings.common.yes') });
-    const no = screen.getByRole('button', { name: i18n.t('settings.common.no') });
+    const yes = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.confirmAddType') });
+    const no = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.cancelAddType') });
     expectAllIconsHidden(yes);
     expectAllIconsHidden(no);
     expectAllIconsHidden(container);
@@ -519,7 +520,7 @@ describe('NodeTypesEditor icon accessibility', () => {
     await screen.findByDisplayValue('implementation-tier-text');
 
     await user.click(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') }));
-    const no = screen.getByRole('button', { name: i18n.t('settings.common.no') });
+    const no = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.cancelAddType') });
     expect(no).toHaveClass('text-slate-500', 'dark:text-slate-400', 'hover:text-slate-700', 'dark:hover:text-slate-200');
     expect(no).not.toHaveClass('text-slate-400');
     expect(no).not.toHaveClass('hover:text-slate-600');
@@ -530,6 +531,8 @@ describe('NodeTypesEditor icon accessibility', () => {
 // button, so each delete button's accessible name carries its type -- in
 // the "<action>: <target>" form LabelsEditor uses -- while the tooltip stays
 // as it was and a default type keeps "why it can't be deleted" as its
+// description. DFLT-00171: the tooltip is IconButton's, not a title, and
+// only that reason -- not the "delete" tooltip already in the name -- is a
 // description.
 describe('NodeTypesEditor delete button names', () => {
   beforeEach(() => {
@@ -554,12 +557,69 @@ describe('NodeTypesEditor delete button names', () => {
     const custom = screen.getByRole('button', { name: customName });
     expect(custom).toBe(container.querySelector('[data-focus-key="delete-custom_lint"]'));
     expect(custom).toBeEnabled();
-    expect(custom).toHaveAttribute('title', i18n.t('settings.nodeTypes.deleteType'));
+    expect(custom).not.toHaveAttribute('title');
+    expect(custom).toHaveAccessibleDescription('');
+    act(() => custom.focus());
+    expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.nodeTypes.deleteType'));
+    act(() => custom.blur());
 
     const byDefault = screen.getByRole('button', { name: defaultName });
     expect(byDefault).toBe(container.querySelector('[data-focus-key="delete-implementation"]'));
     expect(byDefault).toBeDisabled();
-    expect(byDefault).toHaveAttribute('title', i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
+    expect(byDefault).not.toHaveAttribute('title');
     expect(byDefault).toHaveAccessibleDescription(i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
+  });
+
+  // A disabled button takes no keyboard focus, so the reason is shown on
+  // hover (over the wrapper, since a disabled button may get no mouse
+  // events) and stays available to assistive technology as the description.
+  it('shows why a default type cannot be deleted on hover', async () => {
+    const user = userEvent.setup();
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+    const byDefault = screen.getByRole('button', {
+      name: i18n.t('settings.nodeTypes.deleteTypeAriaLabel', { name: i18n.t('nodeType.implementation') })
+    });
+    await user.hover(byDefault.parentElement as HTMLElement);
+    expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
+  });
+});
+
+// DFLT-00171: the add row's confirm / cancel buttons say what they confirm
+// or cancel, instead of a bare "yes" / "no".
+describe('NodeTypesEditor add row button names', () => {
+  afterEach(async () => {
+    await i18n.changeLanguage('ja');
+  });
+
+  it.each([
+    ['ja', 'ノード種別を追加', '追加を取り消す'],
+    ['en', 'Add node type', 'Cancel adding']
+  ])('names the confirm and cancel buttons in %s, with no title', async (lng, confirmName, cancelName) => {
+    await i18n.changeLanguage(lng);
+    const user = userEvent.setup();
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') }));
+    const confirm = screen.getByRole('button', { name: confirmName });
+    const cancel = screen.getByRole('button', { name: cancelName });
+    for (const button of [confirm, cancel]) {
+      expect(button).not.toHaveAttribute('title');
+      expect(button).toHaveAccessibleDescription('');
+    }
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.yes') })).toBeNull();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.no') })).toBeNull();
+
+    // Keyboard focus shows the name as a tooltip.
+    await user.tab();
+    expect(confirm).toHaveFocus();
+    expect(openIconButtonTooltip()).toHaveTextContent(confirmName);
+    await user.tab();
+    expect(cancel).toHaveFocus();
+    expect(openIconButtonTooltip()).toHaveTextContent(cancelName);
+
+    await user.click(cancel);
+    expect(screen.queryByRole('button', { name: cancelName })).toBeNull();
   });
 });

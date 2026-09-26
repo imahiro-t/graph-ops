@@ -13,6 +13,7 @@ import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 import { useTransientAnnouncement } from '../../hooks/useTransientAnnouncement';
 import { StatusLiveRegion } from '../StatusLiveRegion';
+import { IconButton } from '../IconButton';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
@@ -313,20 +314,23 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-blue-500" title={t('settings.nodeTypes.overrideBadge')} />
                 )}
               </button>
-              <button
+              <IconButton
                 data-focus-key={deleteButtonKey(info.type)}
                 onClick={() => removeType(info.type)}
                 disabled={!canDelete}
                 // The name carries the type so a screen reader can tell which
-                // row focus is on; title stays as the tooltip and -- no longer
-                // used for the name -- is exposed as the description, which
-                // keeps the "cannot delete a default" reason available.
-                aria-label={t('settings.nodeTypes.deleteTypeAriaLabel', { name: displayName })}
-                title={info.has_default ? t('settings.nodeTypes.cannotDeleteDefaultHint') : t('settings.nodeTypes.deleteType')}
-                className="shrink-0 p-1 mr-1 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-30 rounded"
+                // row focus is on. The tooltip says "delete" -- already part
+                // of the name -- or, on a type with a plugin default, why it
+                // cannot be deleted; only that reason is added as the
+                // description, so the name is not read twice.
+                label={t('settings.nodeTypes.deleteTypeAriaLabel', { name: displayName })}
+                tooltip={info.has_default ? t('settings.nodeTypes.cannotDeleteDefaultHint') : t('settings.nodeTypes.deleteType')}
+                describeWithTooltip={info.has_default}
+                wrapperClassName="shrink-0 mr-1"
+                className="p-1 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-30 rounded"
               >
                 <Trash2 aria-hidden="true" className="w-3 h-3" />
-              </button>
+              </IconButton>
             </div>
           );
         })}
@@ -366,16 +370,28 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   placeholder={t('settings.nodeTypes.newTypePlaceholder')}
                   className="flex-1 min-w-0 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
                 />
-                <button onClick={() => void confirmAddType()} className="p-1 text-emerald-600 hover:text-emerald-700 shrink-0" title={t('settings.common.yes')}>
+                <IconButton
+                  onClick={() => void confirmAddType()}
+                  label={t('settings.nodeTypes.confirmAddType')}
+                  tooltipSide="top"
+                  wrapperClassName="shrink-0"
+                  className="p-1 text-emerald-600 hover:text-emerald-700"
+                >
                   <Check aria-hidden="true" className="w-3.5 h-3.5" />
-                </button>
+                </IconButton>
                 {/* DFLT-00168: icon-only button, so WCAG 1.4.11 asks for 3:1
                     against the list panel (slate-50 / slate-800). slate-500 /
                     dark:slate-400 gives 4.55:1 / 5.71:1, and the hover darkens
                     (lightens in dark) instead of fading into slate-800. */}
-                <button onClick={cancelAddType} className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 shrink-0" title={t('settings.common.no')}>
+                <IconButton
+                  onClick={cancelAddType}
+                  label={t('settings.nodeTypes.cancelAddType')}
+                  tooltipSide="top"
+                  wrapperClassName="shrink-0"
+                  className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                >
                   <X aria-hidden="true" className="w-3.5 h-3.5" />
-                </button>
+                </IconButton>
               </div>
             </>
           ) : (

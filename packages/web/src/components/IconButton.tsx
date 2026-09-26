@@ -1,0 +1,235 @@
+// An icon-only button with a visible tooltip (DFLT-00171), in place of the
+// native title attribute the app's icon buttons used to rely on. A title
+// tooltip only appears on mouse hover -- never on keyboard focus or touch --
+// and how assistive technologies treat a title-only name varies, so:
+//
+// - The accessible name always comes from `label`, as aria-label. The props
+//   type refuses `title` and `aria-label` so a duplicate name cannot creep
+//   back in next to it.
+// - A visible tooltip (`tooltip`, defaulting to `label`) appears on mouse
+//   hover and on keyboard focus (:focus-visible only, so a mouse click does
+//   not leave one behind), and hides on blur, on mouse leave and on Escape.
+// - The tooltip element is aria-hidden: its text is either the name itself
+//   or already part of it, so reading it again would only repeat the name.
+//   The one exception is `describeWithTooltip`, for a tooltip that says
+//   something the name does not (e.g. why a default entry cannot be
+//   deleted): the button then points aria-describedby at the tooltip
+//   element, which keeps it rendered (hidden) while closed so the reference
+//   always resolves. A referenced element counts for the description even
+//   when it is hidden.
+//
+// Layout and behaviour details:
+//
+// - Hover is tracked on a wrapping <span>, not on the button, because some
+//   browsers deliver no mouse events to a disabled button -- and a disabled
+//   delete button is exactly where the "cannot delete" tooltip matters.
+//   Put classes that position the button within its parent's flex layout
+//   (ml-auto, shrink-0, negative margins, ...) on `wrapperClassName`.
+// - The tooltip is rendered into document.body through a portal with fixed
+//   positioning, so a scrolling list or an overflow-hidden card cannot clip
+//   it. Its position is measured after it is laid out invisibly
+//   (visibility: hidden, not display: none, which would measure 0x0), then
+//   revealed; it follows scrolling and resizing while open and is kept
+//   inside the viewport, flipping to the other side of the button when the
+//   preferred side (`tooltipSide`) has no room.
+// - React events bubble through the React tree even out of a portal, so
+//   the tooltip stops click / mousedown / pointerdown / mouseup from
+//   reaching the component that rendered the button (a ticket row's header,
+//   for instance, toggles on click).
+// - The tooltip itself can be hovered (WCAG 1.4.13): leaving the button or
+//   the tooltip only schedules the close, and entering either cancels it.
+// - Escape closes an open tooltip and calls preventDefault -- without
+//   stopPropagation -- so useModalDialog, which ignores a defaultPrevented
+//   key, leaves a surrounding modal open for that press; with the tooltip
+//   closed, Escape is left alone and reaches the modal as before.
+import React, { forwardRef, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+
+const CLOSE_DELAY_MS = 100;
+const VIEWPORT_MARGIN = 4;
+const GAP = 6;
+
+type ButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'title' | 'aria-label'>;
+
+export interface IconButtonProps extends ButtonProps {
+  // The accessible name (aria-label).
+  label: string;
+  // The visible tooltip text; defaults to `label`.
+  tooltip?: string;
+  // Expose the tooltip as the button's description (aria-describedby). Only
+  // for a tooltip carrying information the name does not.
+  describeWithTooltip?: boolean;
+  tooltipSide?: 'top' | 'bottom';
+  wrapperClassName?: string;
+}
+
+interface Position {
+  left: number;
+  top: number;
+}
+
+const stopPropagation = (e: React.SyntheticEvent) => e.stopPropagation();
+
+function isFocusVisible(el: Element): boolean {
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    // An environment that cannot evaluate :focus-visible errs on the side
+    // of showing the tooltip.
+    return true;
+  }
+}
+
+export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
+  {
+    label,
+    tooltip,
+    describeWithTooltip = false,
+    tooltipSide = 'bottom',
+    wrapperClassName,
+    type,
+    'aria-describedby': ariaDescribedBy,
+    children,
+    ...buttonProps
+  },
+  forwardedRef
+) {
+  const tooltipText = tooltip ?? label;
+  const tooltipId = useId();
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<Position | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const tooltipRef = useRef<HTMLSpanElement | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const setButtonRef = useCallback(
+    (node: HTMLButtonElement | null) => {
+      buttonRef.current = node;
+      if (typeof forwardedRef === 'function') forwardedRef(node);
+      else if (forwardedRef) forwardedRef.current = node;
+    },
+    [forwardedRef]
+  );
+
+  const cancelClose = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
+  const show = useCallback(() => {
+    cancelClose();
+    setOpen(true);
+  }, [cancelClose]);
+
+  const hideNow = useCallback(() => {
+    cancelClose();
+    setOpen(false);
+  }, [cancelClose]);
+
+  const scheduleClose = useCallback(() => {
+    cancelClose();
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = null;
+      setOpen(false);
+    }, CLOSE_DELAY_MS);
+  }, [cancelClose]);
+
+  useEffect(() => cancelClose, [cancelClose]);
+
+  const updatePosition = useCallback(() => {
+    const button = buttonRef.current;
+    const tip = tooltipRef.current;
+    if (!button || !tip) return;
+    const anchor = button.getBoundingClientRect();
+    const { width, height } = tip.getBoundingClientRect();
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+
+    let left = anchor.left + anchor.width / 2 - width / 2;
+    left = Math.min(left, viewportWidth - VIEWPORT_MARGIN - width);
+    left = Math.max(left, VIEWPORT_MARGIN);
+
+    const below = anchor.bottom + GAP;
+    const above = anchor.top - GAP - height;
+    const fitsBelow = below + height <= viewportHeight - VIEWPORT_MARGIN;
+    const fitsAbove = above >= VIEWPORT_MARGIN;
+    let top: number;
+    if (tooltipSide === 'top') top = fitsAbove || !fitsBelow ? above : below;
+    else top = fitsBelow || !fitsAbove ? below : above;
+
+    setPosition(prev => (prev && prev.left === left && prev.top === top ? prev : { left, top }));
+  }, [tooltipSide]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPosition(null);
+      return;
+    }
+    updatePosition();
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [open, tooltipText, updatePosition]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLSpanElement>) => {
+    if (e.key !== 'Escape' || !open) return;
+    e.preventDefault();
+    hideNow();
+  };
+
+  const describedBy = [ariaDescribedBy, describeWithTooltip ? tooltipId : undefined].filter(Boolean).join(' ') || undefined;
+  const renderTooltip = open || describeWithTooltip;
+
+  return (
+    <span
+      className={`inline-flex${wrapperClassName ? ` ${wrapperClassName}` : ''}`}
+      onMouseEnter={show}
+      onMouseLeave={scheduleClose}
+      onFocus={e => {
+        if (isFocusVisible(e.target)) show();
+      }}
+      onBlur={hideNow}
+      onKeyDown={handleKeyDown}
+    >
+      <button
+        ref={setButtonRef}
+        type={type ?? 'button'}
+        aria-label={label}
+        aria-describedby={describedBy}
+        {...buttonProps}
+      >
+        {children}
+      </button>
+      {renderTooltip &&
+        createPortal(
+          <span
+            ref={tooltipRef}
+            id={tooltipId}
+            aria-hidden="true"
+            hidden={!open}
+            data-icon-button-tooltip=""
+            className="fixed z-[60] max-w-xs rounded px-2 py-1 text-[11px] font-medium leading-snug shadow-sm bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 whitespace-normal break-words text-left"
+            style={{
+              left: position?.left ?? 0,
+              top: position?.top ?? 0,
+              visibility: position ? 'visible' : 'hidden'
+            }}
+            onMouseEnter={show}
+            onMouseLeave={scheduleClose}
+            onClick={stopPropagation}
+            onMouseDown={stopPropagation}
+            onMouseUp={stopPropagation}
+            onPointerDown={stopPropagation}
+          >
+            {tooltipText}
+          </span>,
+          document.body
+        )}
+    </span>
+  );
+});

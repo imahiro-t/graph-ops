@@ -441,7 +441,7 @@ describe('App toolbar filters', () => {
       expectVisible(['DFLT-00005']);
 
       backend.tickets.find(tk => tk.id === 'DFLT-00005')!.assignee = null;
-      await user.click(screen.getByTitle(i18n.t('toolbar.refreshTitle')));
+      await user.click(screen.getByRole('button', { name: i18n.t('toolbar.refreshTitle') }));
 
       await waitFor(() => expectVisible([]));
       expect(trigger('assignee')).toHaveTextContent(selectedText('assignee', 1));
@@ -456,7 +456,7 @@ describe('App toolbar filters', () => {
       await filterBy(user, 'assignee', ['田中']);
 
       backend.tickets.find(tk => tk.id === 'DFLT-00005')!.assignee = null;
-      await user.click(screen.getByTitle(i18n.t('toolbar.refreshTitle')));
+      await user.click(screen.getByRole('button', { name: i18n.t('toolbar.refreshTitle') }));
       await waitFor(() => expectVisible([]));
       expect(within(await open(user, 'assignee')).queryByRole('checkbox', { name: '田中' })).not.toBeInTheDocument();
 
@@ -468,7 +468,7 @@ describe('App toolbar filters', () => {
       // Bring 田中 back: the name must still be selected, which the UI shows
       // as a ticked box and DFLT-00005 reappearing.
       backend.tickets.find(tk => tk.id === 'DFLT-00005')!.assignee = '田中';
-      await user.click(screen.getByTitle(i18n.t('toolbar.refreshTitle')));
+      await user.click(screen.getByRole('button', { name: i18n.t('toolbar.refreshTitle') }));
       await waitFor(() => expectVisible(['DFLT-00001', 'DFLT-00002', 'DFLT-00005']));
       const p = await open(user, 'assignee');
       expect(within(p).getByRole('checkbox', { name: '田中' })).toBeChecked();

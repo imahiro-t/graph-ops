@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { getFocusableElements } from '../hooks/useModalDialog';
 import { SettingsModal } from './SettingsModal';
+import { openIconButtonTooltip, openIconButtonTooltips } from '../test/iconButtonTooltip';
 import { Project } from '../types';
 
 vi.mock('../lib/settingsApi', async () => {
@@ -292,6 +293,29 @@ describe('SettingsModal', () => {
       expect(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') })).toBeInTheDocument();
       expect(onClose).not.toHaveBeenCalled();
       expect(discardDialog()).not.toBeInTheDocument();
+
+      await user.keyboard('{Escape}');
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    // DFLT-00171: an icon button's tooltip is dismissed by Escape first; the
+    // modal only closes on the next Escape, once no tooltip is open.
+    it('lets Escape close an open icon button tooltip only, and closes on the next Escape', async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      renderModal(onClose);
+
+      await user.click(await screen.findByRole('button', { name: i18n.t('settings.nodeTypes.addType') }));
+      await user.tab();
+      const confirm = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.confirmAddType') });
+      expect(confirm).toHaveFocus();
+      expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.nodeTypes.confirmAddType'));
+
+      await user.keyboard('{Escape}');
+      expect(openIconButtonTooltips()).toHaveLength(0);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(confirm).toHaveFocus();
 
       await user.keyboard('{Escape}');
       expect(onClose).toHaveBeenCalledTimes(1);

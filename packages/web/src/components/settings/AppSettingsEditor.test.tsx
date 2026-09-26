@@ -1,12 +1,13 @@
 // Regression coverage for behaviour DFLT-00023 left unverified (5-5) and for
 // F-1's structural non-regression (language switch must never re-trigger
 // this tab's load). See this ticket's plan section 4-2.
-import { render, screen, waitFor, waitForElementToBeRemoved, within } from '@testing-library/react';
+import { act, render, screen, waitFor, waitForElementToBeRemoved, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { AppSettingsEditor } from './AppSettingsEditor';
 import { REDACTED_SECRET_PLACEHOLDER, AppSettingsResponse, Project } from '../../types';
+import { openIconButtonTooltip } from '../../test/iconButtonTooltip';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -330,6 +331,13 @@ describe('AppSettingsEditor project local paths', () => {
   }
 
   const row = (id: string) => within(screen.getByTestId(`project-row-${id}`));
+  // A row's delete button, found by the start of its accessible name
+  // ("<action>: <project>", DFLT-00193) rather than by the project name,
+  // which some tests change or leave empty.
+  const projectDeleteButtonIn = (r: ReturnType<typeof row>) => {
+    const prefix = i18n.t('settings.appSettings.projects.deleteAriaLabel', { name: '' });
+    return r.getByRole('button', { name: (accessibleName: string) => accessibleName.startsWith(prefix) });
+  };
   const localPathInput = (id: string) => row(id).getByLabelText(new RegExp(i18n.t('settings.appSettings.projects.localPathLabel').replace(/[()]/g, '\\$&')));
   const saveButton = (id: string) => row(id).getByRole('button', { name: i18n.t('settings.common.save') });
   const patchBody = (n = 0) => {
@@ -417,7 +425,7 @@ describe('AppSettingsEditor project local paths', () => {
   // DFLT-00148: deleting a project is confirmed through the in-app
   // ConfirmDialog, not window.confirm.
   describe('deleting a project', () => {
-    const deleteButton = () => row('p-alpha').getByTitle(i18n.t('settings.appSettings.projects.delete'));
+    const deleteButton = () => projectDeleteButtonIn(row('p-alpha'));
     const deleteCalls = () =>
       (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
         ([url, init]) => String(url) === '/api/projects/p-alpha' && (init as RequestInit | undefined)?.method === 'DELETE'
@@ -475,7 +483,7 @@ describe('AppSettingsEditor project local paths', () => {
     // one before it, else the section heading) instead of dropping to <body>.
     describe('focus after the delete', () => {
       const gamma: Project = { id: 'p-gamma', name: 'Gamma', prefix: 'GAMMA', local_path: '', created_at: '', updated_at: '' };
-      const deleteButtonOf = (id: string) => row(id).getByTitle(i18n.t('settings.appSettings.projects.delete'));
+      const deleteButtonOf = (id: string) => projectDeleteButtonIn(row(id));
       const heading = () => screen.getByRole('heading', { name: i18n.t('settings.appSettings.projects.title') });
 
       async function confirmDelete(id: string, user: ReturnType<typeof userEvent.setup>) {
@@ -636,7 +644,7 @@ describe('AppSettingsEditor project local paths', () => {
         renderWithProjects([{ ...alpha, name: '' }]);
         await waitForAppSettingsLoaded();
 
-        await user.click(row('p-alpha').getByTitle(i18n.t('settings.appSettings.projects.delete')));
+        await user.click(projectDeleteButtonIn(row('p-alpha')));
         await user.click(screen.getByTestId('project-delete-confirm-confirm'));
 
         await waitFor(() => expect(statusTexts()).toContain(successText('p-alpha')));
@@ -685,7 +693,7 @@ describe('AppSettingsEditor project local paths', () => {
     renderWithProjects([alpha]);
     await waitForAppSettingsLoaded();
 
-    const del = row('p-alpha').getByTitle(i18n.t('settings.appSettings.projects.delete'));
+    const del = projectDeleteButtonIn(row('p-alpha'));
     expect(del).toHaveClass('text-slate-500', 'dark:text-slate-400');
     expect(del).not.toHaveClass('text-slate-400');
     expect(del).not.toHaveClass('dark:text-slate-500');
@@ -694,7 +702,8 @@ describe('AppSettingsEditor project local paths', () => {
 
   // DFLT-00193: after a delete, focus lands on a neighboring row's delete
   // button, so each one's accessible name carries its project -- in the
-  // "<action>: <target>" form LabelsEditor uses -- while the tooltip stays.
+  // "<action>: <target>" form LabelsEditor uses -- while the tooltip stays
+  // the short action (shown by IconButton since DFLT-00171, not a title).
   describe('delete button names', () => {
     afterEach(async () => {
       await i18n.changeLanguage('ja');
@@ -710,8 +719,16 @@ describe('AppSettingsEditor project local paths', () => {
 
       const alphaDelete = screen.getByRole('button', { name: alphaName });
       const betaDelete = screen.getByRole('button', { name: betaName });
-      expect(row('p-alpha').getByTitle(tooltip)).toBe(alphaDelete);
-      expect(row('p-beta').getByTitle(tooltip)).toBe(betaDelete);
+      expect(projectDeleteButtonIn(row('p-alpha'))).toBe(alphaDelete);
+      expect(projectDeleteButtonIn(row('p-beta'))).toBe(betaDelete);
+      for (const button of [alphaDelete, betaDelete]) {
+        expect(button).not.toHaveAttribute('title');
+        // The tooltip repeats part of the name, so it is not a description.
+        expect(button).toHaveAccessibleDescription('');
+        act(() => button.focus());
+        expect(openIconButtonTooltip()).toHaveTextContent(new RegExp(`^${tooltip}$`));
+        act(() => button.blur());
+      }
     });
 
     it('keeps the saved name while the name is being edited, and falls back to the ID when the name is empty', async () => {

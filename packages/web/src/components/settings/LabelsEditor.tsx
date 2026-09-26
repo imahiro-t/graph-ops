@@ -20,6 +20,7 @@ import { LabelChip } from '../LabelChip';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { useTransientAnnouncement } from '../../hooks/useTransientAnnouncement';
 import { StatusLiveRegion } from '../StatusLiveRegion';
+import { IconButton } from '../IconButton';
 
 interface Props {
   // Every project that can be picked. An empty list disables the tab: there
@@ -71,7 +72,9 @@ interface PaletteProps {
 
 // The fixed color palette as a group of toggle buttons: each button is named
 // by its translated color name and reports whether it is the current color
-// via aria-pressed, so the choice is not conveyed by color alone.
+// via aria-pressed, so the choice is not conveyed by color alone. The color
+// name is also shown as a tooltip on hover and keyboard focus (IconButton,
+// DFLT-00171), since the swatch itself has no text.
 export const LabelColorPalette: React.FC<PaletteProps> = ({ value, onChange, disabled = false, busy = false, groupLabel, size = 'md' }) => {
   const { t } = useTranslation();
   const dim = size === 'md' ? 'w-6 h-6' : 'w-4 h-4';
@@ -81,13 +84,11 @@ export const LabelColorPalette: React.FC<PaletteProps> = ({ value, onChange, dis
         const meta = getLabelColorMeta(color);
         const selected = value === color;
         return (
-          <button
+          <IconButton
             key={color}
-            type="button"
-            aria-label={t(meta.nameKey)}
+            label={t(meta.nameKey)}
             aria-pressed={selected}
             aria-disabled={busy || undefined}
-            title={t(meta.nameKey)}
             disabled={disabled}
             onClick={() => {
               if (!busy) onChange(color);

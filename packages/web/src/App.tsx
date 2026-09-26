@@ -23,6 +23,7 @@ import { getPriorityMeta, matchesPriorityFilter } from './priorityMeta';
 import { matchesLabelFilter } from './labelMeta';
 import { assigneeFilterOptions, isUnassignedOption, matchesAssigneeFilter } from './assigneeFilter';
 import { TicketItem } from './components/TicketItem';
+import { IconButton } from './components/IconButton';
 import { StatusLiveRegion } from './components/StatusLiveRegion';
 import { LabelFilter } from './components/LabelFilter';
 import { MultiSelectFilter } from './components/MultiSelectFilter';
@@ -1222,30 +1223,35 @@ export const App: React.FC = () => {
               {t('header.launchClaude')}
             </button>
 
-            <button
+            {/* The language, theme and settings buttons name themselves
+                through IconButton's aria-label and show that name as a
+                tooltip on hover and keyboard focus (DFLT-00171). The
+                language button's name contains its visible text, so speech
+                input can still target it by what it shows. */}
+            <IconButton
               onClick={() => i18n.changeLanguage(currentLanguage === 'ja' ? 'en' : 'ja')}
-              title={t('header.language.toggleTitle', { lang: t(`header.language.${currentLanguage}`) })}
+              label={t('header.language.toggleTitle', { lang: t(`header.language.${currentLanguage}`) })}
               className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs transition flex items-center gap-1.5"
             >
               <Languages aria-hidden="true" className="w-4 h-4" />
               <span className="text-xs font-semibold">{t(`header.language.${currentLanguage}`)}</span>
-            </button>
+            </IconButton>
 
-            <button
+            <IconButton
               onClick={() => setThemePreference(NEXT_THEME[themePreference])}
-              title={t('header.theme.toggleTitle', { mode: t(`header.theme.${themePreference}`) })}
+              label={t('header.theme.toggleTitle', { mode: t(`header.theme.${themePreference}`) })}
               className="p-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs transition"
             >
               <ThemeIcon aria-hidden="true" className="w-4 h-4" />
-            </button>
+            </IconButton>
 
-            <button
+            <IconButton
               onClick={() => setIsSettingsOpen(true)}
-              title={t('header.settings')}
+              label={t('header.settings')}
               className="p-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs transition"
             >
               <SettingsIcon aria-hidden="true" className="w-4 h-4" />
-            </button>
+            </IconButton>
 
             <button
               ref={newTicketButtonRef}
@@ -1344,14 +1350,14 @@ export const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400 text-xs">
-            <button
+            <IconButton
               onClick={refreshTickets}
               disabled={loading}
               className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition"
-              title={t('toolbar.refreshTitle')}
+              label={t('toolbar.refreshTitle')}
             >
               <RotateCw aria-hidden="true" className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            </button>
+            </IconButton>
             <span>
               {t('toolbar.updatedAt', {
                 time: lastFetchedAt ? formatTime(lastFetchedAt, i18n.language) : t('common.justNow')

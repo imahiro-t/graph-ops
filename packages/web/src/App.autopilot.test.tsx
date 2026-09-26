@@ -88,7 +88,7 @@ const runRequestCount = () => fetchMock.mock.calls.filter(c => String(c[0]).star
 // with fireEvent so focus stays inside the open dialog.
 async function poll() {
   const runsBefore = runRequestCount();
-  fireEvent.click(screen.getByTitle(i18n.t('toolbar.refreshTitle')));
+  fireEvent.click(screen.getByRole('button', { name: i18n.t('toolbar.refreshTitle') }));
   await waitFor(() => expect(runRequestCount()).toBeGreaterThan(runsBefore));
 }
 

@@ -1,13 +1,17 @@
 // DFLT-00166: every lucide icon TicketItem draws is decorative -- its meaning
 // is carried by the text next to it or by the name of the control around it
 // -- so each one is aria-hidden="true". The icon-only header buttons
-// (close/reopen) keep an accessible name from their title; the delete button
-// is named after its ticket (DFLT-00193).
-import { fireEvent, render, screen, within } from '@testing-library/react';
+// (close/reopen) are named through aria-label; the delete button is named
+// after its ticket (DFLT-00193). DFLT-00171: none of them carries a title
+// any more; the name (or a shorter tooltip) is shown by IconButton on hover
+// and keyboard focus.
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { Artifact, GraphNode, TicketDetail, TicketStatus } from '../types';
 import { TicketItem } from './TicketItem';
+import { openIconButtonTooltip, openIconButtonTooltips } from '../test/iconButtonTooltip';
 
 const TICKET_ID = 'TEST-00166';
 
@@ -128,7 +132,9 @@ describe('TicketItem icon accessibility', () => {
       const { container } = renderItem('IN PROGRESS', false);
       const del = screen.getByRole('button', { name });
       expect(del).toBe(container.querySelector(`[data-focus-key="ticket-delete-${TICKET_ID}"]`));
-      expect(del).toHaveAttribute('title', tooltip);
+      expect(del).not.toHaveAttribute('title');
+      act(() => del.focus());
+      expect(openIconButtonTooltip()).toHaveTextContent(new RegExp(`^${tooltip}$`));
     } finally {
       await i18n.changeLanguage('ja');
     }
@@ -140,5 +146,69 @@ describe('TicketItem icon accessibility', () => {
     expectAllIconsHidden(reopen);
     expectAllIconsHidden(container);
     expect(within(container).queryByRole('button', { name: i18n.t('ticketItem.close.button') })).toBeNull();
+  });
+});
+
+// DFLT-00171: the icon-only buttons of the ticket header row.
+describe('TicketItem icon buttons (IconButton)', () => {
+  const renderRow = (overrides: Partial<TicketDetail> = {}, myName = '') => {
+    const onToggleExpand = vi.fn();
+    const utils = render(
+      <TicketItem
+        ticket={{ ...makeTicket(), ...overrides }}
+        isExpanded={false}
+        onToggleExpand={onToggleExpand}
+        onRefresh={vi.fn()}
+        myName={myName}
+        projectLabels={[]}
+      />
+    );
+    return { ...utils, onToggleExpand };
+  };
+
+  it('names close, delete, copy ID and unassign through aria-label, with no title', () => {
+    renderRow({ assignee: 'me' }, 'me');
+    const names = [
+      i18n.t('ticketItem.close.button'),
+      i18n.t('ticketItem.delete.ariaLabel', { id: TICKET_ID, title: 'アイコンのテスト' }),
+      i18n.t('ticketItem.copyId.button', { id: TICKET_ID }),
+      i18n.t('ticketItem.selfAssign.unassign')
+    ];
+    for (const name of names) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toHaveAttribute('aria-label', name);
+      expect(button).not.toHaveAttribute('title');
+    }
+  });
+
+  it('names the reopen button of a closed ticket through aria-label, with no title', () => {
+    renderRow({ status: 'CLOSED' });
+    const reopen = screen.getByRole('button', { name: i18n.t('ticketItem.reopen.button') });
+    expect(reopen).toHaveAttribute('aria-label', i18n.t('ticketItem.reopen.button'));
+    expect(reopen).not.toHaveAttribute('title');
+  });
+
+  it('shows the tooltip of the delete button on keyboard focus', async () => {
+    const user = userEvent.setup();
+    renderRow();
+    const del = screen.getByRole('button', { name: i18n.t('ticketItem.delete.ariaLabel', { id: TICKET_ID, title: 'アイコンのテスト' }) });
+    // Tab until the delete button has focus (the row has a few tab stops).
+    for (let i = 0; i < 20 && document.activeElement !== del; i++) await user.tab();
+    expect(del).toHaveFocus();
+    const tooltip = openIconButtonTooltip();
+    expect(tooltip).toBeVisible();
+    expect(tooltip).toHaveTextContent(new RegExp(`^${i18n.t('ticketItem.delete.button')}$`));
+    expect(tooltip).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('does not toggle the row when the tooltip is clicked', async () => {
+    const user = userEvent.setup();
+    const { onToggleExpand } = renderRow();
+    const del = screen.getByRole('button', { name: i18n.t('ticketItem.delete.ariaLabel', { id: TICKET_ID, title: 'アイコンのテスト' }) });
+    await user.hover(del);
+    await user.click(openIconButtonTooltip());
+    expect(onToggleExpand).not.toHaveBeenCalled();
+    // The tooltip is still up, and nothing else opened.
+    expect(openIconButtonTooltips()).toHaveLength(1);
   });
 });

@@ -5,12 +5,13 @@
 // override) must keep working exactly as before. See this ticket's plan --
 // the guard/tooltip pattern mirrors the existing delete button
 // (disabled={!canEdit || !g.isOverridden} + cannotDeleteDefaultHint).
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { ReviewGatesEditor } from './ReviewGatesEditor';
 import { SETTINGS_CATALOG_WARNINGS, SettingsCatalogResponse, SettingsCatalogWarning } from '../../types';
+import { openIconButtonTooltip } from '../../test/iconButtonTooltip';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -651,9 +652,12 @@ describe('ReviewGatesEditor delete button contrast (WCAG 1.4.11)', () => {
 // DFLT-00195: each row's icon-only delete button is named "<action>: <gate>"
 // like the labels / node types / projects / tickets delete buttons, so rows
 // can be told apart by a screen reader. The target is the gate ID, or the
-// name on a new row that has no ID yet; with neither, no aria-label is set and
-// the plain title stays the name (never a name ending in an empty target).
-// The title stays as the tooltip and becomes the description.
+// name on a new row that has no ID yet; with neither, the plain "delete" text
+// is the name (never a name ending in an empty target). DFLT-00171: there is
+// no title any more -- IconButton shows the tooltip ("delete", or why a
+// default gate cannot be deleted) and always sets aria-label; only the
+// "cannot delete" reason is a description, since "delete" is already part of
+// the name.
 describe('ReviewGatesEditor delete button accessible name', () => {
   beforeEach(async () => {
     mockedFetchCatalog.mockReset();
@@ -663,7 +667,7 @@ describe('ReviewGatesEditor delete button accessible name', () => {
 
   const deleteName = (name: string) => i18n.t('settings.reviewGates.deleteGateAriaLabel', { name });
 
-  it.each(['ja', 'en'])('names each delete button after its gate in %s and keeps the title as the description', async lang => {
+  it.each(['ja', 'en'])('names each delete button after its gate in %s and describes only a default gate', async lang => {
     await i18n.changeLanguage(lang);
     render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
     await screen.findByDisplayValue('Code Review');
@@ -678,16 +682,31 @@ describe('ReviewGatesEditor delete button accessible name', () => {
 
     const [defaultGate, overridden, custom] = buttons;
     expect(defaultGate).toBeDisabled();
-    expect(defaultGate).toHaveAttribute('title', i18n.t('settings.reviewGates.cannotDeleteDefaultHint'));
+    expect(defaultGate).not.toHaveAttribute('title');
     expect(defaultGate).toHaveAccessibleDescription(i18n.t('settings.reviewGates.cannotDeleteDefaultHint'));
     for (const b of [overridden, custom]) {
       expect(b).toBeEnabled();
-      expect(b).toHaveAttribute('title', i18n.t('settings.reviewGates.deleteGate'));
-      expect(b).toHaveAccessibleDescription(i18n.t('settings.reviewGates.deleteGate'));
+      expect(b).not.toHaveAttribute('title');
+      expect(b).toHaveAccessibleDescription('');
     }
   });
 
-  it.each(['ja', 'en'])('falls back from the ID to the name, then to the plain title, on a new row in %s', async lang => {
+  it('shows the delete tooltip on keyboard focus, and why a default gate cannot be deleted on hover', async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+
+    const custom = screen.getByRole('button', { name: deleteName('custom_review') });
+    act(() => custom.focus());
+    expect(openIconButtonTooltip()).toHaveTextContent(new RegExp(`^${i18n.t('settings.reviewGates.deleteGate')}$`));
+    act(() => custom.blur());
+
+    const defaultGate = screen.getByRole('button', { name: deleteName('code_review') });
+    await user.hover(defaultGate.parentElement as HTMLElement);
+    expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.reviewGates.cannotDeleteDefaultHint'));
+  });
+
+  it.each(['ja', 'en'])('falls back from the ID to the name, then to the plain delete text, on a new row in %s', async lang => {
     await i18n.changeLanguage(lang);
     const user = userEvent.setup();
     render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
@@ -697,7 +716,9 @@ describe('ReviewGatesEditor delete button accessible name', () => {
     const plain = i18n.t('settings.reviewGates.deleteGate');
     const newRowButton = () => screen.getByRole('button', { name: plain });
     const button = newRowButton();
-    expect(button).not.toHaveAttribute('aria-label');
+    expect(button).toHaveAttribute('aria-label', plain);
+    expect(button).not.toHaveAttribute('title');
+    expect(button).toHaveAccessibleDescription('');
     expect(button).toHaveAccessibleName(plain);
     expect(button).not.toHaveAccessibleName(/:\s*$/);
 
@@ -707,13 +728,13 @@ describe('ReviewGatesEditor delete button accessible name', () => {
     };
     // Whitespace alone is not a target.
     await user.type(lastField('settings.reviewGates.nameLabel'), '   ');
-    expect(newRowButton()).not.toHaveAttribute('aria-label');
+    expect(newRowButton()).toHaveAttribute('aria-label', plain);
 
     await user.clear(lastField('settings.reviewGates.nameLabel'));
     await user.type(lastField('settings.reviewGates.nameLabel'), ' New Gate ');
     const byName = screen.getByRole('button', { name: deleteName('New Gate') });
     expect(byName).toBe(button);
-    expect(byName).toHaveAccessibleDescription(plain);
+    expect(byName).toHaveAccessibleDescription('');
 
     await user.type(lastField('settings.reviewGates.idLabel'), 'new_gate');
     expect(screen.getByRole('button', { name: deleteName('new_gate') })).toBe(button);

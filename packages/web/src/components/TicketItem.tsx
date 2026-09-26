@@ -32,6 +32,7 @@ import { PrioritySelect } from './PrioritySelect';
 import { LabelChip } from './LabelChip';
 import { LabelSelect } from './LabelSelect';
 import { StatusLiveRegion } from './StatusLiveRegion';
+import { IconButton } from './IconButton';
 import { TicketFamily } from './TicketFamily';
 import { AutopilotBadges } from './AutopilotBadges';
 import { AutopilotControls } from './AutopilotControls';
@@ -1135,13 +1136,12 @@ export const TicketItem: React.FC<Props> = ({
               since every row has one; the always-mounted live region beside
               it announces the result (the one in the expanded panel is not
               rendered while the row is collapsed). */}
-          <button
-            type="button"
+          <IconButton
             onClick={handleCopyId}
-            aria-label={copyIdLabel}
-            title={copyIdLabel}
+            label={copyIdLabel}
             data-testid="ticket-copy-id"
-            className={`-ml-1 w-6 h-6 inline-flex items-center justify-center rounded shrink-0 transition ${
+            wrapperClassName="-ml-1 shrink-0"
+            className={`w-6 h-6 inline-flex items-center justify-center rounded transition ${
               copyState === 'copied'
                 ? 'text-emerald-600 dark:text-emerald-400'
                 : copyState === 'failed'
@@ -1156,7 +1156,7 @@ export const TicketItem: React.FC<Props> = ({
             ) : (
               <Copy className="w-3.5 h-3.5" aria-hidden="true" />
             )}
-          </button>
+          </IconButton>
           <StatusLiveRegion message={copyIdStatus} />
 
           {/* Label/colors shared with the node badge via statusMeta.ts
@@ -1270,15 +1270,14 @@ export const TicketItem: React.FC<Props> = ({
               {myName && isAssignedToMe ? (
                 <span className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-[11px] font-semibold">
                   {ticket.assignee}
-                  <button
-                    type="button"
+                  <IconButton
                     onClick={handleToggleAssignedToMe}
                     disabled={assignToMeSaving}
-                    title={t('ticketItem.selfAssign.unassign')}
+                    label={t('ticketItem.selfAssign.unassign')}
                     className="p-0.5 text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-200 disabled:opacity-50 rounded-full"
                   >
                     {assignToMeSaving ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <X aria-hidden="true" className="w-3 h-3" />}
-                  </button>
+                  </IconButton>
                 </span>
               ) : ticket.assignee ? (
                 // Someone else already has this ticket (or the viewer hasn't
@@ -1360,27 +1359,27 @@ export const TicketItem: React.FC<Props> = ({
               opens the optional-reason prompt below, rendered outside this
               clickable header row). */}
           {ticket.status === 'CLOSED' ? (
-            <button
-              type="button"
+            <IconButton
               onClick={handleReopenTicket}
               disabled={isReopeningTicket}
-              title={t('ticketItem.reopen.button')}
-              className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
+              label={t('ticketItem.reopen.button')}
+              wrapperClassName="-m-1"
+              className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 rounded"
             >
               {isReopeningTicket ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <RotateCcw aria-hidden="true" className="w-4 h-4" />}
-            </button>
+            </IconButton>
           ) : (
-            <button
-              type="button"
+            <IconButton
               onClick={e => {
                 e.stopPropagation();
                 setIsClosePromptOpen(v => !v);
               }}
-              title={t('ticketItem.close.button')}
-              className="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition p-1 -m-1 rounded"
+              label={t('ticketItem.close.button')}
+              wrapperClassName="-m-1"
+              className="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition p-1 rounded"
             >
               <Archive aria-hidden="true" className="w-4 h-4" />
-            </button>
+            </IconButton>
           )}
 
           {deleteError && (
@@ -1389,18 +1388,18 @@ export const TicketItem: React.FC<Props> = ({
             </span>
           )}
 
-          <button
+          <IconButton
             ref={deleteButtonRef}
-            type="button"
             data-focus-key={`ticket-delete-${ticket.id}`}
             onClick={handleDeleteTicket}
             disabled={isDeletingTicket}
-            title={t('ticketItem.delete.button')}
-            aria-label={t('ticketItem.delete.ariaLabel', { id: ticket.id, title: ticket.title })}
-            className="text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
+            label={t('ticketItem.delete.ariaLabel', { id: ticket.id, title: ticket.title })}
+            tooltip={t('ticketItem.delete.button')}
+            wrapperClassName="-m-1"
+            className="text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 rounded"
           >
             {isDeletingTicket ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <Trash2 aria-hidden="true" className="w-4 h-4" />}
-          </button>
+          </IconButton>
         </div>
       </div>
 

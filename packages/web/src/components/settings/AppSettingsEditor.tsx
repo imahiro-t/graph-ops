@@ -25,6 +25,7 @@ import { apiFetch } from '../../lib/apiFetch';
 import { localizedApiErrorMessage, errorMessage } from '../../lib/apiError';
 import { httpDataSourceProblem, HTTPDataSourceProblem, normalizeHTTPDataSourceURL } from '../../lib/httpDataSource';
 import { StatusLiveRegion } from '../StatusLiveRegion';
+import { IconButton } from '../IconButton';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 import { useTransientAnnouncement } from '../../hooks/useTransientAnnouncement';
@@ -1067,16 +1068,17 @@ export const AppSettingsEditor: React.FC<Props> = ({
                       className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-semibold text-slate-800 dark:text-slate-200"
                     />
                   </div>
-                  <button
+                  <IconButton
                     data-focus-key={projectDeleteButtonKey(p.id)}
                     onClick={() => handleDeleteProject(p)}
                     disabled={projectDeletingId === p.id}
-                    title={t('settings.appSettings.projects.delete')}
-                    aria-label={t('settings.appSettings.projects.deleteAriaLabel', { name: p.name || p.id })}
-                    className="ml-auto mb-0.5 p-1 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40 shrink-0"
+                    label={t('settings.appSettings.projects.deleteAriaLabel', { name: p.name || p.id })}
+                    tooltip={t('settings.appSettings.projects.delete')}
+                    wrapperClassName="ml-auto mb-0.5 shrink-0"
+                    className="p-1 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40"
                   >
                     {projectDeletingId === p.id ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Trash2 aria-hidden="true" className="w-3.5 h-3.5" />}
-                  </button>
+                  </IconButton>
                 </div>
                 <div className="flex items-end gap-2">
                   <div className="flex-1 min-w-0 flex flex-col">
