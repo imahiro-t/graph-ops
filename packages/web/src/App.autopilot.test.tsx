@@ -143,26 +143,37 @@ describe('autopilot in the Web UI', () => {
     expect(controls.querySelectorAll('[data-testid^="autopilot-start"]')).toHaveLength(1);
     const group = within(controls).getByTestId('autopilot-group');
     expect(group).toContainElement(button);
-    expect(group).toHaveClass('sm:border-l');
-    // The autopilot column is pushed to the right end of the row.
+    // DFLT-00219: the divider shows on sm+ only while the row (a size
+    // container) is at least 16rem wide, so it never stays behind at the
+    // start of a wrapped line.
+    expect(group).toHaveClass('sm:[@container(min-width:16rem)]:border-l');
+    expect(group).not.toHaveClass('sm:border-l');
+    // The autopilot column sits in a slot pushed to the right end of the row.
     const column = focusFallback(controls);
     expect(column).toContainElement(group);
-    expect(column).toHaveClass('ml-auto');
+    const slot = within(controls).getByTestId('autopilot-slot');
+    expect(slot).toContainElement(column);
+    expect(slot).toHaveClass('ml-auto');
     // The regular actions share the row, on its left.
     const row = controls;
     const [refine, runButton] = regularActions(row);
     expect(refine.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(runButton.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(row.lastElementChild).toBe(column);
-    // DFLT-00219: the row wraps below sm only. On sm+ the regular actions
-    // keep their width and the column stays on their line, so the divider
-    // never starts a line of its own.
-    expect(row).toHaveClass('flex-wrap', 'sm:flex-nowrap');
+    expect(row.lastElementChild).toBe(slot);
+    // DFLT-00219: the row may wrap, and is the divider's size container. On
+    // sm+ both sides start from a zero basis with their min-content as the
+    // floor -- for the slot, the whole button, its label not wrapping -- so
+    // the row wraps only when those floors do not fit, and the button is
+    // never squeezed or drawn over the regular actions; the free space goes
+    // to the regular actions first, up to their one-line width.
+    expect(row).toHaveClass('flex-wrap', '[container-type:inline-size]');
+    expect(row).not.toHaveClass('sm:flex-nowrap');
     const actions = within(row).getByTestId('autopilot-row-actions');
-    expect(actions).toHaveClass('sm:shrink-0');
+    expect(actions).toHaveClass('sm:basis-0', 'sm:min-w-min', 'sm:grow-[999]', 'sm:max-w-max');
     expect(actions).toContainElement(refine);
     expect(actions).toContainElement(runButton);
-    expect(column).toHaveClass('min-w-0');
+    expect(slot).toHaveClass('sm:basis-0', 'sm:min-w-min', 'sm:grow', 'sm:max-w-xs');
+    expect(button).toHaveClass('sm:whitespace-nowrap');
   });
 
   // DFLT-00218: the focus fallback holds the autopilot button and the lines

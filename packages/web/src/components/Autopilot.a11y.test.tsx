@@ -322,7 +322,10 @@ describe('autopilot accessibility', () => {
     const actions = screen.getByTestId('regular-actions');
     expect(row).toContainElement(actions);
     expect(fallback).not.toContainElement(actions);
-    expect(row.lastElementChild).toBe(fallback);
+    // The fallback ends the row, in a layout-only slot (DFLT-00219).
+    expect(row.lastElementChild).toBe(screen.getByTestId('autopilot-slot'));
+    expect(row.lastElementChild).toContainElement(fallback);
+    expect(row.lastElementChild).not.toHaveAttribute('tabindex');
     expect(fallback).toContainElement(screen.getByTestId('autopilot-start'));
     expect(fallback).toContainElement(screen.getByTestId('autopilot-disabled-reason'));
   });

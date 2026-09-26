@@ -74,20 +74,40 @@ const DIALOG_MODES: AutopilotMode[] = ['tree', 'ticket'];
 // /api/tickets/{id}/autopilot with that mode, which reserves the run and
 // opens the orchestrator's terminal.
 //
-// Layout (DFLT-00181, DFLT-00218): this component lays out the whole action
-// row -- the caller's regular actions (`actions`: refine, run) on the left,
-// and at the right end (ml-auto) the autopilot column: the button, behind a
-// divider on sm+ screens, and the lines under it (what a person is awaited
-// for, the disabled reasons, the result, the untrusted-folder notice). Below
-// sm the row wraps and the column moves to its own line with the button
-// still right-aligned, set apart by that and by its violet colours -- no
-// divider there. On sm+ the row does not wrap (DFLT-00219): the divider
-// only makes sense right next to the regular actions, and a column moved to
-// the next line would leave it at the start of an otherwise empty line.
-// That did happen at 640-700px (in English and Japanese alike) once the
-// column had lines under the button, which widen it up to its max-w-xs. So
-// on sm+ the regular actions keep their natural width (sm:shrink-0) and the
-// column takes the rest (min-w-0), its lines wrapping inside it.
+// Layout (DFLT-00181, DFLT-00218, DFLT-00219): this component lays out the
+// whole action row -- the caller's regular actions (`actions`: refine, run)
+// on the left, and at the right end (ml-auto, in a layout-only slot) the
+// autopilot column: the button, behind a divider on sm+ screens, and the
+// lines under it (what a person is awaited for, the disabled reasons, the
+// result, the untrusted-folder notice). Below sm the row wraps and the
+// column moves to its own line with the button still right-aligned, set
+// apart by that and by its violet colours -- no divider there.
+// On sm+ the divider only makes sense right next to the regular actions: a
+// column moved to the next line would leave it at the start of an otherwise
+// empty line. That did happen at 640-700px (in English and Japanese alike)
+// once the column had lines under the button, which widen it up to its
+// max-w-xs. So on sm+ the row only wraps when not even the narrowest
+// layout fits (DFLT-00219):
+// - Both the regular actions and the slot start from a zero basis
+//   (sm:basis-0) with their min-content as the floor (sm:min-w-min), so the
+//   row wraps only when those floors do not fit side by side -- the slot's
+//   floor being the whole button, whose label does not wrap on sm+
+//   (sm:whitespace-nowrap).
+// - The free space goes to the regular actions first (sm:grow-[999]) up to
+//   their one-line width (sm:max-w-max), then to the slot, up to its
+//   max-w-xs (the column's lines wrap inside it; the column hugs the slot's
+//   right end, so its focus ring still fits the autopilot). What is left is
+//   the ml-auto gap.
+// - So with larger text (a 150% default font size, say) the regular actions
+//   wrap inside their own box, instead of the button being squeezed or
+//   drawn over them (as it was with a non-wrapping row).
+// - Only at an extreme (a 200% default font size at 640px, say) do the
+//   floors not fit and the row wraps. Sizes are in rem, so the divider is
+//   also tied to the row's width in rem, not to the viewport: it shows only
+//   while the row (a size container) is at least 16rem wide. The narrowest
+//   layout needs about 14rem, so the row never wraps with the divider on.
+//   Below that the autopilot is set apart by its place and colours alone,
+//   as below sm.
 // The outer element only lays out the row and never takes focus; the column
 // is the focus fallback below, so it holds the button and the text about it
 // but not the regular actions -- its focus ring (and what a screen reader
@@ -261,162 +281,171 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
 
   return (
     // The action row: lays it out only, never takes focus (DFLT-00218).
-    // Wraps below sm only; on sm+ the column stays on the actions' line, so
-    // its divider never starts a line of its own (DFLT-00219).
-    <div data-testid="autopilot-controls" className="flex flex-wrap sm:flex-nowrap items-start gap-2">
+    // On sm+ it wraps only when not even the narrowest layout fits, and is
+    // the size container the divider is tied to (DFLT-00219, see above).
+    <div data-testid="autopilot-controls" className="flex flex-wrap items-start gap-2 [container-type:inline-size]">
       {actions != null && (
-        <div data-testid="autopilot-row-actions" className="min-w-0 sm:shrink-0">
+        <div data-testid="autopilot-row-actions" className="min-w-0 sm:min-w-min sm:basis-0 sm:grow-[999] sm:max-w-max">
           {actions}
         </div>
       )}
-      {/* The autopilot column, set apart from the regular actions: pushed to
-          the right end (below sm, on its own line when the row wraps), the
-          button right-aligned in it behind a divider on sm+, the lines about it
-          under the button. tabIndex={-1}: the focus fallback while a
-          confirmed start runs (see above), so its ring surrounds the
-          autopilot alone. Not a Tab stop; the ring shows when it gets focus
-          that way after keyboard use. */}
+      {/* The slot for the autopilot column: pushed to the right end (on its
+          own line when the row wraps); on sm+ it takes the width the regular
+          actions leave, never less than the column's min-content
+          (DFLT-00219, see above). Layout only. */}
       <div
-        ref={fallbackRef}
-        tabIndex={-1}
-        data-testid="autopilot-focus-fallback"
-        className="ml-auto flex flex-col items-end gap-1.5 min-w-0 max-w-full sm:max-w-xs rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
+        data-testid="autopilot-slot"
+        className="ml-auto flex justify-end min-w-0 max-w-full sm:grow sm:basis-0 sm:min-w-min sm:max-w-xs"
       >
+        {/* The autopilot column, set apart from the regular actions: at the
+            right end of its slot, the button right-aligned in it behind a
+            divider on sm+ (while the row is 16rem wide or more), the lines
+            about it under the button. tabIndex={-1}:
+            the focus fallback while a confirmed start runs (see above), so its
+            ring surrounds the autopilot alone. Not a Tab stop; the ring shows
+            when it gets focus that way after keyboard use. */}
         <div
-          data-testid="autopilot-group"
-          className="flex items-center sm:border-l sm:pl-3 border-slate-200 dark:border-slate-700"
+          ref={fallbackRef}
+          tabIndex={-1}
+          data-testid="autopilot-focus-fallback"
+          className="flex flex-col items-end gap-1.5 min-w-0 max-w-full rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
         >
-          <button
-            ref={buttonRef}
-            type="button"
-            data-testid="autopilot-start"
-            onClick={handleClick}
-            disabled={starting !== null || noneStartable}
-            {...submittingProps(starting !== null)}
-            title={distinctReasons.length > 0 ? distinctReasons.join('\n') : undefined}
-            aria-describedby={reasonIds.length > 0 ? reasonIds.join(' ') : undefined}
-            className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-slate-700 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
-          >
-            {starting !== null ? (
-              <Loader2 className="w-3.5 h-3.5 motion-safe:animate-spin" aria-hidden="true" />
-            ) : (
-              <Bot className="w-3.5 h-3.5" aria-hidden="true" />
-            )}
-            {t('autopilot.button')}
-            <SubmittingText busy={starting !== null} />
-          </button>
-        </div>
-        {view.awaiting && (
-          // What the person is waited on for, as text a sighted keyboard user
-          // can read too (the badge only carries it as a tooltip).
-          <p data-testid="autopilot-awaiting" className="self-stretch text-[11px] text-amber-900 dark:text-amber-100">
-            {t('autopilot.badges.awaitingTitle', { what: view.awaiting })}
-          </p>
-        )}
-        {distinctReasons.map((r, i) => (
-          <p
-            key={r}
-            id={reasonIds[i]}
-            data-testid="autopilot-disabled-reason"
-            className="self-stretch text-[11px] text-slate-600 dark:text-slate-400"
-          >
-            {r}
-          </p>
-        ))}
-        <StatusLiveRegion message={message?.text ?? ''} />
-        {message && (
           <div
-            aria-hidden="true"
-            data-testid="autopilot-message"
-            className={`self-stretch p-2 rounded-lg border text-[11px] ${
-              message.error
-                ? 'bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
-                : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-            }`}
+            data-testid="autopilot-group"
+            className="flex items-center sm:[@container(min-width:16rem)]:border-l sm:[@container(min-width:16rem)]:pl-3 border-slate-200 dark:border-slate-700"
           >
-            {message.text}
-          </div>
-        )}
-        {/* Always mounted (StatusLiveRegion): the notice is announced when it
-            appears, and the dismiss button is described by it. */}
-        <StatusLiveRegion
-          id={untrustedId}
-          message={untrustedFolder ? t('autopilot.untrustedFolder', { path: untrustedFolder }) : ''}
-        />
-        {untrustedFolder && (
-          <div
-            data-testid="autopilot-untrusted"
-            className="self-stretch flex items-start gap-2 p-2 rounded-lg border text-[11px] bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100"
-          >
-            <p aria-hidden="true" className="flex-1 min-w-0 break-words [overflow-wrap:anywhere]">
-              {t('autopilot.untrustedFolder', { path: untrustedFolder })}
-            </p>
             <button
+              ref={buttonRef}
               type="button"
-              data-testid="autopilot-untrusted-dismiss"
-              onClick={dismissUntrusted}
-              aria-describedby={untrustedId}
-              className="shrink-0 px-2 py-0.5 rounded border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 font-semibold hover:bg-amber-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+              data-testid="autopilot-start"
+              onClick={handleClick}
+              disabled={starting !== null || noneStartable}
+              {...submittingProps(starting !== null)}
+              title={distinctReasons.length > 0 ? distinctReasons.join('\n') : undefined}
+              aria-describedby={reasonIds.length > 0 ? reasonIds.join(' ') : undefined}
+              className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-slate-700 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 rounded-lg text-xs font-semibold sm:whitespace-nowrap flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
             >
-              {t('autopilot.untrustedDismiss')}
+              {starting !== null ? (
+                <Loader2 className="w-3.5 h-3.5 motion-safe:animate-spin" aria-hidden="true" />
+              ) : (
+                <Bot className="w-3.5 h-3.5" aria-hidden="true" />
+              )}
+              {t('autopilot.button')}
+              <SubmittingText busy={starting !== null} />
             </button>
           </div>
-        )}
-        {pending && (
-          <ConfirmDialog
-            title={dialogTitle}
-            message={dialogMessage}
-            confirmLabel={dialogConfirmLabel}
-            cancelLabel={t('autopilot.confirm.cancel')}
-            onConfirm={handleConfirm}
-            onCancel={() => setPending(null)}
-            returnFocusFallbackRef={fallbackRef}
-            testIdPrefix="autopilot-confirm"
-          >
-            <fieldset data-testid="autopilot-mode" className="mb-4">
-              <legend className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                {t('autopilot.confirm.modeLegend')}
-              </legend>
-              <div className="flex flex-col gap-2">
-                {DIALOG_MODES.map(mode => {
-                  const reason = reasons[mode];
-                  const reasonId = `${reasonIdBase}-mode-reason-${mode}`;
-                  return (
-                    <div key={mode}>
-                      <label
-                        className={`flex items-center gap-2 text-sm text-slate-800 dark:text-slate-200 ${
-                          reason ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name={radioName}
-                          value={mode}
-                          data-testid={`autopilot-mode-${mode}`}
-                          checked={selectedMode === mode}
-                          disabled={reason !== ''}
-                          onChange={() => setSelectedMode(mode)}
-                          aria-describedby={reason ? reasonId : undefined}
-                          className="accent-violet-600"
-                        />
-                        {t(`autopilot.modeOptions.${mode}`)}
-                      </label>
-                      {reason && (
-                        <p
-                          id={reasonId}
-                          data-testid={`autopilot-mode-reason-${mode}`}
-                          className="ml-6 mt-0.5 text-[11px] text-slate-600 dark:text-slate-400"
+          {view.awaiting && (
+            // What the person is waited on for, as text a sighted keyboard user
+            // can read too (the badge only carries it as a tooltip).
+            <p data-testid="autopilot-awaiting" className="self-stretch text-[11px] text-amber-900 dark:text-amber-100">
+              {t('autopilot.badges.awaitingTitle', { what: view.awaiting })}
+            </p>
+          )}
+          {distinctReasons.map((r, i) => (
+            <p
+              key={r}
+              id={reasonIds[i]}
+              data-testid="autopilot-disabled-reason"
+              className="self-stretch text-[11px] text-slate-600 dark:text-slate-400"
+            >
+              {r}
+            </p>
+          ))}
+          <StatusLiveRegion message={message?.text ?? ''} />
+          {message && (
+            <div
+              aria-hidden="true"
+              data-testid="autopilot-message"
+              className={`self-stretch p-2 rounded-lg border text-[11px] ${
+                message.error
+                  ? 'bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
+                  : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              {message.text}
+            </div>
+          )}
+          {/* Always mounted (StatusLiveRegion): the notice is announced when it
+              appears, and the dismiss button is described by it. */}
+          <StatusLiveRegion
+            id={untrustedId}
+            message={untrustedFolder ? t('autopilot.untrustedFolder', { path: untrustedFolder }) : ''}
+          />
+          {untrustedFolder && (
+            <div
+              data-testid="autopilot-untrusted"
+              className="self-stretch flex items-start gap-2 p-2 rounded-lg border text-[11px] bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100"
+            >
+              <p aria-hidden="true" className="flex-1 min-w-0 break-words [overflow-wrap:anywhere]">
+                {t('autopilot.untrustedFolder', { path: untrustedFolder })}
+              </p>
+              <button
+                type="button"
+                data-testid="autopilot-untrusted-dismiss"
+                onClick={dismissUntrusted}
+                aria-describedby={untrustedId}
+                className="shrink-0 px-2 py-0.5 rounded border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 font-semibold hover:bg-amber-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+              >
+                {t('autopilot.untrustedDismiss')}
+              </button>
+            </div>
+          )}
+          {pending && (
+            <ConfirmDialog
+              title={dialogTitle}
+              message={dialogMessage}
+              confirmLabel={dialogConfirmLabel}
+              cancelLabel={t('autopilot.confirm.cancel')}
+              onConfirm={handleConfirm}
+              onCancel={() => setPending(null)}
+              returnFocusFallbackRef={fallbackRef}
+              testIdPrefix="autopilot-confirm"
+            >
+              <fieldset data-testid="autopilot-mode" className="mb-4">
+                <legend className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                  {t('autopilot.confirm.modeLegend')}
+                </legend>
+                <div className="flex flex-col gap-2">
+                  {DIALOG_MODES.map(mode => {
+                    const reason = reasons[mode];
+                    const reasonId = `${reasonIdBase}-mode-reason-${mode}`;
+                    return (
+                      <div key={mode}>
+                        <label
+                          className={`flex items-center gap-2 text-sm text-slate-800 dark:text-slate-200 ${
+                            reason ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+                          }`}
                         >
-                          {reason}
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </fieldset>
-          </ConfirmDialog>
-        )}
+                          <input
+                            type="radio"
+                            name={radioName}
+                            value={mode}
+                            data-testid={`autopilot-mode-${mode}`}
+                            checked={selectedMode === mode}
+                            disabled={reason !== ''}
+                            onChange={() => setSelectedMode(mode)}
+                            aria-describedby={reason ? reasonId : undefined}
+                            className="accent-violet-600"
+                          />
+                          {t(`autopilot.modeOptions.${mode}`)}
+                        </label>
+                        {reason && (
+                          <p
+                            id={reasonId}
+                            data-testid={`autopilot-mode-reason-${mode}`}
+                            className="ml-6 mt-0.5 text-[11px] text-slate-600 dark:text-slate-400"
+                          >
+                            {reason}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            </ConfirmDialog>
+          )}
+        </div>
       </div>
     </div>
   );
