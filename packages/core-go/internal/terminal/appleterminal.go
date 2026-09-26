@@ -141,10 +141,24 @@ const (
 //     otherwise the script sends no key at all and fails with 9103.
 //   - The command is never sent to "the selected tab", which the user (or
 //     another run's launch in the same window) can change at any moment.
-//     The ttys of the window's tabs are recorded before Cmd+T, and the
-//     command goes to the one tab whose tty is new. No new tab within about
-//     3 seconds is 9102; more than one (someone else opened a tab at the
-//     same time) is 9104, and the command is run in none of them.
+//     The ttys of every tab of every Terminal window are recorded before
+//     Cmd+T, and the command goes to the one tab whose tty is new. No new
+//     tab within about 3 seconds is 9102; more than one (someone else
+//     opened a tab at the same time) is 9104, and the command is run in
+//     none of them.
+//
+// Terminal.app on current macOS reports every tab of a window to
+// AppleScript as a window of its own with a single tab (DFLT-00183: the
+// three tabs of one window came back as three windows with one tab each,
+// all with the same bounds), while older versions list the tabs inside
+// their window. So the new tab is looked for in every window, not only in
+// the target one, and is accepted as part of the orchestrator's window only
+// when the window reporting it has the target window's bounds -- true of
+// the tabs of one window under either model. The bounds are compared after
+// the tab appeared (for up to about 1 second), never with those from before
+// the Cmd+T: a window that gets its second tab grows by the height of its
+// new tab bar. A new tab anywhere else (the Cmd+T reached another Terminal
+// window) is 9102 and gets no command.
 //
 // `do script` is the last statement: every failure before it ends the
 // script with an error, so falling back to a new window never runs the
@@ -155,7 +169,21 @@ const (
 //
 //	GRAPH_OPS_TAB_SCRIPT_OUT=/tmp/tab.applescript go test ./internal/terminal -run TestAppleTerminalTabScript_Structure
 //	osascript /tmp/tab.applescript "$(tty)" "echo hello"
-const appleTerminalTabScript = `on run argv
+const appleTerminalTabScript = `on terminalTTYs()
+	tell application "Terminal" to set perWindow to tty of every tab of every window
+	set found to {}
+	repeat with entry in perWindow
+		set e to contents of entry
+		if class of e is not list then set e to {e}
+		repeat with x in e
+			set v to contents of x
+			if v is not missing value and v is not "" then set end of found to v
+		end repeat
+	end repeat
+	return found
+end terminalTTYs
+
+on run argv
 	set targetTTY to item 1 of argv
 	set shellCommand to item 2 of argv
 	tell application "Terminal"
@@ -172,7 +200,9 @@ const appleTerminalTabScript = `on run argv
 			if targetID is not missing value then exit repeat
 		end repeat
 		if targetID is missing value then error "graph-ops: no Terminal window has a tab on " & targetTTY number 9101
-		set knownTTYs to tty of tabs of window id targetID
+	end tell
+	set knownTTYs to my terminalTTYs()
+	tell application "Terminal"
 		set index of window id targetID to 1
 		activate
 	end tell
@@ -194,16 +224,21 @@ const appleTerminalTabScript = `on run argv
 	set newTTY to missing value
 	repeat 30 times
 		try
-			tell application "Terminal" to set nowTTYs to tty of tabs of window id targetID
+			tell application "Terminal" to get id of window id targetID
 		on error
 			error "graph-ops: the Terminal window of " & targetTTY & " went away" number 9101
+		end try
+		try
+			set nowTTYs to my terminalTTYs()
+		on error
+			set nowTTYs to {}
 		end try
 		set freshTTYs to {}
 		repeat with x in nowTTYs
 			set v to contents of x
-			if v is not missing value and v is not "" and knownTTYs does not contain v then set end of freshTTYs to v
+			if knownTTYs does not contain v then set end of freshTTYs to v
 		end repeat
-		if (count of freshTTYs) > 1 then error "graph-ops: more than one new tab appeared in the Terminal window of " & targetTTY number 9104
+		if (count of freshTTYs) > 1 then error "graph-ops: more than one new tab appeared in Terminal while opening a tab in the window of " & targetTTY number 9104
 		if (count of freshTTYs) is 1 then
 			set newTTY to item 1 of freshTTYs
 			exit repeat
@@ -212,17 +247,37 @@ const appleTerminalTabScript = `on run argv
 	end repeat
 	if newTTY is missing value then error "graph-ops: no new tab appeared in the Terminal window of " & targetTTY number 9102
 	set newTab to missing value
+	set newID to missing value
 	tell application "Terminal"
-		try
-			repeat with t in tabs of window id targetID
-				if tty of t is newTTY then
-					set newTab to contents of t
-					exit repeat
-				end if
-			end repeat
-		end try
+		repeat with w in windows
+			try
+				repeat with t in tabs of w
+					if tty of t is newTTY then
+						set newTab to contents of t
+						set newID to id of w
+						exit repeat
+					end if
+				end repeat
+			end try
+			if newTab is not missing value then exit repeat
+		end repeat
 	end tell
 	if newTab is missing value then error "graph-ops: the new tab in the Terminal window of " & targetTTY & " closed" number 9102
+	set sameWindow to false
+	repeat 10 times
+		try
+			tell application "Terminal"
+				set targetBounds to bounds of window id targetID
+				set newBounds to bounds of window id newID
+			end tell
+			if newBounds is targetBounds then
+				set sameWindow to true
+				exit repeat
+			end if
+		end try
+		delay 0.1
+	end repeat
+	if not sameWindow then error "graph-ops: the new tab did not open in the Terminal window of " & targetTTY number 9102
 	tell application "Terminal" to do script shellCommand in newTab
 end run`
 
@@ -362,7 +417,7 @@ var tabRetryableError = regexp.MustCompile(`\((` + strings.Join([]string{
 // classifyTabFailure decides LaunchOutcome.DisableTab. It is an allow list:
 // only the script's own quick errors (9101-9104) keep the tab for the next
 // launch; everything else -- a timeout, a missing Automation (-1743) or
-// Accessibility (-25211, -1719) permission, a sandbox refusing Apple
+// Accessibility (1002, -25211, -1719) permission, a sandbox refusing Apple
 // events, osascript missing, anything not foreseen -- disables it, so a run
 // pays for such a failure (up to tabScriptTimeout) once rather than on every
 // launch, without depending on a complete list of macOS error numbers.

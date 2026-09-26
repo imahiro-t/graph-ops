@@ -302,7 +302,8 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 		"item 1 of argv",
 		"item 2 of argv",
 		"window id targetID",
-		"set knownTTYs to tty of tabs of window id targetID",
+		"tty of every tab of every window",
+		"set knownTTYs to my terminalTTYs()",
 		`set frontmost of process "Terminal" to true`,
 		`frontmost of process "Terminal"`,
 		"id of front window",
@@ -310,6 +311,9 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 		`keystroke "t" using command down`,
 		"knownTTYs does not contain v",
 		"if tty of t is newTTY then",
+		"set targetBounds to bounds of window id targetID",
+		"newBounds is targetBounds",
+		"if not sameWindow then error",
 		"number 9101",
 		"number 9102",
 		"number 9103",
@@ -325,7 +329,8 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 	}
 	// Order: the ttys are recorded and the front checked (with its 9103)
 	// before the keystroke; the new tab is found (with its 9104 and 9102)
-	// after it and before do script.
+	// and checked to be in the orchestrator's window after it and before
+	// do script.
 	order := []string{
 		"set knownTTYs to",
 		"frontID is targetID",
@@ -334,6 +339,8 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 		"knownTTYs does not contain v",
 		"number 9104",
 		"number 9102",
+		"newBounds is targetBounds",
+		"if not sameWindow then error",
 		"do script",
 	}
 	last := -1
