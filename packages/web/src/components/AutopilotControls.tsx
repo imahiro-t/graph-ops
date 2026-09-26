@@ -261,7 +261,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
           data-testid="autopilot-untrusted"
           className="flex items-start gap-2 p-2 rounded-lg border text-[11px] bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100"
         >
-          <p aria-hidden="true" className="flex-1 break-words">
+          <p aria-hidden="true" className="flex-1 min-w-0 break-words [overflow-wrap:anywhere]">
             {t('autopilot.untrustedFolder', { path: untrustedFolder })}
           </p>
           <button
