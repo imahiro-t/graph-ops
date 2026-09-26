@@ -490,7 +490,10 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                   size="sm"
                 />
                 <div className="ml-auto flex items-center gap-2">
-                  {busy && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" aria-hidden="true" />}
+                  {/* DFLT-00168: the spinner is the only direct sign that this
+                      row's save is in progress, so it needs 3:1 (WCAG 1.4.11)
+                      against white / slate-900: 4.76:1 / 6.96:1. */}
+                  {busy && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-500 dark:text-slate-400" aria-hidden="true" />}
                   {renaming ? (
                     <>
                       <button

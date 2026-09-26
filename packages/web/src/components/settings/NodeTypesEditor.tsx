@@ -369,7 +369,11 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 <button onClick={() => void confirmAddType()} className="p-1 text-emerald-600 hover:text-emerald-700 shrink-0" title={t('settings.common.yes')}>
                   <Check aria-hidden="true" className="w-3.5 h-3.5" />
                 </button>
-                <button onClick={cancelAddType} className="p-1 text-slate-400 hover:text-slate-600 shrink-0" title={t('settings.common.no')}>
+                {/* DFLT-00168: icon-only button, so WCAG 1.4.11 asks for 3:1
+                    against the list panel (slate-50 / slate-800). slate-500 /
+                    dark:slate-400 gives 4.55:1 / 5.71:1, and the hover darkens
+                    (lightens in dark) instead of fading into slate-800. */}
+                <button onClick={cancelAddType} className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 shrink-0" title={t('settings.common.no')}>
                   <X aria-hidden="true" className="w-3.5 h-3.5" />
                 </button>
               </div>
