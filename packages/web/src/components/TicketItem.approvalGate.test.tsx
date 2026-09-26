@@ -109,7 +109,7 @@ const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 type ButtonKey = 'approve' | 'reject' | 'confirmReject';
 const buttonName = (key: ButtonKey, { submitting }: { submitting?: boolean } = {}) => {
   const label = escapeRegExp(i18n.t(`ticketItem.approvalGate.${key}`));
-  const sub = escapeRegExp(i18n.t('ticketItem.approvalGate.submitting'));
+  const sub = escapeRegExp(i18n.t('common.submitting'));
   if (submitting === true) return new RegExp(`^${label}\\s*${sub}$`);
   if (submitting === false) return new RegExp(`^${label}$`);
   return new RegExp(`^${label}\\s*(?:${sub})?$`);

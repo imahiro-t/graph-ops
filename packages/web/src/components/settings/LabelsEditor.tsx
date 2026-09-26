@@ -21,6 +21,7 @@ import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { useTransientAnnouncement } from '../../hooks/useTransientAnnouncement';
 import { StatusLiveRegion } from '../StatusLiveRegion';
 import { IconButton } from '../IconButton';
+import { SubmittingText, submittingProps } from '../Submitting';
 
 interface Props {
   // Every project that can be picked. An empty list disables the tab: there
@@ -406,10 +407,12 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
           <button
             type="submit"
             disabled={!canEdit || creating || newName.trim() === ''}
+            {...submittingProps(creating)}
             className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white font-semibold flex items-center gap-1"
           >
             {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Plus className="w-3.5 h-3.5" aria-hidden="true" />}
             {t('settings.labels.create')}
+            <SubmittingText busy={creating} />
           </button>
           {newName.trim() !== '' && <LabelChip name={newName.trim()} color={newColor} />}
         </div>

@@ -2,18 +2,21 @@
 // instead of separate title/description fields, and the prompt handed to
 // Claude asks the create-ticket skill to work out the title/description.
 import { useState } from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import ja from '../i18n/locales/ja/translation.json';
 import en from '../i18n/locales/en/translation.json';
 import { CreateTicketModal } from './CreateTicketModal';
+import { submittingName } from '../test/submittingName';
 
 const getRequestInput = () =>
   screen.getByLabelText(i18n.t('createModal.requestLabel')) as HTMLTextAreaElement;
 
 const getSubmitButton = () => screen.getByRole('button', { name: i18n.t('createModal.submit') });
+const getSubmittingButton = () =>
+  screen.getByRole('button', { name: submittingName(i18n.t('createModal.submit')) });
 
 const renderModal = (overrides: Partial<React.ComponentProps<typeof CreateTicketModal>> = {}) => {
   const props = {
@@ -134,8 +137,64 @@ describe('CreateTicketModal', () => {
     renderModal({ isCreating: true });
 
     expect(getRequestInput()).toBeDisabled();
-    expect(getSubmitButton()).toBeDisabled();
+    expect(getSubmittingButton()).toBeDisabled();
     expect(screen.getByRole('button', { name: i18n.t('createModal.close') })).toBeInTheDocument();
+  });
+
+  // DFLT-00206: while the ticket is being created the submit button is
+  // aria-busy and its accessible name says "(submitting)"; both go away once
+  // the request settles, whether it succeeded or failed.
+  describe('submitting state of the Create button', () => {
+    // Owns isCreating the way App does: true while onSubmit is pending.
+    const renderWithPendingSubmit = () => {
+      let settle: (ok: boolean) => void = () => {};
+      const Harness = () => {
+        const [isCreating, setIsCreating] = useState(false);
+        return (
+          <CreateTicketModal
+            isCreating={isCreating}
+            status=""
+            onClose={vi.fn()}
+            onSubmit={async () => {
+              setIsCreating(true);
+              try {
+                return await new Promise<boolean>(resolve => {
+                  settle = resolve;
+                });
+              } finally {
+                setIsCreating(false);
+              }
+            }}
+          />
+        );
+      };
+      render(<Harness />);
+      return { settle: (ok: boolean) => settle(ok) };
+    };
+
+    for (const ok of [true, false]) {
+      it(`is busy only while creating and clears after ${ok ? 'success' : 'failure'}`, async () => {
+        const user = userEvent.setup();
+        const { settle } = renderWithPendingSubmit();
+
+        expect(getSubmitButton()).not.toHaveAttribute('aria-busy');
+        await user.type(getRequestInput(), 'request');
+        await user.click(getSubmitButton());
+
+        const busy = getSubmittingButton();
+        expect(busy).toHaveAttribute('aria-busy', 'true');
+        expect(busy).toHaveAccessibleName(submittingName(i18n.t('createModal.submit')));
+
+        await act(async () => {
+          settle(ok);
+        });
+
+        const done = getSubmitButton();
+        expect(done).toBe(busy);
+        expect(done).not.toHaveAttribute('aria-busy');
+        expect(done).toHaveAccessibleName(i18n.t('createModal.submit'));
+      });
+    }
   });
 
   // DFLT-00074: dialog semantics and keyboard focus management.

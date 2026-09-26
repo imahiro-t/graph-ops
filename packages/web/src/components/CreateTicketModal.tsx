@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react';
 import { isSubmitShortcut } from '../lib/keyboardShortcuts';
 import { useModalDialog } from '../hooks/useModalDialog';
 import { StatusLiveRegion } from './StatusLiveRegion';
+import { SubmittingText, submittingProps } from './Submitting';
 
 interface Props {
   // Called with the free-form request text once the user submits. The
@@ -117,10 +118,12 @@ export const CreateTicketModal: React.FC<Props> = ({ onSubmit, onClose, isCreati
             <button
               type="submit"
               disabled={isCreating || !request.trim()}
+              {...submittingProps(isCreating)}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white shadow-xs transition flex items-center gap-1.5"
             >
               {isCreating && <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" />}
               {t('createModal.submit')}
+              <SubmittingText busy={isCreating} />
             </button>
           </div>
         </form>

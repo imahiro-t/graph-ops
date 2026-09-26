@@ -38,6 +38,7 @@ import { Project } from '../types';
 import { apiFetch } from '../lib/apiFetch';
 import { errorMessage, localizedApiErrorMessage, parseApiError, translateErrorCode } from '../lib/apiError';
 import { useModalDialog } from '../hooks/useModalDialog';
+import { SubmittingText, submittingProps } from './Submitting';
 
 type Mode = 'create' | 'existing';
 
@@ -263,10 +264,12 @@ export const ProjectSetupModal: React.FC<Props> = ({
       <button
         type="submit"
         disabled={saving || submitDisabled}
+        {...submittingProps(saving)}
         className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white shadow-xs transition flex items-center gap-1.5"
       >
         {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />}
         {submitLabel}
+        <SubmittingText busy={saving} />
       </button>
     </div>
   );

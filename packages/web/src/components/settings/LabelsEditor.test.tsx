@@ -22,6 +22,7 @@ vi.mock('../../lib/labelsApi', () => ({
 
 import { createLabel, deleteLabel, fetchLabels, updateLabel } from '../../lib/labelsApi';
 import { LabelsEditor } from './LabelsEditor';
+import { submittingName } from '../../test/submittingName';
 
 type Mock = ReturnType<typeof vi.fn>;
 const mockedFetch = fetchLabels as unknown as Mock;
@@ -109,6 +110,42 @@ describe('LabelsEditor', () => {
     expect(mockedCreate).toHaveBeenCalledWith(expect.anything(), 'proj-A', 'ドキュメント', 'teal');
     expect(await screen.findByTestId('label-row-label-doc')).toBeInTheDocument();
     expect(onLabelsChanged).toHaveBeenCalledTimes(1);
+  });
+
+  // DFLT-00206: the create button is aria-busy and says "(submitting)" in its
+  // name while the label is being created; both go away once it settles.
+  describe('create button while submitting', () => {
+    for (const ok of [true, false]) {
+      it(`is busy only while creating and clears after ${ok ? 'success' : 'failure'}`, async () => {
+        let settle: () => void = () => {};
+        mockedCreate.mockImplementation(
+          () =>
+            new Promise((resolve, reject) => {
+              settle = () =>
+                ok ? resolve(label('label-doc', 'ドキュメント', 'gray', 0)) : reject(new Error(i18n.t('errors.LABEL_NAME_TAKEN')));
+            })
+        );
+        const user = userEvent.setup();
+        render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+        await screen.findByTestId('label-row-label-bug');
+
+        await user.type(createForm().getByRole('textbox'), 'ドキュメント');
+        const button = createForm().getByRole('button', { name: i18n.t('settings.labels.create') });
+        expect(button).not.toHaveAttribute('aria-busy');
+        await user.click(button);
+
+        expect(button).toBeDisabled();
+        expect(button).toHaveAttribute('aria-busy', 'true');
+        expect(button).toHaveAccessibleName(submittingName(i18n.t('settings.labels.create')));
+
+        await act(async () => {
+          settle();
+        });
+
+        expect(button).not.toHaveAttribute('aria-busy');
+        expect(button).toHaveAccessibleName(i18n.t('settings.labels.create'));
+      });
+    }
   });
 
   it('offers 10 named palette buttons whose aria-pressed follows the selection', async () => {

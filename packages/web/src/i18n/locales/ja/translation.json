@@ -1,5 +1,6 @@
 {
   "common": {
+    "submitting": "（送信中）",
     "justNow": "たった今",
     "closeDialog": "閉じる",
     "confirmDialog": {
@@ -216,7 +217,6 @@
       "reasonPlaceholder": "却下理由（必須）",
       "confirmReject": "却下を確定",
       "cancelReject": "キャンセル",
-      "submitting": "（送信中）",
       "pendingStatus": "承認待ち",
       "rejectedHint": "却下済み。process-ticketが却下理由をトリアージし（対象ノードを再実行するか）、または人手で解決するまでブロックされたままです。",
       "rejectedBadgeOne": "却下済み: {{name}}",

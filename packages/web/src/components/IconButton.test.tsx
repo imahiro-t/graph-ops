@@ -5,6 +5,8 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IconButton } from './IconButton';
+import i18n from '../i18n';
+import { submittingName } from '../test/submittingName';
 import { allIconButtonTooltips, openIconButtonTooltip, openIconButtonTooltips } from '../test/iconButtonTooltip';
 
 const Icon = () => <svg aria-hidden="true" data-testid="icon" />;
@@ -613,5 +615,51 @@ describe('IconButton', () => {
       // 18 (button bottom) + 6.
       expect(tooltip).toHaveStyle({ top: '24px' });
     });
+  });
+});
+
+// DFLT-00206: `busy` marks the button as sending the user's own action.
+describe('IconButton busy', () => {
+  it('adds aria-busy and the "(submitting)" suffix to the name while busy, keeping the tooltip text', async () => {
+    const { rerender } = render(
+      <IconButton label="Delete ticket" tooltip="Delete" busy disabled>
+        <Icon />
+      </IconButton>
+    );
+    const button = screen.getByRole('button');
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    expect(button).toHaveAttribute('aria-label', `Delete ticket${i18n.t('common.submitting')}`);
+    expect(button).toHaveAccessibleName(submittingName('Delete ticket'));
+    await userEvent.setup().hover(button.parentElement!);
+    expect(openIconButtonTooltip()).toHaveTextContent(/^Delete$/);
+
+    rerender(
+      <IconButton label="Delete ticket" tooltip="Delete" busy={false}>
+        <Icon />
+      </IconButton>
+    );
+    expect(button).not.toHaveAttribute('aria-busy');
+    expect(button).toHaveAccessibleName('Delete ticket');
+  });
+
+  it('keeps the plain label as the tooltip when no tooltip is given', async () => {
+    render(
+      <IconButton label="Reopen" busy disabled>
+        <Icon />
+      </IconButton>
+    );
+    const button = screen.getByRole('button');
+    expect(button).toHaveAccessibleName(submittingName('Reopen'));
+    await userEvent.setup().hover(button.parentElement!);
+    expect(openIconButtonTooltip()).toHaveTextContent(/^Reopen$/);
+  });
+
+  it('is not busy by default', () => {
+    render(
+      <IconButton label="Settings">
+        <Icon />
+      </IconButton>
+    );
+    expect(screen.getByRole('button', { name: 'Settings' })).not.toHaveAttribute('aria-busy');
   });
 });

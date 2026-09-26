@@ -33,6 +33,7 @@ import { LabelChip } from './LabelChip';
 import { LabelSelect } from './LabelSelect';
 import { StatusLiveRegion } from './StatusLiveRegion';
 import { IconButton } from './IconButton';
+import { SubmittingText, submittingProps } from './Submitting';
 import { TicketFamily } from './TicketFamily';
 import { AutopilotBadges } from './AutopilotBadges';
 import { AutopilotControls } from './AutopilotControls';
@@ -261,7 +262,7 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
         type="button"
         onClick={onConfirm}
         disabled={isSubmitting || draft.trim() === ''}
-        aria-busy={isSubmitting || undefined}
+        {...submittingProps(isSubmitting)}
         className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition shrink-0"
       >
         {isSubmitting ? (
@@ -270,10 +271,8 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
           <X aria-hidden="true" className="w-3 h-3" />
         )}
         {t('ticketItem.approvalGate.confirmReject')}
-        {/* DFLT-00176: the spinner is aria-hidden and disabled alone reads as
-            "unavailable", so while submitting the accessible name also says
-            so (with aria-busy as the standard hint alongside). */}
-        {isSubmitting && <span className="sr-only">{t('ticketItem.approvalGate.submitting')}</span>}
+        {/* DFLT-00176: aria-busy and "(submitting)" in the name while sending (see Submitting.tsx). */}
+        <SubmittingText busy={isSubmitting} />
       </button>
       <button
         type="button"
@@ -1278,6 +1277,7 @@ export const TicketItem: React.FC<Props> = ({
                   <IconButton
                     onClick={handleToggleAssignedToMe}
                     disabled={assignToMeSaving}
+                    busy={assignToMeSaving}
                     label={t('ticketItem.selfAssign.unassign')}
                     className="p-0.5 text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-200 disabled:opacity-50 rounded-full"
                   >
@@ -1303,10 +1303,12 @@ export const TicketItem: React.FC<Props> = ({
                   type="button"
                   onClick={handleToggleAssignedToMe}
                   disabled={assignToMeSaving}
+                  {...submittingProps(assignToMeSaving)}
                   className="px-2 py-0.5 rounded-full border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 disabled:opacity-50 text-[11px] font-semibold flex items-center gap-1 transition"
                 >
                   {assignToMeSaving ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <UserPlus aria-hidden="true" className="w-3 h-3" />}
                   {t('ticketItem.selfAssign.assign')}
+                  <SubmittingText busy={assignToMeSaving} />
                 </button>
               ) : null}
               {assignToMeError && (
@@ -1367,6 +1369,7 @@ export const TicketItem: React.FC<Props> = ({
             <IconButton
               onClick={handleReopenTicket}
               disabled={isReopeningTicket}
+              busy={isReopeningTicket}
               label={t('ticketItem.reopen.button')}
               wrapperClassName="-m-1"
               className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 rounded"
@@ -1398,6 +1401,7 @@ export const TicketItem: React.FC<Props> = ({
             data-focus-key={`ticket-delete-${ticket.id}`}
             onClick={handleDeleteTicket}
             disabled={isDeletingTicket}
+            busy={isDeletingTicket}
             label={t('ticketItem.delete.ariaLabel', { id: ticket.id, title: ticket.title })}
             tooltip={t('ticketItem.delete.button')}
             wrapperClassName="-m-1"
@@ -1431,10 +1435,12 @@ export const TicketItem: React.FC<Props> = ({
             type="button"
             onClick={handleCloseTicket}
             disabled={isClosingTicket}
+            {...submittingProps(isClosingTicket)}
             className="px-2 py-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-xs font-bold flex items-center gap-1 transition shrink-0"
           >
             {isClosingTicket ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Archive aria-hidden="true" className="w-3.5 h-3.5" />}
             {t('ticketItem.close.confirm')}
+            <SubmittingText busy={isClosingTicket} />
           </button>
           <button
             type="button"
@@ -1869,7 +1875,7 @@ export const TicketItem: React.FC<Props> = ({
                                     type="button"
                                     onClick={() => handleApprovalDecision(node.id, true)}
                                     disabled={isApprovalSubmitting}
-                                    aria-busy={isApprovalSubmitting || undefined}
+                                    {...submittingProps(isApprovalSubmitting)}
                                     data-testid={`node-approve-${node.id}`}
                                     className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition"
                                   >
@@ -1879,20 +1885,20 @@ export const TicketItem: React.FC<Props> = ({
                                       <Check aria-hidden="true" className="w-3 h-3" />
                                     )}
                                     {t('ticketItem.approvalGate.approve')}
-                                    {/* DFLT-00176: "submitting" in the accessible name (see RejectReasonPrompt). */}
-                                    {isApprovalSubmitting && <span className="sr-only">{t('ticketItem.approvalGate.submitting')}</span>}
+                                    {/* DFLT-00176: "submitting" in the accessible name (see Submitting.tsx). */}
+                                    <SubmittingText busy={isApprovalSubmitting} />
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => startRejecting(node.id)}
                                     disabled={isApprovalSubmitting}
-                                    aria-busy={isApprovalSubmitting || undefined}
+                                    {...submittingProps(isApprovalSubmitting)}
                                     data-testid={`node-reject-${node.id}`}
                                     className="px-2 py-1 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50 disabled:cursor-not-allowed text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800 rounded text-[11px] font-bold flex items-center gap-1 transition"
                                   >
                                     <X aria-hidden="true" className="w-3 h-3" />
                                     {t('ticketItem.approvalGate.reject')}
-                                    {isApprovalSubmitting && <span className="sr-only">{t('ticketItem.approvalGate.submitting')}</span>}
+                                    <SubmittingText busy={isApprovalSubmitting} />
                                   </button>
                                 </div>
                               )}
@@ -2143,18 +2149,22 @@ export const TicketItem: React.FC<Props> = ({
                 <button
                   onClick={() => handleRunClaude(t('claudePrompts.refineTicket', { ticketId: ticket.id }), ticket.id)}
                   disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
+                  {...submittingProps(isRunning)}
                   className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
                 >
                   {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 text-indigo-600" />}
                   {t('ticketItem.actions.refine')}
+                  <SubmittingText busy={isRunning} />
                 </button>
                 <button
                   onClick={() => handleRunClaude(t('claudePrompts.processTicket', { ticketId: ticket.id }), ticket.id)}
                   disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
+                  {...submittingProps(isRunning)}
                   className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
                 >
                   {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5" />}
                   {t('ticketItem.actions.run')}
+                  <SubmittingText busy={isRunning} />
                 </button>
               </div>
             </div>
@@ -2188,10 +2198,12 @@ export const TicketItem: React.FC<Props> = ({
               <button
                 onClick={handleSendPrompt}
                 disabled={isRunning || !promptText.trim()}
+                {...submittingProps(isRunning)}
                 className="px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition"
               >
                 {isRunning ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <Send aria-hidden="true" className="w-4 h-4" />}
                 {t('ticketItem.send')}
+                <SubmittingText busy={isRunning} />
               </button>
             </div>
 
