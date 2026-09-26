@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/graph-ops/core-go/internal/autopilot"
+	"github.com/graph-ops/core-go/internal/terminal"
 )
 
 // DFLT-00142 iteration 1: the QA review's unclassified launch and merge-up
@@ -49,11 +50,11 @@ func (h *harness) driveTolerant(runID string) (NextResult, int) {
 // failLaunchesOf makes every launch of ticket fail as a terminal that does
 // not open.
 func (h *harness) failLaunchesOf(ticket string) {
-	h.svc.Launcher = LauncherFunc(func(workDir string, args []string, prompt string) error {
-		if strings.Contains(prompt, " "+ticket+" ") {
-			return errors.New("terminal command exited 127")
+	h.svc.Launcher = LauncherFunc(func(req LaunchRequest) (terminal.LaunchOutcome, error) {
+		if strings.Contains(req.Prompt, " "+ticket+" ") {
+			return terminal.LaunchOutcome{}, errors.New("terminal command exited 127")
 		}
-		return h.launch(workDir, args, prompt)
+		return h.launch(req)
 	})
 }
 
@@ -139,11 +140,11 @@ func TestLaunch_FinalizeThatCannotLaunchStopsAsFinalizeFailed(t *testing.T) {
 	h.settings.MainReflection = autopilot.MainReflectionPullRequest
 	r := h.ticket("R", "")
 	run := h.start(r, autopilot.ModeTree)
-	h.svc.Launcher = LauncherFunc(func(workDir string, args []string, prompt string) error {
-		if strings.HasSuffix(prompt, "--role finalize") {
-			return errors.New("no terminal")
+	h.svc.Launcher = LauncherFunc(func(req LaunchRequest) (terminal.LaunchOutcome, error) {
+		if strings.HasSuffix(req.Prompt, "--role finalize") {
+			return terminal.LaunchOutcome{}, errors.New("no terminal")
 		}
-		return h.launch(workDir, args, prompt)
+		return h.launch(req)
 	})
 	res, _ := h.driveTolerant(run.RunID)
 	fin := h.run(run.RunID).Finalize

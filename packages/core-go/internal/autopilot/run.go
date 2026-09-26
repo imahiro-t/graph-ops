@@ -121,6 +121,18 @@ type Run struct {
 	// its orchestrator: it holds what the run looked like before the
 	// reservation, so CancelReservation can put it back.
 	Reservation *Reservation `json:"reservation,omitempty"`
+	// TerminalTTY is the tty of the Terminal.app tab the run's current
+	// orchestrator runs in (DFLT-00154): its child sessions open as new tabs
+	// of that tab's window. "" (another terminal, tmux, not detectable)
+	// opens them in new windows. Every start that decides who drives the run
+	// -- creation, takeover, adoption of a reservation -- overwrites it with
+	// that orchestrator's value, even an empty one; a reservation clears it.
+	TerminalTTY string `json:"terminal_tty,omitempty"`
+	// TerminalTabDisabled, when set, is why the tab path failed in a way that
+	// would repeat (a missing permission, a timeout): the rest of the run
+	// opens its sessions in new windows without trying a tab. Cleared by the
+	// same starts that set TerminalTTY.
+	TerminalTabDisabled string `json:"terminal_tab_disabled,omitempty"`
 }
 
 // Reservation remembers what a reservation replaced.

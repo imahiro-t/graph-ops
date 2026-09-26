@@ -31,6 +31,10 @@ type BeginRequest struct {
 	// Descendants returns every descendant of a ticket (the ticket itself
 	// excluded), for the overlap check.
 	Descendants func(ticketID string) ([]string, error)
+	// TerminalTTY is the starting orchestrator's Terminal.app tty (see
+	// Run.TerminalTTY), "" when it has none. Ignored with Reserve: the
+	// process reserving the run is not the orchestrator.
+	TerminalTTY string
 }
 
 // BeginResult says what Begin did.
@@ -96,6 +100,9 @@ func (g *Registry) Begin(req BeginRequest) (BeginResult, error) {
 				cand.State = RunRunning
 				cand.Reservation = nil
 				cand.Heartbeat = now
+				// The adopting orchestrator is the run's first window now,
+				// whatever the reservation (or a run it took over) held.
+				cand.TerminalTTY, cand.TerminalTabDisabled = req.TerminalTTY, ""
 				res.Adopted = true
 				savedID = cand.ID
 				return tx.Save(cand)
@@ -161,7 +168,15 @@ func (g *Registry) Begin(req BeginRequest) (BeginResult, error) {
 				g.logf("pruned %d settled autopilot run(s) of project %s beyond the newest %d", len(deleted), req.ProjectID, KeepSettledRuns)
 			}
 		}
+		// Whoever drives the run from now on decides its window: a new or
+		// taken-over run takes this orchestrator's tty even when it is empty,
+		// so a tty left by an earlier orchestrator (whose number the system
+		// may since have given to an unrelated tab) is never used, and a
+		// disabled tab path gets another chance (a permission may have been
+		// granted since). A reservation holds none until it is adopted.
+		cand.TerminalTTY, cand.TerminalTabDisabled = req.TerminalTTY, ""
 		if req.Reserve {
+			cand.TerminalTTY = ""
 			cand.State = RunStarting
 			cand.Reservation = &Reservation{Created: res.Created, Previous: previous}
 		}

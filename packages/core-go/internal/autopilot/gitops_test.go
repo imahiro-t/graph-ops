@@ -28,6 +28,13 @@ func newGitRepo(t *testing.T) string {
 		dir = resolved
 	}
 	gitT(t, dir, "init", "-q", "-b", "main")
+	// No automatic gc or maintenance: a commit may start one detached in
+	// the background, and when it is still writing to .git/objects at the
+	// end of the test, t.TempDir's cleanup fails with "directory not empty"
+	// (seen in CI on the 120 commits of
+	// TestGit_WorktreeFingerprintDoesNotLockOutConcurrentCommits).
+	gitT(t, dir, "config", "gc.auto", "0")
+	gitT(t, dir, "config", "maintenance.auto", "false")
 	commitFile(t, dir, "README.md", "hello\n", "initial")
 	return dir
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
+	"github.com/graph-ops/core-go/internal/terminal"
 )
 
 // DFLT-00142 phase 5: POST /api/tickets/{id}/autopilot and
@@ -30,16 +31,17 @@ type fakeAutopilotLauncher struct {
 }
 
 type launchedTerminal struct {
-	WorkDir string
-	Args    []string
-	Prompt  string
+	WorkDir     string
+	Args        []string
+	Prompt      string
+	TerminalTTY string
 }
 
-func (f *fakeAutopilotLauncher) Launch(workDir string, args []string, prompt string) error {
+func (f *fakeAutopilotLauncher) Launch(req runner.LaunchRequest) (terminal.LaunchOutcome, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, launchedTerminal{WorkDir: workDir, Args: append([]string(nil), args...), Prompt: prompt})
-	return f.err
+	f.calls = append(f.calls, launchedTerminal{WorkDir: req.WorkDir, Args: append([]string(nil), req.ExtraArgs...), Prompt: req.Prompt, TerminalTTY: req.TerminalTTY})
+	return terminal.LaunchOutcome{}, f.err
 }
 
 func (f *fakeAutopilotLauncher) count() int {
@@ -151,7 +153,9 @@ func TestAutopilotStart_ReservesAndOpensTheOrchestrator(t *testing.T) {
 			}
 			call := e.launcher.calls[0]
 			want := "/graph-ops:autopilot-" + mode + " " + r + " --run " + res.RunID
-			if call.WorkDir != e.localPath() || call.Prompt != want ||
+			// The orchestrator itself always opens in a new window
+			// (DFLT-00154): no Terminal.app tty is passed.
+			if call.WorkDir != e.localPath() || call.Prompt != want || call.TerminalTTY != "" ||
 				strings.Join(call.Args, " ") != "--permission-mode "+autopilot.Defaults().PermissionMode {
 				t.Fatalf("call = %+v, want prompt %q in %s", call, want, e.localPath())
 			}

@@ -31,6 +31,10 @@ func (s *Server) autopilotService() *runner.Service {
 	if s.cfg.AutopilotLauncher != nil {
 		svc.Launcher = s.cfg.AutopilotLauncher
 	}
+	// The server is never an orchestrator, so the terminal it runs in (if
+	// any) is not a run's window: its runs get their Terminal.app tty when
+	// an orchestrator adopts them (DFLT-00154).
+	svc.TerminalTTY = nil
 	return svc
 }
 
@@ -123,8 +127,12 @@ func (s *Server) handleStartAutopilot(w http.ResponseWriter, r *http.Request) {
 	// The run's own snapshot, which Start just saved from the effective
 	// settings: what the orchestrator -- and every child it launches -- runs
 	// with.
-	launchErr := svc.Launcher.Launch(localPath, []string{"--permission-mode", res.PermissionMode},
-		runner.OrchestratorPrompt(mode, ticket.ID, res.RunID))
+	// No TerminalTTY: the orchestrator itself always opens in a new window
+	// (DFLT-00154 applies to the child sessions it launches).
+	_, launchErr := svc.Launcher.Launch(runner.LaunchRequest{
+		WorkDir: localPath, ExtraArgs: []string{"--permission-mode", res.PermissionMode},
+		Prompt: runner.OrchestratorPrompt(mode, ticket.ID, res.RunID),
+	})
 	if launchErr != nil {
 		s.logger.Warn("the autopilot terminal failed to open; cancelling the reservation",
 			slog.String("event", "autopilot_launch_failed"),

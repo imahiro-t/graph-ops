@@ -16,6 +16,7 @@ import (
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/store"
+	"github.com/graph-ops/core-go/internal/terminal"
 )
 
 // This file is the test harness for the runner: a SQLite DB, a throwaway git
@@ -48,6 +49,10 @@ type launchCall struct {
 	RunID   string
 	Ticket  string
 	Role    string
+	// TerminalTTY / SkipTab are what the launch passed for the Terminal.app
+	// tab path (DFLT-00154).
+	TerminalTTY string
+	SkipTab     bool
 }
 
 // worker is a fake child session. It runs inside the fake launcher, i.e.
@@ -74,6 +79,9 @@ type harness struct {
 	launchWorker worker
 	// launchErr makes the launcher fail.
 	launchErr error
+	// launchOutcome, when set, is the outcome of each successful launch
+	// (the Terminal.app tab path's fallback report).
+	launchOutcome func(call launchCall) terminal.LaunchOutcome
 	// actions is every action next returned, as "action ticket role".
 	actions []string
 	// outputBytes is the total size of what the orchestrator would have
@@ -208,21 +216,28 @@ func (h *harness) st(runID, ticketID string) *autopilot.TicketState {
 // orchestrator).
 func (h *harness) makeStale() { h.clock.Advance(autopilot.ActiveThreshold + time.Minute) }
 
-func (h *harness) launch(workDir string, args []string, prompt string) error {
+func (h *harness) launch(req LaunchRequest) (terminal.LaunchOutcome, error) {
 	if h.launchErr != nil {
-		return h.launchErr
+		return terminal.LaunchOutcome{}, h.launchErr
 	}
-	f := strings.Fields(prompt)
+	f := strings.Fields(req.Prompt)
 	if len(f) != 5 || f[0] != "/graph-ops:autopilot-worker" || f[3] != "--role" {
-		return fmt.Errorf("unexpected prompt %q", prompt)
+		return terminal.LaunchOutcome{}, fmt.Errorf("unexpected prompt %q", req.Prompt)
 	}
-	call := launchCall{WorkDir: workDir, Args: append([]string(nil), args...), Prompt: prompt, RunID: f[1], Ticket: f[2], Role: f[4]}
+	call := launchCall{
+		WorkDir: req.WorkDir, Args: append([]string(nil), req.ExtraArgs...), Prompt: req.Prompt, RunID: f[1], Ticket: f[2], Role: f[4],
+		TerminalTTY: req.TerminalTTY, SkipTab: req.SkipTab,
+	}
 	h.mu.Lock()
 	h.launches = append(h.launches, call)
 	h.mu.Unlock()
+	var outcome terminal.LaunchOutcome
+	if h.launchOutcome != nil {
+		outcome = h.launchOutcome(call)
+	}
 	if h.launchWorker != nil {
 		h.launchWorker(&workerCall{h: h, launchCall: call})
-		return nil
+		return outcome, nil
 	}
 	w := h.behave[call.Ticket+"/"+call.Role]
 	if w == nil {
@@ -235,7 +250,7 @@ func (h *harness) launch(workDir string, args []string, prompt string) error {
 		w = defaultWorker
 	}
 	w(&workerCall{h: h, launchCall: call})
-	return nil
+	return outcome, nil
 }
 
 // workLaunches returns the tickets launched with role work, in order.
