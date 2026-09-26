@@ -517,10 +517,10 @@ describe('AppSettingsEditor project local paths', () => {
         expect(document.activeElement).not.toBe(document.body);
       });
 
-      it('puts focus back on the delete button when the re-fetched list still has the project', async () => {
+      it('keeps focus on the delete button while the list still has the project, and moves on once a later list drops it', async () => {
         const user = userEvent.setup();
         const onProjectsChanged = vi.fn();
-        const { rerenderWith } = renderWithProjects([alpha, beta], onProjectsChanged);
+        const { rerenderWith } = renderWithProjects([alpha, beta, gamma], onProjectsChanged);
         await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
         // Like a browser that drops focus from a button while it is disabled
         // (jsdom keeps it there), the button loses focus during the request.
@@ -529,22 +529,41 @@ describe('AppSettingsEditor project local paths', () => {
           return { ok: true, status: 200, json: async () => ({}) };
         });
 
-        await confirmDelete('p-alpha', user);
+        await confirmDelete('p-beta', user);
         await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
-        // Still the list from before the delete: nothing moves yet.
-        expect(deleteButtonOf('p-alpha')).not.toHaveFocus();
+        // The re-fetch is still on its way: the row is there, so focus is
+        // back on its (re-enabled) delete button rather than on <body>.
+        await waitFor(() => expect(deleteButtonOf('p-beta')).toHaveFocus());
+        expect(deleteButtonOf('p-beta')).toBeEnabled();
 
-        // A re-fetched list (a new array) that still has the project: its
-        // row stayed, so focus goes back to its own delete button.
-        rerenderWith([alpha, beta]);
-        await waitFor(() => expect(deleteButtonOf('p-alpha')).toHaveFocus());
+        // A re-fetched list (a new array) that still has the project -- it
+        // raced the delete: the row stayed, and so does focus.
+        rerenderWith([alpha, beta, gamma]);
+        expect(deleteButtonOf('p-beta')).toHaveFocus();
         expect(document.activeElement).not.toBe(document.body);
 
-        // A later list without it no longer moves focus: the pending move
-        // was settled with the refreshed list above.
-        (document.activeElement as HTMLElement | null)?.blur();
-        rerenderWith([beta]);
-        expect(deleteButtonOf('p-beta')).not.toHaveFocus();
+        // A later list drops it: the removed button takes focus with it, and
+        // the pending move puts it on the row that took its place.
+        rerenderWith([alpha, gamma]);
+        await waitFor(() => expect(deleteButtonOf('p-gamma')).toHaveFocus());
+        expect(document.activeElement).not.toBe(document.body);
+      });
+
+      it('does not take focus back from where the user moved it while the list still had the project', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        const { rerenderWith } = renderWithProjects([alpha, beta, gamma], onProjectsChanged);
+        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+        await confirmDelete('p-beta', user);
+        await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
+        deleteButtonOf('p-alpha').focus();
+
+        rerenderWith([alpha, beta, gamma]);
+        rerenderWith([alpha, gamma]);
+
+        expect(deleteButtonOf('p-alpha')).toHaveFocus();
+        expect(deleteButtonOf('p-gamma')).not.toHaveFocus();
       });
 
       it('puts focus back on the delete button when the delete request fails', async () => {

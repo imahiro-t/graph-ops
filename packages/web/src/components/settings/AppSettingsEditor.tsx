@@ -196,13 +196,15 @@ export const AppSettingsEditor: React.FC<Props> = ({
   // confirmed delete removes the row, focused delete button included, but
   // only once the parent has re-fetched `projects` (onProjectsChanged is not
   // awaited), so the move waits for the deleted id to leave the list:
-  // `before` is the list the delete was made against, used both to place the
-  // neighbor and to tell a refreshed list from the one still on screen.
-  // A failed delete (removedId null) puts focus back on its own button once
-  // projectDeletingId has re-enabled it -- a browser may drop focus from a
-  // button while it is disabled. So does a successful one whose re-fetched
-  // list still has the project: the row stayed, but its button was disabled
-  // meanwhile.
+  // `before` is the list the delete was made against, where the neighbor is
+  // placed from. Until the id has left the list -- the re-fetch may still be
+  // on its way, or have raced the delete and still list the project, which
+  // a later re-fetch then drops -- the row is still there and focus is kept
+  // on its own delete button once projectDeletingId has re-enabled it (a
+  // browser may drop focus from a button while it is disabled); the move
+  // stays pending for when the row goes. A failed delete (removedId null)
+  // puts focus back on its own button the same way and is then done.
+  // focusIfLost never takes focus from wherever the user has put it.
   const [pendingProjectFocus, setPendingProjectFocus] = useState<
     { removedId: string; before: Project[] } | { removedId: null; key: string } | null
   >(null);
@@ -216,12 +218,12 @@ export const AppSettingsEditor: React.FC<Props> = ({
     } else {
       const { removedId, before } = pendingProjectFocus;
       if (projects.some(p => p.id === removedId)) {
-        // Still the list from before the delete: wait for the re-fetch. A
-        // list that has been re-fetched and still has the project (the
-        // re-fetch raced the delete, say) means its row is still there, so
-        // focus goes back to its own delete button, as after a failure.
-        if (projects === before) return;
-        setPendingProjectFocus({ removedId: null, key: projectDeleteButtonKey(removedId) });
+        // The row is still there: hold focus on its delete button (once it
+        // is enabled again) and keep waiting for the row to go.
+        const own = projectsSectionRef.current?.querySelector<HTMLButtonElement>(
+          focusKeySelector(projectDeleteButtonKey(removedId))
+        );
+        if (own && !own.disabled) focusIfLost(own);
         return;
       }
       const neighbor = neighborAfterRemoval(before.map(p => p.id), removedId, projects.map(p => p.id));

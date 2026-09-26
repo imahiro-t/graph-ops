@@ -127,7 +127,8 @@ describe('TicketItem ticket deletion', () => {
   });
 
   // DFLT-00191: when the delete succeeded but the re-fetch still shows the
-  // card (the re-fetch failed), there is no neighbor for App to move to, so
+  // card (the re-fetch failed, or was superseded), App has no neighbor to move
+  // to until a later fetch drops the card (App.ticketDelete.test.tsx), so
   // the card puts focus back on its own (re-enabled) delete button.
   it('puts focus back on the delete button when the card is still there after a successful delete', async () => {
     const onDeleted = vi.fn(async () => {});

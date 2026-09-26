@@ -1019,15 +1019,18 @@ export const App: React.FC = () => {
   // took the deleted one's place in the (filtered) list, else the one before
   // it, else the header's "new ticket" button -- LabelsEditor's rule (see
   // lib/focusAfterRemoval). `before` is the filtered list's ids when the
-  // delete succeeded; `refreshed` is set once the re-fetch has settled, so a
-  // list that still has the ticket then (a failed re-fetch) drops the move
-  // instead of waiting for ever -- the card is still there, and TicketItem
-  // puts focus back on its delete button (which was disabled meanwhile).
+  // delete succeeded. The move waits for the deleted id to actually leave
+  // the list, however long that takes: the re-fetch that follows the delete
+  // can fail, or be discarded as superseded by a newer fetch, and leave the
+  // card on screen until a later fetch (the next poll, say) drops it.
+  // Meanwhile TicketItem keeps focus on the card's own delete button (which
+  // was disabled during the request), and when the card finally goes,
+  // focusIfLost moves focus on -- without taking it from wherever the user
+  // has put it in the meantime. Only a project switch drops the move.
   const [pendingTicketFocus, setPendingTicketFocus] = useState<{
     removedId: string;
     projectId: string;
     before: string[];
-    refreshed: boolean;
   } | null>(null);
   const ticketListRef = useRef<HTMLDivElement>(null);
   const newTicketButtonRef = useRef<HTMLButtonElement>(null);
@@ -1038,27 +1041,22 @@ export const App: React.FC = () => {
   // no longer holds it and neighborAfterRemoval picks the first ticket.
   const handleTicketDeleted = async (ticketId: string) => {
     const projectId = currentProjectIdRef.current;
-    setPendingTicketFocus({ removedId: ticketId, projectId, before: filteredTicketsRef.current.map(ticket => ticket.id), refreshed: false });
+    setPendingTicketFocus({ removedId: ticketId, projectId, before: filteredTicketsRef.current.map(ticket => ticket.id) });
     await refreshTickets();
-    setPendingTicketFocus(prev => (prev && prev.removedId === ticketId ? { ...prev, refreshed: true } : prev));
   };
 
   useEffect(() => {
     if (pendingTicketFocus === null) return;
-    const { removedId, projectId, before, refreshed } = pendingTicketFocus;
+    const { removedId, projectId, before } = pendingTicketFocus;
     // Another project's list is on screen now: this move no longer applies.
     if (projectId !== currentProjectId) {
       setPendingTicketFocus(null);
       return;
     }
     const currentIds = filteredTickets.map(ticket => ticket.id);
-    if (currentIds.includes(removedId)) {
-      // Wait for the re-fetch; after it, the card is still there (the
-      // re-fetch failed), so there is no neighbor to move to: TicketItem
-      // puts focus back on the card's own delete button instead.
-      if (refreshed) setPendingTicketFocus(null);
-      return;
-    }
+    // Still listed: wait (see above) -- the card, and TicketItem's hold on
+    // focus, are still there.
+    if (currentIds.includes(removedId)) return;
     setPendingTicketFocus(null);
     const pagedIds = pagedTickets.map(ticket => ticket.id);
     const neighbor = neighborAfterRemoval(before, removedId, currentIds);

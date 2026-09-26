@@ -613,11 +613,13 @@ export const TicketItem: React.FC<Props> = ({
   // delete button. After a successful delete the re-fetch removes the card
   // itself, so where focus goes then is the list's call: onDeleted (App)
   // moves it to a neighboring card (DFLT-00191). After a failed one -- or a
-  // successful one whose re-fetch still shows this card (the re-fetch failed)
-  // -- focus is put back on the delete button once it is re-enabled: a
-  // browser may drop focus from a button while it is disabled. When the card
-  // is gone this effect never runs, and focusIfLost leaves alone a neighbor
-  // App has already focused.
+  // successful one whose re-fetch still shows this card (the re-fetch failed,
+  // or its result was discarded as superseded) -- focus is put back on the
+  // delete button once it is re-enabled: a browser may drop focus from a
+  // button while it is disabled. In the latter case App keeps its move
+  // pending, and takes focus on to a neighbor when a later fetch drops the
+  // card. When the card is gone this effect never runs, and focusIfLost
+  // leaves alone a neighbor App has already focused.
   const [isDeletingTicket, setIsDeletingTicket] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const { confirm: confirmDelete, confirmDialog: deleteConfirmDialog } = useConfirmDialog();
