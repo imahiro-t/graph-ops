@@ -396,6 +396,7 @@
       "enabledLabel": "Enabled",
       "deleteGate": "Delete",
       "deleteGateAriaLabel": "Delete review gate: {{name}}",
+      "deleteUnnamedGateAriaLabel": "Delete review gate with no ID (row {{row}})",
       "deleteGateAnnouncement": "Removed review gate \"{{name}}\" from the list (not applied until you save).",
       "deleteUnnamedGateAnnouncement": "Removed a review gate with no ID from the list (not applied until you save).",
       "defaultBadge": "Default",

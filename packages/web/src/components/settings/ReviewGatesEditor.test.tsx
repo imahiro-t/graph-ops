@@ -664,8 +664,10 @@ describe('ReviewGatesEditor delete button contrast (WCAG 1.4.11)', () => {
 // DFLT-00195: each row's icon-only delete button is named "<action>: <gate>"
 // like the labels / node types / projects / tickets delete buttons, so rows
 // can be told apart by a screen reader. The target is the gate ID, or the
-// name on a new row that has no ID yet; with neither, the plain "delete" text
-// is the name (never a name ending in an empty target). DFLT-00171: there is
+// name on a new row that has no ID yet; with neither, the name says the gate
+// has no ID and gives its 1-based row number (DFLT-00208), so several such
+// rows can be told apart too (never a name ending in an empty target, nor a
+// bare "delete" they would all share). DFLT-00171: there is
 // no title any more -- IconButton shows the tooltip ("delete", or why a
 // default gate cannot be deleted) and always sets aria-label; only the
 // "cannot delete" reason is a description, since "delete" is already part of
@@ -756,20 +758,24 @@ describe('ReviewGatesEditor delete button accessible name', () => {
     expect(onDirtyChange).not.toHaveBeenCalledWith(true);
   });
 
-  it.each(['ja', 'en'])('falls back from the ID to the name, then to the plain delete text, on a new row in %s', async lang => {
+  const unnamedName = (row: number) => i18n.t('settings.reviewGates.deleteUnnamedGateAriaLabel', { row });
+
+  it.each(['ja', 'en'])('falls back from the ID to the name, then to the row-numbered no-ID wording, on a new row in %s', async lang => {
     await i18n.changeLanguage(lang);
     const user = userEvent.setup();
     render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
     await screen.findByDisplayValue('Code Review');
     await user.click(screen.getByRole('button', { name: i18n.t('settings.reviewGates.addGate') }));
 
-    const plain = i18n.t('settings.reviewGates.deleteGate');
-    const newRowButton = () => screen.getByRole('button', { name: plain });
+    // WITH_CUSTOM_GATE has three rows, so the new one is the fourth.
+    const unnamed = unnamedName(4);
+    const newRowButton = () => screen.getByRole('button', { name: unnamed });
     const button = newRowButton();
-    expect(button).toHaveAttribute('aria-label', plain);
+    expect(button).toHaveAttribute('aria-label', unnamed);
     expect(button).not.toHaveAttribute('title');
     expect(button).toHaveAccessibleDescription('');
-    expect(button).toHaveAccessibleName(plain);
+    expect(button).toHaveAccessibleName(unnamed);
+    expect(button).not.toHaveAccessibleName(i18n.t('settings.reviewGates.deleteGate'));
     expect(button).not.toHaveAccessibleName(/:\s*$/);
 
     const lastField = (label: string) => {
@@ -778,17 +784,62 @@ describe('ReviewGatesEditor delete button accessible name', () => {
     };
     // Whitespace alone is not a target.
     await user.type(lastField('settings.reviewGates.nameLabel'), '   ');
-    expect(newRowButton()).toHaveAttribute('aria-label', plain);
+    expect(newRowButton()).toBe(button);
+    expect(button).toHaveAttribute('aria-label', unnamed);
 
     await user.clear(lastField('settings.reviewGates.nameLabel'));
     await user.type(lastField('settings.reviewGates.nameLabel'), ' New Gate ');
     const byName = screen.getByRole('button', { name: deleteName('New Gate') });
     expect(byName).toBe(button);
     expect(byName).toHaveAccessibleDescription('');
+    expect(screen.queryByRole('button', { name: unnamed })).not.toBeInTheDocument();
 
     await user.type(lastField('settings.reviewGates.idLabel'), 'new_gate');
     expect(screen.getByRole('button', { name: deleteName('new_gate') })).toBe(button);
     expect(screen.queryByRole('button', { name: deleteName('New Gate') })).not.toBeInTheDocument();
+  });
+
+  // DFLT-00208: two rows with neither an ID nor a name used to share the name
+  // "delete"; each now carries its own row number.
+  it.each([
+    ['ja', 'ID 未入力のゲートを削除（4 行目）', 'ID 未入力のゲートを削除（5 行目）'],
+    ['en', 'Delete review gate with no ID (row 4)', 'Delete review gate with no ID (row 5)']
+  ])('tells two empty rows\' delete buttons apart by row number in %s, leaving named rows as they were', async (lang, fourth, fifth) => {
+    await i18n.changeLanguage(lang);
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+    const add = screen.getByRole('button', { name: i18n.t('settings.reviewGates.addGate') });
+    await user.click(add);
+    await user.click(add);
+
+    // The literal wording guards against a mixed-up key or interpolation.
+    expect(unnamedName(4)).toBe(fourth);
+    expect(unnamedName(5)).toBe(fifth);
+    const first = screen.getByRole('button', { name: fourth });
+    const second = screen.getByRole('button', { name: fifth });
+    expect(first).not.toBe(second);
+    expect(first).toHaveAccessibleName(fourth);
+    expect(second).toHaveAccessibleName(fifth);
+    expect(screen.queryByRole('button', { name: i18n.t('settings.reviewGates.deleteGate') })).not.toBeInTheDocument();
+
+    // Rows with an ID keep their "<action>: <gate>" names.
+    const ids = ['code_review', 'qa_review', 'custom_review'];
+    const named = ids.map(id => screen.getByRole('button', { name: deleteName(id) }));
+    expect(new Set([...named, first, second]).size).toBe(5);
+    expect(named[0]).toHaveAttribute('aria-disabled', 'true');
+    expect(named[0]).toHaveAccessibleDescription(i18n.t('settings.reviewGates.cannotDeleteDefaultHint'));
+
+    // The empty rows' buttons are usable, undescribed, and still show the
+    // plain "delete" tooltip.
+    for (const b of [first, second]) {
+      expect(b).not.toHaveAttribute('aria-disabled');
+      expect(b).not.toHaveAttribute('title');
+      expect(b).toHaveAccessibleDescription('');
+      act(() => b.focus());
+      expect(openIconButtonTooltip()).toHaveTextContent(new RegExp(`^${i18n.t('settings.reviewGates.deleteGate')}$`));
+      act(() => b.blur());
+    }
   });
 });
 
@@ -1079,8 +1130,14 @@ describe('ReviewGatesEditor removal announcement', () => {
   const liveRegion = () => screen.getAllByRole('status').find(el => el.getAttribute('aria-live') === 'polite')!;
   const deleteButton = (name: string) =>
     screen.getByRole('button', { name: i18n.t('settings.reviewGates.deleteGateAriaLabel', { name }) });
-  // A row with neither an ID nor a name has no aria-label; its title names it.
-  const unnamedDeleteButtons = () => screen.getAllByRole('button', { name: i18n.t('settings.reviewGates.deleteGate') });
+  // A row with neither an ID nor a name is named by its row number
+  // (deleteUnnamedGateAriaLabel), whatever that number is.
+  const unnamedDeleteButtons = () => {
+    const [before, after] = i18n.t('settings.reviewGates.deleteUnnamedGateAriaLabel', { row: '\u0000' }).split('\u0000');
+    return screen.getAllByRole('button', {
+      name: name => name.startsWith(before) && name.endsWith(after) && /^\d+$/.test(name.slice(before.length, name.length - after.length))
+    });
+  };
   const removedText = (name: string) => i18n.t('settings.reviewGates.deleteGateAnnouncement', { name });
   const unnamedRemovedText = () => i18n.t('settings.reviewGates.deleteUnnamedGateAnnouncement');
   const addButton = () => screen.getByRole('button', { name: i18n.t('settings.reviewGates.addGate') });

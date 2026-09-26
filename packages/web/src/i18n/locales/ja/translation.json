@@ -395,6 +395,7 @@
       "enabledLabel": "有効",
       "deleteGate": "削除",
       "deleteGateAriaLabel": "ゲートを削除: {{name}}",
+      "deleteUnnamedGateAriaLabel": "ID 未入力のゲートを削除（{{row}} 行目）",
       "deleteGateAnnouncement": "レビューゲート「{{name}}」を一覧から削除しました（保存するまで反映されません）。",
       "deleteUnnamedGateAnnouncement": "ID 未入力のレビューゲートを一覧から削除しました（保存するまで反映されません）。",
       "defaultBadge": "既定",

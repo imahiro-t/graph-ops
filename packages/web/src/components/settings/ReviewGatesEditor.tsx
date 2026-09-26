@@ -152,7 +152,8 @@ const ADD_GATE_FOCUS_KEY = 'add-gate';
 // What a row is called when naming it to a screen reader (its delete button's
 // name and the removal announcement): the ID, or on a new row that has none
 // yet, the name typed so far. Whitespace-only counts as empty, so '' means
-// the row has neither.
+// the row has neither -- then the delete button falls back to the
+// row-numbered no-ID wording (deleteUnnamedGateAriaLabel).
 const gateDisplayName = (g: Pick<GateRow, 'id' | 'name'>) => (g.id ?? '').trim() || (g.name ?? '').trim();
 
 const SMALL_LABEL_CLASS = 'block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5';
@@ -458,7 +459,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
             {t('settings.reviewGates.tableEmpty')}
           </div>
         )}
-        {gates.map(g => {
+        {gates.map((g, idx) => {
           const inherited = inheritedGates[g.id];
           // An override's empty field inherits the default, so show that
           // default as the field's placeholder instead of a blank box.
@@ -536,13 +537,17 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 aria-disabled={g.isOverridden ? undefined : true}
                 // The name carries the gate (its ID, or its name on a new row
                 // with no ID yet) so a screen reader can tell which row focus
-                // is on. With neither an ID nor a name there is nothing to
-                // add, so the tooltip text itself is the name, rather than a
-                // name ending in an empty target. The tooltip says "delete"
+                // is on. With neither an ID nor a name there is no target to
+                // add, so the name says the gate has no ID and gives its
+                // 1-based position in the list (DFLT-00208) -- rather than a
+                // name ending in an empty target, or a bare "delete" that
+                // several such rows would share. The tooltip says "delete"
                 // -- already part of the name -- or, on a default gate, why
                 // it cannot be deleted; only that reason is added as the
                 // description, and only when it is not the name already.
-                label={deleteTarget ? t('settings.reviewGates.deleteGateAriaLabel', { name: deleteTarget }) : deleteTooltip}
+                label={deleteTarget
+                  ? t('settings.reviewGates.deleteGateAriaLabel', { name: deleteTarget })
+                  : t('settings.reviewGates.deleteUnnamedGateAriaLabel', { row: idx + 1 })}
                 tooltip={deleteTooltip}
                 describeWithTooltip={Boolean(deleteTarget) && !g.isOverridden}
                 wrapperClassName="mb-0.5 shrink-0"
