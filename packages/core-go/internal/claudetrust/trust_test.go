@@ -46,6 +46,18 @@ func writeGitFile(t *testing.T, dir, gitdir string) {
 
 // projectsJSON builds a ~/.claude.json with the given hasTrustDialogAccepted
 // values (a nil value leaves the key out of the entry).
+// makeSubmodule lays out <root>/outer as a repository with a submodule at
+// outer/lib whose .git file points to ../.git/modules/lib, the way
+// `git submodule add` leaves it, and returns both paths.
+func makeSubmodule(t *testing.T, root string) (outer, sub string) {
+	t.Helper()
+	outer = mkdir(t, filepath.Join(root, "outer"))
+	mkdir(t, filepath.Join(outer, ".git", "modules", "lib"))
+	sub = mkdir(t, filepath.Join(outer, "lib"))
+	writeGitFile(t, sub, "../.git/modules/lib")
+	return outer, sub
+}
+
 func projectsJSON(t *testing.T, entries map[string]any) string {
 	t.Helper()
 	projects := map[string]any{}
@@ -177,14 +189,59 @@ func TestCheck(t *testing.T) {
 			},
 			untrusted: true,
 		},
+		// Submodules (a .git file into <outer>/.git/modules/...): the outer
+		// repository's trust does not cover them, and their own trust is
+		// keyed on the submodule's root -- both confirmed with Claude Code
+		// 2.1.283 (DFLT-00185).
 		{
-			name: "a submodule (.git file into .git/modules) inside a trusted repository",
+			name: "a submodule's root with only the outer repository trusted (confirmed: the dialog appears)",
 			prepare: func(t *testing.T, s setup) string {
-				repo := mkdir(t, filepath.Join(s.root, "repo"))
-				mkdir(t, filepath.Join(repo, ".git", "modules", "lib"))
-				sub := mkdir(t, filepath.Join(repo, "lib"))
-				writeGitFile(t, sub, "../.git/modules/lib")
+				repo, sub := makeSubmodule(t, s.root)
 				writeConfig(t, s.home, projectsJSON(t, map[string]any{repo: true}))
+				return sub
+			},
+			untrusted: true,
+		},
+		{
+			name: "a submodule's subfolder with only the outer repository trusted (confirmed: the dialog appears)",
+			prepare: func(t *testing.T, s setup) string {
+				repo, sub := makeSubmodule(t, s.root)
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{repo: true}))
+				return mkdir(t, filepath.Join(sub, "sub"))
+			},
+			untrusted: true,
+		},
+		{
+			name: "a submodule's root keyed as trusted (confirmed: the key Claude Code saves)",
+			prepare: func(t *testing.T, s setup) string {
+				_, sub := makeSubmodule(t, s.root)
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{sub: true}))
+				return sub
+			},
+		},
+		{
+			name: "a submodule's subfolder with the submodule's root trusted (confirmed: no dialog)",
+			prepare: func(t *testing.T, s setup) string {
+				_, sub := makeSubmodule(t, s.root)
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{sub: true}))
+				return mkdir(t, filepath.Join(sub, "sub"))
+			},
+		},
+		{
+			name: "the outer repository with only its submodule trusted (confirmed: the dialog appears)",
+			prepare: func(t *testing.T, s setup) string {
+				repo, sub := makeSubmodule(t, s.root)
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{sub: true}))
+				return repo
+			},
+			untrusted: true,
+		},
+		{
+			name: "a submodule with no trusted entry anywhere (still judged)",
+			prepare: func(t *testing.T, s setup) string {
+				_, sub := makeSubmodule(t, s.root)
+				other := mkdir(t, filepath.Join(s.root, "other"))
+				writeConfig(t, s.home, projectsJSON(t, map[string]any{other: true}))
 				return sub
 			},
 			untrusted: true,

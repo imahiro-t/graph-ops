@@ -9,8 +9,12 @@
 // the key is the repository root -- for a worktree, the main checkout's
 // root -- and outside one, a trusted folder covers its subfolders, except
 // for a git repository nested inside it (a clone under a trusted ~/dev
-// still shows the dialog). There is no command or flag that answers the
-// question, so this package reads the file.
+// still shows the dialog). A git submodule counts as such a nested
+// repository: the trust of the repository around it does not cover it, and
+// its own trust is keyed on the submodule's root, even when accepted from
+// one of its subfolders (checked with Claude Code 2.1.283, DFLT-00185).
+// There is no command or flag that answers the question, so this package
+// reads the file.
 //
 // Because the file can change shape with any Claude Code update, Check is
 // deliberately one-sided: it answers Untrusted only when the file looks
@@ -232,9 +236,21 @@ func candidateKeys(dir string) (candidates []string, ok bool) {
 		if filepath.Base(filepath.Dir(gitdir)) == "worktrees" {
 			return nil, false
 		}
-		// A submodule or a separate git dir: Claude Code keys it on its own
-		// root (p), and the trust of the repository around a submodule does
-		// not cover it.
+		// A submodule (a gitdir into <outer>/.git/modules/...) or a separate
+		// git dir: the candidates stop at its own root (p). For a submodule
+		// this was checked against Claude Code 2.1.283 (DFLT-00185): with only
+		// the outer repository trusted, the dialog appears both at the
+		// submodule's root and in its subfolders; accepting it -- from the
+		// root or from a subfolder -- saves exactly one key, the submodule's
+		// root (not the outer root, not .git/modules/<name>), and that key
+		// covers the submodule's subfolders but not the outer repository.
+		// Still unchecked: a submodule nested inside a submodule (handled the
+		// same way, on its own root, as the documentation's "any git
+		// repository nested inside it" suggests) and a separate git dir
+		// (--separate-git-dir). A submodule inside a linked worktree points
+		// into .git/worktrees/<X>/modules/... and so is caught by the
+		// worktree case above, which adds the main checkout's root -- the
+		// silent side.
 		return inRepo, true
 	}
 	return all, true
