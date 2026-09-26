@@ -506,6 +506,24 @@ describe('NodeTypesEditor icon accessibility', () => {
     expectAllIconsHidden(no);
     expectAllIconsHidden(container);
   });
+
+  // DFLT-00168: the add row's icon-only cancel button sits on the list
+  // panel (slate-50 / slate-800). It rests at text-slate-500 /
+  // dark:text-slate-400 (4.55:1 / 5.71:1) for WCAG 1.4.11's 3:1 -- the old
+  // text-slate-400 was 2.45:1 on slate-50 -- and its hover gets stronger in
+  // both themes (slate-700 / slate-200) instead of the old hover:text-slate-600,
+  // which faded to 1.93:1 on slate-800.
+  it('rests the add row cancel button at slate-500 / dark:slate-400 with a stronger hover', async () => {
+    const user = userEvent.setup();
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') }));
+    const no = screen.getByRole('button', { name: i18n.t('settings.common.no') });
+    expect(no).toHaveClass('text-slate-500', 'dark:text-slate-400', 'hover:text-slate-700', 'dark:hover:text-slate-200');
+    expect(no).not.toHaveClass('text-slate-400');
+    expect(no).not.toHaveClass('hover:text-slate-600');
+  });
 });
 
 // DFLT-00193: after a delete, focus lands on a neighboring row's delete

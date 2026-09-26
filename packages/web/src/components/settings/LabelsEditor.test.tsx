@@ -533,6 +533,31 @@ describe('LabelsEditor', () => {
     });
   });
 
+  // DFLT-00168: the row's saving spinner is the only direct sign that the
+  // save is in progress, so it rests at text-slate-500 / dark:text-slate-400
+  // for WCAG 1.4.11's 3:1 -- 4.76:1 on white and 6.96:1 on slate-900. The old
+  // text-slate-400 was 2.56:1 on white.
+  it('shows the saving spinner at slate-500 / dark:slate-400', async () => {
+    let resolveUpdate: (v: LabelUsage) => void = () => {};
+    mockedUpdate.mockImplementation(() => new Promise(r => (resolveUpdate = r)));
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    const row = await screen.findByTestId('label-row-label-bug');
+
+    await user.click(within(row).getByRole('button', { name: i18n.t('labels.colors.orange') }));
+    const spinner = await waitFor(() => {
+      const el = row.querySelector('svg.animate-spin');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(spinner).toHaveAttribute('aria-hidden', 'true');
+    expect(spinner).toHaveClass('text-slate-500', 'dark:text-slate-400');
+    expect(spinner).not.toHaveClass('text-slate-400');
+
+    resolveUpdate(label('label-bug', 'バグ', 'orange', 2));
+    await waitFor(() => expect(screen.getByTestId('label-row-label-bug').querySelector('svg.animate-spin')).toBeNull());
+  });
+
   it('announces loading as a status and limits names to the server maximum of 50', async () => {
     let resolveFetch: (v: LabelUsage[]) => void = () => {};
     mockedFetch.mockImplementation(() => new Promise(r => (resolveFetch = r)));
