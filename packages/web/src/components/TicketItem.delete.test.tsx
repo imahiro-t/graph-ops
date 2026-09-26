@@ -64,7 +64,8 @@ const renderItem = (onDeleted?: (ticketId: string) => void | Promise<void>) => {
   return { onToggleExpand, onRefresh, confirmSpy };
 };
 
-const deleteButton = () => screen.getByRole('button', { name: i18n.t('ticketItem.delete.button') });
+const deleteButton = () =>
+  screen.getByRole('button', { name: i18n.t('ticketItem.delete.ariaLabel', { id: TICKET_ID, title: '削除のテスト' }) });
 
 async function openConfirm(onDeleted?: (ticketId: string) => void | Promise<void>) {
   const user = userEvent.setup();

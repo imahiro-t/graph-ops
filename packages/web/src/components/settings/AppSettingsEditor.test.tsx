@@ -603,6 +603,42 @@ describe('AppSettingsEditor project local paths', () => {
     expect(del).not.toHaveClass('dark:text-slate-500');
     expect(del).toHaveClass('hover:text-red-600', 'dark:hover:text-red-400', 'disabled:opacity-40');
   });
+
+  // DFLT-00193: after a delete, focus lands on a neighboring row's delete
+  // button, so each one's accessible name carries its project -- in the
+  // "<action>: <target>" form LabelsEditor uses -- while the tooltip stays.
+  describe('delete button names', () => {
+    afterEach(async () => {
+      await i18n.changeLanguage('ja');
+    });
+
+    it.each([
+      ['ja', 'プロジェクトを削除: Alpha', 'プロジェクトを削除: Beta', 'プロジェクトを削除'],
+      ['en', 'Delete project: Alpha', 'Delete project: Beta', 'Delete project']
+    ])('names each delete button after its project in %s, keeping the tooltip', async (lng, alphaName, betaName, tooltip) => {
+      await i18n.changeLanguage(lng);
+      renderWithProjects([alpha, beta]);
+      await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+      const alphaDelete = screen.getByRole('button', { name: alphaName });
+      const betaDelete = screen.getByRole('button', { name: betaName });
+      expect(row('p-alpha').getByTitle(tooltip)).toBe(alphaDelete);
+      expect(row('p-beta').getByTitle(tooltip)).toBe(betaDelete);
+    });
+
+    it('keeps the saved name while the name is being edited, and falls back to the ID when the name is empty', async () => {
+      const user = userEvent.setup();
+      renderWithProjects([alpha, { ...beta, name: '' }]);
+      await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+      const nameInput = row('p-alpha').getByLabelText(i18n.t('settings.appSettings.projects.nameLabel'));
+      await user.clear(nameInput);
+      await user.type(nameInput, 'Alpha renamed');
+
+      expect(row('p-alpha').getByRole('button', { name: 'プロジェクトを削除: Alpha' })).toBeInTheDocument();
+      expect(row('p-beta').getByRole('button', { name: 'プロジェクトを削除: p-beta' })).toBeInTheDocument();
+    });
+  });
 });
 
 // DFLT-00153: the former node/workflow config directory field now edits the

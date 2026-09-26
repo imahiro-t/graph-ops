@@ -233,6 +233,7 @@
     "noArtifactsYet": "No artifacts registered yet",
     "delete": {
       "button": "Delete ticket",
+      "ariaLabel": "Delete ticket: {{id}} {{title}}",
       "confirm": "This will delete ticket {{id}} \"{{title}}\". This action cannot be undone. Are you sure you want to delete it?",
       "confirmTitle": "Delete ticket",
       "confirmButton": "Delete"
@@ -370,6 +371,7 @@
       "newTypeLabel": "New node type name",
       "invalidTypeName": "Enter a name with no \"/\", \"\\\", \".\" or \"..\".",
       "deleteType": "Delete this node type's override",
+      "deleteTypeAriaLabel": "Delete node type override: {{name}}",
       "confirmDeleteType": "Delete the override for the node type \"{{name}}\"? Its saved instructions cannot be restored.",
       "defaultBadge": "Default",
       "defaultBadgeHint": "This is a plugin-default node type you have not overridden. Edit the text below to override it.",
@@ -529,6 +531,7 @@
         "description": "Edit each project's name and local path (the folder Claude Code is launched in), or delete a project.",
         "empty": "No projects yet.",
         "delete": "Delete project",
+        "deleteAriaLabel": "Delete project: {{name}}",
         "nameLabel": "Project name",
         "localPathLabel": "Local path (this environment)",
         "localPathHint": "The local path is not stored in the DB -- only in this environment's home config file ($HOME/.graph-ops/config.json) -- so it never affects teammates sharing the same DB. Save it empty to unset it.",

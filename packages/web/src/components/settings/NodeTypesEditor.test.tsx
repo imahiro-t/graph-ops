@@ -78,7 +78,7 @@ describe('NodeTypesEditor', () => {
     // fireEvent returns false when the handler called preventDefault().
     expect(fireEvent.keyDown(input, { key: 'Escape' })).toBe(false);
     expect(screen.queryByLabelText(i18n.t('settings.nodeTypes.newTypeLabel'))).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /custom_lint/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^custom_lint/ })).not.toBeInTheDocument();
   });
 
   it('#3 non-regression: changing the selection does not re-fetch the type list', async () => {
@@ -88,7 +88,7 @@ describe('NodeTypesEditor', () => {
     await screen.findByDisplayValue('implementation-tier-text');
     expect(mockedFetchTypes).toHaveBeenCalledTimes(1);
 
-    const reviewButton = screen.getByRole('button', { name: new RegExp(i18n.t('nodeType.review')) });
+    const reviewButton = screen.getByRole('button', { name: new RegExp(`^${i18n.t('nodeType.review')}`) });
     await user.click(reviewButton);
 
     await screen.findByDisplayValue('review-tier-text');
@@ -119,8 +119,8 @@ describe('NodeTypesEditor', () => {
   describe('switching the selection with unsaved edits', () => {
     const dialog = () => screen.queryByTestId('node-type-discard-confirm');
 
-    const reviewButton = () => screen.getByRole('button', { name: new RegExp(i18n.t('nodeType.review')) });
-    const implementationButton = () => screen.getByRole('button', { name: new RegExp(i18n.t('nodeType.implementation')) });
+    const reviewButton = () => screen.getByRole('button', { name: new RegExp(`^${i18n.t('nodeType.review')}`) });
+    const implementationButton = () => screen.getByRole('button', { name: new RegExp(`^${i18n.t('nodeType.implementation')}`) });
 
     it.each([
       ['the cancel button', (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByTestId('node-type-discard-confirm-cancel'))],
@@ -201,7 +201,7 @@ describe('NodeTypesEditor', () => {
       const input = screen.getByLabelText(i18n.t('settings.nodeTypes.newTypeLabel'));
       expect(input).toHaveValue('custom_lint');
       expect(input).toHaveFocus();
-      expect(screen.queryByRole('button', { name: /custom_lint/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^custom_lint/ })).not.toBeInTheDocument();
       expect(screen.getByDisplayValue('implementation-tier-text edited')).toBeInTheDocument();
     });
 
@@ -216,7 +216,7 @@ describe('NodeTypesEditor', () => {
       await user.click(screen.getByTestId('node-type-discard-confirm-confirm'));
 
       expect(dialog()).not.toBeInTheDocument();
-      expect(await screen.findByRole('button', { name: /custom_lint/ })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: /^custom_lint/ })).toBeInTheDocument();
       expect(screen.queryByLabelText(i18n.t('settings.nodeTypes.newTypeLabel'))).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') })).toHaveFocus();
     });
@@ -230,7 +230,8 @@ describe('NodeTypesEditor', () => {
       mockedSaveType.mockResolvedValue({ type: 'custom_lint', tier_text: '', merged_text: '' });
       mockedFetchTypes.mockResolvedValue([...TYPES, { type: 'custom_lint', has_default: false, has_user_override: true }]);
     });
-    const deleteButton = () => screen.getByRole('button', { name: i18n.t('settings.nodeTypes.deleteType') });
+    const deleteButton = () =>
+      screen.getByRole('button', { name: i18n.t('settings.nodeTypes.deleteTypeAriaLabel', { name: 'custom_lint' }) });
 
     it.each([
       ['the cancel button', (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByTestId('node-type-delete-confirm-cancel'))],
@@ -277,7 +278,12 @@ describe('NodeTypesEditor', () => {
 
       const buttons = [
         deleteButton(),
-        ...screen.getAllByRole('button', { name: i18n.t('settings.nodeTypes.cannotDeleteDefaultHint') })
+        screen.getByRole('button', {
+          name: i18n.t('settings.nodeTypes.deleteTypeAriaLabel', { name: i18n.t('nodeType.implementation') })
+        }),
+        screen.getByRole('button', {
+          name: i18n.t('settings.nodeTypes.deleteTypeAriaLabel', { name: i18n.t('nodeType.review') })
+        })
       ];
       expect(buttons).toHaveLength(3);
       expect(buttons[0]).toBeEnabled();
@@ -385,7 +391,8 @@ describe('NodeTypesEditor focus after deleting a type', () => {
 });
 
 // DFLT-00166: the list's icons are decorative and aria-hidden; the icon-only
-// buttons (delete, and the yes/no of the add row) are named by their title.
+// buttons (delete, and the yes/no of the add row) are named -- the delete
+// buttons after their type since DFLT-00193, the others by their title.
 describe('NodeTypesEditor icon accessibility', () => {
   beforeEach(() => {
     mockedFetchTypes.mockReset();
@@ -409,12 +416,21 @@ describe('NodeTypesEditor icon accessibility', () => {
     // nodeTypeMeta through a variable -- is hidden.
     expectAllIconsHidden(container);
 
-    // The custom type's delete button is found by its title-derived name.
-    const del = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.deleteType') });
+    // The custom type's delete button is named after the type (DFLT-00193).
+    const del = screen.getByRole('button', {
+      name: i18n.t('settings.nodeTypes.deleteTypeAriaLabel', { name: 'security_scan' })
+    });
     expect(del).toBeEnabled();
     expectAllIconsHidden(del);
-    // Default types' delete buttons are named with the reason they are disabled.
-    expect(screen.getAllByRole('button', { name: i18n.t('settings.nodeTypes.cannotDeleteDefaultHint') })).toHaveLength(2);
+    // Default types' delete buttons are named after the type too, and keep
+    // the reason they are disabled as their description.
+    for (const type of ['implementation', 'review'] as const) {
+      const disabledDel = screen.getByRole('button', {
+        name: i18n.t('settings.nodeTypes.deleteTypeAriaLabel', { name: i18n.t(`nodeType.${type}`) })
+      });
+      expect(disabledDel).toBeDisabled();
+      expect(disabledDel).toHaveAccessibleDescription(i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
+    }
 
     await user.click(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') }));
     const yes = screen.getByRole('button', { name: i18n.t('settings.common.yes') });
@@ -422,5 +438,43 @@ describe('NodeTypesEditor icon accessibility', () => {
     expectAllIconsHidden(yes);
     expectAllIconsHidden(no);
     expectAllIconsHidden(container);
+  });
+});
+
+// DFLT-00193: after a delete, focus lands on a neighboring row's delete
+// button, so each delete button's accessible name carries its type -- in
+// the "<action>: <target>" form LabelsEditor uses -- while the tooltip stays
+// as it was and a default type keeps "why it can't be deleted" as its
+// description.
+describe('NodeTypesEditor delete button names', () => {
+  beforeEach(() => {
+    mockedFetchTypes.mockReset();
+    mockedFetchType.mockReset();
+    mockedFetchTypes.mockResolvedValue([...TYPES, { type: 'custom_lint', has_default: false, has_user_override: true }]);
+    stubFetchType();
+  });
+
+  afterEach(async () => {
+    await i18n.changeLanguage('ja');
+  });
+
+  it.each([
+    ['ja', 'ノード種別の上書きを削除: custom_lint', 'ノード種別の上書きを削除: 実装'],
+    ['en', 'Delete node type override: custom_lint', 'Delete node type override: Implementation']
+  ])('names each delete button after its type in %s, keeping the tooltip and the default hint', async (lng, customName, defaultName) => {
+    await i18n.changeLanguage(lng);
+    const { container } = render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    const custom = screen.getByRole('button', { name: customName });
+    expect(custom).toBe(container.querySelector('[data-focus-key="delete-custom_lint"]'));
+    expect(custom).toBeEnabled();
+    expect(custom).toHaveAttribute('title', i18n.t('settings.nodeTypes.deleteType'));
+
+    const byDefault = screen.getByRole('button', { name: defaultName });
+    expect(byDefault).toBe(container.querySelector('[data-focus-key="delete-implementation"]'));
+    expect(byDefault).toBeDisabled();
+    expect(byDefault).toHaveAttribute('title', i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
+    expect(byDefault).toHaveAccessibleDescription(i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
   });
 });

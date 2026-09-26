@@ -1385,6 +1385,7 @@ export const TicketItem: React.FC<Props> = ({
             onClick={handleDeleteTicket}
             disabled={isDeletingTicket}
             title={t('ticketItem.delete.button')}
+            aria-label={t('ticketItem.delete.ariaLabel', { id: ticket.id, title: ticket.title })}
             className="text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 -m-1 rounded"
           >
             {isDeletingTicket ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <Trash2 aria-hidden="true" className="w-4 h-4" />}

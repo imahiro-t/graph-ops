@@ -1064,6 +1064,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                     onClick={() => handleDeleteProject(p)}
                     disabled={projectDeletingId === p.id}
                     title={t('settings.appSettings.projects.delete')}
+                    aria-label={t('settings.appSettings.projects.deleteAriaLabel', { name: p.name || p.id })}
                     className="ml-auto mb-0.5 p-1 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40 shrink-0"
                   >
                     {projectDeletingId === p.id ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Trash2 aria-hidden="true" className="w-3.5 h-3.5" />}

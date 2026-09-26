@@ -273,6 +273,9 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           // -- only overridden or not -- exactly like レビューゲート's
           // default rows; deleting only ever makes sense for a custom type.
           const canDelete = !info.has_default;
+          // One name for both the visible select button and the delete
+          // button's accessible name, so the two always read the same.
+          const displayName = meta.labelKey ? t(meta.labelKey) : info.type;
           return (
             <div
               key={info.type}
@@ -288,7 +291,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 }`}
               >
                 <Icon aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-                <span className="truncate flex-1">{meta.labelKey ? t(meta.labelKey) : info.type}</span>
+                <span className="truncate flex-1">{displayName}</span>
                 {!hasOverride && info.has_default && (
                   <span
                     title={t('settings.nodeTypes.defaultBadgeHint')}
@@ -305,6 +308,11 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 data-focus-key={deleteButtonKey(info.type)}
                 onClick={() => removeType(info.type)}
                 disabled={!canDelete}
+                // The name carries the type so a screen reader can tell which
+                // row focus is on; title stays as the tooltip and -- no longer
+                // used for the name -- is exposed as the description, which
+                // keeps the "cannot delete a default" reason available.
+                aria-label={t('settings.nodeTypes.deleteTypeAriaLabel', { name: displayName })}
                 title={info.has_default ? t('settings.nodeTypes.cannotDeleteDefaultHint') : t('settings.nodeTypes.deleteType')}
                 className="shrink-0 p-1 mr-1 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-30 rounded"
               >

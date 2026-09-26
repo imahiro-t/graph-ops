@@ -1,7 +1,8 @@
 // DFLT-00166: every lucide icon TicketItem draws is decorative -- its meaning
 // is carried by the text next to it or by the name of the control around it
 // -- so each one is aria-hidden="true". The icon-only header buttons
-// (close/reopen/delete) keep an accessible name from their title.
+// (close/reopen) keep an accessible name from their title; the delete button
+// is named after its ticket (DFLT-00193).
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
@@ -105,12 +106,32 @@ describe('TicketItem icon accessibility', () => {
     expectAllIconsHidden(badge);
   });
 
-  it('names the icon-only close and delete buttons from their title', () => {
+  it('names the icon-only close button from its title and the delete button after its ticket', () => {
     renderItem('IN PROGRESS', false);
     const close = screen.getByRole('button', { name: i18n.t('ticketItem.close.button') });
-    const del = screen.getByRole('button', { name: i18n.t('ticketItem.delete.button') });
+    const del = screen.getByRole('button', {
+      name: i18n.t('ticketItem.delete.ariaLabel', { id: TICKET_ID, title: 'アイコンのテスト' })
+    });
     expectAllIconsHidden(close);
     expectAllIconsHidden(del);
+  });
+
+  // DFLT-00193: after a delete, focus can land on another card's delete
+  // button, so its name carries the ticket's ID and title -- in the
+  // "<action>: <target>" form LabelsEditor uses -- while the tooltip stays.
+  it.each([
+    ['ja', `チケットを削除: ${TICKET_ID} アイコンのテスト`, 'チケットを削除'],
+    ['en', `Delete ticket: ${TICKET_ID} アイコンのテスト`, 'Delete ticket']
+  ])('names the delete button with the ticket ID and title in %s, keeping the tooltip', async (lng, name, tooltip) => {
+    await i18n.changeLanguage(lng);
+    try {
+      const { container } = renderItem('IN PROGRESS', false);
+      const del = screen.getByRole('button', { name });
+      expect(del).toBe(container.querySelector(`[data-focus-key="ticket-delete-${TICKET_ID}"]`));
+      expect(del).toHaveAttribute('title', tooltip);
+    } finally {
+      await i18n.changeLanguage('ja');
+    }
   });
 
   it('names the icon-only reopen button of a closed ticket from its title', () => {

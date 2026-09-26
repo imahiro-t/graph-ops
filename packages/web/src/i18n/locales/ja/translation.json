@@ -232,6 +232,7 @@
     "noArtifactsYet": "成果物はまだ登録されていません",
     "delete": {
       "button": "チケットを削除",
+      "ariaLabel": "チケットを削除: {{id}} {{title}}",
       "confirm": "チケット {{id}}「{{title}}」を削除します。この操作は取り消せません。本当に削除しますか？",
       "confirmTitle": "チケットの削除",
       "confirmButton": "削除する"
@@ -369,6 +370,7 @@
       "newTypeLabel": "新しいノード種別名",
       "invalidTypeName": "「/」「\\」「.」「..」を含まない名前を入力してください。",
       "deleteType": "このノード種別の上書きを削除",
+      "deleteTypeAriaLabel": "ノード種別の上書きを削除: {{name}}",
       "confirmDeleteType": "ノード種別「{{name}}」の上書きを削除します。保存済みの指示文は元に戻せません。削除しますか？",
       "defaultBadge": "既定",
       "defaultBadgeHint": "まだ上書きしていない、プラグイン既定のノード種別です。下の欄に入力すると上書きされます。",
@@ -528,6 +530,7 @@
         "description": "各プロジェクトの名前とローカルパス（Claude Codeを起動するフォルダ）の編集、プロジェクトの削除ができます。",
         "empty": "プロジェクトがまだありません。",
         "delete": "プロジェクトを削除",
+        "deleteAriaLabel": "プロジェクトを削除: {{name}}",
         "nameLabel": "プロジェクト名",
         "localPathLabel": "ローカルパス（この環境）",
         "localPathHint": "ローカルパスはDBには保存されず、この環境のホーム設定ファイル（$HOME/.graph-ops/config.json）にだけ保存されます。同じDBを使う他のメンバーには影響しません。空にして保存すると未設定に戻ります。",

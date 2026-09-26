@@ -410,7 +410,7 @@ describe('SettingsModal', () => {
         const user = userEvent.setup();
         const onClose = vi.fn();
         renderModal(onClose);
-        const deleteButton = await screen.findByRole('button', { name: i18n.t('settings.nodeTypes.deleteType') });
+        const deleteButton = await screen.findByRole('button', { name: i18n.t('settings.nodeTypes.deleteTypeAriaLabel', { name: 'custom_lint' }) });
 
         await user.click(deleteButton);
         expect(screen.getByRole('alertdialog', { name: i18n.t('settings.nodeTypes.confirmDeleteTypeTitle') })).toBeInTheDocument();
