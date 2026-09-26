@@ -1056,13 +1056,22 @@ export const TicketItem: React.FC<Props> = ({
               (DFLT-00152). It deliberately has no onClick of its own -- the
               toggle lives only in handleHeaderClick, which the chevron's
               click (mouse, or Enter/Space with detail 0) bubbles up to, so
-              every activation toggles the row exactly once. */}
+              every activation toggles the row exactly once.
+              DFLT-00178: it draws its own focus-visible ring (the same
+              classes as the node-row chevron, DFLT-00175) instead of relying
+              on the browser outline, and none on a mouse click. The ring has
+              no offset, so it sits on this header's background: light
+              blue-500 is 3.68:1 / 3.52:1 on white / the hovered slate-50,
+              dark blue-400 is 7.02:1 / 5.75:1 on slate-900 / the hovered
+              slate-800 -- all above the 3:1 non-text minimum. (blue-500
+              would also pass in dark mode, 4.85:1 / 3.98:1, but blue-400
+              keeps it consistent with the node-row chevron.) */}
           <button
             type="button"
             aria-expanded={isExpanded}
             aria-label={t('ticketItem.toggleTicket', { id: ticket.id })}
             data-testid="ticket-toggle-expand"
-            className="text-slate-500 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 shrink-0"
+            className="text-slate-500 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 shrink-0 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
           >
             {isExpanded
               ? <ChevronDown className="w-5 h-5" aria-hidden="true" />
