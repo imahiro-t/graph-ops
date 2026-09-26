@@ -16,6 +16,7 @@ import { fetchSettingsCatalog, saveSettingsCatalog } from '../../lib/settingsApi
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
+import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
 
 interface Props {
   onDirtyChange: (dirty: boolean) => void;
@@ -139,6 +140,12 @@ type FetchedRows = {
   warnings: SettingsCatalogWarning[];
 };
 
+// data-focus-key values of the controls removeGate moves keyboard focus to
+// once the deleted row is gone (see pendingFocus).
+const deleteButtonKey = (rowKey: string) => `delete-${rowKey}`;
+const previewToggleKey = (rowKey: string) => `preview-${rowKey}`;
+const ADD_GATE_FOCUS_KEY = 'add-gate';
+
 const SMALL_LABEL_CLASS = 'block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5';
 
 export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
@@ -173,6 +180,19 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // is (still) empty can be marked invalid and point at the message.
   const [emptyIdErrorShown, setEmptyIdErrorShown] = useState(false);
   const errorId = `${idPrefix}-error`;
+  const containerRef = useRef<HTMLDivElement>(null);
+  // Where keyboard focus goes once the next render has settled (DFLT-00199,
+  // following DFLT-00191's rule): deleting a gate unmounts its row, focused
+  // delete button included, which would otherwise drop focus to <body>. Same
+  // pattern as NodeTypesEditor's.
+  const [pendingFocus, setPendingFocus] = useState<string | null>(null);
+  useEffect(() => {
+    if (pendingFocus === null) return;
+    focusIfLost(containerRef.current?.querySelector<HTMLElement>(focusKeySelector(pendingFocus)));
+    setPendingFocus(null);
+    // gates is what mounts and unmounts the targets; it is listed so the
+    // effect runs once the removed row is gone.
+  }, [pendingFocus, gates]);
   const { savedFlash, showSavedFlash } = useSavedFlash();
 
   const isDirty = JSON.stringify(gates) !== JSON.stringify(savedGates) || maxIterations !== savedMaxIterations;
@@ -261,13 +281,25 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // not-yet-overridden default row even if triggered some other way.
   // The removed row's open state goes with it; its rowKey is never handed
   // out again, so no later row could pick it up anyway.
+  // Focus then moves to the row that took the removed one's place (else the
+  // new last row, else "Add Review Gate"): to its delete button, or -- when
+  // that is disabled because the row is a not-yet-overridden default -- to
+  // its merged preview toggle, the row's other always-enabled button.
   const removeGate = (rowKey: string) => {
     if (!gates.find(g => g.rowKey === rowKey)?.isOverridden) return;
+    const remaining = gates.filter(g => g.rowKey !== rowKey);
     setGates(prev => prev.filter(g => g.rowKey !== rowKey));
     setExpandedPreview(prev => {
       const { [rowKey]: _removed, ...rest } = prev;
       return rest;
     });
+    const neighborKey = neighborAfterRemoval(gates.map(g => g.rowKey), rowKey, remaining.map(g => g.rowKey));
+    const neighbor = remaining.find(g => g.rowKey === neighborKey);
+    if (!neighbor) {
+      setPendingFocus(ADD_GATE_FOCUS_KEY);
+    } else {
+      setPendingFocus(neighbor.isOverridden ? deleteButtonKey(neighbor.rowKey) : previewToggleKey(neighbor.rowKey));
+    }
   };
 
   const handleSave = async () => {
@@ -340,7 +372,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   }
 
   return (
-    <div className="flex flex-col gap-3 h-full min-h-0">
+    <div ref={containerRef} className="flex flex-col gap-3 h-full min-h-0">
       <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.intro')}</p>
       {error && <div id={errorId} role="alert" className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900 whitespace-pre-wrap">{error}</div>}
 
@@ -458,6 +490,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               </label>
               <button
                 onClick={() => removeGate(g.rowKey)}
+                data-focus-key={deleteButtonKey(g.rowKey)}
                 disabled={!g.isOverridden}
                 // The name carries the gate (its ID, or its name on a new row
                 // with no ID yet) so a screen reader can tell which row focus
@@ -500,6 +533,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               <button
                 type="button"
                 onClick={() => setExpandedPreview(prev => ({ ...prev, [g.rowKey]: !prev[g.rowKey] }))}
+                data-focus-key={previewToggleKey(g.rowKey)}
                 // The preview is only rendered while open, so aria-controls is
                 // set only then and never points at an id missing from the DOM.
                 aria-expanded={previewOpen}
@@ -537,6 +571,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       <div className="flex justify-between items-center">
         <button
           onClick={addGate}
+          data-focus-key={ADD_GATE_FOCUS_KEY}
           className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 transition"
         >
           <Plus aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.reviewGates.addGate')}

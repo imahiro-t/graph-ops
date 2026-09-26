@@ -895,3 +895,94 @@ describe('ReviewGatesEditor merged preview state across row changes', () => {
     });
   });
 });
+
+// Deleting a gate unmounts its row, focused delete button included; focus
+// must not drop to <body> (DFLT-00199, following DFLT-00191's rule). It goes
+// to the row that took the removed one's place, else the new last row, else
+// "Add Review Gate" -- on that row's delete button, or its merged preview
+// toggle when the delete button is disabled (a not-yet-overridden default).
+describe('ReviewGatesEditor focus after deleting a gate', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockedSaveCatalog.mockResolvedValue(undefined);
+    await i18n.changeLanguage('ja');
+  });
+
+  const deleteButton = (name: string) =>
+    screen.getByRole('button', { name: i18n.t('settings.reviewGates.deleteGateAriaLabel', { name }) });
+  const toggles = () => screen.getAllByRole('button', { name: i18n.t('settings.reviewGates.mergedPreviewLabel') });
+
+  it('moves focus to the next row\'s delete button when a middle row is deleted', async () => {
+    mockedFetchCatalog.mockResolvedValue(WITH_CUSTOM_GATE);
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+
+    deleteButton('qa_review').focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(document.activeElement).toBe(deleteButton('custom_review')));
+    expect(screen.queryByDisplayValue('qa_review')).not.toBeInTheDocument();
+  });
+
+  it('moves focus to the previous row\'s delete button when the last row is deleted', async () => {
+    mockedFetchCatalog.mockResolvedValue(WITH_CUSTOM_GATE);
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+
+    deleteButton('custom_review').focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(document.activeElement).toBe(deleteButton('qa_review')));
+  });
+
+  it('moves focus to the neighbor\'s merged preview toggle when its delete button is disabled', async () => {
+    // Rows: code_review (default, delete disabled), qa_review (overridden).
+    mockedFetchCatalog.mockResolvedValue(CATALOG_RESPONSE);
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('QA Review (overridden)');
+
+    deleteButton('qa_review').focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(document.activeElement).toBe(toggles()[0]));
+    expect(toggles()).toHaveLength(1);
+  });
+
+  it('moves focus to "Add Review Gate" when the only row is deleted', async () => {
+    mockedFetchCatalog.mockResolvedValue({
+      ...CATALOG_RESPONSE,
+      tier_document: { version: 1, review_gates: { custom_review: { name: 'Custom Review', criteria: 'custom criteria' } } },
+      merged_catalog: { ...CATALOG_RESPONSE.merged_catalog, review_gates: { custom_review: { name: 'Custom Review', criteria: 'custom criteria' } } },
+      inherited_catalog: { ...CATALOG_RESPONSE.inherited_catalog, review_gates: {} }
+    } as SettingsCatalogResponse);
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+
+    deleteButton('custom_review').focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: i18n.t('settings.reviewGates.addGate') }))
+    );
+    expect(screen.queryAllByRole('button', { name: i18n.t('settings.reviewGates.mergedPreviewLabel') })).toHaveLength(0);
+  });
+
+  it('moves focus to the neighbor when a newly added row is deleted', async () => {
+    mockedFetchCatalog.mockResolvedValue(WITH_CUSTOM_GATE);
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.reviewGates.addGate') }));
+    const idInputs = screen.getAllByLabelText(i18n.t('settings.reviewGates.idLabel'));
+    await user.type(idInputs[idInputs.length - 1], 'new_gate');
+    deleteButton('new_gate').focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(document.activeElement).toBe(deleteButton('custom_review')));
+  });
+});
