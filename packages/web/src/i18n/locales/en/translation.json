@@ -26,6 +26,7 @@
   },
   "toolbar": {
     "searchPlaceholder": "Search tickets (ID / title)...",
+    "searchLabel": "Search tickets",
     "statusAll": "Status: All",
     "statusSelected": "Status: {{count}} selected",
     "statusGroupLabel": "Filter by status",
@@ -374,6 +375,8 @@
       "invalidTypeName": "Enter a name with no \"/\", \"\\\", \".\" or \"..\".",
       "deleteType": "Delete this node type's override",
       "deleteTypeAriaLabel": "Delete node type override: {{name}}",
+      "confirmAddType": "Add node type",
+      "cancelAddType": "Cancel adding",
       "deleteTypeSuccess": "Deleted the override for the node type \"{{name}}\".",
       "confirmDeleteType": "Delete the override for the node type \"{{name}}\"? Its saved instructions cannot be restored.",
       "defaultBadge": "Default",

@@ -26,6 +26,7 @@
   },
   "toolbar": {
     "searchPlaceholder": "チケット検索 (ID・タイトル)...",
+    "searchLabel": "チケット検索",
     "statusAll": "ステータス: すべて",
     "statusSelected": "ステータス: {{count}}件選択",
     "statusGroupLabel": "ステータスで絞り込む",
@@ -373,6 +374,8 @@
       "invalidTypeName": "「/」「\\」「.」「..」を含まない名前を入力してください。",
       "deleteType": "このノード種別の上書きを削除",
       "deleteTypeAriaLabel": "ノード種別の上書きを削除: {{name}}",
+      "confirmAddType": "ノード種別を追加",
+      "cancelAddType": "追加を取り消す",
       "deleteTypeSuccess": "ノード種別「{{name}}」の上書きを削除しました。",
       "confirmDeleteType": "ノード種別「{{name}}」の上書きを削除します。保存済みの指示文は元に戻せません。削除しますか？",
       "defaultBadge": "既定",

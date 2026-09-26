@@ -108,8 +108,8 @@ describe('TicketItem icon button contrast (WCAG 1.4.11)', () => {
 
   it('uses the higher-contrast resting color on the close and delete buttons', () => {
     renderItem(makeTicket());
-    const close = screen.getByTitle(i18n.t('ticketItem.close.button'));
-    const del = screen.getByTitle(i18n.t('ticketItem.delete.button'));
+    const close = screen.getByRole('button', { name: i18n.t('ticketItem.close.button') });
+    const del = screen.getByRole('button', { name: i18n.t('ticketItem.delete.ariaLabel', { id: TICKET_ID, title: 'タイトル' }) });
     expectContrastColors(close);
     expectContrastColors(del);
     expect(close).toHaveClass('hover:text-slate-700', 'dark:hover:text-slate-200');
@@ -123,7 +123,7 @@ describe('TicketItem icon button contrast (WCAG 1.4.11)', () => {
 
   it('uses the higher-contrast resting color on the reopen button of a CLOSED ticket', () => {
     renderItem(makeTicket('CLOSED'));
-    const reopen = screen.getByTitle(i18n.t('ticketItem.reopen.button'));
+    const reopen = screen.getByRole('button', { name: i18n.t('ticketItem.reopen.button') });
     expectContrastColors(reopen);
     expect(reopen).toHaveClass(
       'hover:text-indigo-600',
