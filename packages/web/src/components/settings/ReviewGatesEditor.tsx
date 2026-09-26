@@ -374,6 +374,8 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               ? fallback
               : t('settings.reviewGates.inheritedPlaceholder', { value });
           const idLocked = !g.isOverridden || g.hasDefault;
+          const previewOpen = !!expandedPreview[idx];
+          const previewId = `${idPrefix}-${idx}-preview`;
           // What the delete button names: the ID, or on a new row that has
           // none yet, the name typed so far. Whitespace-only counts as empty.
           const deleteTarget = (g.id ?? '').trim() || (g.name ?? '').trim();
@@ -474,27 +476,33 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               <button
                 type="button"
                 onClick={() => setExpandedPreview(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                // The preview is only rendered while open, so aria-controls is
+                // set only then and never points at an id missing from the DOM.
+                aria-expanded={previewOpen}
+                aria-controls={previewOpen ? previewId : undefined}
                 className="flex items-center gap-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
               >
-                {expandedPreview[idx] ? <ChevronDown aria-hidden="true" className="w-3 h-3" /> : <ChevronRight aria-hidden="true" className="w-3 h-3" />}
+                {previewOpen ? <ChevronDown aria-hidden="true" className="w-3 h-3" /> : <ChevronRight aria-hidden="true" className="w-3 h-3" />}
                 {t('settings.reviewGates.mergedPreviewLabel')}
               </button>
-              {expandedPreview[idx] && (
-                mergedGates[g.id] ? (
-                  <div className="mt-1.5 space-y-1.5">
-                    <div>
-                      <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.reviewGates.mergedCriteriaLabel')}</label>
-                      <pre className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 max-h-32 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono">
-                        {mergedGates[g.id].criteria || t('settings.common.inheritedFromDefault')}
-                      </pre>
+              {previewOpen && (
+                <div id={previewId}>
+                  {mergedGates[g.id] ? (
+                    <div className="mt-1.5 space-y-1.5">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.reviewGates.mergedCriteriaLabel')}</label>
+                        <pre className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 max-h-32 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono">
+                          {mergedGates[g.id].criteria || t('settings.common.inheritedFromDefault')}
+                        </pre>
+                      </div>
+                      <div className="flex items-center gap-4 text-[11px] text-slate-600 dark:text-slate-400">
+                        <span>{t('settings.reviewGates.mergedEnabledLabel')}: {mergedGates[g.id].enabled === false ? t('settings.common.no') : t('settings.common.yes')}</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-4 text-[11px] text-slate-600 dark:text-slate-400">
-                      <span>{t('settings.reviewGates.mergedEnabledLabel')}: {mergedGates[g.id].enabled === false ? t('settings.common.no') : t('settings.common.yes')}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.previewUnavailableHint')}</p>
-                )
+                  ) : (
+                    <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.previewUnavailableHint')}</p>
+                  )}
+                </div>
               )}
             </div>
           </div>

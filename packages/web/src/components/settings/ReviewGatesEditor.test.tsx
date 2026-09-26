@@ -720,3 +720,91 @@ describe('ReviewGatesEditor delete button accessible name', () => {
     expect(screen.queryByRole('button', { name: deleteName('New Gate') })).not.toBeInTheDocument();
   });
 });
+
+// DFLT-00169: the "merged preview" toggle tells assistive tech whether the
+// preview is open (aria-expanded) and, only while it is rendered, which
+// region it shows (aria-controls). The chevron is aria-hidden (DFLT-00166),
+// so without these the state was conveyed by the chevron's direction alone.
+describe('ReviewGatesEditor merged preview toggle state', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockedFetchCatalog.mockResolvedValue(CATALOG_RESPONSE);
+    await i18n.changeLanguage('ja');
+  });
+
+  // One toggle per row, in row order (code_review, qa_review, then added rows).
+  const toggles = () => screen.getAllByRole('button', { name: i18n.t('settings.reviewGates.mergedPreviewLabel') });
+  // useId values contain colons, so look the region up by id directly
+  // rather than through a CSS selector.
+  const controlledRegion = (toggle: HTMLElement) => {
+    const id = toggle.getAttribute('aria-controls');
+    expect(id).toBeTruthy();
+    const region = document.getElementById(id!);
+    expect(region).not.toBeNull();
+    return region!;
+  };
+
+  it('starts collapsed on every row with no aria-controls', async () => {
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+
+    const buttons = toggles();
+    expect(buttons).toHaveLength(2);
+    for (const button of buttons) {
+      expect(button).toHaveAttribute('aria-expanded', 'false');
+      expect(button).not.toHaveAttribute('aria-controls');
+    }
+  });
+
+  it('points aria-controls at the merged criteria while open and drops both when closed again', async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+
+    const toggle = toggles()[0];
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const region = controlledRegion(toggle);
+    expect(within(region).getByText(i18n.t('settings.reviewGates.mergedCriteriaLabel'))).toBeInTheDocument();
+    expect(within(region).getByText('code criteria')).toBeInTheDocument();
+    const regionId = region.id;
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).not.toHaveAttribute('aria-controls');
+    expect(document.getElementById(regionId)).toBeNull();
+  });
+
+  it('points aria-controls at the "preview unavailable" hint on a newly added row', async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.reviewGates.addGate') }));
+
+    const buttons = toggles();
+    expect(buttons).toHaveLength(3);
+    const toggle = buttons[2];
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const region = controlledRegion(toggle);
+    expect(within(region).getByText(i18n.t('settings.reviewGates.previewUnavailableHint'))).toBeInTheDocument();
+  });
+
+  it('gives each open row its own region id', async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+
+    const [first, second] = toggles();
+    await user.click(first);
+    await user.click(second);
+    expect(first).toHaveAttribute('aria-expanded', 'true');
+    expect(second).toHaveAttribute('aria-expanded', 'true');
+    const firstRegion = controlledRegion(first);
+    const secondRegion = controlledRegion(second);
+    expect(firstRegion.id).not.toBe(secondRegion.id);
+    expect(within(firstRegion).getByText('code criteria')).toBeInTheDocument();
+    expect(within(secondRegion).getByText('qa criteria')).toBeInTheDocument();
+  });
+});
