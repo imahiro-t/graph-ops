@@ -223,6 +223,7 @@
       "rejectedBadgeOne": "Rejected: {{name}}",
       "rejectedBadgeMany": "{{count}} rejected",
       "rejectedAnnouncement": "Rejected {{name}}",
+      "approvedAnnouncement": "Approved {{name}}",
       "noLongerPendingAnnouncement": "{{name}} is no longer awaiting approval"
     },
     "artifactsCount": "Artifacts {{count}}",

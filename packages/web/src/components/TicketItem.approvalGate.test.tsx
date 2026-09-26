@@ -956,6 +956,9 @@ describe('TicketItem reject prompt focus and announcements', () => {
       await waitFor(() => expectIdleButton(approveOf(GATE_ID)));
       expect(approveOf(GATE_ID)).not.toHaveAttribute('aria-busy');
       expect(completeCalls(GATE_ID)).toBe(1);
+      // DFLT-00215: the approval succeeded, so focus has already moved on to
+      // the gate toggle, ahead of the refresh that removes the buttons.
+      expect(document.activeElement).toBe(toggleOf(GATE_ID));
     });
 
     it('does not open the reject prompt from the reject button while an approval is in flight', async () => {
@@ -1053,6 +1056,154 @@ describe('TicketItem reject prompt focus and announcements', () => {
       await waitFor(() => expect(document.activeElement).toBe(input));
       expect(confirmRejectButton()).toHaveProperty('disabled', true);
       expect(confirmRejectButton()).not.toHaveAttribute('aria-disabled');
+    });
+  });
+
+  // DFLT-00215: a successful approval removes the gate's Approve and Reject
+  // buttons, which left focus on <body> with nothing announced. It now moves
+  // to the gate toggle (from either button, or from <body>) and "<gate>
+  // approved" is announced -- without pulling focus off a control the user
+  // moved to while the approval was in flight.
+  describe('moves focus to the gate toggle and announces it when an approval succeeds', () => {
+    const approvedText = (name = GATE_NAME) => i18n.t('ticketItem.approvalGate.approvedAnnouncement', { name });
+    const rejectOf = (nodeId: string) => screen.getByTestId(`node-reject-${nodeId}`) as HTMLButtonElement;
+    const expectApprovedAndOnToggle = () => {
+      expect(document.activeElement).toBe(toggleOf(GATE_ID));
+      expect(document.activeElement).not.toBe(document.body);
+      expect(announcement(approvedText())).toHaveLength(1);
+    };
+
+    it('from a mouse click on the approve button', async () => {
+      const user = userEvent.setup();
+      const respond = stubHeldCompletes();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { strict: true });
+
+      await user.click(approveOf(GATE_ID));
+      expect(document.activeElement).toBe(approveOf(GATE_ID));
+      expect(announcement(approvedText())).toHaveLength(0);
+
+      await respond(GATE_ID, new Response('{}', { status: 200 }));
+      await waitFor(() => expect(announcement(approvedText())).toHaveLength(1));
+
+      // The refresh that follows shows the gate DONE: both buttons are gone.
+      rerenderTicket(makeTicket('IN REVIEW', 'DONE'));
+      expect(screen.queryByTestId(`node-approve-${GATE_ID}`)).toBeNull();
+      expect(screen.queryByTestId(`node-reject-${GATE_ID}`)).toBeNull();
+      expectApprovedAndOnToggle();
+      expect(completeCalls(GATE_ID)).toBe(1);
+    });
+
+    it.each([
+      ['Enter', '{Enter}'],
+      ['Space', ' ']
+    ])('from %s on the focused approve button', async (_label, keys) => {
+      const user = userEvent.setup();
+      const respond = stubHeldCompletes();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { strict: true });
+      approveOf(GATE_ID).focus();
+
+      await user.keyboard(keys);
+      expect(completeCalls(GATE_ID)).toBe(1);
+      expect(document.activeElement).toBe(approveOf(GATE_ID));
+
+      await respond(GATE_ID, new Response('{}', { status: 200 }));
+      await waitFor(() => expect(announcement(approvedText())).toHaveLength(1));
+
+      rerenderTicket(makeTicket('IN REVIEW', 'DONE'));
+      expect(screen.queryByTestId(`node-approve-${GATE_ID}`)).toBeNull();
+      expectApprovedAndOnToggle();
+    });
+
+    it("from the same gate's reject button the user tabbed to while the approval was in flight", async () => {
+      const user = userEvent.setup();
+      const respond = stubHeldCompletes();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { strict: true });
+      await user.click(approveOf(GATE_ID));
+
+      await user.tab();
+      expect(document.activeElement).toBe(rejectOf(GATE_ID));
+
+      await respond(GATE_ID, new Response('{}', { status: 200 }));
+      await waitFor(() => expect(announcement(approvedText())).toHaveLength(1));
+
+      rerenderTicket(makeTicket('IN REVIEW', 'DONE'));
+      expect(screen.queryByTestId(`node-reject-${GATE_ID}`)).toBeNull();
+      expectApprovedAndOnToggle();
+    });
+
+    it('from <body> when a poll removed the buttons before the approval responded', async () => {
+      const user = userEvent.setup();
+      const respond = stubHeldCompletes();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { strict: true });
+      await user.click(approveOf(GATE_ID));
+
+      // App's polling lands the DONE gate while the POST is still pending.
+      rerenderTicket(makeTicket('IN REVIEW', 'DONE'));
+      expect(screen.queryByTestId(`node-approve-${GATE_ID}`)).toBeNull();
+      expect(document.activeElement).toBe(document.body);
+      expect(announcement(approvedText())).toHaveLength(0);
+
+      await respond(GATE_ID, new Response('{}', { status: 200 }));
+
+      await waitFor(() => expect(announcement(approvedText())).toHaveLength(1));
+      expectApprovedAndOnToggle();
+    });
+
+    it('leaves focus on a control the user moved to while the approval was in flight, and still announces it', async () => {
+      const user = userEvent.setup();
+      const respond = stubHeldCompletes();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { ticket: twoGateTicket('IN REVIEW'), strict: true });
+      await user.click(approveOf(GATE_ID));
+
+      // Another gate's button: a control that survives this gate's approval.
+      const elsewhere = approveOf(GATE_B_ID);
+      elsewhere.focus();
+
+      await respond(GATE_ID, new Response('{}', { status: 200 }));
+      await waitFor(() => expect(announcement(approvedText())).toHaveLength(1));
+      expect(document.activeElement).toBe(elsewhere);
+
+      rerenderTicket(twoGateTicket('IN REVIEW', 'DONE'));
+      expect(screen.queryByTestId(`node-approve-${GATE_ID}`)).toBeNull();
+      expect(document.activeElement).toBe(approveOf(GATE_B_ID));
+      expect(announcement(approvedText())).toHaveLength(1);
+      expect(completeCalls(GATE_B_ID)).toBe(0);
+    });
+
+    it('keeps focus on the approve button, shows the error and announces nothing when the approval fails', async () => {
+      const user = userEvent.setup();
+      const respond = stubHeldCompletes();
+      renderTicket('IN REVIEW', { strict: true });
+      await user.click(approveOf(GATE_ID));
+
+      await respond(
+        GATE_ID,
+        new Response(JSON.stringify({ error: { code: 'INVALID_NODE_STATE', message: 'refused' } }), { status: 409 })
+      );
+
+      await waitFor(() => expectIdleButton(approveOf(GATE_ID)));
+      expect(screen.getByText(i18n.t('errors.INVALID_NODE_STATE'))).not.toBeNull();
+      expect(document.activeElement).toBe(approveOf(GATE_ID));
+      expect(screen.queryByText(approvedText())).toBeNull();
+    });
+
+    it('announces a second approval of a gate with the same name again', async () => {
+      const user = userEvent.setup();
+      const respond = stubHeldCompletes();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { strict: true });
+      await user.click(approveOf(GATE_ID));
+      await respond(GATE_ID, new Response('{}', { status: 200 }));
+      await waitFor(() => expect(announcement(approvedText())).toHaveLength(1));
+
+      // The gate is reached again (a loop back) and approved once more: the
+      // slot is emptied when the approval starts, so the same text is a
+      // change the live region reads out again.
+      rerenderTicket(makeTicket('IN REVIEW', 'TODO'));
+      await user.click(approveOf(GATE_ID));
+      expect(announcement(approvedText())).toHaveLength(0);
+      await respond(GATE_ID, new Response('{}', { status: 200 }));
+      await waitFor(() => expect(announcement(approvedText())).toHaveLength(1));
+      expect(document.activeElement).toBe(toggleOf(GATE_ID));
     });
   });
 });

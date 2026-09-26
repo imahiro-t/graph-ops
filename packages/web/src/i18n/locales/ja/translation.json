@@ -222,6 +222,7 @@
       "rejectedBadgeOne": "却下済み: {{name}}",
       "rejectedBadgeMany": "却下済み {{count}}件",
       "rejectedAnnouncement": "{{name}} を却下しました",
+      "approvedAnnouncement": "{{name}} を承認しました",
       "noLongerPendingAnnouncement": "{{name}} は承認待ちではなくなりました"
     },
     "artifactsCount": "成果物 {{count}}",

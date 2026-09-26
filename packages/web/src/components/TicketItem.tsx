@@ -578,6 +578,19 @@ export const TicketItem: React.FC<Props> = ({
   const gateName = (nodeId: string) => ticket.nodes.find(n => n.id === nodeId)?.name ?? nodeId;
   const announceRejected = (nodeId: string) =>
     setApprovalAnnouncement(t('ticketItem.approvalGate.rejectedAnnouncement', { name: gateName(nodeId) }));
+  const announceApproved = (nodeId: string) =>
+    setApprovalAnnouncement(t('ticketItem.approvalGate.approvedAnnouncement', { name: gateName(nodeId) }));
+  // DFLT-00215: whether focus is on this gate's own decision buttons. While
+  // an approval is in flight both stay focusable (the Reject button is only
+  // aria-disabled, DFLT-00207), so a user may have tabbed from Approve to
+  // Reject -- and a successful approval removes both.
+  const focusIsOnGateButtons = (nodeId: string) => {
+    const active = document.activeElement;
+    return active !== null && (
+      active === findInTicket(`[data-testid="node-approve-${nodeId}"]`) ||
+      active === findInTicket(`[data-testid="node-reject-${nodeId}"]`)
+    );
+  };
   // `deferred`: the prompt unmounted earlier (a poll removed it while its
   // reject POST was in flight) and is only being settled now, when the
   // response arrives. hadFocus describes the moment it unmounted, not now:
@@ -753,6 +766,10 @@ export const TicketItem: React.FC<Props> = ({
     approvalsInFlightRef.current.add(nodeId);
     setSubmittingApprovalNodeIds(prev => new Set(prev).add(nodeId));
     if (!passed) rejectsInFlightRef.current.add(nodeId);
+    // DFLT-00215: an empty announcement slot, so that approving a gate with
+    // the same name again is still a change the live region reads out.
+    // (Rejecting already clears it when its prompt opens, in startRejecting.)
+    if (passed) setApprovalAnnouncement('');
     setApprovalErrors(prev => {
       if (!(nodeId in prev)) return prev;
       const next = { ...prev };
@@ -789,6 +806,22 @@ export const TicketItem: React.FC<Props> = ({
           // user is typing there, so only announce.
           announceRejected(nodeId);
         }
+      } else {
+        // DFLT-00215: the approval went through, so this gate's Approve and
+        // Reject buttons are about to disappear, and focus on either would
+        // fall to <body>. Move it to the node's toggle, which is rendered in
+        // every state -- but only while it is on those buttons or already
+        // nowhere (<body>, e.g. a poll removed them first); a user who moved
+        // on to some other control while the request was in flight keeps
+        // their place. Both buttons count as "where the user pressed", not as
+        // somewhere they moved to on purpose: neither survives the approval
+        // (the same reasoning as the reject prompt's hadFocus). This runs
+        // before onRefresh on purpose: its re-render is what removes the
+        // buttons, and it is not guaranteed to be committed when onRefresh
+        // resolves, so waiting for it would not be reliable. The toggle
+        // exists before and after, so moving early loses nothing.
+        if (focusIsOnGateButtons(nodeId) || focusIsNowhere()) focusNodeToggle(nodeId);
+        announceApproved(nodeId);
       }
       // Close this gate's prompt (and drop its draft) only if it is the one
       // open: another gate's prompt may be open with a draft in progress.
