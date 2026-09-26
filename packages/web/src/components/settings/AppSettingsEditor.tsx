@@ -200,7 +200,9 @@ export const AppSettingsEditor: React.FC<Props> = ({
   // neighbor and to tell a refreshed list from the one still on screen.
   // A failed delete (removedId null) puts focus back on its own button once
   // projectDeletingId has re-enabled it -- a browser may drop focus from a
-  // button while it is disabled.
+  // button while it is disabled. So does a successful one whose re-fetched
+  // list still has the project: the row stayed, but its button was disabled
+  // meanwhile.
   const [pendingProjectFocus, setPendingProjectFocus] = useState<
     { removedId: string; before: Project[] } | { removedId: null; key: string } | null
   >(null);
@@ -217,9 +219,9 @@ export const AppSettingsEditor: React.FC<Props> = ({
         // Still the list from before the delete: wait for the re-fetch. A
         // list that has been re-fetched and still has the project (the
         // re-fetch raced the delete, say) means its row is still there, so
-        // there is nothing to move.
+        // focus goes back to its own delete button, as after a failure.
         if (projects === before) return;
-        setPendingProjectFocus(null);
+        setPendingProjectFocus({ removedId: null, key: projectDeleteButtonKey(removedId) });
         return;
       }
       const neighbor = neighborAfterRemoval(before.map(p => p.id), removedId, projects.map(p => p.id));

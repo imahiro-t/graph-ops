@@ -126,6 +126,46 @@ describe('TicketItem ticket deletion', () => {
     expect(deleteCalls()).toHaveLength(1);
   });
 
+  // DFLT-00191: when the delete succeeded but the re-fetch still shows the
+  // card (the re-fetch failed), there is no neighbor for App to move to, so
+  // the card puts focus back on its own (re-enabled) delete button.
+  it('puts focus back on the delete button when the card is still there after a successful delete', async () => {
+    const onDeleted = vi.fn(async () => {});
+    const { user } = await openConfirm(onDeleted);
+    fetchMock.mockImplementation(async () => {
+      // What a browser may do while the button is disabled (jsdom keeps it).
+      (document.activeElement as HTMLElement | null)?.blur();
+      return new Response('{}', { status: 200 });
+    });
+
+    await user.click(screen.getByTestId('ticket-delete-confirm-confirm'));
+
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(TICKET_ID));
+    await waitFor(() => expect(deleteButton()).toHaveFocus());
+    expect(deleteButton()).toBeEnabled();
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  // A neighbor App has already focused is not pulled back.
+  it('leaves focus on another element the list moved it to after a successful delete', async () => {
+    const other = document.createElement('button');
+    document.body.appendChild(other);
+    try {
+      const onDeleted = vi.fn(async () => {
+        other.focus();
+      });
+      const { user } = await openConfirm(onDeleted);
+
+      await user.click(screen.getByTestId('ticket-delete-confirm-confirm'));
+
+      await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(TICKET_ID));
+      await waitFor(() => expect(deleteButton()).toBeEnabled());
+      expect(other).toHaveFocus();
+    } finally {
+      other.remove();
+    }
+  });
+
   // DFLT-00191: the button is disabled while the request runs, and a browser
   // may drop focus from it then; a failed delete puts focus back on it.
   it('puts focus back on the delete button when the delete request fails', async () => {

@@ -1021,7 +1021,8 @@ export const App: React.FC = () => {
   // lib/focusAfterRemoval). `before` is the filtered list's ids when the
   // delete succeeded; `refreshed` is set once the re-fetch has settled, so a
   // list that still has the ticket then (a failed re-fetch) drops the move
-  // instead of waiting for ever.
+  // instead of waiting for ever -- the card is still there, and TicketItem
+  // puts focus back on its delete button (which was disabled meanwhile).
   const [pendingTicketFocus, setPendingTicketFocus] = useState<{
     removedId: string;
     projectId: string;
@@ -1030,14 +1031,14 @@ export const App: React.FC = () => {
   } | null>(null);
   const ticketListRef = useRef<HTMLDivElement>(null);
   const newTicketButtonRef = useRef<HTMLButtonElement>(null);
-  const filteredTicketIdsRef = useLatest(filteredTickets.map(ticket => ticket.id));
+  const filteredTicketsRef = useLatest(filteredTickets);
 
   // TicketItem's onDeleted: called once the DELETE has succeeded. When the
   // list has already dropped the ticket (a poll got there first), `before`
   // no longer holds it and neighborAfterRemoval picks the first ticket.
   const handleTicketDeleted = async (ticketId: string) => {
     const projectId = currentProjectIdRef.current;
-    setPendingTicketFocus({ removedId: ticketId, projectId, before: filteredTicketIdsRef.current, refreshed: false });
+    setPendingTicketFocus({ removedId: ticketId, projectId, before: filteredTicketsRef.current.map(ticket => ticket.id), refreshed: false });
     await refreshTickets();
     setPendingTicketFocus(prev => (prev && prev.removedId === ticketId ? { ...prev, refreshed: true } : prev));
   };
@@ -1053,7 +1054,8 @@ export const App: React.FC = () => {
     const currentIds = filteredTickets.map(ticket => ticket.id);
     if (currentIds.includes(removedId)) {
       // Wait for the re-fetch; after it, the card is still there (the
-      // re-fetch failed), so it keeps its focus and nothing moves.
+      // re-fetch failed), so there is no neighbor to move to: TicketItem
+      // puts focus back on the card's own delete button instead.
       if (refreshed) setPendingTicketFocus(null);
       return;
     }

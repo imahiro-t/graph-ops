@@ -22,7 +22,7 @@ export function focusKeySelector(key: string): string {
 // Whether keyboard focus is currently nowhere useful: on <body> (where it
 // lands when the focused element is removed, and in some browsers when it is
 // disabled), or on an element no longer in the document.
-export function isFocusLost(): boolean {
+function isFocusLost(): boolean {
   const active = document.activeElement;
   return !active || active === document.body || !active.isConnected;
 }

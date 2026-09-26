@@ -517,19 +517,32 @@ describe('AppSettingsEditor project local paths', () => {
         expect(document.activeElement).not.toBe(document.body);
       });
 
-      it('leaves focus alone when the re-fetched list still has the project', async () => {
+      it('puts focus back on the delete button when the re-fetched list still has the project', async () => {
         const user = userEvent.setup();
         const onProjectsChanged = vi.fn();
         const { rerenderWith } = renderWithProjects([alpha, beta], onProjectsChanged);
         await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+        // Like a browser that drops focus from a button while it is disabled
+        // (jsdom keeps it there), the button loses focus during the request.
+        (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+          (document.activeElement as HTMLElement | null)?.blur();
+          return { ok: true, status: 200, json: async () => ({}) };
+        });
 
         await confirmDelete('p-alpha', user);
         await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
+        // Still the list from before the delete: nothing moves yet.
+        expect(deleteButtonOf('p-alpha')).not.toHaveFocus();
+
+        // A re-fetched list (a new array) that still has the project: its
+        // row stayed, so focus goes back to its own delete button.
         rerenderWith([alpha, beta]);
-        expect(deleteButtonOf('p-alpha')).toHaveFocus();
+        await waitFor(() => expect(deleteButtonOf('p-alpha')).toHaveFocus());
+        expect(document.activeElement).not.toBe(document.body);
 
         // A later list without it no longer moves focus: the pending move
-        // was dropped with the refreshed list above.
+        // was settled with the refreshed list above.
+        (document.activeElement as HTMLElement | null)?.blur();
         rerenderWith([beta]);
         expect(deleteButtonOf('p-beta')).not.toHaveFocus();
       });
