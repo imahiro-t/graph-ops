@@ -8,7 +8,7 @@
 // criteria by the time it reaches merged_catalog, so the preview only needs
 // to show the resulting criteria/enabled -- not a separate
 // additional_criteria field. There is no per-gate iteration limit any more.
-import React, { useCallback, useEffect, useId, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Save, Plus, Trash2, CheckCircle2, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
 import { ReviewGateDef, SETTINGS_CATALOG_WARNINGS, SettingsCatalog, SettingsCatalogWarning, SettingsDocument } from '../../types';
@@ -44,6 +44,12 @@ interface Props {
 // default for every field it leaves out, so moving it to another ID would
 // leave a gate with no criteria/name behind it. A custom gate's override
 // (no default) stays renamable, and a 'new' row never has a default.
+//
+// rowKey is a client-only key, handed out once when the row is created
+// (loaded or added) and never reused: it identifies the row for its preview
+// open state, its React key and its DOM ids, so deleting a row or editing an
+// ID can't move any of those onto another row (DFLT-00199). It is never
+// saved -- buildGateOverride only writes GATE_FIELDS.
 type GateOrigin = 'inherited' | 'override' | 'new';
 type GateRow = ReviewGateDef & {
   id: string;
@@ -51,6 +57,7 @@ type GateRow = ReviewGateDef & {
   origin: GateOrigin;
   baseline: ReviewGateDef;
   hasDefault: boolean;
+  rowKey: string;
 };
 
 type GateField = keyof ReviewGateDef;
@@ -139,15 +146,20 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // See src/hooks/useLatest.ts -- keeps fetchRows/load below insensitive to
   // language changes (F-1).
   const tRef = useLatest(t);
-  // Row inputs are repeated, so each id is this prefix plus the row index.
+  // Row inputs are repeated, so each id is this prefix plus the row's rowKey.
   const idPrefix = useId();
+  // Hands out each row's rowKey (see GateRow); letters and digits only, so
+  // it is safe inside an id.
+  const nextRowKey = useRef(0);
+  const newRowKey = useCallback(() => `row${nextRowKey.current++}`, []);
   const [gates, setGates] = useState<GateRow[]>([]);
   const [savedGates, setSavedGates] = useState<GateRow[]>([]);
   const [mergedGates, setMergedGates] = useState<SettingsCatalog['review_gates']>({});
   // The defaults this scope inherits, per gate ID: shown as placeholders in
   // an override's empty fields, which inherit these values.
   const [inheritedGates, setInheritedGates] = useState<SettingsCatalog['review_gates']>({});
-  const [expandedPreview, setExpandedPreview] = useState<Record<number, boolean>>({});
+  // Which rows' merged preview is open, per rowKey.
+  const [expandedPreview, setExpandedPreview] = useState<Record<string, boolean>>({});
   // The workflow-wide review iteration limit this scope sets (null =
   // inherit), as edited and as last loaded/saved.
   const [maxIterations, setMaxIterations] = useState<number | null>(null);
@@ -190,7 +202,8 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         baseline: { ...base },
         // A row with no override here is showing an inherited gate, so it
         // has a default even if inherited_catalog were to omit it.
-        hasDefault: !isOverridden || id in inheritedMap
+        hasDefault: !isOverridden || id in inheritedMap,
+        rowKey: newRowKey()
       };
     });
     return {
@@ -201,10 +214,14 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       inheritedMaxIterations: catalogRes.inherited_catalog?.max_iterations ?? DEFAULT_MAX_ITERATIONS,
       warnings: knownWarnings(catalogRes.warnings)
     };
-  }, [tRef]);
+  }, [tRef, newRowKey]);
 
+  // gates and savedGates get the very same rows (same rowKeys), so an
+  // untouched form is not dirty. The rows are new, with new rowKeys, so every
+  // preview starts closed again rather than carrying over an old row's state.
   const applyFetched = useCallback((fetched: FetchedRows) => {
     setGates(fetched.rows);
+    setExpandedPreview({});
     setSavedGates(fetched.rows);
     setMergedGates(fetched.merged);
     setInheritedGates(fetched.inherited);
@@ -231,19 +248,26 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
   // Editing any field on a not-yet-overridden default row is what actually
   // creates its override -- see GateRow's doc comment.
-  const updateGate = (idx: number, patch: Partial<GateRow>) => {
-    setGates(prev => prev.map((g, i) => (i === idx ? { ...g, ...patch, isOverridden: true } : g)));
+  const updateGate = (rowKey: string, patch: Partial<GateRow>) => {
+    setGates(prev => prev.map(g => (g.rowKey === rowKey ? { ...g, ...patch, isOverridden: true } : g)));
   };
 
   const addGate = () => {
-    setGates(prev => [...prev, { id: '', name: '', criteria: '', enabled: true, isOverridden: true, origin: 'new', baseline: {}, hasDefault: false }]);
+    setGates(prev => [...prev, { id: '', name: '', criteria: '', enabled: true, isOverridden: true, origin: 'new', baseline: {}, hasDefault: false, rowKey: newRowKey() }]);
   };
 
   // Only ever called from a button that's disabled unless g.isOverridden
   // (see the JSX below); guarded here too so this can't remove a
   // not-yet-overridden default row even if triggered some other way.
-  const removeGate = (idx: number) => {
-    setGates(prev => (prev[idx]?.isOverridden ? prev.filter((_, i) => i !== idx) : prev));
+  // The removed row's open state goes with it; its rowKey is never handed
+  // out again, so no later row could pick it up anyway.
+  const removeGate = (rowKey: string) => {
+    if (!gates.find(g => g.rowKey === rowKey)?.isOverridden) return;
+    setGates(prev => prev.filter(g => g.rowKey !== rowKey));
+    setExpandedPreview(prev => {
+      const { [rowKey]: _removed, ...rest } = prev;
+      return rest;
+    });
   };
 
   const handleSave = async () => {
@@ -365,7 +389,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
             {t('settings.reviewGates.tableEmpty')}
           </div>
         )}
-        {gates.map((g, idx) => {
+        {gates.map(g => {
           const inherited = inheritedGates[g.id];
           // An override's empty field inherits the default, so show that
           // default as the field's placeholder instead of a blank box.
@@ -374,22 +398,22 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               ? fallback
               : t('settings.reviewGates.inheritedPlaceholder', { value });
           const idLocked = !g.isOverridden || g.hasDefault;
-          const previewOpen = !!expandedPreview[idx];
-          const previewId = `${idPrefix}-${idx}-preview`;
+          const previewOpen = !!expandedPreview[g.rowKey];
+          const previewId = `${idPrefix}-${g.rowKey}-preview`;
           // What the delete button names: the ID, or on a new row that has
           // none yet, the name typed so far. Whitespace-only counts as empty.
           const deleteTarget = (g.id ?? '').trim() || (g.name ?? '').trim();
           const idInvalid = emptyIdErrorShown && g.id.trim() === '';
           return (
-          <div key={idx} className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2 bg-white dark:bg-slate-900">
+          <div key={g.rowKey} className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2 bg-white dark:bg-slate-900">
             {/* Each text field has a small visible label above it (the
                 placeholders stay as a supplementary hint); items-end keeps
                 the checkbox and delete button aligned with the inputs. */}
             <div className="flex items-end gap-2">
               <div className="w-40 flex flex-col">
-                <label htmlFor={`${idPrefix}-${idx}-id`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.idLabel')}</label>
+                <label htmlFor={`${idPrefix}-${g.rowKey}-id`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.idLabel')}</label>
                 <input
-                  id={`${idPrefix}-${idx}-id`}
+                  id={`${idPrefix}-${g.rowKey}-id`}
                   value={g.id}
                   // A gate with a default behind it keeps its ID (see
                   // GateRow's hasDefault) -- use "Add Review Gate" for a new
@@ -399,7 +423,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   aria-invalid={idInvalid || undefined}
                   aria-describedby={idInvalid ? errorId : undefined}
                   placeholder={t('settings.reviewGates.idLabel')}
-                  onChange={e => updateGate(idx, { id: e.target.value })}
+                  onChange={e => updateGate(g.rowKey, { id: e.target.value })}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100 disabled:opacity-60"
                 />
               </div>
@@ -412,13 +436,13 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 </span>
               )}
               <div className="flex-1 min-w-0 flex flex-col">
-                <label htmlFor={`${idPrefix}-${idx}-name`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.nameLabel')}</label>
+                <label htmlFor={`${idPrefix}-${g.rowKey}-name`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.nameLabel')}</label>
                 <input
-                  id={`${idPrefix}-${idx}-name`}
+                  id={`${idPrefix}-${g.rowKey}-name`}
                   value={g.name || ''}
                   disabled={!g.isOverridden}
                   placeholder={inheritedPlaceholder(inherited?.name, t('settings.reviewGates.nameLabel'))}
-                  onChange={e => updateGate(idx, { name: e.target.value })}
+                  onChange={e => updateGate(g.rowKey, { name: e.target.value })}
                   title={g.isOverridden ? undefined : t('settings.reviewGates.cannotRenameDefaultHint')}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
                 />
@@ -427,13 +451,13 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 <input
                   type="checkbox"
                   checked={g.enabled !== false}
-                  onChange={e => updateGate(idx, { enabled: e.target.checked })}
+                  onChange={e => updateGate(g.rowKey, { enabled: e.target.checked })}
                   className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0"
                 />
                 {t('settings.reviewGates.enabledLabel')}
               </label>
               <button
-                onClick={() => removeGate(idx)}
+                onClick={() => removeGate(g.rowKey)}
                 disabled={!g.isOverridden}
                 // The name carries the gate (its ID, or its name on a new row
                 // with no ID yet) so a screen reader can tell which row focus
@@ -451,23 +475,23 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               </button>
             </div>
             <div>
-              <label htmlFor={`${idPrefix}-${idx}-criteria`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.criteriaLabel')}</label>
+              <label htmlFor={`${idPrefix}-${g.rowKey}-criteria`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.criteriaLabel')}</label>
               <textarea
-                id={`${idPrefix}-${idx}-criteria`}
+                id={`${idPrefix}-${g.rowKey}-criteria`}
                 value={g.criteria || ''}
                 placeholder={inheritedPlaceholder(inherited?.criteria)}
-                onChange={e => updateGate(idx, { criteria: e.target.value })}
+                onChange={e => updateGate(g.rowKey, { criteria: e.target.value })}
                 rows={2}
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
               />
             </div>
             <div>
-              <label htmlFor={`${idPrefix}-${idx}-additional`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.additionalCriteriaLabel')}</label>
+              <label htmlFor={`${idPrefix}-${g.rowKey}-additional`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.additionalCriteriaLabel')}</label>
               <textarea
-                id={`${idPrefix}-${idx}-additional`}
+                id={`${idPrefix}-${g.rowKey}-additional`}
                 value={g.additional_criteria || ''}
                 placeholder={inheritedPlaceholder(inherited?.additional_criteria)}
-                onChange={e => updateGate(idx, { additional_criteria: e.target.value })}
+                onChange={e => updateGate(g.rowKey, { additional_criteria: e.target.value })}
                 rows={2}
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
               />
@@ -475,7 +499,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
             <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"
-                onClick={() => setExpandedPreview(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                onClick={() => setExpandedPreview(prev => ({ ...prev, [g.rowKey]: !prev[g.rowKey] }))}
                 // The preview is only rendered while open, so aria-controls is
                 // set only then and never points at an id missing from the DOM.
                 aria-expanded={previewOpen}

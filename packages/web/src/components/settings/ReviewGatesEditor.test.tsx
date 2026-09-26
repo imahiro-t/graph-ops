@@ -808,3 +808,90 @@ describe('ReviewGatesEditor merged preview toggle state', () => {
     expect(within(secondRegion).getByText('qa criteria')).toBeInTheDocument();
   });
 });
+
+// The open state belongs to the row (the gate), not to its position
+// (DFLT-00199): deleting a row used to shift the state of every later row
+// up by one, and a row added afterwards inherited a deleted row's state.
+describe('ReviewGatesEditor merged preview state across row changes', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    // Rows in order: code_review (default), qa_review and custom_review
+    // (both overridden here, so both deletable).
+    mockedFetchCatalog.mockResolvedValue(WITH_CUSTOM_GATE);
+    mockedSaveCatalog.mockResolvedValue(undefined);
+    await i18n.changeLanguage('ja');
+  });
+
+  const toggles = () => screen.getAllByRole('button', { name: i18n.t('settings.reviewGates.mergedPreviewLabel') });
+  const deleteButton = (name: string) =>
+    screen.getByRole('button', { name: i18n.t('settings.reviewGates.deleteGateAriaLabel', { name }) });
+  const renderLoaded = async () => {
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Custom Review');
+  };
+
+  it('keeps a later row open, and only that row, when an earlier row is deleted', async () => {
+    const user = userEvent.setup();
+    await renderLoaded();
+
+    await user.click(toggles()[2]);
+    await user.click(deleteButton('qa_review'));
+
+    const [codeToggle, customToggle] = toggles();
+    expect(toggles()).toHaveLength(2);
+    expect(codeToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(codeToggle).not.toHaveAttribute('aria-controls');
+    expect(customToggle).toHaveAttribute('aria-expanded', 'true');
+    const region = document.getElementById(customToggle.getAttribute('aria-controls')!);
+    expect(region).not.toBeNull();
+    expect(within(region!).getByText('custom criteria')).toBeInTheDocument();
+  });
+
+  it('does not move a deleted row\'s open state onto the row that follows it', async () => {
+    const user = userEvent.setup();
+    await renderLoaded();
+
+    await user.click(toggles()[1]);
+    await user.click(deleteButton('qa_review'));
+
+    expect(toggles()).toHaveLength(2);
+    for (const toggle of toggles()) {
+      expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      expect(toggle).not.toHaveAttribute('aria-controls');
+    }
+  });
+
+  it('starts a row added after a deletion collapsed, not with the deleted row\'s state', async () => {
+    const user = userEvent.setup();
+    await renderLoaded();
+
+    await user.click(toggles()[2]);
+    await user.click(deleteButton('custom_review'));
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.reviewGates.addGate') }));
+
+    const buttons = toggles();
+    expect(buttons).toHaveLength(3);
+    for (const toggle of buttons) {
+      expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      expect(toggle).not.toHaveAttribute('aria-controls');
+    }
+  });
+
+  it('collapses every row once a save reloads the rows', async () => {
+    const user = userEvent.setup();
+    await renderLoaded();
+
+    await user.click(toggles()[2]);
+    const criteria = screen.getByDisplayValue('custom criteria');
+    await user.type(criteria, ' more');
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
+    await waitFor(() => expect(mockedSaveCatalog).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockedFetchCatalog).toHaveBeenCalledTimes(3));
+
+    await waitFor(() => {
+      for (const toggle of toggles()) {
+        expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      }
+    });
+  });
+});
