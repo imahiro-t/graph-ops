@@ -27,6 +27,7 @@ import { httpDataSourceProblem, HTTPDataSourceProblem, normalizeHTTPDataSourceUR
 import { StatusLiveRegion } from '../StatusLiveRegion';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
+import { useTransientAnnouncement } from '../../hooks/useTransientAnnouncement';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
 
@@ -183,6 +184,9 @@ export const AppSettingsEditor: React.FC<Props> = ({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const { savedFlash, showSavedFlash } = useSavedFlash();
+  // Announces a successful project delete (DFLT-00194): focus moves to a
+  // neighbor afterwards, and this says why -- which project is gone.
+  const { message: projectDeleteNotice, announce: announceProjectDelete } = useTransientAnnouncement();
 
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -472,6 +476,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
     try {
       const res = await apiFetch(`/api/projects/${p.id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(await localizedApiErrorMessage(t, res));
+      announceProjectDelete(t('settings.appSettings.projects.deleteSuccess', { name: p.name || p.id }));
       setPendingProjectFocus({ removedId: p.id, before: projectsRef.current });
       onProjectsChanged();
     } catch (e) {
@@ -564,6 +569,9 @@ export const AppSettingsEditor: React.FC<Props> = ({
           ここに出る（下端の保存ボタンを押した直後は視野外になりうる）。読み上げは
           常時マウントの live region が担当する（SC 4.1.3）。 */}
       <StatusLiveRegion message={error} />
+      {/* Outside the project list, which swaps to its empty state when the
+          last project is deleted and would take the region with it. */}
+      <StatusLiveRegion message={projectDeleteNotice} />
       {error && <div aria-hidden="true" className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900 whitespace-pre-wrap">{error}</div>}
 
       {/* Where a save lands. The server answers '' when it has no home

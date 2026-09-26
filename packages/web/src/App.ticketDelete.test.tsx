@@ -231,6 +231,57 @@ describe('App focus after deleting a ticket', () => {
     });
   });
 
+  // DFLT-00194: the delete itself is announced through an always-mounted
+  // live region (the card's own region leaves with the card), naming the
+  // ticket, without taking focus from the neighbor it moves to.
+  describe('announcing the delete', () => {
+    const successText = (n: number) => i18n.t('ticketItem.delete.success', { id: `ALP-0000${n}`, title: `チケット ${n}` });
+    const statusTexts = () => screen.getAllByRole('status').map(el => el.textContent ?? '');
+
+    it('announces the deleted ticket in a live region and still moves focus to the next ticket', async () => {
+      seed(3);
+      const user = await renderApp();
+
+      await deleteTicket(user, 'ALP-00002');
+
+      await waitFor(() => expect(statusTexts()).toContain(successText(2)));
+      await waitFor(() => expect(deleteButtonOf('ALP-00003')).toHaveFocus());
+      const region = screen.getAllByRole('status').find(el => el.textContent === successText(2))!;
+      expect(region).toHaveAttribute('aria-live', 'polite');
+      expect(region.contains(document.activeElement)).toBe(false);
+    });
+
+    it('announces the delete of the only ticket, when the list swaps to its empty state', async () => {
+      seed(1);
+      const user = await renderApp();
+
+      await deleteTicket(user, 'ALP-00001');
+
+      await waitFor(() => expect(statusTexts()).toContain(successText(1)));
+      await waitFor(() => expect(newTicketButton()).toHaveFocus());
+    });
+
+    it('announces nothing when the delete fails, and keeps the existing error and focus handling', async () => {
+      const fetchMock = seed(3);
+      const user = await renderApp();
+      fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === 'DELETE'
+          ? new Response('{}', { status: 500 })
+          : backend.fetch(input, init)
+      );
+
+      await user.click(deleteButtonOf('ALP-00002')!);
+      await user.click(screen.getByTestId('ticket-delete-confirm-confirm'));
+
+      // The card stays, shows its error and gets focus back on its button.
+      await waitFor(() => expect(deleteButtonOf('ALP-00002')).toHaveFocus());
+      expect(deleteButtonOf('ALP-00002')).toBeEnabled();
+      expect(screen.getByText('ALP-00002')).toBeInTheDocument();
+      expect(screen.getByText(i18n.t('errors.UNKNOWN'))).toBeInTheDocument();
+      expect(statusTexts()).not.toContain(successText(2));
+    });
+  });
+
   it('moves focus to the ticket pulled in from the next page when the last card of a page is deleted', async () => {
     seed(3, 2);
     const user = await renderApp();

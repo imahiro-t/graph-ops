@@ -41,6 +41,7 @@ import { fetchPendingApprovalCounts } from './lib/pendingApprovals';
 import { fetchAppSettings } from './lib/settingsApi';
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from './lib/focusAfterRemoval';
 import { useLatest } from './hooks/useLatest';
+import { useTransientAnnouncement } from './hooks/useTransientAnnouncement';
 
 // Cycles through the three-way theme preference in a fixed order, used by
 // the header toggle button (light -> dark -> system -> light -> ...).
@@ -900,22 +901,7 @@ export const App: React.FC = () => {
   // The live announcement of what opening a related ticket changed (the
   // filters it cleared), cleared after a while so the same message can be
   // announced again.
-  const [openNotice, setOpenNotice] = useState('');
-  const openNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const announceOpenNotice = (message: string) => {
-    if (openNoticeTimer.current !== null) clearTimeout(openNoticeTimer.current);
-    setOpenNotice(message);
-    openNoticeTimer.current = setTimeout(() => {
-      openNoticeTimer.current = null;
-      setOpenNotice('');
-    }, 5000);
-  };
-  useEffect(
-    () => () => {
-      if (openNoticeTimer.current !== null) clearTimeout(openNoticeTimer.current);
-    },
-    []
-  );
+  const { message: openNotice, announce: announceOpenNotice } = useTransientAnnouncement();
   const handleOpenTicket = (id: string) => {
     // Every ticket of the current project is loaded (paging is client-side),
     // so a ticket missing here is gone or in another project: nothing to open.
@@ -1035,11 +1021,15 @@ export const App: React.FC = () => {
   const ticketListRef = useRef<HTMLDivElement>(null);
   const newTicketButtonRef = useRef<HTMLButtonElement>(null);
   const filteredTicketsRef = useLatest(filteredTickets);
+  const { message: ticketDeleteNotice, announce: announceTicketDelete } = useTransientAnnouncement();
 
   // TicketItem's onDeleted: called once the DELETE has succeeded. When the
   // list has already dropped the ticket (a poll got there first), `before`
   // no longer holds it and neighborAfterRemoval picks the first ticket.
-  const handleTicketDeleted = async (ticketId: string) => {
+  // The delete is announced here rather than in the card, whose own live
+  // region leaves with it (DFLT-00194).
+  const handleTicketDeleted = async (ticketId: string, ticketTitle: string) => {
+    announceTicketDelete(t('ticketItem.delete.success', { id: ticketId, title: ticketTitle }));
     const projectId = currentProjectIdRef.current;
     setPendingTicketFocus({ removedId: ticketId, projectId, before: filteredTicketsRef.current.map(ticket => ticket.id) });
     await refreshTickets();
@@ -1413,6 +1403,7 @@ export const App: React.FC = () => {
               selected, its list not having arrived yet is "loading" too --
               not the empty state, and never the previous project's list. */}
           <StatusLiveRegion message={openNotice} />
+          <StatusLiveRegion message={ticketDeleteNotice} />
           {!isCurrentProjectResolved ? (
             <div
               className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm"

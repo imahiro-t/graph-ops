@@ -11,6 +11,8 @@ import { getNodeTypeMeta } from '../../nodeTypeMeta';
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
+import { useTransientAnnouncement } from '../../hooks/useTransientAnnouncement';
+import { StatusLiveRegion } from '../StatusLiveRegion';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
@@ -46,6 +48,9 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const { savedFlash, showSavedFlash } = useSavedFlash();
+  // Announces a successful delete (DFLT-00194): focus moves to a neighbor
+  // afterwards, and this says why -- which override is gone.
+  const { message: deleteNotice, announce: announceDelete } = useTransientAnnouncement();
   // Inline "add a node type" affordance -- mirrors レビューゲート's "Add
   // Review Gate" in spirit, but needs a name up front (there's no separate
   // id/name pair here) so it's a small text-entry row rather than a blank
@@ -228,6 +233,9 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     setError('');
     try {
       await saveSettingsNodeType(t, type, '');
+      // The override is gone on the server now, whether or not the refresh
+      // below succeeds or another tier keeps the row listed.
+      announceDelete(t('settings.nodeTypes.deleteTypeSuccess', { name: type }));
       if (selected === type) {
         setTierText('');
         setSavedTierText('');
@@ -255,6 +263,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   return (
     <div className="flex h-full min-h-0 gap-4">
       {confirmDialog}
+      <StatusLiveRegion message={deleteNotice} />
       {/* Left: type list */}
       <div ref={listRef} className="w-56 shrink-0 border border-slate-200 dark:border-slate-800 rounded-lg overflow-y-auto bg-slate-50 dark:bg-slate-800 flex flex-col">
         <div className="px-3 py-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-slate-50 dark:bg-slate-800">

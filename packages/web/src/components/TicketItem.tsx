@@ -56,7 +56,9 @@ interface Props {
   // Called in place of onRefresh once this ticket has been deleted
   // (DFLT-00191), so the list can refresh itself and move focus off the card
   // that is about to disappear. Omitted means onRefresh is called instead.
-  onDeleted?: (ticketId: string) => void | Promise<void>;
+  // The title comes along so the list can announce the delete (DFLT-00194)
+  // even when a poll has already dropped the ticket from its own copy.
+  onDeleted?: (ticketId: string, ticketTitle: string) => void | Promise<void>;
   // The viewer's own display name (from "アプリ設定", GET /api/settings/app's
   // "myName"). Powers the "assign to me"/"unassign" action buttons below; an
   // empty string hides only those actions (there is no "me" to act as), not
@@ -648,7 +650,7 @@ export const TicketItem: React.FC<Props> = ({
       if (!res.ok) {
         throw new Error(await localizedApiErrorMessage(t, res));
       }
-      await (onDeleted ? onDeleted(ticket.id) : onRefresh());
+      await (onDeleted ? onDeleted(ticket.id, ticket.title) : onRefresh());
       setRefocusDeleteButton(true);
     } catch (err) {
       setDeleteError(errorMessage(err, t('errors.UNKNOWN')));

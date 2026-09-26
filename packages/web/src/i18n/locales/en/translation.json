@@ -236,7 +236,8 @@
       "ariaLabel": "Delete ticket: {{id}} {{title}}",
       "confirm": "This will delete ticket {{id}} \"{{title}}\". This action cannot be undone. Are you sure you want to delete it?",
       "confirmTitle": "Delete ticket",
-      "confirmButton": "Delete"
+      "confirmButton": "Delete",
+      "success": "Deleted ticket {{id}} \"{{title}}\"."
     },
     "close": {
       "button": "Close (withdraw without completing)",
@@ -372,6 +373,7 @@
       "invalidTypeName": "Enter a name with no \"/\", \"\\\", \".\" or \"..\".",
       "deleteType": "Delete this node type's override",
       "deleteTypeAriaLabel": "Delete node type override: {{name}}",
+      "deleteTypeSuccess": "Deleted the override for the node type \"{{name}}\".",
       "confirmDeleteType": "Delete the override for the node type \"{{name}}\"? Its saved instructions cannot be restored.",
       "defaultBadge": "Default",
       "defaultBadgeHint": "This is a plugin-default node type you have not overridden. Edit the text below to override it.",
@@ -533,6 +535,7 @@
         "empty": "No projects yet.",
         "delete": "Delete project",
         "deleteAriaLabel": "Delete project: {{name}}",
+        "deleteSuccess": "Deleted the project \"{{name}}\".",
         "nameLabel": "Project name",
         "localPathLabel": "Local path (this environment)",
         "localPathHint": "The local path is not stored in the DB -- only in this environment's home config file ($HOME/.graph-ops/config.json) -- so it never affects teammates sharing the same DB. Save it empty to unset it.",

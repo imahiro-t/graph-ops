@@ -586,6 +586,79 @@ describe('AppSettingsEditor project local paths', () => {
         expect(onProjectsChanged).not.toHaveBeenCalled();
       });
     });
+
+    // DFLT-00194: a delete that succeeded is announced, naming the project,
+    // through a live region outside the project list -- which swaps to its
+    // empty state when the last project goes -- without taking focus.
+    describe('announcing the delete', () => {
+      const successText = (name: string) => i18n.t('settings.appSettings.projects.deleteSuccess', { name });
+      const statusTexts = () => screen.getAllByRole('status').map(el => el.textContent ?? '');
+      const heading = () => screen.getByRole('heading', { name: i18n.t('settings.appSettings.projects.title') });
+
+      it('announces the deleted project in a live region that outlives the list, and still moves focus', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        const { rerenderWith } = renderWithProjects([alpha], onProjectsChanged);
+        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+        expect(statusTexts()).not.toContain(successText('Alpha'));
+
+        await user.click(deleteButton());
+        await user.click(screen.getByTestId('project-delete-confirm-confirm'));
+
+        await waitFor(() => expect(statusTexts()).toContain(successText('Alpha')));
+        rerenderWith([]);
+
+        expect(screen.getByText(i18n.t('settings.appSettings.projects.empty'))).toBeInTheDocument();
+        expect(statusTexts()).toContain(successText('Alpha'));
+        await waitFor(() => expect(heading()).toHaveFocus());
+        const region = screen.getAllByRole('status').find(el => el.textContent === successText('Alpha'))!;
+        expect(region).toHaveAttribute('aria-live', 'polite');
+        expect(region.contains(document.activeElement)).toBe(false);
+      });
+
+      it('names the project by its id when it has no name', async () => {
+        const user = userEvent.setup();
+        renderWithProjects([{ ...alpha, name: '' }]);
+        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+        await user.click(row('p-alpha').getByTitle(i18n.t('settings.appSettings.projects.delete')));
+        await user.click(screen.getByTestId('project-delete-confirm-confirm'));
+
+        await waitFor(() => expect(statusTexts()).toContain(successText('p-alpha')));
+      });
+
+      it('announces nothing when the user cancels', async () => {
+        const user = userEvent.setup();
+        renderWithProjects([alpha]);
+        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+
+        await user.click(deleteButton());
+        await user.click(screen.getByTestId('project-delete-confirm-cancel'));
+
+        expect(deleteButton()).toHaveFocus();
+        expect(statusTexts()).not.toContain(successText('Alpha'));
+      });
+
+      it('announces nothing when the delete fails, and keeps the row error and focus as they were', async () => {
+        const user = userEvent.setup();
+        const onProjectsChanged = vi.fn();
+        renderWithProjects([alpha, beta], onProjectsChanged);
+        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+        (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+          ok: false,
+          status: 500,
+          json: async () => ({ error: { code: 'INTERNAL', message: 'boom' } })
+        });
+
+        await user.click(deleteButton());
+        await user.click(screen.getByTestId('project-delete-confirm-confirm'));
+
+        await waitFor(() => expect(row('p-alpha').getByText(i18n.t('errors.UNKNOWN'))).toBeInTheDocument());
+        await waitFor(() => expect(deleteButton()).toHaveFocus());
+        expect(onProjectsChanged).not.toHaveBeenCalled();
+        expect(statusTexts()).not.toContain(successText('Alpha'));
+      });
+    });
   });
 
   // DFLT-00165: the icon-only delete button rests at text-slate-500 /

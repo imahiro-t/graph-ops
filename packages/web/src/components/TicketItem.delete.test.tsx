@@ -10,11 +10,12 @@ import { TicketDetail } from '../types';
 import { TicketItem } from './TicketItem';
 
 const TICKET_ID = 'TEST-00148';
+const TICKET_TITLE = '削除のテスト';
 
 const makeTicket = (): TicketDetail => ({
   id: TICKET_ID,
   project_id: 'proj-1',
-  title: '削除のテスト',
+  title: TICKET_TITLE,
   description: '説明',
   status: 'TODO',
   auto_executable: true,
@@ -46,7 +47,7 @@ const deleteCalls = () =>
     ([url, init]) => String(url) === `/api/tickets/${TICKET_ID}` && (init as RequestInit | undefined)?.method === 'DELETE'
   );
 
-const renderItem = (onDeleted?: (ticketId: string) => void | Promise<void>) => {
+const renderItem = (onDeleted?: (ticketId: string, ticketTitle: string) => void | Promise<void>) => {
   const onToggleExpand = vi.fn();
   const onRefresh = vi.fn();
   const confirmSpy = vi.spyOn(window, 'confirm');
@@ -67,7 +68,7 @@ const renderItem = (onDeleted?: (ticketId: string) => void | Promise<void>) => {
 const deleteButton = () =>
   screen.getByRole('button', { name: i18n.t('ticketItem.delete.ariaLabel', { id: TICKET_ID, title: '削除のテスト' }) });
 
-async function openConfirm(onDeleted?: (ticketId: string) => void | Promise<void>) {
+async function openConfirm(onDeleted?: (ticketId: string, ticketTitle: string) => void | Promise<void>) {
   const user = userEvent.setup();
   const utils = renderItem(onDeleted);
   await user.click(deleteButton());
@@ -122,7 +123,7 @@ describe('TicketItem ticket deletion', () => {
     const { user, onRefresh } = await openConfirm(onDeleted);
 
     await user.click(screen.getByTestId('ticket-delete-confirm-confirm'));
-    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(TICKET_ID));
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(TICKET_ID, TICKET_TITLE));
     expect(onRefresh).not.toHaveBeenCalled();
     expect(deleteCalls()).toHaveLength(1);
   });
@@ -142,7 +143,7 @@ describe('TicketItem ticket deletion', () => {
 
     await user.click(screen.getByTestId('ticket-delete-confirm-confirm'));
 
-    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(TICKET_ID));
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(TICKET_ID, TICKET_TITLE));
     await waitFor(() => expect(deleteButton()).toHaveFocus());
     expect(deleteButton()).toBeEnabled();
     expect(document.activeElement).not.toBe(document.body);
@@ -160,7 +161,7 @@ describe('TicketItem ticket deletion', () => {
 
       await user.click(screen.getByTestId('ticket-delete-confirm-confirm'));
 
-      await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(TICKET_ID));
+      await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(TICKET_ID, TICKET_TITLE));
       await waitFor(() => expect(deleteButton()).toBeEnabled());
       expect(other).toHaveFocus();
     } finally {

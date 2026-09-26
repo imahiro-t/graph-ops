@@ -390,6 +390,73 @@ describe('NodeTypesEditor focus after deleting a type', () => {
   });
 });
 
+// DFLT-00194: a confirmed delete that succeeded is announced, naming the
+// type, through an always-mounted live region -- focus moves on to a
+// neighbor, and this says why. A cancelled or failed delete announces nothing.
+describe('NodeTypesEditor announcing a delete', () => {
+  const custom = (type: string): SettingsNodeTypeInfo => ({ type, has_default: false, has_user_override: true });
+  const byKey = (container: HTMLElement, key: string) => container.querySelector<HTMLElement>(`[data-focus-key="${key}"]`);
+  const successText = (name: string) => i18n.t('settings.nodeTypes.deleteTypeSuccess', { name });
+  const statusTexts = () => screen.getAllByRole('status').map(el => el.textContent ?? '');
+
+  beforeEach(() => {
+    mockedFetchTypes.mockReset();
+    mockedFetchType.mockReset();
+    mockedSaveType.mockReset();
+    stubFetchType();
+  });
+
+  it('announces the deleted type in a live region and still moves focus to the next row', async () => {
+    let current = [...TYPES, custom('custom_a'), custom('custom_b')];
+    mockedFetchTypes.mockImplementation(async () => current);
+    mockedSaveType.mockImplementation(async (_t, type: string) => {
+      current = current.filter(info => info.type !== type);
+      return { type, tier_text: '', merged_text: '' };
+    });
+    const user = userEvent.setup();
+    const { container } = render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+    expect(statusTexts()).not.toContain(successText('custom_a'));
+
+    await user.click(byKey(container, 'delete-custom_a')!);
+    await user.click(screen.getByTestId('node-type-delete-confirm-confirm'));
+
+    await waitFor(() => expect(statusTexts()).toContain(successText('custom_a')));
+    await waitFor(() => expect(byKey(container, 'delete-custom_b')).toHaveFocus());
+    const region = screen.getAllByRole('status').find(el => el.textContent === successText('custom_a'))!;
+    expect(region).toHaveAttribute('aria-live', 'polite');
+    expect(region.contains(document.activeElement)).toBe(false);
+  });
+
+  it('announces nothing when the user cancels', async () => {
+    mockedFetchTypes.mockResolvedValue([...TYPES, custom('custom_a')]);
+    const user = userEvent.setup();
+    const { container } = render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    await user.click(byKey(container, 'delete-custom_a')!);
+    await user.click(screen.getByTestId('node-type-delete-confirm-cancel'));
+
+    expect(byKey(container, 'delete-custom_a')).toHaveFocus();
+    expect(statusTexts()).not.toContain(successText('custom_a'));
+  });
+
+  it('announces nothing when the delete fails, and keeps the error and focus as they were', async () => {
+    mockedFetchTypes.mockResolvedValue([...TYPES, custom('custom_a'), custom('custom_b')]);
+    mockedSaveType.mockRejectedValue(new Error('boom'));
+    const user = userEvent.setup();
+    const { container } = render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    await user.click(byKey(container, 'delete-custom_a')!);
+    await user.click(screen.getByTestId('node-type-delete-confirm-confirm'));
+
+    expect(await screen.findByText('boom')).toBeInTheDocument();
+    expect(byKey(container, 'delete-custom_a')).toHaveFocus();
+    expect(statusTexts()).not.toContain(successText('custom_a'));
+  });
+});
+
 // DFLT-00166: the list's icons are decorative and aria-hidden; the icon-only
 // buttons (delete, and the yes/no of the add row) are named -- the delete
 // buttons after their type since DFLT-00193, the others by their title.
