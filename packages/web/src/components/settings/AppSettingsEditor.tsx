@@ -534,8 +534,8 @@ export const AppSettingsEditor: React.FC<Props> = ({
               </label>
             ))}
           </div>
-          <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{t('settings.appSettings.storage.dbBackendSwitchHint')}</p>
-          {effective && <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{t('settings.appSettings.currentlyInEffect', { value: effective.dbBackend })}</p>}
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{t('settings.appSettings.storage.dbBackendSwitchHint')}</p>
+          {effective && <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{t('settings.appSettings.currentlyInEffect', { value: effective.dbBackend })}</p>}
         </div>
 
         {form.dbBackend === 'sqlite' ? (
@@ -548,7 +548,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
               placeholder={effective?.dbPath}
               className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
             />
-            {effective && <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{t('settings.appSettings.currentlyInEffect', { value: effective.dbPath })}</p>}
+            {effective && <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{t('settings.appSettings.currentlyInEffect', { value: effective.dbPath })}</p>}
           </div>
         ) : form.dbBackend === 'mysql' ? (
           <div className="space-y-2 border border-slate-100 dark:border-slate-800 rounded-lg p-2.5 bg-slate-50/50 dark:bg-slate-900/50">
@@ -615,7 +615,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 aria-describedby={mysqlPasswordRetypeRequired ? 'mysql-password-retype-hint' : undefined}
                 className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
               />
-              <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                 {mysqlPasswordState === 'redacted'
                   ? t('settings.appSettings.storage.mysqlPasswordSavedHint')
                   : mysqlPasswordEnvVar
@@ -659,7 +659,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
               <p
                 id="mysql-tls-mode-hint"
                 className={`text-[10px] mt-0.5 ${
-                  form.mysqlTls === 'disabled' ? 'text-red-600 dark:text-red-400' : 'text-slate-400 dark:text-slate-500'
+                  form.mysqlTls === 'disabled' ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'
                 }`}
               >
                 {t(
@@ -685,7 +685,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                   aria-describedby={mysqlTlsCaInvalid ? 'mysql-tls-ca-required-hint' : undefined}
                   className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
                 />
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{t('settings.appSettings.storage.mysqlTlsCaHint')}</p>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{t('settings.appSettings.storage.mysqlTlsCaHint')}</p>
                 {mysqlTlsCaInvalid && (
                   <p id="mysql-tls-ca-required-hint" role="status" aria-live="polite" className="text-[10px] text-red-600 dark:text-red-400 mt-0.5">
                     {t('settings.appSettings.storage.mysqlTlsCaRequiredHint')}
@@ -752,11 +752,11 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 aria-describedby={`${fieldId}-http-url-hint${httpProblem && httpProblem !== 'tokenRequired' ? ` ${fieldId}-http-problem` : ''}`}
                 className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
               />
-              <p id={`${fieldId}-http-url-hint`} className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+              <p id={`${fieldId}-http-url-hint`} className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                 {t('settings.appSettings.storage.httpUrlHint')}
               </p>
               {effective?.httpDataSourceUrl && (
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                   {t('settings.appSettings.currentlyInEffect', { value: effective.httpDataSourceUrl })}
                 </p>
               )}
@@ -781,7 +781,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 aria-describedby={`${fieldId}-http-token-hint${httpTokenRetypeNeeded ? ` ${fieldId}-http-token-retype` : ''}${httpProblem === 'tokenRequired' ? ` ${fieldId}-http-problem` : ''}`}
                 className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
               />
-              <p id={`${fieldId}-http-token-hint`} className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+              <p id={`${fieldId}-http-token-hint`} className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                 {httpTokenState === 'redacted'
                   ? t('settings.appSettings.storage.httpTokenSavedHint')
                   : httpTokenEnvVar
@@ -817,7 +817,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
             placeholder={effective?.artifactsDir}
             className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
           />
-          {effective && <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{t('settings.appSettings.currentlyInEffect', { value: effective.artifactsDir })}</p>}
+          {effective && <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{t('settings.appSettings.currentlyInEffect', { value: effective.artifactsDir })}</p>}
         </div>
       </div>
 
@@ -878,7 +878,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
           </p>
         )}
         {effective && (
-          <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
             {t('settings.appSettings.currentlyInEffect', {
               value: effective.teamExtensionsDir || t('settings.appSettings.teamExtensionsDir.notSet')
             })}

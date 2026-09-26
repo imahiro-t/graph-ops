@@ -507,3 +507,71 @@ describe('AppSettingsEditor team settings directory', () => {
     expect((mockedSaveAppSettings.mock.calls[0][1] as Record<string, unknown>).teamExtensionsDir).toBe('');
   });
 });
+
+// DFLT-00179: the 10px secondary lines (the "currently in effect" rows and the
+// hint rows) must meet WCAG 1.4.3 (>= 4.5:1) against the backgrounds they
+// actually sit on. Light: slate-500 on white (modal body) 4.76:1, on the
+// bg-slate-50/50 MySQL/HTTP box (composited ~#fbfcfe) 4.64:1. Dark: slate-400
+// on slate-900 6.96:1. The previous slate-400 (light, 2.56:1) / slate-500
+// (dark, 3.75:1) fell short. Darkening either box's background later would
+// push the light ratio below 4.5:1, so revisit these classes if it changes.
+// The font size must stay text-[10px] -- only the colour changed.
+function expectSecondaryTextContrast(el: HTMLElement | null) {
+  expect(el).toHaveClass('text-[10px]', 'text-slate-500', 'dark:text-slate-400');
+  expect(el).not.toHaveClass('text-slate-400');
+  expect(el).not.toHaveClass('dark:text-slate-500');
+}
+
+describe('AppSettingsEditor secondary text contrast (DFLT-00179)', () => {
+  beforeEach(() => {
+    mockedFetchAppSettings.mockReset();
+    mockedSaveAppSettings.mockReset();
+  });
+
+  afterEach(async () => {
+    await i18n.changeLanguage('ja');
+  });
+
+  it('the "not set (personal settings only)" line uses colours that meet 4.5:1 in light and dark', async () => {
+    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse());
+    renderEditor();
+
+    await screen.findByLabelText(i18n.t('settings.appSettings.teamExtensionsDir.title'));
+    expectSecondaryTextContrast(
+      screen.getByText(
+        i18n.t('settings.appSettings.currentlyInEffect', { value: i18n.t('settings.appSettings.teamExtensionsDir.notSet') })
+      )
+    );
+  });
+
+  it('the other "currently in effect" lines and the DB backend switch hint meet 4.5:1', async () => {
+    const response = makeResponse({ teamExtensionsDir: '/srv/team' });
+    response.effective.teamExtensionsDir = '/srv/team';
+    mockedFetchAppSettings.mockResolvedValueOnce(response);
+    renderEditor();
+
+    await screen.findByLabelText(i18n.t('settings.appSettings.teamExtensionsDir.title'));
+    for (const value of ['sqlite', '/tmp/graph.db', '/tmp/artifacts', '/srv/team']) {
+      expectSecondaryTextContrast(screen.getByText(i18n.t('settings.appSettings.currentlyInEffect', { value })));
+    }
+    expectSecondaryTextContrast(screen.getByText(i18n.t('settings.appSettings.storage.dbBackendSwitchHint')));
+  });
+
+  it('the MySQL password, TLS mode and TLS CA hints meet 4.5:1, and the TLS-disabled warning stays red', async () => {
+    const user = userEvent.setup();
+    mockedFetchAppSettings.mockResolvedValueOnce(
+      makeResponse({ dbBackend: 'mysql', mysqlHost: 'db.example.com', mysqlDatabase: 'graphops', mysqlUser: 'admin' })
+    );
+    renderEditor();
+
+    await screen.findByLabelText(i18n.t('settings.appSettings.storage.mysqlPasswordLabel'));
+    expectSecondaryTextContrast(screen.getByText(i18n.t('settings.appSettings.storage.mysqlPasswordPlaintextHint')));
+    expectSecondaryTextContrast(screen.getByText(i18n.t('settings.appSettings.storage.mysqlTlsVerifyFullHint')));
+    expectSecondaryTextContrast(screen.getByText(i18n.t('settings.appSettings.storage.mysqlTlsCaHint')));
+
+    await user.click(screen.getByRole('radio', { name: i18n.t('settings.appSettings.storage.mysqlTlsDisabled') }));
+    const warning = screen.getByText(i18n.t('settings.appSettings.storage.mysqlTlsDisabledWarning'));
+    expect(warning).toHaveClass('text-[10px]', 'text-red-600', 'dark:text-red-400');
+    expect(warning).not.toHaveClass('text-slate-500');
+  });
+});
