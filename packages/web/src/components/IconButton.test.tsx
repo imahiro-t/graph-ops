@@ -3,7 +3,7 @@
 import { createRef } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IconButton } from './IconButton';
 import { allIconButtonTooltips, openIconButtonTooltip, openIconButtonTooltips } from '../test/iconButtonTooltip';
 
@@ -294,5 +294,268 @@ describe('IconButton', () => {
     } finally {
       matches.mockRestore();
     }
+  });
+
+  describe('hover and focus are tracked separately', () => {
+    it('keeps a focus-opened tooltip open while the pointer passes over the button', async () => {
+      const user = userEvent.setup();
+      render(
+        <IconButton label="Settings">
+          <Icon />
+        </IconButton>
+      );
+      const button = screen.getByRole('button', { name: 'Settings' });
+      await user.tab();
+      expect(button).toHaveFocus();
+      expect(openIconButtonTooltip()).toBeVisible();
+
+      await user.hover(button);
+      await user.unhover(button);
+      await new Promise(r => setTimeout(r, 150));
+      expect(button).toHaveFocus();
+      expect(openIconButtonTooltip()).toBeVisible();
+    });
+
+    it('keeps a hover-opened tooltip open when focus leaves the button, until the pointer leaves', async () => {
+      const user = userEvent.setup();
+      render(
+        <>
+          <IconButton label="Settings">
+            <Icon />
+          </IconButton>
+          <button type="button">next</button>
+        </>
+      );
+      const button = screen.getByRole('button', { name: 'Settings' });
+      await user.tab();
+      await user.hover(button);
+      await user.tab();
+      expect(screen.getByRole('button', { name: 'next' })).toHaveFocus();
+      expect(openIconButtonTooltip()).toHaveTextContent('Settings');
+
+      await user.unhover(button);
+      await new Promise(r => setTimeout(r, 150));
+      expect(openIconButtonTooltips()).toHaveLength(0);
+    });
+
+    it('closes a tooltip open by both hover and focus on one Escape, and keeps it closed', async () => {
+      const user = userEvent.setup();
+      render(
+        <IconButton label="Settings">
+          <Icon />
+        </IconButton>
+      );
+      const button = screen.getByRole('button', { name: 'Settings' });
+      await user.tab();
+      await user.hover(button);
+      await user.keyboard('{Escape}');
+      expect(openIconButtonTooltips()).toHaveLength(0);
+      await new Promise(r => setTimeout(r, 150));
+      expect(openIconButtonTooltips()).toHaveLength(0);
+      expect(button).toHaveFocus();
+    });
+  });
+
+  describe('Escape with focus outside the button', () => {
+    it('dismisses a hover-opened tooltip without preventDefault, so the focused element still gets the key', async () => {
+      const user = userEvent.setup();
+      const onInputKeyDown = vi.fn();
+      const seen: boolean[] = [];
+      const listener = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') seen.push(e.defaultPrevented);
+      };
+      document.addEventListener('keydown', listener);
+      try {
+        render(
+          <>
+            <input aria-label="field" onKeyDown={e => onInputKeyDown(e.key)} />
+            <IconButton label="Refresh">
+              <Icon />
+            </IconButton>
+          </>
+        );
+        const input = screen.getByRole('textbox', { name: 'field' });
+        await user.click(input);
+        await user.hover(screen.getByRole('button', { name: 'Refresh' }));
+        expect(openIconButtonTooltip()).toBeVisible();
+
+        await user.keyboard('{Escape}');
+        expect(openIconButtonTooltips()).toHaveLength(0);
+        expect(input).toHaveFocus();
+        expect(onInputKeyDown).toHaveBeenCalledWith('Escape');
+        expect(seen).toEqual([false]);
+      } finally {
+        document.removeEventListener('keydown', listener);
+      }
+    });
+
+    it('dismisses the tooltip of a hovered disabled button', async () => {
+      const user = userEvent.setup();
+      render(
+        <>
+          <input aria-label="field" />
+          <IconButton label="Delete" tooltip="Defaults cannot be deleted" disabled>
+            <Icon />
+          </IconButton>
+        </>
+      );
+      await user.click(screen.getByRole('textbox', { name: 'field' }));
+      await user.hover(screen.getByRole('button', { name: 'Delete' }).parentElement as HTMLElement);
+      expect(openIconButtonTooltip()).toHaveTextContent('Defaults cannot be deleted');
+
+      await user.keyboard('{Escape}');
+      expect(openIconButtonTooltips()).toHaveLength(0);
+    });
+
+    it('dismisses the tooltip even when the focused element stops the key from propagating', async () => {
+      const user = userEvent.setup();
+      render(
+        <>
+          <input aria-label="field" onKeyDown={e => e.stopPropagation()} />
+          <IconButton label="Refresh">
+            <Icon />
+          </IconButton>
+        </>
+      );
+      await user.click(screen.getByRole('textbox', { name: 'field' }));
+      await user.hover(screen.getByRole('button', { name: 'Refresh' }));
+      await user.keyboard('{Escape}');
+      expect(openIconButtonTooltips()).toHaveLength(0);
+    });
+
+    it('stops listening once the tooltip is closed', async () => {
+      const user = userEvent.setup();
+      const add = vi.spyOn(document, 'addEventListener');
+      const remove = vi.spyOn(document, 'removeEventListener');
+      try {
+        render(
+          <IconButton label="Refresh">
+            <Icon />
+          </IconButton>
+        );
+        const button = screen.getByRole('button', { name: 'Refresh' });
+        await user.hover(button);
+        const registered = add.mock.calls.filter(([type, , capture]) => type === 'keydown' && capture === true);
+        expect(registered).toHaveLength(1);
+        await user.unhover(button);
+        await new Promise(r => setTimeout(r, 150));
+        expect(remove).toHaveBeenCalledWith('keydown', registered[0][1], true);
+      } finally {
+        add.mockRestore();
+        remove.mockRestore();
+      }
+    });
+  });
+
+  describe('Escape during IME composition', () => {
+    it.each([
+      ['isComposing', { key: 'Escape', isComposing: true }],
+      ['keyCode 229', { key: 'Escape', keyCode: 229 }]
+    ])('leaves a hover-opened tooltip open (%s), with focus elsewhere', async (_name, init) => {
+      const user = userEvent.setup();
+      render(
+        <>
+          <input aria-label="field" />
+          <IconButton label="Refresh">
+            <Icon />
+          </IconButton>
+        </>
+      );
+      const input = screen.getByRole('textbox', { name: 'field' });
+      await user.click(input);
+      await user.hover(screen.getByRole('button', { name: 'Refresh' }));
+      fireEvent.keyDown(input, init);
+      expect(openIconButtonTooltip()).toBeVisible();
+    });
+
+    it.each([
+      ['isComposing', { key: 'Escape', isComposing: true }],
+      ['keyCode 229', { key: 'Escape', keyCode: 229 }]
+    ])('leaves a focus-opened tooltip open and the key unhandled (%s)', async (_name, init) => {
+      const user = userEvent.setup();
+      render(
+        <IconButton label="Settings">
+          <Icon />
+        </IconButton>
+      );
+      await user.tab();
+      const button = screen.getByRole('button', { name: 'Settings' });
+      const notCancelled = fireEvent.keyDown(button, init);
+      expect(notCancelled).toBe(true);
+      expect(openIconButtonTooltip()).toBeVisible();
+    });
+  });
+
+  describe('tooltip position', () => {
+    const VIEWPORT = { width: 800, height: 600 };
+    const TOOLTIP = { width: 70, height: 20 };
+
+    const rect = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+
+    function stubLayout(button: { left: number; top: number }) {
+      Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: VIEWPORT.width });
+      Object.defineProperty(document.documentElement, 'clientHeight', { configurable: true, value: VIEWPORT.height });
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        if (this.hasAttribute('data-icon-button-tooltip')) return rect(0, 0, TOOLTIP.width, TOOLTIP.height);
+        if (this.tagName === 'BUTTON') return rect(button.left, button.top, 16, 16);
+        return rect(0, 0, 0, 0);
+      });
+    }
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      // Drop the own properties so the prototype getters apply again.
+      delete (document.documentElement as unknown as Record<string, unknown>).clientWidth;
+      delete (document.documentElement as unknown as Record<string, unknown>).clientHeight;
+    });
+
+    async function openAt(button: { left: number; top: number }, side?: 'top' | 'bottom') {
+      stubLayout(button);
+      const user = userEvent.setup();
+      render(
+        <IconButton label="Delete" tooltipSide={side}>
+          <Icon />
+        </IconButton>
+      );
+      await user.hover(screen.getByRole('button', { name: 'Delete' }));
+      const tooltip = openIconButtonTooltip();
+      expect(tooltip).toHaveStyle({ visibility: 'visible' });
+      return tooltip;
+    }
+
+    it('centres the tooltip below the button when there is room', async () => {
+      const tooltip = await openAt({ left: 400, top: 100 });
+      // 408 (button centre) - 35; 116 (button bottom) + 6.
+      expect(tooltip).toHaveStyle({ left: '373px', top: '122px' });
+    });
+
+    it('keeps the tooltip inside the right edge of the viewport', async () => {
+      const tooltip = await openAt({ left: 780, top: 10 });
+      // viewport width - margin 4 - tooltip width.
+      expect(tooltip).toHaveStyle({ left: `${VIEWPORT.width - 4 - TOOLTIP.width}px`, top: '32px' });
+    });
+
+    it('keeps the tooltip inside the left edge of the viewport', async () => {
+      const tooltip = await openAt({ left: 0, top: 10 });
+      expect(tooltip).toHaveStyle({ left: '4px' });
+    });
+
+    it('flips a bottom tooltip above the button when there is no room below', async () => {
+      const tooltip = await openAt({ left: 400, top: 570 }, 'bottom');
+      // 570 (button top) - 6 - 20.
+      expect(tooltip).toHaveStyle({ top: '544px' });
+    });
+
+    it('shows a top tooltip above the button when there is room', async () => {
+      const tooltip = await openAt({ left: 400, top: 100 }, 'top');
+      expect(tooltip).toHaveStyle({ top: '74px' });
+    });
+
+    it('flips a top tooltip below the button when there is no room above', async () => {
+      const tooltip = await openAt({ left: 400, top: 2 }, 'top');
+      // 18 (button bottom) + 6.
+      expect(tooltip).toHaveStyle({ top: '24px' });
+    });
   });
 });

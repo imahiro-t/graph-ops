@@ -8,7 +8,10 @@
 //   back in next to it.
 // - A visible tooltip (`tooltip`, defaulting to `label`) appears on mouse
 //   hover and on keyboard focus (:focus-visible only, so a mouse click does
-//   not leave one behind), and hides on blur, on mouse leave and on Escape.
+//   not leave one behind). Hover and focus are tracked separately and the
+//   tooltip stays open while either holds, so a pointer passing over a
+//   keyboard-focused button does not take its tooltip away, nor does Tab
+//   moving focus off a hovered one. Escape dismisses it (see below).
 // - The tooltip element is aria-hidden: its text is either the name itself
 //   or already part of it, so reading it again would only repeat the name.
 //   The one exception is `describeWithTooltip`, for a tooltip that says
@@ -38,10 +41,20 @@
 //   for instance, toggles on click).
 // - The tooltip itself can be hovered (WCAG 1.4.13): leaving the button or
 //   the tooltip only schedules the close, and entering either cancels it.
-// - Escape closes an open tooltip and calls preventDefault -- without
-//   stopPropagation -- so useModalDialog, which ignores a defaultPrevented
-//   key, leaves a surrounding modal open for that press; with the tooltip
-//   closed, Escape is left alone and reaches the modal as before.
+// - Escape dismisses an open tooltip wherever focus is (WCAG 1.4.13,
+//   dismissible), until the pointer leaves and focus leaves the button;
+//   an Escape pressed while an input method is composing text is ignored.
+//   - With focus inside the button, the press also calls preventDefault --
+//     without stopPropagation -- so useModalDialog, which ignores a
+//     defaultPrevented key, leaves a surrounding modal open for that press.
+//   - With focus elsewhere (the tooltip was opened by hover alone, which is
+//     the only way to open one on a disabled button), a document listener
+//     registered only while the tooltip is open closes it without
+//     preventDefault, so the press still does whatever it does where focus
+//     is -- cancelling an input's edit, closing a modal. It listens in the
+//     capture phase so a handler that stops propagation cannot keep the
+//     tooltip from being dismissed.
+//   With the tooltip closed, Escape is left alone as before.
 import React, { forwardRef, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -80,6 +93,12 @@ function isFocusVisible(el: Element): boolean {
   }
 }
 
+// Escape, unless an input method is composing text (keyCode 229 covers
+// browsers that end the composition before reporting the key).
+function isDismissKey(e: KeyboardEvent): boolean {
+  return e.key === 'Escape' && !e.isComposing && e.keyCode !== 229;
+}
+
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
   {
     label,
@@ -96,10 +115,13 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
 ) {
   const tooltipText = tooltip ?? label;
   const tooltipId = useId();
-  const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const open = hovered || focused;
   const [position, setPosition] = useState<Position | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const tooltipRef = useRef<HTMLSpanElement | null>(null);
+  const wrapperRef = useRef<HTMLSpanElement | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setButtonRef = useCallback(
@@ -118,22 +140,24 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     }
   }, []);
 
-  const show = useCallback(() => {
+  const startHover = useCallback(() => {
     cancelClose();
-    setOpen(true);
+    setHovered(true);
   }, [cancelClose]);
 
-  const hideNow = useCallback(() => {
-    cancelClose();
-    setOpen(false);
-  }, [cancelClose]);
-
-  const scheduleClose = useCallback(() => {
+  const scheduleHoverEnd = useCallback(() => {
     cancelClose();
     closeTimerRef.current = setTimeout(() => {
       closeTimerRef.current = null;
-      setOpen(false);
+      setHovered(false);
     }, CLOSE_DELAY_MS);
+  }, [cancelClose]);
+
+  // Escape: close for both hover and focus, until each of them starts again.
+  const dismiss = useCallback(() => {
+    cancelClose();
+    setHovered(false);
+    setFocused(false);
   }, [cancelClose]);
 
   useEffect(() => cancelClose, [cancelClose]);
@@ -177,23 +201,37 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
   }, [open, tooltipText, updatePosition]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLSpanElement>) => {
-    if (e.key !== 'Escape' || !open) return;
+    if (!open || !isDismissKey(e.nativeEvent)) return;
     e.preventDefault();
-    hideNow();
+    dismiss();
   };
+
+  // Escape pressed with focus outside the button (a tooltip opened by hover
+  // alone). A press inside the button is handleKeyDown's.
+  useEffect(() => {
+    if (!open) return;
+    const onDocumentKeyDown = (e: KeyboardEvent) => {
+      if (!isDismissKey(e)) return;
+      if (e.target instanceof Node && wrapperRef.current?.contains(e.target)) return;
+      dismiss();
+    };
+    document.addEventListener('keydown', onDocumentKeyDown, true);
+    return () => document.removeEventListener('keydown', onDocumentKeyDown, true);
+  }, [open, dismiss]);
 
   const describedBy = [ariaDescribedBy, describeWithTooltip ? tooltipId : undefined].filter(Boolean).join(' ') || undefined;
   const renderTooltip = open || describeWithTooltip;
 
   return (
     <span
+      ref={wrapperRef}
       className={`inline-flex${wrapperClassName ? ` ${wrapperClassName}` : ''}`}
-      onMouseEnter={show}
-      onMouseLeave={scheduleClose}
+      onMouseEnter={startHover}
+      onMouseLeave={scheduleHoverEnd}
       onFocus={e => {
-        if (isFocusVisible(e.target)) show();
+        if (isFocusVisible(e.target)) setFocused(true);
       }}
-      onBlur={hideNow}
+      onBlur={() => setFocused(false)}
       onKeyDown={handleKeyDown}
     >
       <button
@@ -219,8 +257,8 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
               top: position?.top ?? 0,
               visibility: position ? 'visible' : 'hidden'
             }}
-            onMouseEnter={show}
-            onMouseLeave={scheduleClose}
+            onMouseEnter={startHover}
+            onMouseLeave={scheduleHoverEnd}
             onClick={stopPropagation}
             onMouseDown={stopPropagation}
             onMouseUp={stopPropagation}

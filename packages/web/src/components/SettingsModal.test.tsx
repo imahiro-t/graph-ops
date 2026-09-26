@@ -321,6 +321,29 @@ describe('SettingsModal', () => {
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
+    // DFLT-00171: a tooltip opened by hover alone, with focus elsewhere, is
+    // dismissed by Escape too (WCAG 1.4.13) -- here on a disabled delete
+    // button, which cannot take focus -- and, since focus is not on the
+    // button, the press is not marked as handled: it goes on to the modal,
+    // which closes on it as it would with no tooltip open.
+    it('lets Escape dismiss a hover-opened icon button tooltip while focus is elsewhere, and close the modal', async () => {
+      (fetchSettingsNodeTypes as unknown as Mock).mockResolvedValue([{ type: 'plan', has_default: true, has_user_override: false }]);
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      renderModal(onClose);
+
+      const del = await screen.findByRole('button', { name: /^ノード種別の上書きを削除: / });
+      expect(del).toBeDisabled();
+      const add = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') });
+      act(() => add.focus());
+      await user.hover(del.parentElement as HTMLElement);
+      expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
+
+      await user.keyboard('{Escape}');
+      expect(openIconButtonTooltips()).toHaveLength(0);
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
     it('returns focus to the button that opened it when closed', async () => {
       const user = userEvent.setup();
       const Harness = () => {
