@@ -70,8 +70,9 @@ const MODES: AutopilotMode[] = ['ticket', 'tree'];
 //
 // - Its title, text and confirm button label are fixed when it opens (resume
 //   or fresh start, from the view at that moment); a poll changing
-//   `resumable` while it is open does not swap the text under the reader. The server decides whether the
-//   run is actually resumed, and the result message follows its answer.
+//   `resumable` while it is open does not swap the text under the reader.
+//   The server decides whether the run is actually resumed, and the result
+//   message follows its answer.
 // - If a poll shows the start would now be refused (the button gets a
 //   disabled reason), the dialog closes by itself without starting; the
 //   reason appears next to the buttons as usual. A start confirmed before the
