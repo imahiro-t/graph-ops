@@ -304,15 +304,15 @@ on run argv
 	tell application "Terminal" to do script shellCommand in newTab
 end run`
 
-// defaultTabScriptTimeout is tabScriptTimeout's value; tabLockWait is
-// derived from it, so changing it here moves both.
+// defaultTabScriptTimeout is tabScriptTimeout's initial value (tests may
+// shorten the variable); tabLockWait is derived from it, so changing it here
+// moves both.
 const defaultTabScriptTimeout = 10 * time.Second
 
 // tabScriptTimeout bounds the osascript run. The script itself gives up
 // after about 2 seconds of waiting for Terminal to come to the front and 3
-// seconds of waiting for the tab; what takes longer is almost
-// always a permission prompt nobody answers. A variable so tests can
-// shorten it.
+// seconds of waiting for the tab; what takes longer is almost always a
+// permission prompt nobody answers. A variable so tests can shorten it.
 var tabScriptTimeout = defaultTabScriptTimeout
 
 // maxTabErrorLen caps LaunchOutcome.TabError, which the runner keeps in the
@@ -455,9 +455,9 @@ var tabRetryableError = regexp.MustCompile(`\((` + strings.Join([]string{
 // events, Terminal's state that could not be read at all while waiting for
 // it to come to the front (the script rethrows that read error with its own
 // number rather than 9103), osascript missing, anything not foreseen --
-// disables it, so a run
-// pays for such a failure (up to tabScriptTimeout) once rather than on every
-// launch, without depending on a complete list of macOS error numbers.
+// disables it, so a run pays for such a failure (up to tabScriptTimeout) once
+// rather than on every launch, without depending on a complete list of macOS
+// error numbers.
 func classifyTabFailure(timedOut bool, msg string) bool {
 	if timedOut {
 		return true

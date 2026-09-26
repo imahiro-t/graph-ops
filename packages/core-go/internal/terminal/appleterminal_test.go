@@ -333,9 +333,11 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 		t.Error("the command must go to the new tab found by its tty, never to the selected tab")
 	}
 	// Order: the ttys are recorded and the front checked (with its 9103)
-	// before the keystroke; the new tab is found (with its 9104 and 9102)
-	// and checked to be in the orchestrator's window after it and before
-	// do script.
+	// before the keystroke -- when the front loop never read Terminal's
+	// state (not pollOK), the last read error is rethrown with its own
+	// number (number lastErrNum) ahead of the 9103; the new tab is found
+	// (with its 9104 and 9102) and checked to be in the orchestrator's
+	// window after the keystroke and before do script.
 	order := []string{
 		"set knownTTYs to",
 		"set pollOK to true",
