@@ -46,6 +46,12 @@ type autopilotStartResponse struct {
 	State   string `json:"state"`
 	Created bool   `json:"created"`
 	Resumed bool   `json:"resumed"`
+	// UntrustedFolder is runner.StartResult.UntrustedFolder copied as is
+	// (DFLT-00182): the project's local path when Claude Code has not
+	// trusted it yet, so the terminal just opened is likely waiting at the
+	// workspace trust dialog. Left out when trusted or not judged. The
+	// handler never judges it itself.
+	UntrustedFolder string `json:"untrusted_folder,omitempty"`
 }
 
 // handleStartAutopilot answers POST /api/tickets/{id}/autopilot (DFLT-00142,
@@ -150,10 +156,11 @@ func (s *Server) handleStartAutopilot(w http.ResponseWriter, r *http.Request) {
 		slog.String("mode", mode),
 		slog.Bool("created", res.Created),
 		slog.Bool("resumed", res.Resumed),
+		slog.Bool("untrusted_folder", res.UntrustedFolder != ""),
 		slog.String("permission_mode", res.PermissionMode))
 	writeJSON(w, http.StatusOK, autopilotStartResponse{
 		RunID: res.RunID, Mode: res.Mode, Root: res.Root, State: res.State,
-		Created: res.Created, Resumed: res.Resumed,
+		Created: res.Created, Resumed: res.Resumed, UntrustedFolder: res.UntrustedFolder,
 	})
 }
 

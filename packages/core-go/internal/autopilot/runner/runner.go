@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/graph-ops/core-go/internal/autopilot"
+	"github.com/graph-ops/core-go/internal/claudetrust"
 	"github.com/graph-ops/core-go/internal/config"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
@@ -85,6 +86,10 @@ type Service struct {
 	Settings func(projectID string) (autopilot.Settings, error)
 	// LocalPath returns a project's local path, "" when none is set.
 	LocalPath func(projectID string) string
+	// HomeDir is the home directory whose ~/.claude.json tells whether
+	// Claude Code trusts the folder a session opens in (DFLT-00182); ""
+	// means the folder is never judged.
+	HomeDir string
 	// Now is the clock; nil means time.Now. The registry uses the same one.
 	Now func() time.Time
 	// PollInterval is how often Wait re-checks; 0 means 30 seconds.
@@ -130,6 +135,7 @@ func RegistryRoot(homeDir string) string {
 func New(o Options) *Service {
 	s := &Service{
 		Repo:        o.Repo,
+		HomeDir:     o.HomeDir,
 		Registry:    &autopilot.Registry{Root: RegistryRoot(o.HomeDir), Logf: o.Logf},
 		Launcher:    TerminalLauncher{Config: terminal.Config{TerminalCommand: o.TerminalCommand}, ClaudeBin: o.ClaudeBinary},
 		TerminalTTY: terminal.DetectAppleTerminalTTY,
@@ -184,6 +190,22 @@ func (s *Service) localPath(projectID string) (string, error) {
 			"PROJECT_LOCAL_PATH_NOT_SET: project %s has no local path in this environment; set it (Web UI project settings, or create-project --workdir) so the autopilot knows which repository to work in", projectID)
 	}
 	return p, nil
+}
+
+// untrustedFolder returns dir's resolved path when Claude Code has
+// evidently not trusted it yet, so the first session opened there would
+// stop at the workspace trust dialog; "" when it is trusted or cannot be
+// judged (see claudetrust.Check). The answer is only ever reported as a
+// notice (untrusted_folder): no launch, reservation or state change depends
+// on it.
+func (s *Service) untrustedFolder(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	if r := claudetrust.Check(s.HomeDir, dir); r.Untrusted {
+		return r.Path
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
@@ -357,6 +379,13 @@ type StartResult struct {
 	Resumed   bool   `json:"resumed"`
 	Adopted   bool   `json:"adopted"`
 	Next      string `json:"next"`
+	// UntrustedFolder is the project's local path when Claude Code has not
+	// trusted it yet (DFLT-00182): the sessions the run opens there -- the
+	// Web UI's orchestrator, and every child in its worktree below -- would
+	// stop at the workspace trust dialog until someone accepts it. Empty
+	// (and left out) when the folder is trusted or cannot be judged. A
+	// notice only: the run starts either way.
+	UntrustedFolder string `json:"untrusted_folder,omitempty"`
 	// PermissionMode is the child sessions' permission mode in the run's
 	// settings snapshot -- what the Web UI's launch opens the orchestrator
 	// with. Not printed: the CLI's orchestrator is already running.
@@ -403,11 +432,18 @@ func (s *Service) Start(ticketID, mode, runID string, reserve bool) (StartResult
 	if err != nil {
 		return StartResult{}, err
 	}
+	// Judged once here, after Begin succeeded, for both the CLI and the
+	// Web UI (whose handler only copies it into its response).
+	untrusted := ""
+	if s.LocalPath != nil {
+		untrusted = s.untrustedFolder(s.LocalPath(root.ProjectID))
+	}
 	return StartResult{
 		RunID: res.Run.ID, ProjectID: res.Run.ProjectID, Mode: res.Run.Mode, Root: res.Run.RootTicketID,
 		State: res.Run.State, Created: res.Created, Resumed: res.TookOver, Adopted: res.Adopted,
-		Next:           "graph-engine autopilot next " + res.Run.ID,
-		PermissionMode: res.Run.Settings.PermissionMode,
+		Next:            "graph-engine autopilot next " + res.Run.ID,
+		UntrustedFolder: untrusted,
+		PermissionMode:  res.Run.Settings.PermissionMode,
 	}, nil
 }
 
@@ -597,6 +633,11 @@ type LaunchResult struct {
 	Branch     string `json:"branch,omitempty"`
 	BaseBranch string `json:"base_branch,omitempty"`
 	Next       string `json:"next"`
+	// UntrustedFolder is the session's folder when Claude Code has not
+	// trusted it (DFLT-00182): the session just opened is likely waiting at
+	// the workspace trust dialog. Empty (and left out) when trusted or not
+	// judged, and never set when the launch failed.
+	UntrustedFolder string `json:"untrusted_folder,omitempty"`
 }
 
 // WorkerPrompt is the prompt a child session starts with.
@@ -641,6 +682,7 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		permissionMode                    string
 		terminalTTY                       string
 		skipTab                           bool
+		untrusted                         string
 	)
 	err = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
 		if run.IsFinal() || run.State == autopilot.RunStarting {
@@ -737,6 +779,9 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 			return err
 		}
 		workDir = path
+		// Judged only now: the worktree exists (EnsureWorktree may just
+		// have created it), so its path resolves even on the first launch.
+		untrusted = s.untrustedFolder(workDir)
 		if s.Launcher == nil {
 			return errors.New("no terminal launcher configured")
 		}
@@ -772,7 +817,7 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 			run.TerminalTabDisabled = outcome.TabError
 		}
 		sample.observe(st, s.now())
-		out = LaunchResult{Launched: ticketID, Role: role, Worktree: workDir, Next: fmt.Sprintf("graph-engine autopilot wait %s %s", runID, ticketID)}
+		out = LaunchResult{Launched: ticketID, Role: role, Worktree: workDir, Next: fmt.Sprintf("graph-engine autopilot wait %s %s", runID, ticketID), UntrustedFolder: untrusted}
 		if role == autopilot.RoleWork {
 			out.Branch, out.BaseBranch = st.Branch, st.BaseBranch
 		}

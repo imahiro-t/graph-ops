@@ -155,6 +155,26 @@ for (const [name, mode] of [['autopilot-ticket', 'ticket'], ['autopilot-tree', '
   });
 }
 
+for (const name of ['autopilot-ticket', 'autopilot-tree']) {
+  // DFLT-00182: start and launch report an untrusted folder, and the
+  // orchestrator passes it on in one line without stopping.
+  test(`${name}/SKILL.md passes on untrusted_folder without stopping`, () => {
+    const body = read(`skills/${name}/SKILL.md`);
+    const start = body.slice(body.indexOf('## 1. Start or resume the run'), body.indexOf('## 2.'));
+    assertAll(start, `${name} step 1`, [
+      '`untrusted_folder` (with or without `--run`)',
+      'open that folder in Claude Code once and accept the trust prompt',
+      'carry on without stopping or asking'
+    ]);
+    const launch = body.slice(body.indexOf('- `launch`:'), body.indexOf('- `wait`:'));
+    assertAll(launch, `${name} launch`, [
+      'When its line has `untrusted_folder`',
+      'waiting at the workspace trust prompt',
+      'carry on to `wait` as usual'
+    ]);
+  });
+}
+
 test('the existing skills and node types defer to the autopilot-worker overrides', () => {
   for (const file of [
     'skills/process-ticket/SKILL.md',
