@@ -8,7 +8,7 @@
 // criteria by the time it reaches merged_catalog, so the preview only needs
 // to show the resulting criteria/enabled -- not a separate
 // additional_criteria field. There is no per-gate iteration limit any more.
-import React, { useCallback, useEffect, useId, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Save, Plus, Trash2, CheckCircle2, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
 import { ReviewGateDef, SETTINGS_CATALOG_WARNINGS, SettingsCatalog, SettingsCatalogWarning, SettingsDocument } from '../../types';
@@ -16,6 +16,9 @@ import { fetchSettingsCatalog, saveSettingsCatalog } from '../../lib/settingsApi
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
+import { useTransientAnnouncement } from '../../hooks/useTransientAnnouncement';
+import { StatusLiveRegion } from '../StatusLiveRegion';
+import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
 import { IconButton } from '../IconButton';
 
 interface Props {
@@ -45,6 +48,12 @@ interface Props {
 // default for every field it leaves out, so moving it to another ID would
 // leave a gate with no criteria/name behind it. A custom gate's override
 // (no default) stays renamable, and a 'new' row never has a default.
+//
+// rowKey is a client-only key, handed out once when the row is created
+// (loaded or added) and never reused: it identifies the row for its preview
+// open state, its React key and its DOM ids, so deleting a row or editing an
+// ID can't move any of those onto another row (DFLT-00199). It is never
+// saved -- buildGateOverride only writes GATE_FIELDS.
 type GateOrigin = 'inherited' | 'override' | 'new';
 type GateRow = ReviewGateDef & {
   id: string;
@@ -52,6 +61,7 @@ type GateRow = ReviewGateDef & {
   origin: GateOrigin;
   baseline: ReviewGateDef;
   hasDefault: boolean;
+  rowKey: string;
 };
 
 type GateField = keyof ReviewGateDef;
@@ -133,6 +143,20 @@ type FetchedRows = {
   warnings: SettingsCatalogWarning[];
 };
 
+// data-focus-key values of the controls removeGate moves keyboard focus to
+// once the deleted row is gone (see pendingFocus).
+const deleteButtonKey = (rowKey: string) => `delete-${rowKey}`;
+const previewToggleKey = (rowKey: string) => `preview-${rowKey}`;
+const ADD_GATE_FOCUS_KEY = 'add-gate';
+
+// What a row is called when naming it to a screen reader (its delete button's
+// name, its merged-preview toggle's name and the removal announcement): the
+// ID, or on a new row that has none yet, the name typed so far.
+// Whitespace-only counts as empty, so '' means the row has neither -- then
+// both buttons fall back to the row-numbered no-ID wording
+// (deleteUnnamedGateAriaLabel / previewToggleUnnamedAriaLabel).
+const gateDisplayName = (g: Pick<GateRow, 'id' | 'name'>) => (g.id ?? '').trim() || (g.name ?? '').trim();
+
 const SMALL_LABEL_CLASS = 'block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5';
 
 export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
@@ -140,15 +164,20 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // See src/hooks/useLatest.ts -- keeps fetchRows/load below insensitive to
   // language changes (F-1).
   const tRef = useLatest(t);
-  // Row inputs are repeated, so each id is this prefix plus the row index.
+  // Row inputs are repeated, so each id is this prefix plus the row's rowKey.
   const idPrefix = useId();
+  // Hands out each row's rowKey (see GateRow); letters and digits only, so
+  // it is safe inside an id.
+  const nextRowKey = useRef(0);
+  const newRowKey = useCallback(() => `row${nextRowKey.current++}`, []);
   const [gates, setGates] = useState<GateRow[]>([]);
   const [savedGates, setSavedGates] = useState<GateRow[]>([]);
   const [mergedGates, setMergedGates] = useState<SettingsCatalog['review_gates']>({});
   // The defaults this scope inherits, per gate ID: shown as placeholders in
   // an override's empty fields, which inherit these values.
   const [inheritedGates, setInheritedGates] = useState<SettingsCatalog['review_gates']>({});
-  const [expandedPreview, setExpandedPreview] = useState<Record<number, boolean>>({});
+  // Which rows' merged preview is open, per rowKey.
+  const [expandedPreview, setExpandedPreview] = useState<Record<string, boolean>>({});
   // The workflow-wide review iteration limit this scope sets (null =
   // inherit), as edited and as last loaded/saved.
   const [maxIterations, setMaxIterations] = useState<number | null>(null);
@@ -162,7 +191,30 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // is (still) empty can be marked invalid and point at the message.
   const [emptyIdErrorShown, setEmptyIdErrorShown] = useState(false);
   const errorId = `${idPrefix}-error`;
+  const containerRef = useRef<HTMLDivElement>(null);
+  // Where keyboard focus goes once the next render has settled (DFLT-00199,
+  // following DFLT-00191's rule): deleting a gate unmounts its row, focused
+  // delete button included, which would otherwise drop focus to <body>. Same
+  // pattern as NodeTypesEditor's.
+  const [pendingFocus, setPendingFocus] = useState<string | null>(null);
+  useEffect(() => {
+    if (pendingFocus === null) return;
+    focusIfLost(containerRef.current?.querySelector<HTMLElement>(focusKeySelector(pendingFocus)));
+    setPendingFocus(null);
+    // gates is what mounts and unmounts the targets; it is listed so the
+    // effect runs once the removed row is gone.
+  }, [pendingFocus, gates]);
   const { savedFlash, showSavedFlash } = useSavedFlash();
+  // Announces a removed row (DFLT-00204) through the always-mounted
+  // StatusLiveRegion at the end of the editor, like NodeTypesEditor's and
+  // LabelsEditor's deletes. Removing a row only changes the list here -- it
+  // is not saved yet -- so the wording says so. Removing two rows that read
+  // the same (e.g. two empty new rows) is announced both times: the hook
+  // re-sets identical text after a short gap. The notice is cleared as soon as
+  // anything else changes the form (add, edit, iteration limit, save, reload),
+  // so a stale "removed" never lingers next to later changes; opening or
+  // closing a preview changes nothing and leaves it alone.
+  const { message: deleteNotice, announce: announceDelete, clear: clearDeleteNotice } = useTransientAnnouncement();
 
   const isDirty = JSON.stringify(gates) !== JSON.stringify(savedGates) || maxIterations !== savedMaxIterations;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
@@ -191,7 +243,8 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         baseline: { ...base },
         // A row with no override here is showing an inherited gate, so it
         // has a default even if inherited_catalog were to omit it.
-        hasDefault: !isOverridden || id in inheritedMap
+        hasDefault: !isOverridden || id in inheritedMap,
+        rowKey: newRowKey()
       };
     });
     return {
@@ -202,10 +255,14 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       inheritedMaxIterations: catalogRes.inherited_catalog?.max_iterations ?? DEFAULT_MAX_ITERATIONS,
       warnings: knownWarnings(catalogRes.warnings)
     };
-  }, [tRef]);
+  }, [tRef, newRowKey]);
 
+  // gates and savedGates get the very same rows (same rowKeys), so an
+  // untouched form is not dirty. The rows are new, with new rowKeys, so every
+  // preview starts closed again rather than carrying over an old row's state.
   const applyFetched = useCallback((fetched: FetchedRows) => {
     setGates(fetched.rows);
+    setExpandedPreview({});
     setSavedGates(fetched.rows);
     setMergedGates(fetched.merged);
     setInheritedGates(fetched.inherited);
@@ -216,6 +273,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   }, []);
 
   const load = useCallback(async () => {
+    clearDeleteNotice();
     setLoading(true);
     setError('');
     setEmptyIdErrorShown(false);
@@ -226,18 +284,20 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     } finally {
       setLoading(false);
     }
-  }, [fetchRows, applyFetched, tRef]);
+  }, [fetchRows, applyFetched, tRef, clearDeleteNotice]);
 
   useEffect(() => { load(); }, [load]);
 
   // Editing any field on a not-yet-overridden default row is what actually
   // creates its override -- see GateRow's doc comment.
-  const updateGate = (idx: number, patch: Partial<GateRow>) => {
-    setGates(prev => prev.map((g, i) => (i === idx ? { ...g, ...patch, isOverridden: true } : g)));
+  const updateGate = (rowKey: string, patch: Partial<GateRow>) => {
+    clearDeleteNotice();
+    setGates(prev => prev.map(g => (g.rowKey === rowKey ? { ...g, ...patch, isOverridden: true } : g)));
   };
 
   const addGate = () => {
-    setGates(prev => [...prev, { id: '', name: '', criteria: '', enabled: true, isOverridden: true, origin: 'new', baseline: {}, hasDefault: false }]);
+    clearDeleteNotice();
+    setGates(prev => [...prev, { id: '', name: '', criteria: '', enabled: true, isOverridden: true, origin: 'new', baseline: {}, hasDefault: false, rowKey: newRowKey() }]);
   };
 
   // Only ever called for an overridden row: a not-yet-overridden default
@@ -245,11 +305,40 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // swallows its clicks and its onClick checks g.isOverridden too. Guarded
   // here as well so this can't remove such a row even if triggered some
   // other way.
-  const removeGate = (idx: number) => {
-    setGates(prev => (prev[idx]?.isOverridden ? prev.filter((_, i) => i !== idx) : prev));
+  // The removed row's open state goes with it; its rowKey is never handed
+  // out again, so no later row could pick it up anyway.
+  // Focus then moves to the row that took the removed one's place (else the
+  // new last row, else "Add Review Gate"): to its delete button, or -- when
+  // that is aria-disabled because the row is a not-yet-overridden default --
+  // to its merged preview toggle, the row's other usable button.
+  // The removal is then announced (see deleteNotice); a guarded-out call
+  // removes nothing and announces nothing.
+  const removeGate = (rowKey: string) => {
+    const removed = gates.find(g => g.rowKey === rowKey);
+    if (!removed?.isOverridden) return;
+    const remaining = gates.filter(g => g.rowKey !== rowKey);
+    setGates(prev => prev.filter(g => g.rowKey !== rowKey));
+    setExpandedPreview(prev => {
+      const { [rowKey]: _removed, ...rest } = prev;
+      return rest;
+    });
+    const neighborKey = neighborAfterRemoval(gates.map(g => g.rowKey), rowKey, remaining.map(g => g.rowKey));
+    const neighbor = remaining.find(g => g.rowKey === neighborKey);
+    if (!neighbor) {
+      setPendingFocus(ADD_GATE_FOCUS_KEY);
+    } else {
+      setPendingFocus(neighbor.isOverridden ? deleteButtonKey(neighbor.rowKey) : previewToggleKey(neighbor.rowKey));
+    }
+    const removedName = gateDisplayName(removed);
+    announceDelete(
+      removedName
+        ? t('settings.reviewGates.deleteGateAnnouncement', { name: removedName })
+        : t('settings.reviewGates.deleteUnnamedGateAnnouncement')
+    );
   };
 
   const handleSave = async () => {
+    clearDeleteNotice();
     // A row without an ID cannot be saved; refuse the whole save (and keep
     // every input as typed) instead of silently dropping that row and still
     // reporting success.
@@ -309,6 +398,8 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     `${idPrefix}-workflow-max-help`,
     maxIterationsInvalid && outOfRangeWarningIndex >= 0 ? warningItemId(outOfRangeWarningIndex) : null
   ].filter(Boolean).join(' ');
+  // Every row's preview toggle shows this text and starts its name with it.
+  const previewLabel = t('settings.reviewGates.mergedPreviewLabel');
 
   if (loading) {
     return (
@@ -319,7 +410,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   }
 
   return (
-    <div className="flex flex-col gap-3 h-full min-h-0">
+    <div ref={containerRef} className="flex flex-col gap-3 h-full min-h-0">
       <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.intro')}</p>
       {error && <div id={errorId} role="alert" className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900 whitespace-pre-wrap">{error}</div>}
 
@@ -348,7 +439,10 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           value={maxIterations === null ? '' : String(maxIterations)}
           aria-describedby={maxIterationsDescribedBy}
           aria-invalid={maxIterationsInvalid || undefined}
-          onChange={e => setMaxIterations(e.target.value === '' ? null : Number(e.target.value))}
+          onChange={e => {
+            clearDeleteNotice();
+            setMaxIterations(e.target.value === '' ? null : Number(e.target.value));
+          }}
           className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100"
         >
           <option value="">{t('settings.reviewGates.workflowMaxIterationsInherit', { value: inheritedMaxIterations })}</option>
@@ -377,21 +471,27 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               ? fallback
               : t('settings.reviewGates.inheritedPlaceholder', { value });
           const idLocked = !g.isOverridden || g.hasDefault;
-          // What the delete button names: the ID, or on a new row that has
-          // none yet, the name typed so far. Whitespace-only counts as empty.
-          const deleteTarget = (g.id ?? '').trim() || (g.name ?? '').trim();
+          const previewOpen = !!expandedPreview[g.rowKey];
+          const previewId = `${idPrefix}-${g.rowKey}-preview`;
+          // The merged criteria heading and the hidden gate identifier that
+          // together name the criteria region (DFLT-00201).
+          const mergedCriteriaLabelId = `${idPrefix}-${g.rowKey}-merged-criteria-label`;
+          const mergedCriteriaGateId = `${idPrefix}-${g.rowKey}-merged-criteria-gate`;
+          // What the delete button and the preview toggle name (see
+          // gateDisplayName).
+          const rowName = gateDisplayName(g);
           const deleteTooltip = g.isOverridden ? t('settings.reviewGates.deleteGate') : t('settings.reviewGates.cannotDeleteDefaultHint');
           const idInvalid = emptyIdErrorShown && g.id.trim() === '';
           return (
-          <div key={idx} className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2 bg-white dark:bg-slate-900">
+          <div key={g.rowKey} className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2 bg-white dark:bg-slate-900">
             {/* Each text field has a small visible label above it (the
                 placeholders stay as a supplementary hint); items-end keeps
                 the checkbox and delete button aligned with the inputs. */}
             <div className="flex items-end gap-2">
               <div className="w-40 flex flex-col">
-                <label htmlFor={`${idPrefix}-${idx}-id`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.idLabel')}</label>
+                <label htmlFor={`${idPrefix}-${g.rowKey}-id`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.idLabel')}</label>
                 <input
-                  id={`${idPrefix}-${idx}-id`}
+                  id={`${idPrefix}-${g.rowKey}-id`}
                   value={g.id}
                   // A gate with a default behind it keeps its ID (see
                   // GateRow's hasDefault) -- use "Add Review Gate" for a new
@@ -401,7 +501,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   aria-invalid={idInvalid || undefined}
                   aria-describedby={idInvalid ? errorId : undefined}
                   placeholder={t('settings.reviewGates.idLabel')}
-                  onChange={e => updateGate(idx, { id: e.target.value })}
+                  onChange={e => updateGate(g.rowKey, { id: e.target.value })}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100 disabled:opacity-60"
                 />
               </div>
@@ -414,13 +514,13 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 </span>
               )}
               <div className="flex-1 min-w-0 flex flex-col">
-                <label htmlFor={`${idPrefix}-${idx}-name`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.nameLabel')}</label>
+                <label htmlFor={`${idPrefix}-${g.rowKey}-name`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.nameLabel')}</label>
                 <input
-                  id={`${idPrefix}-${idx}-name`}
+                  id={`${idPrefix}-${g.rowKey}-name`}
                   value={g.name || ''}
                   disabled={!g.isOverridden}
                   placeholder={inheritedPlaceholder(inherited?.name, t('settings.reviewGates.nameLabel'))}
-                  onChange={e => updateGate(idx, { name: e.target.value })}
+                  onChange={e => updateGate(g.rowKey, { name: e.target.value })}
                   title={g.isOverridden ? undefined : t('settings.reviewGates.cannotRenameDefaultHint')}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
                 />
@@ -429,30 +529,35 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 <input
                   type="checkbox"
                   checked={g.enabled !== false}
-                  onChange={e => updateGate(idx, { enabled: e.target.checked })}
+                  onChange={e => updateGate(g.rowKey, { enabled: e.target.checked })}
                   className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0"
                 />
                 {t('settings.reviewGates.enabledLabel')}
               </label>
               <IconButton
                 onClick={() => {
-                  if (g.isOverridden) removeGate(idx);
+                  if (g.isOverridden) removeGate(g.rowKey);
                 }}
+                data-focus-key={deleteButtonKey(g.rowKey)}
                 // aria-disabled rather than disabled, so a default gate's
                 // button still takes keyboard focus and shows why it cannot
                 // be deleted (IconButton swallows the click).
                 aria-disabled={g.isOverridden ? undefined : true}
                 // The name carries the gate (its ID, or its name on a new row
                 // with no ID yet) so a screen reader can tell which row focus
-                // is on. With neither an ID nor a name there is nothing to
-                // add, so the tooltip text itself is the name, rather than a
-                // name ending in an empty target. The tooltip says "delete"
+                // is on. With neither an ID nor a name there is no target to
+                // add, so the name says the gate has no ID and gives its
+                // 1-based position in the list (DFLT-00208) -- rather than a
+                // name ending in an empty target, or a bare "delete" that
+                // several such rows would share. The tooltip says "delete"
                 // -- already part of the name -- or, on a default gate, why
                 // it cannot be deleted; only that reason is added as the
                 // description, and only when it is not the name already.
-                label={deleteTarget ? t('settings.reviewGates.deleteGateAriaLabel', { name: deleteTarget }) : deleteTooltip}
+                label={rowName
+                  ? t('settings.reviewGates.deleteGateAriaLabel', { name: rowName })
+                  : t('settings.reviewGates.deleteUnnamedGateAriaLabel', { row: idx + 1 })}
                 tooltip={deleteTooltip}
-                describeWithTooltip={Boolean(deleteTarget) && !g.isOverridden}
+                describeWithTooltip={Boolean(rowName) && !g.isOverridden}
                 wrapperClassName="mb-0.5 shrink-0"
                 className={`p-1 text-slate-500 dark:text-slate-400 ${
                   g.isOverridden ? 'hover:text-red-600 dark:hover:text-red-400' : 'opacity-40 cursor-not-allowed'
@@ -462,23 +567,23 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               </IconButton>
             </div>
             <div>
-              <label htmlFor={`${idPrefix}-${idx}-criteria`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.criteriaLabel')}</label>
+              <label htmlFor={`${idPrefix}-${g.rowKey}-criteria`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.criteriaLabel')}</label>
               <textarea
-                id={`${idPrefix}-${idx}-criteria`}
+                id={`${idPrefix}-${g.rowKey}-criteria`}
                 value={g.criteria || ''}
                 placeholder={inheritedPlaceholder(inherited?.criteria)}
-                onChange={e => updateGate(idx, { criteria: e.target.value })}
+                onChange={e => updateGate(g.rowKey, { criteria: e.target.value })}
                 rows={2}
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
               />
             </div>
             <div>
-              <label htmlFor={`${idPrefix}-${idx}-additional`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.additionalCriteriaLabel')}</label>
+              <label htmlFor={`${idPrefix}-${g.rowKey}-additional`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.additionalCriteriaLabel')}</label>
               <textarea
-                id={`${idPrefix}-${idx}-additional`}
+                id={`${idPrefix}-${g.rowKey}-additional`}
                 value={g.additional_criteria || ''}
                 placeholder={inheritedPlaceholder(inherited?.additional_criteria)}
-                onChange={e => updateGate(idx, { additional_criteria: e.target.value })}
+                onChange={e => updateGate(g.rowKey, { additional_criteria: e.target.value })}
                 rows={2}
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
               />
@@ -486,28 +591,61 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
             <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"
-                onClick={() => setExpandedPreview(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                onClick={() => setExpandedPreview(prev => ({ ...prev, [g.rowKey]: !prev[g.rowKey] }))}
+                data-focus-key={previewToggleKey(g.rowKey)}
+                // The preview is only rendered while open, so aria-controls is
+                // set only then and never points at an id missing from the DOM.
+                aria-expanded={previewOpen}
+                aria-controls={previewOpen ? previewId : undefined}
+                // Every row has this toggle with the same visible text, so the
+                // name adds the gate the same way the delete button's does
+                // (ID, else name, else "no ID" plus the 1-based row number;
+                // DFLT-00200). The visible text is passed in as-is and starts
+                // the name, so the name keeps the label (WCAG 2.5.3).
+                aria-label={rowName
+                  ? t('settings.reviewGates.previewToggleAriaLabel', { label: previewLabel, name: rowName })
+                  : t('settings.reviewGates.previewToggleUnnamedAriaLabel', { label: previewLabel, row: idx + 1 })}
                 className="flex items-center gap-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
               >
-                {expandedPreview[idx] ? <ChevronDown aria-hidden="true" className="w-3 h-3" /> : <ChevronRight aria-hidden="true" className="w-3 h-3" />}
-                {t('settings.reviewGates.mergedPreviewLabel')}
+                {previewOpen ? <ChevronDown aria-hidden="true" className="w-3 h-3" /> : <ChevronRight aria-hidden="true" className="w-3 h-3" />}
+                {previewLabel}
               </button>
-              {expandedPreview[idx] && (
-                mergedGates[g.id] ? (
-                  <div className="mt-1.5 space-y-1.5">
-                    <div>
-                      <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.reviewGates.mergedCriteriaLabel')}</label>
-                      <pre className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 max-h-32 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono">
-                        {mergedGates[g.id].criteria || t('settings.common.inheritedFromDefault')}
-                      </pre>
+              {previewOpen && (
+                <div id={previewId}>
+                  {mergedGates[g.id] ? (
+                    <div className="mt-1.5 space-y-1.5">
+                      <div>
+                        {/* A plain heading, not a <label>: there is no form
+                            control for it to label (WCAG 1.3.1, DFLT-00201). */}
+                        <p id={mergedCriteriaLabelId} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.mergedCriteriaLabel')}</p>
+                        {/* Not shown and not read in browse mode, but a hidden
+                            element referenced by aria-labelledby still counts
+                            toward the name. rowName is never empty here: this
+                            branch only renders for a row whose ID matches a
+                            merged gate, so no row-numbered wording is needed. */}
+                        <span id={mergedCriteriaGateId} hidden>{t('settings.reviewGates.mergedCriteriaGateSuffix', { name: rowName })}</span>
+                        {/* A named, focusable region, like the Templates tab's
+                            merged preview, so keyboard users can scroll it.
+                            Every row can show one, so the name adds the gate
+                            after the heading to keep the regions apart
+                            (WCAG 2.4.6, DFLT-00201). */}
+                        <pre
+                          role="region"
+                          aria-labelledby={`${mergedCriteriaLabelId} ${mergedCriteriaGateId}`}
+                          tabIndex={0}
+                          className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 max-h-32 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                        >
+                          {mergedGates[g.id].criteria || t('settings.common.inheritedFromDefault')}
+                        </pre>
+                      </div>
+                      <div className="flex items-center gap-4 text-[11px] text-slate-600 dark:text-slate-400">
+                        <span>{t('settings.reviewGates.mergedEnabledLabel')}: {mergedGates[g.id].enabled === false ? t('settings.common.no') : t('settings.common.yes')}</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-4 text-[11px] text-slate-600 dark:text-slate-400">
-                      <span>{t('settings.reviewGates.mergedEnabledLabel')}: {mergedGates[g.id].enabled === false ? t('settings.common.no') : t('settings.common.yes')}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.previewUnavailableHint')}</p>
-                )
+                  ) : (
+                    <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.previewUnavailableHint')}</p>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -518,6 +656,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       <div className="flex justify-between items-center">
         <button
           onClick={addGate}
+          data-focus-key={ADD_GATE_FOCUS_KEY}
           className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 transition"
         >
           <Plus aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.reviewGates.addGate')}
@@ -538,6 +677,9 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           </button>
         </div>
       </div>
+      {/* Last child, so the empty sr-only region never shifts the layout; it
+          stays mounted even when the last row is removed (DFLT-00204). */}
+      <StatusLiveRegion message={deleteNotice} />
     </div>
   );
 };
