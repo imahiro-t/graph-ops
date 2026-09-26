@@ -376,14 +376,18 @@ const tabLockMargin = 5 * time.Second
 // after a release, not to the one that has waited longest. If other
 // launches keep taking the lock in between, any of the waiters (not
 // necessarily the latest to arrive) can reach its deadline and fall back to
-// a new window. That is deliberate and not covered by a longer wait: an
-// osascript normally finishes in a few seconds, so the lock comes free well
-// within the wait; the wait runs out only when a holder runs close to
-// tabScriptTimeout (a permission prompt left unanswered, say), and then the
-// waiter's own tab would most likely fail the same way; and a wait that grew
-// with the number of waiters would stretch a launch's worst case (about 35
-// seconds) in proportion, where a bounded wait keeps it fixed. See the lock
-// in docs/autopilot.md.
+// a new window. That is deliberate and not covered by a longer wait. An
+// osascript normally finishes in a few seconds, so the lock normally comes
+// free often enough, though with no queue nothing guarantees a given waiter
+// gets it in time. The wait runs out when the holders' runs add up past it:
+// one running close to tabScriptTimeout (a permission prompt left
+// unanswered, say), several passing failures of a few seconds each
+// (9102/9103), or an unusual number of waiters. Most of these mean something
+// is wrong with Terminal, and then the waiter's own tab would most likely
+// fail the same way; either way it still opens a new window. And a wait
+// that grew with the number of waiters would stretch a launch's worst case
+// (about 35 seconds) in proportion, where a bounded wait keeps it fixed. See
+// the lock in docs/autopilot.md.
 var tabLockWait = defaultTabScriptTimeout + tabLockMargin
 
 // tabLockPoll is how often lockTabLaunch retries a held lock.
@@ -397,13 +401,14 @@ const tabLockPoll = 50 * time.Millisecond
 // place.
 //
 // It returns the function releasing the lock, or, when other processes
-// (one, or several taking turns) held it for all of tabLockWait since this
-// call started waiting, a non-empty reason to fall back to a new window.
-// Waiters are not served in any order -- whichever polls first after a
-// release gets the lock -- so with several waiters any of them may fall
-// back; that is intended (see tabLockWait). The lock is a convenience, not a requirement: if its file cannot
-// be created or locked at all (no home directory, a sandbox refusing the
-// write), the tab is tried without it.
+// (one, or several taking the lock between them) held it for all of
+// tabLockWait since this call started waiting, a non-empty reason to fall
+// back to a new window. Waiters are not served in any order -- whichever
+// polls first after a release gets the lock -- so with several waiters any
+// of them may fall back; that is intended (see tabLockWait). The lock is a
+// convenience, not a requirement: if its file cannot be created or locked
+// at all (no home directory, a sandbox refusing the write), the tab is
+// tried without it.
 func lockTabLaunch() (unlock func(), busy string) {
 	noop := func() {}
 	path, err := tabLockPath()
