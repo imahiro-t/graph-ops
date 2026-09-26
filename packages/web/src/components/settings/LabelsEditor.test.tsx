@@ -1154,4 +1154,178 @@ describe('LabelsEditor announcing row saves', () => {
       expect(colorButton('label-bug', 'バグ', 'green')).toHaveAttribute('aria-pressed', 'true');
     });
   });
+
+  // DFLT-00213: one row is renamed at a time, but a row's rename can be
+  // opened -- or another row deleted -- while an earlier rename is still
+  // saving. That save's completion must close only its own rename, and must
+  // not pull focus away from wherever the user has moved on to.
+  describe('renaming while another row is saving', () => {
+    const renameInput = (id: string) => within(row(id)).queryByRole('textbox');
+    const saveButton = (id: string) => within(row(id)).getByRole('button', { name: i18n.t('settings.labels.save') });
+
+    // Row A's (label-bug) rename waits for the test; row B's (label-feat)
+    // saves at once with whatever it was given.
+    function holdRowA() {
+      const a = deferred<LabelUsage>();
+      mockedUpdate.mockImplementation((_t: unknown, id: string, patch: { name?: string }) =>
+        id === 'label-bug' ? a.promise : Promise.resolve(label('label-feat', patch.name ?? '機能追加', 'blue', 0))
+      );
+      return a;
+    }
+
+    // Opens row B's rename while row A saves, and leaves a half-typed draft.
+    async function openRenameOfB(user: User) {
+      await user.click(renameButton('label-feat', '機能追加'));
+      const input = renameInput('label-feat')!;
+      await user.clear(input);
+      await user.type(input, '機能追');
+      return input;
+    }
+
+    it("keeps another row's rename open, with its draft and focus, when the earlier rename succeeds", async () => {
+      const a = holdRowA();
+      const user = userEvent.setup();
+      render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+      await screen.findByTestId('label-row-label-bug');
+
+      await startRename(user, '不具合');
+      const inputB = await openRenameOfB(user);
+      expect(inputB).toHaveFocus();
+
+      await act(async () => a.resolve(label('label-bug', '不具合', 'red', 2)));
+
+      await waitFor(() => expect(row('label-bug')).not.toHaveAttribute('aria-busy'));
+      expect(within(row('label-bug')).getByText('不具合')).toBeInTheDocument();
+      expect(renameInput('label-bug')).toBeNull();
+      expect(renameInput('label-feat')).toBe(inputB);
+      expect(inputB).toHaveValue('機能追');
+      expect(inputB).toHaveFocus();
+      expect(renameButton('label-bug', '不具合')).not.toHaveFocus();
+
+      // Row B's rename still works as usual.
+      await user.click(saveButton('label-feat'));
+      await waitFor(() => expect(renameButton('label-feat', '機能追')).toHaveFocus());
+      expect(mockedUpdate).toHaveBeenLastCalledWith(expect.anything(), 'label-feat', { name: '機能追' });
+      expect(renameInput('label-feat')).toBeNull();
+    });
+
+    it("keeps another row's rename open, with its draft and focus, when the earlier rename fails", async () => {
+      const a = holdRowA();
+      const user = userEvent.setup();
+      render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+      await screen.findByTestId('label-row-label-bug');
+
+      await startRename(user, '不具合');
+      const inputB = await openRenameOfB(user);
+
+      await act(async () => a.reject(new Error(i18n.t('errors.LABEL_NAME_TAKEN'))));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(i18n.t('errors.LABEL_NAME_TAKEN'));
+      await waitFor(() => expect(row('label-bug')).not.toHaveAttribute('aria-busy'));
+      expect(within(row('label-bug')).getByText('バグ')).toBeInTheDocument();
+      expect(renameInput('label-bug')).toBeNull();
+      expect(renameInput('label-feat')).toBe(inputB);
+      expect(inputB).toHaveValue('機能追');
+      expect(inputB).toHaveFocus();
+    });
+
+    it.each([
+      ['confirmed', true],
+      ['cancelled', false]
+    ] as const)(
+      "leaves focus in another row's delete confirmation when the rename succeeds meanwhile (%s)",
+      async (_case, confirmed) => {
+        const a = holdRowA();
+        mockedDelete.mockResolvedValue(undefined);
+        const user = userEvent.setup();
+        render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+        await screen.findByTestId('label-row-label-bug');
+
+        await startRename(user, '不具合');
+        await user.click(deleteButton('label-feat', '機能追加'));
+        // Resolved only once the usage re-read has replaced the list: the
+        // re-read still has row A's old name.
+        const dialog = await findDeleteDialog();
+        await act(async () => a.resolve(label('label-bug', '不具合', 'red', 2)));
+
+        await waitFor(() => expect(row('label-bug')).not.toHaveAttribute('aria-busy'));
+        expect(dialog).toContainElement(document.activeElement as HTMLElement);
+        expect(within(row('label-bug')).getByText('不具合')).toBeInTheDocument();
+        expect(renameInput('label-bug')).toBeNull();
+
+        await answerDelete(user, confirmed);
+
+        if (confirmed) {
+          await waitFor(() => expect(screen.queryByTestId('label-row-label-feat')).not.toBeInTheDocument());
+          // The usual rule after a delete: the neighbor's delete button.
+          await waitFor(() => expect(deleteButton('label-bug', '不具合')).toHaveFocus());
+        } else {
+          await waitFor(() => expect(deleteButton('label-feat', '機能追加')).toHaveFocus());
+          expect(row('label-feat')).toBeInTheDocument();
+        }
+        expect(renameButton('label-bug', '不具合')).not.toHaveFocus();
+        expect(within(row('label-bug')).getByText('不具合')).toBeInTheDocument();
+      }
+    );
+
+    it("leaves focus in another row's delete confirmation when the rename fails meanwhile", async () => {
+      const a = holdRowA();
+      const user = userEvent.setup();
+      render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+      await screen.findByTestId('label-row-label-bug');
+
+      await startRename(user, '不具合');
+      await user.click(deleteButton('label-feat', '機能追加'));
+      const dialog = await findDeleteDialog();
+      await act(async () => a.reject(new Error(i18n.t('errors.LABEL_NAME_TAKEN'))));
+
+      await waitFor(() => expect(row('label-bug')).not.toHaveAttribute('aria-busy'));
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+
+      await answerDelete(user, false);
+
+      await waitFor(() => expect(deleteButton('label-feat', '機能追加')).toHaveFocus());
+      expect(screen.getByRole('alert')).toHaveTextContent(i18n.t('errors.LABEL_NAME_TAKEN'));
+      // Row A's rename stays open to fix the name; it just does not take focus.
+      expect(renameInput('label-bug')).toHaveValue('不具合');
+      expect(mockedDelete).not.toHaveBeenCalled();
+    });
+
+    it("leaves focus in the create form's name input when focus moved there while the rename saved", async () => {
+      const a = holdRowA();
+      const user = userEvent.setup();
+      render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+      await screen.findByTestId('label-row-label-bug');
+
+      await startRename(user, '不具合');
+      const createName = createForm().getByRole('textbox');
+      act(() => createName.focus());
+
+      await act(async () => a.resolve(label('label-bug', '不具合', 'red', 2)));
+
+      await waitFor(() => expect(row('label-bug')).not.toHaveAttribute('aria-busy'));
+      expect(within(row('label-bug')).getByText('不具合')).toBeInTheDocument();
+      expect(renameInput('label-bug')).toBeNull();
+      expect(createName).toHaveFocus();
+    });
+
+    it("leaves focus on the row's own color button when focus moved there while the rename saved", async () => {
+      const a = holdRowA();
+      const user = userEvent.setup();
+      render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+      await screen.findByTestId('label-row-label-bug');
+
+      await startRename(user, '不具合');
+      // Focus only: a click on a busy row's palette does nothing anyway.
+      const green = colorButton('label-bug', 'バグ', 'green');
+      act(() => green.focus());
+
+      await act(async () => a.resolve(label('label-bug', '不具合', 'red', 2)));
+
+      await waitFor(() => expect(row('label-bug')).not.toHaveAttribute('aria-busy'));
+      expect(renameInput('label-bug')).toBeNull();
+      expect(green).toHaveFocus();
+      expect(renameButton('label-bug', '不具合')).not.toHaveFocus();
+    });
+  });
 });

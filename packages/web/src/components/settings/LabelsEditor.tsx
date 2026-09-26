@@ -57,6 +57,26 @@ const CREATE_NAME_FOCUS_KEY = 'create-name';
 const renameButtonKey = (id: string) => `rename-${id}`;
 const renameInputKey = (id: string) => `rename-input-${id}`;
 const deleteButtonKey = (id: string) => `delete-${id}`;
+// The rename's "save" button (DFLT-00213). Together with the rename input it
+// is what a rename is operated from, and so where focus sits when the rename
+// was just saved: only from these two does a finished save move focus on
+// (see focusIsInRenameOf). The row's color buttons stay focusable while it
+// saves, but moving to one starts a different action, not a rename step.
+const renameSaveKey = (id: string) => `rename-save-${id}`;
+
+// Whether keyboard focus is still on `id`'s rename -- its name input or its
+// "save" button -- or nowhere (<body>, where a disabled "save" button may drop
+// it in a browser). Only then may a finished save move focus: the user has
+// otherwise gone on to something else (another row's rename or delete
+// confirmation, a color button, the create form), and a save started earlier
+// must not pull them away from it (DFLT-00213). Deliberately not "anywhere in
+// the row": the row's own color buttons are a separate action.
+function focusIsInRenameOf(id: string): boolean {
+  const active = document.activeElement;
+  if (active === null || active === document.body) return true;
+  const key = active.getAttribute('data-focus-key');
+  return key === renameInputKey(id) || key === renameSaveKey(id);
+}
 
 interface PaletteProps {
   value: LabelColor | null;
@@ -139,8 +159,22 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   // input aria-invalid and describes it).
   const [createFailed, setCreateFailed] = useState(false);
 
-  // Inline rename: which row is being renamed, and its draft.
+  // Inline rename: which row is being renamed, and its draft. One row at a
+  // time. A finished save only closes the rename if its own row is still the
+  // one being renamed -- another row's rename may have been opened while it
+  // was saving, and must keep its input and draft -- and only moves focus if
+  // focus is still on its own name input or save button, or nowhere
+  // (DFLT-00213). renamingIdRef holds the latest value for that check, which
+  // runs after an await where the render's renamingId is stale; it is only
+  // ever updated through setRenaming, together with the state, so it is
+  // current from the moment a handler changes it, not only after the next
+  // render.
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const renamingIdRef = useRef<string | null>(null);
+  const setRenaming = useCallback((id: string | null) => {
+    renamingIdRef.current = id;
+    setRenamingId(id);
+  }, []);
   const [renameDraft, setRenameDraft] = useState('');
   // The rows with a request in flight (DFLT-00211). A set, not a single id:
   // another row can be renamed, recolored or deleted while one is saving,
@@ -219,9 +253,9 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   }, [projectId]);
 
   useEffect(() => {
-    setRenamingId(null);
+    setRenaming(null);
     load();
-  }, [load]);
+  }, [load, setRenaming]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -271,17 +305,35 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
     }
   };
 
+  // Cancel / Escape: the user acted on this row's rename, so it always closes
+  // and focus goes back to its "rename" button.
   const finishRename = (label: LabelUsage) => {
-    setRenamingId(null);
+    setRenaming(null);
     setPendingFocus(renameButtonKey(label.id));
+  };
+
+  // A successful save. Checked as of now, before the next render unmounts the
+  // input (which would drop focus to <body> and make the focus check always
+  // pass): see renamingId and focusIsInRenameOf.
+  const finishRenameAfterSave = (label: LabelUsage) => {
+    // Another row's rename opened while this one saved: leave it open. This
+    // row already shows its chip, which applyUpdate gave the new name.
+    if (renamingIdRef.current !== label.id) return;
+    const focusHere = focusIsInRenameOf(label.id);
+    setRenaming(null);
+    // Closed either way, but focus only moves on from this rename's own
+    // controls -- not away from, say, another row's delete confirmation.
+    if (focusHere) setPendingFocus(renameButtonKey(label.id));
   };
 
   const handleRenameSave = async (label: LabelUsage) => {
     if (busyIds.has(label.id)) return;
     if (await applyUpdate(label, { name: renameDraft })) {
-      finishRename(label);
-    } else {
-      // Stay in the rename, back in its input, to fix the name.
+      finishRenameAfterSave(label);
+    } else if (renamingIdRef.current === label.id && focusIsInRenameOf(label.id)) {
+      // Stay in the rename, back in its input, to fix the name -- unless
+      // another row's rename has replaced it or focus has moved elsewhere
+      // meanwhile (DFLT-00213). The error is shown either way.
       setPendingFocus(renameInputKey(label.id));
     }
   };
@@ -547,6 +599,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                         type="button"
                         onClick={() => handleRenameSave(label)}
                         disabled={busy}
+                        data-focus-key={renameSaveKey(label.id)}
                         className="px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold"
                       >
                         {t('settings.labels.save')}
@@ -564,7 +617,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                     <button
                       type="button"
                       onClick={() => {
-                        setRenamingId(label.id);
+                        setRenaming(label.id);
                         setRenameDraft(label.name);
                       }}
                       disabled={busy}
