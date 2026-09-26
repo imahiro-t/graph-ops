@@ -1656,3 +1656,192 @@ describe("LabelsEditor keeping each row's error", () => {
     expect(createForm().getByRole('textbox')).not.toHaveAttribute('aria-describedby');
   });
 });
+
+// DFLT-00222: with errors on several rows, another row's successful rename
+// re-sorts the list, and the keyed <li> rows move in the DOM. Screen readers
+// must not re-announce the rows' existing role="alert" errors then. jsdom has
+// no accessibility tree and no screen reader, so these tests can only back up
+// the premise of the manual check (VoiceOver / NVDA, run from the ticket's
+// reproduction guide): React keeps each existing alert as the same DOM node
+// -- it only moves the <li> around it -- and a new failure inserts a new
+// alert. Whether a browser treats the move as "remove + insert" in its
+// accessibility tree, and re-announces the alert, is left to that check.
+//
+// Which <li> React moves depends on its reconciliation: towards the top, the
+// rows that shift down are re-inserted; towards the bottom, only the moved
+// row is. If a React update changes that, the "which rows moved" assertions
+// fail: treat it as a sign that the re-sort takes a different DOM path, and
+// revisit the manual check's premise.
+describe('LabelsEditor keeping row alerts as the same DOM nodes when the list is re-sorted', () => {
+  const row = (id: string) => screen.getByTestId(`label-row-${id}`);
+  const rowOrder = () => screen.getAllByTestId(/^label-row-/).map(li => within(li).queryByTestId('label-chip')?.textContent);
+  const renameButton = (id: string, name: string) =>
+    within(row(id)).getByRole('button', { name: `${i18n.t('settings.labels.rename')}: ${name}` });
+  const saveButton = (id: string) => within(row(id)).getByRole('button', { name: i18n.t('settings.labels.save') });
+  const rowErrorText = (name: string, message: string) => i18n.t('settings.labels.rowError', { name, message });
+  const rowAlert = (id: string) => row(id).querySelector<HTMLElement>('[role="alert"]');
+  const taken = () => i18n.t('errors.LABEL_NAME_TAKEN');
+
+  // Sorted by name: alpha, bravo, charlie, delta.
+  const labels = [
+    label('label-a', 'alpha', 'red', 0),
+    label('label-b', 'bravo', 'blue', 0),
+    label('label-c', 'charlie', 'green', 0),
+    label('label-d', 'delta', 'gray', 0)
+  ];
+
+  // Renaming alpha, bravo or charlie fails as a duplicate name; renaming
+  // delta (label-d) saves whatever name it is given.
+  function failAllButD() {
+    mockedUpdate.mockImplementation((_t: unknown, id: string, patch: { name?: string }) =>
+      id === 'label-d'
+        ? Promise.resolve(label('label-d', patch.name ?? 'delta', 'gray', 0))
+        : Promise.reject(new Error(taken()))
+    );
+  }
+
+  async function renameRow(user: User, id: string, name: string, newName: string) {
+    await user.click(renameButton(id, name));
+    const input = within(row(id)).getByRole('textbox');
+    await user.clear(input);
+    await user.type(input, newName);
+    await user.click(saveButton(id));
+  }
+
+  // A failed rename: its alert appears, focus is back in the input
+  // (DFLT-00213), and Escape closes the rename, leaving the error (DFLT-00214).
+  async function failRename(user: User, id: string, name: string, newName: string) {
+    await renameRow(user, id, name, newName);
+    await waitFor(() => expect(rowAlert(id)).toHaveTextContent(rowErrorText(name, taken())));
+    await waitFor(() => expect(within(row(id)).getByRole('textbox')).toHaveFocus());
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(within(row(id)).queryByRole('textbox')).not.toBeInTheDocument());
+  }
+
+  // Records the list's child-list mutations, from start() until stop().
+  function observeList() {
+    const list = row('label-a').closest('ul')!;
+    const removed: Node[] = [];
+    const added: Node[] = [];
+    const collect = (records: MutationRecord[]) => {
+      for (const r of records) {
+        removed.push(...Array.from(r.removedNodes));
+        added.push(...Array.from(r.addedNodes));
+      }
+    };
+    const observer = new MutationObserver(collect);
+    observer.observe(list, { childList: true, subtree: true });
+    return {
+      removed,
+      added,
+      // The callback runs in a microtask: take what is still queued.
+      stop() {
+        collect(observer.takeRecords());
+        observer.disconnect();
+      }
+    };
+  }
+
+  // Errors on alpha and bravo, then delta renamed to "aaa", which moves it to
+  // the top: alpha, bravo and charlie shift down. Returns the nodes held
+  // before the re-sort and the mutations recorded during it.
+  async function errorsThenSortToTop() {
+    failAllButD();
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-a');
+
+    await failRename(user, 'label-a', 'alpha', 'charlie');
+    await failRename(user, 'label-b', 'bravo', 'delta');
+    const held = {
+      liA: row('label-a'),
+      liB: row('label-b'),
+      alertA: rowAlert('label-a')!,
+      alertB: rowAlert('label-b')!
+    };
+    expect(held.alertA).not.toBeNull();
+    expect(held.alertB).not.toBeNull();
+
+    const sortMutations = observeList();
+    await renameRow(user, 'label-d', 'delta', 'aaa');
+    // The re-sort did happen.
+    await waitFor(() => expect(rowOrder()).toEqual(['aaa', 'alpha', 'bravo', 'charlie']));
+    sortMutations.stop();
+    return { user, held, sortMutations };
+  }
+
+  // The held alerts and rows are still the very same nodes, with their text.
+  function expectHeldUnchanged(held: Awaited<ReturnType<typeof errorsThenSortToTop>>['held']) {
+    expect(row('label-a')).toBe(held.liA);
+    expect(row('label-b')).toBe(held.liB);
+    expect(rowAlert('label-a')).toBe(held.alertA);
+    expect(rowAlert('label-b')).toBe(held.alertB);
+    expect(held.alertA).toHaveTextContent(rowErrorText('alpha', taken()));
+    expect(held.alertB).toHaveTextContent(rowErrorText('bravo', taken()));
+  }
+
+  beforeEach(() => {
+    mockedFetch.mockReset();
+    mockedCreate.mockReset();
+    mockedUpdate.mockReset();
+    mockedDelete.mockReset();
+    mockedFetch.mockResolvedValue(labels);
+  });
+
+  it('keeps each alert as the same DOM node when rows with alerts move up the list', async () => {
+    const { held, sortMutations } = await errorsThenSortToTop();
+
+    // The rows holding the alerts did move in the DOM (removed and inserted
+    // again) -- the path the manual screen reader check is about.
+    expect(sortMutations.removed).toEqual(expect.arrayContaining([held.liA, held.liB]));
+    expect(sortMutations.added).toEqual(expect.arrayContaining([held.liA, held.liB]));
+
+    expectHeldUnchanged(held);
+    // Only their <li> moved: the alerts themselves were neither removed nor
+    // re-created.
+    expect(sortMutations.removed).not.toContain(held.alertA);
+    expect(sortMutations.removed).not.toContain(held.alertB);
+    expect(sortMutations.added).not.toContain(held.alertA);
+    expect(sortMutations.added).not.toContain(held.alertB);
+  });
+
+  it('inserts a new alert for a failure after the re-sort, leaving the existing ones as they were', async () => {
+    const { user, held } = await errorsThenSortToTop();
+    expect(rowAlert('label-c')).toBeNull();
+
+    const failMutations = observeList();
+    await failRename(user, 'label-c', 'charlie', 'alpha');
+    failMutations.stop();
+
+    const alertC = rowAlert('label-c')!;
+    expect(alertC).toHaveTextContent(rowErrorText('charlie', taken()));
+    expect(alertC).not.toBe(held.alertA);
+    expect(alertC).not.toBe(held.alertB);
+    expect(failMutations.added).toContain(alertC);
+
+    expectHeldUnchanged(held);
+    for (const node of [held.liA, held.liB, held.alertA, held.alertB]) {
+      expect(failMutations.removed).not.toContain(node);
+      expect(failMutations.added).not.toContain(node);
+    }
+  });
+
+  it('keeps each alert as the same DOM node when only a row without an alert moves down the list', async () => {
+    const { user, held } = await errorsThenSortToTop();
+    const liD = row('label-d');
+
+    const sortMutations = observeList();
+    await renameRow(user, 'label-d', 'aaa', 'zzz');
+    await waitFor(() => expect(rowOrder()).toEqual(['alpha', 'bravo', 'charlie', 'zzz']));
+    sortMutations.stop();
+
+    // Only the renamed row moved; the rows holding the alerts stayed put.
+    expect(sortMutations.removed).toContain(liD);
+    expect(sortMutations.added).toContain(liD);
+    for (const node of [held.liA, held.liB, held.alertA, held.alertB]) {
+      expect(sortMutations.removed).not.toContain(node);
+      expect(sortMutations.added).not.toContain(node);
+    }
+    expectHeldUnchanged(held);
+  });
+});
