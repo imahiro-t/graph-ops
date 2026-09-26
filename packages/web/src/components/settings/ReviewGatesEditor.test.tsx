@@ -1096,6 +1096,115 @@ describe('ReviewGatesEditor merged preview toggle state', () => {
   });
 });
 
+// DFLT-00201: the merged criteria heading inside a gate's merged preview was
+// a <label> tied to no form control. It is now a <p> with an id, and the
+// criteria <pre> is a focusable region named by that heading plus a hidden
+// element holding the gate's ID, so several open previews' regions have
+// distinct names (WCAG 1.3.1, 2.4.6).
+describe('ReviewGatesEditor merged criteria preview heading', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockedFetchCatalog.mockResolvedValue(CATALOG_RESPONSE);
+    await i18n.changeLanguage('ja');
+  });
+
+  const heading = () => i18n.t('settings.reviewGates.mergedCriteriaLabel');
+  // accname joins the texts of the aria-labelledby targets with a space.
+  const regionName = (gateId: string) =>
+    `${heading()} ${i18n.t('settings.reviewGates.mergedCriteriaGateSuffix', { name: gateId })}`;
+  const toggleOf = (gateId: string) =>
+    screen.getByRole('button', {
+      name: i18n.t('settings.reviewGates.previewToggleAriaLabel', {
+        label: i18n.t('settings.reviewGates.mergedPreviewLabel'),
+        name: gateId
+      })
+    });
+  // useId values contain colons, so resolve ids with getElementById rather
+  // than a CSS selector.
+  const labelledByTargets = (el: HTMLElement) =>
+    (el.getAttribute('aria-labelledby') ?? '').split(/\s+/).filter(Boolean).map(id => {
+      const target = document.getElementById(id);
+      expect(target).not.toBeNull();
+      return target!;
+    });
+  const renderLoaded = async () => {
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+  };
+
+  it('renders the merged criteria as a <pre> region named by a <p> heading plus the gate ID', async () => {
+    const user = userEvent.setup();
+    await renderLoaded();
+    const toggle = toggleOf('code_review');
+    await user.click(toggle);
+
+    const region = screen.getByRole('region', { name: regionName('code_review') });
+    expect(region.tagName).toBe('PRE');
+    expect(region).toHaveTextContent('code criteria');
+
+    const preview = document.getElementById(toggle.getAttribute('aria-controls')!)!;
+    expect(preview).toContainElement(region);
+    expect(preview.querySelector('label')).toBeNull();
+
+    const [headingEl, gateEl] = labelledByTargets(region);
+    expect(headingEl.tagName).toBe('P');
+    expect(headingEl.id).not.toBe('');
+    // The visible heading is only the heading text; the gate ID lives in a
+    // separate hidden element.
+    expect(headingEl).toHaveTextContent(new RegExp(`^${heading()}$`));
+    expect(gateEl).not.toBe(headingEl);
+    expect(gateEl).toHaveAttribute('hidden');
+    expect(gateEl).toHaveTextContent('code_review');
+    expect(within(preview).getByText(heading())).toBe(headingEl);
+  });
+
+  it('makes the region reachable with Tab right after its toggle', async () => {
+    const user = userEvent.setup();
+    await renderLoaded();
+    const toggle = toggleOf('code_review');
+    await user.click(toggle);
+
+    const region = screen.getByRole('region', { name: regionName('code_review') });
+    expect(region).toHaveAttribute('tabindex', '0');
+    toggle.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(region);
+  });
+
+  it('gives the regions of two open previews distinct names that start with the heading', async () => {
+    const user = userEvent.setup();
+    await renderLoaded();
+    await user.click(toggleOf('code_review'));
+    await user.click(toggleOf('qa_review'));
+
+    const codeRegion = screen.getByRole('region', { name: regionName('code_review') });
+    const qaRegion = screen.getByRole('region', { name: regionName('qa_review') });
+    expect(codeRegion).not.toBe(qaRegion);
+    expect(codeRegion).toHaveTextContent('code criteria');
+    expect(qaRegion).toHaveTextContent('qa criteria');
+    expect(regionName('code_review')).not.toBe(regionName('qa_review'));
+    for (const [gateId, name] of [['code_review', regionName('code_review')], ['qa_review', regionName('qa_review')]]) {
+      expect(name.startsWith(heading())).toBe(true);
+      expect(name).toContain(gateId);
+    }
+
+    const ids = [codeRegion, qaRegion].flatMap(r => (r.getAttribute('aria-labelledby') ?? '').split(/\s+/));
+    expect(ids).toHaveLength(4);
+    expect(new Set(ids).size).toBe(4);
+  });
+
+  it('names the region in English too', async () => {
+    await i18n.changeLanguage('en');
+    const user = userEvent.setup();
+    await renderLoaded();
+    await user.click(toggleOf('code_review'));
+
+    // The literal wording guards against a mixed-up key or interpolation.
+    expect(regionName('code_review')).toBe('Merged criteria for code_review');
+    expect(screen.getByRole('region', { name: 'Merged criteria for code_review' }).tagName).toBe('PRE');
+  });
+});
+
 // The open state belongs to the row (the gate), not to its position
 // (DFLT-00199): deleting a row used to shift the state of every later row
 // up by one, and a row added afterwards inherited a deleted row's state.

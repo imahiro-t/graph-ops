@@ -409,6 +409,7 @@
       "tableEmpty": "No review gates defined yet.",
       "mergedPreviewLabel": "Merged preview (plugin default + your override; a team tier is not included)",
       "mergedCriteriaLabel": "Merged criteria",
+      "mergedCriteriaGateSuffix": "for {{name}}",
       "mergedEnabledLabel": "Merged enabled",
       "previewUnavailableHint": "The preview appears after this gate has been saved.",
       "inheritedPlaceholder": "Default: {{value}}",

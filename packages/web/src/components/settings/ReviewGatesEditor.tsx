@@ -473,6 +473,10 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           const idLocked = !g.isOverridden || g.hasDefault;
           const previewOpen = !!expandedPreview[g.rowKey];
           const previewId = `${idPrefix}-${g.rowKey}-preview`;
+          // The merged criteria heading and the hidden gate identifier that
+          // together name the criteria region (DFLT-00201).
+          const mergedCriteriaLabelId = `${idPrefix}-${g.rowKey}-merged-criteria-label`;
+          const mergedCriteriaGateId = `${idPrefix}-${g.rowKey}-merged-criteria-gate`;
           // What the delete button and the preview toggle name (see
           // gateDisplayName).
           const rowName = gateDisplayName(g);
@@ -611,8 +615,26 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   {mergedGates[g.id] ? (
                     <div className="mt-1.5 space-y-1.5">
                       <div>
-                        <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.reviewGates.mergedCriteriaLabel')}</label>
-                        <pre className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 max-h-32 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono">
+                        {/* A plain heading, not a <label>: there is no form
+                            control for it to label (WCAG 1.3.1, DFLT-00201). */}
+                        <p id={mergedCriteriaLabelId} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.mergedCriteriaLabel')}</p>
+                        {/* Not shown and not read in browse mode, but a hidden
+                            element referenced by aria-labelledby still counts
+                            toward the name. rowName is never empty here: this
+                            branch only renders for a row whose ID matches a
+                            merged gate, so no row-numbered wording is needed. */}
+                        <span id={mergedCriteriaGateId} hidden>{t('settings.reviewGates.mergedCriteriaGateSuffix', { name: rowName })}</span>
+                        {/* A named, focusable region, like the Templates tab's
+                            merged preview, so keyboard users can scroll it.
+                            Every row can show one, so the name adds the gate
+                            after the heading to keep the regions apart
+                            (WCAG 2.4.6, DFLT-00201). */}
+                        <pre
+                          role="region"
+                          aria-labelledby={`${mergedCriteriaLabelId} ${mergedCriteriaGateId}`}
+                          tabIndex={0}
+                          className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 max-h-32 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                        >
                           {mergedGates[g.id].criteria || t('settings.common.inheritedFromDefault')}
                         </pre>
                       </div>

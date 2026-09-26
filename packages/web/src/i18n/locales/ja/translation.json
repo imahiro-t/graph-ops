@@ -408,6 +408,7 @@
       "tableEmpty": "レビューゲートはまだ定義されていません。",
       "mergedPreviewLabel": "継承後のプレビュー（プラグイン既定＋ユーザー上書き。チーム層は含みません）",
       "mergedCriteriaLabel": "合成後の合格基準",
+      "mergedCriteriaGateSuffix": "（{{name}}）",
       "mergedEnabledLabel": "合成後の有効状態",
       "previewUnavailableHint": "このゲートを保存すると、プレビューが表示されます。",
       "inheritedPlaceholder": "既定: {{value}}",
