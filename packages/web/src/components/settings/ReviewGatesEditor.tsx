@@ -150,10 +150,11 @@ const previewToggleKey = (rowKey: string) => `preview-${rowKey}`;
 const ADD_GATE_FOCUS_KEY = 'add-gate';
 
 // What a row is called when naming it to a screen reader (its delete button's
-// name and the removal announcement): the ID, or on a new row that has none
-// yet, the name typed so far. Whitespace-only counts as empty, so '' means
-// the row has neither -- then the delete button falls back to the
-// row-numbered no-ID wording (deleteUnnamedGateAriaLabel).
+// name, its merged-preview toggle's name and the removal announcement): the
+// ID, or on a new row that has none yet, the name typed so far.
+// Whitespace-only counts as empty, so '' means the row has neither -- then
+// both buttons fall back to the row-numbered no-ID wording
+// (deleteUnnamedGateAriaLabel / previewToggleUnnamedAriaLabel).
 const gateDisplayName = (g: Pick<GateRow, 'id' | 'name'>) => (g.id ?? '').trim() || (g.name ?? '').trim();
 
 const SMALL_LABEL_CLASS = 'block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5';
@@ -470,8 +471,10 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           const idLocked = !g.isOverridden || g.hasDefault;
           const previewOpen = !!expandedPreview[g.rowKey];
           const previewId = `${idPrefix}-${g.rowKey}-preview`;
-          // What the delete button names (see gateDisplayName).
-          const deleteTarget = gateDisplayName(g);
+          // What the delete button and the preview toggle name (see
+          // gateDisplayName).
+          const rowName = gateDisplayName(g);
+          const previewLabel = t('settings.reviewGates.mergedPreviewLabel');
           const deleteTooltip = g.isOverridden ? t('settings.reviewGates.deleteGate') : t('settings.reviewGates.cannotDeleteDefaultHint');
           const idInvalid = emptyIdErrorShown && g.id.trim() === '';
           return (
@@ -545,11 +548,11 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 // -- already part of the name -- or, on a default gate, why
                 // it cannot be deleted; only that reason is added as the
                 // description, and only when it is not the name already.
-                label={deleteTarget
-                  ? t('settings.reviewGates.deleteGateAriaLabel', { name: deleteTarget })
+                label={rowName
+                  ? t('settings.reviewGates.deleteGateAriaLabel', { name: rowName })
                   : t('settings.reviewGates.deleteUnnamedGateAriaLabel', { row: idx + 1 })}
                 tooltip={deleteTooltip}
-                describeWithTooltip={Boolean(deleteTarget) && !g.isOverridden}
+                describeWithTooltip={Boolean(rowName) && !g.isOverridden}
                 wrapperClassName="mb-0.5 shrink-0"
                 className={`p-1 text-slate-500 dark:text-slate-400 ${
                   g.isOverridden ? 'hover:text-red-600 dark:hover:text-red-400' : 'opacity-40 cursor-not-allowed'
@@ -589,10 +592,18 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 // set only then and never points at an id missing from the DOM.
                 aria-expanded={previewOpen}
                 aria-controls={previewOpen ? previewId : undefined}
+                // Every row has this toggle with the same visible text, so the
+                // name adds the gate the same way the delete button's does
+                // (ID, else name, else "no ID" plus the 1-based row number;
+                // DFLT-00200). The visible text is passed in as-is and starts
+                // the name, so the name keeps the label (WCAG 2.5.3).
+                aria-label={rowName
+                  ? t('settings.reviewGates.previewToggleAriaLabel', { label: previewLabel, name: rowName })
+                  : t('settings.reviewGates.previewToggleUnnamedAriaLabel', { label: previewLabel, row: idx + 1 })}
                 className="flex items-center gap-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
               >
                 {previewOpen ? <ChevronDown aria-hidden="true" className="w-3 h-3" /> : <ChevronRight aria-hidden="true" className="w-3 h-3" />}
-                {t('settings.reviewGates.mergedPreviewLabel')}
+                {previewLabel}
               </button>
               {previewOpen && (
                 <div id={previewId}>
