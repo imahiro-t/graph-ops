@@ -87,7 +87,7 @@ The project must have a **local path** in your environment (App Settings > proje
 **The untrusted-folder notice.** When a run starts, and each time it opens a child session, the autopilot checks whether Claude Code has trusted the folder, and tells you when it can tell that it has not:
 
 - `graph-engine autopilot start` adds `untrusted_folder` -- the project's local path, with symbolic links resolved -- to its output, and `launch` adds it -- the ticket's worktree -- when the terminal opened. The slash commands relay it to you in one line (the terminal just opened is probably waiting at the trust prompt) and carry on without stopping or asking; this includes a Web UI run the orchestrator takes over with `--run`.
-- From the Web UI, the start response carries `untrusted_folder`, and an amber notice under the ticket's action row says that the new terminal is probably waiting at the workspace trust prompt for that folder, and that accepting it there, or opening the folder in Claude Code once, lets the run go on. It stays until you dismiss it ("Dismiss notice") or start again.
+- From the Web UI, the start response carries `untrusted_folder`, and an amber notice under the ticket's "Autopilot" button says that the new terminal is probably waiting at the workspace trust prompt for that folder, and that accepting it there, or opening the folder in Claude Code once, lets the run go on. It stays until you dismiss it ("Dismiss notice") or start again.
 
 The notice never stops or delays anything: the run is reserved, the terminal opens and the run carries on exactly as it would without it. The check reads `~/.claude.json`, the file Claude Code writes for itself, and looks for an entry with `hasTrustDialogAccepted` set to `true` for the folder or, inside a git repository, for a folder between it and the repository's root, or for the main checkout's root of a worktree; outside a repository, for the folder or any folder above it. The key is described in Claude Code's documentation, but the file as a whole belongs to Claude Code and its format is not published, so the check is best-effort: it gives the notice only when it can tell, and otherwise says nothing. There is no notice, and the start goes on as usual, when:
 
@@ -120,7 +120,7 @@ The session you type this in becomes the orchestrator, so it runs with your own 
 | "Waiting for a person" | the running ticket, when its session waits for your decision (the hover text and the expanded ticket say what it waits for) |
 | "Waiting" | tickets the run is still going to process |
 
-A mode whose start would be refused cannot be chosen: in the dialog its choice is disabled with the reason, and the other mode becomes the initial choice. When neither mode can start, the "Autopilot" button itself is disabled, with the reasons shown under the action row and as a tooltip. A start is refused when:
+A mode whose start would be refused cannot be chosen: in the dialog its choice is disabled with the reason, and the other mode becomes the initial choice. When neither mode can start, the "Autopilot" button itself is disabled, with the reasons shown under the button and as a tooltip. A start is refused when:
 
 - the ticket belongs to an active run (it is that run's root, or in tree mode one of its descendants): both modes;
 - a descendant of the ticket is the root of an active run: the tree only;

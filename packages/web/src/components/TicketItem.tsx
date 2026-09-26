@@ -2274,7 +2274,8 @@ export const TicketItem: React.FC<Props> = ({
                 run) on the left, and at its right end, set apart from them,
                 the autopilot start (DFLT-00142: refine through release
                 without a person, in terminals of their own). AutopilotControls
-                lays out the row and the lines under it. */}
+                lays out the row and the lines under the autopilot button;
+                these actions stay outside its focus fallback (DFLT-00218). */}
             <div className="mb-3">
               <AutopilotControls
                 ticketId={ticket.id}

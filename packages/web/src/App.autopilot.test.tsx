@@ -80,6 +80,13 @@ async function expand(user: ReturnType<typeof userEvent.setup>, id: string) {
 
 const dialog = () => screen.queryByTestId('autopilot-confirm');
 const startButton = (controls: HTMLElement) => within(controls).getByTestId('autopilot-start');
+// DFLT-00218: `controls` (from expand) is the whole action row; focus goes
+// to this column inside it, which holds the autopilot alone.
+const focusFallback = (controls: HTMLElement) => within(controls).getByTestId('autopilot-focus-fallback');
+const regularActions = (controls: HTMLElement) => [
+  within(controls).getByRole('button', { name: i18n.t('ticketItem.actions.refine') }),
+  within(controls).getByRole('button', { name: i18n.t('ticketItem.actions.run') })
+];
 const modeTitle = (mode: 'ticket' | 'tree', resume = false) =>
   i18n.t(resume ? 'autopilot.confirm.resumeTitle' : 'autopilot.confirm.title', { mode: i18n.t(`autopilot.modes.${mode}`) });
 const confirmStart = (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByTestId('autopilot-confirm-confirm'));
@@ -136,14 +143,50 @@ describe('autopilot in the Web UI', () => {
     expect(controls.querySelectorAll('[data-testid^="autopilot-start"]')).toHaveLength(1);
     const group = within(controls).getByTestId('autopilot-group');
     expect(group).toContainElement(button);
-    expect(group).toHaveClass('ml-auto', 'sm:border-l');
+    expect(group).toHaveClass('sm:border-l');
+    // The autopilot column is pushed to the right end of the row.
+    const column = focusFallback(controls);
+    expect(column).toContainElement(group);
+    expect(column).toHaveClass('ml-auto');
     // The regular actions share the row, on its left.
-    const row = group.parentElement as HTMLElement;
-    const refine = within(row).getByRole('button', { name: i18n.t('ticketItem.actions.refine') });
-    const runButton = within(row).getByRole('button', { name: i18n.t('ticketItem.actions.run') });
+    const row = controls;
+    const [refine, runButton] = regularActions(row);
     expect(refine.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(runButton.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(row.lastElementChild).toBe(group);
+    expect(row.lastElementChild).toBe(column);
+  });
+
+  // DFLT-00218: the focus fallback holds the autopilot button and the lines
+  // under it, not the regular actions, so its ring and what a screen reader
+  // reads out there cover the autopilot alone.
+  it('keeps the regular actions out of the focus fallback', async () => {
+    seed({ runs: [run()] });
+    const user = await renderApp();
+    await waitFor(() => expect(within(card(C)).getByTestId('autopilot-badge-processing')).toBeInTheDocument());
+    const controls = await expand(user, C);
+    const fallback = focusFallback(controls);
+    expect(fallback).toHaveAttribute('tabindex', '-1');
+    expect(controls).not.toHaveAttribute('tabindex');
+    expect(fallback).toContainElement(startButton(controls));
+    expect(fallback).toContainElement(within(controls).getByTestId('autopilot-disabled-reason'));
+    const label = within(controls).getByText(i18n.t('ticketItem.actions.label'));
+    for (const el of [...regularActions(controls), label]) {
+      expect(controls).toContainElement(el);
+      expect(fallback).not.toContainElement(el);
+    }
+    expect(within(fallback).queryByText(i18n.t('ticketItem.actions.label'))).not.toBeInTheDocument();
+  });
+
+  it('shows what a person is awaited for inside the focus fallback', async () => {
+    seed({ runs: [run({ awaiting_human: '計画承認の判断待ち' })] });
+    const user = await renderApp();
+    await within(card(C)).findByTestId('autopilot-badge-awaitingHuman');
+    const controls = await expand(user, C);
+    const awaiting = await within(controls).findByTestId('autopilot-awaiting');
+    expect(awaiting).toHaveTextContent('計画承認の判断待ち');
+    const fallback = focusFallback(controls);
+    expect(fallback).toContainElement(awaiting);
+    for (const el of regularActions(controls)) expect(fallback).not.toContainElement(el);
   });
 
   it.each(['ticket', 'tree'] as const)('starts a %s run from the ticket detail after confirmation', async mode => {
@@ -245,8 +288,10 @@ describe('autopilot in the Web UI', () => {
 
     await waitFor(() => expect(startRequests()).toHaveLength(1));
     expect(tree).toBeDisabled();
-    expect(controls).toHaveFocus();
+    expect(focusFallback(controls)).toHaveFocus();
     expect(document.body).not.toHaveFocus();
+    // What has focus holds the autopilot alone (DFLT-00218).
+    for (const el of regularActions(controls)) expect(document.activeElement).not.toContainElement(el);
 
     release();
     expect(await within(controls).findByTestId('autopilot-message')).toHaveTextContent(
@@ -255,7 +300,7 @@ describe('autopilot in the Web UI', () => {
     await waitFor(() => expect(tree).toHaveFocus());
   });
 
-  it('leaves focus on the controls when the refreshed runs disable the button after a start', async () => {
+  it('leaves focus on the focus fallback when the refreshed runs disable the button after a start', async () => {
     seed();
     const release = holdStarts();
     const user = await renderApp();
@@ -270,7 +315,8 @@ describe('autopilot in the Web UI', () => {
     await waitFor(() => expect(within(card(X)).getByTestId('autopilot-badge-running')).toBeInTheDocument());
     await within(controls).findByTestId('autopilot-message');
     expect(tree).toBeDisabled();
-    expect(controls).toHaveFocus();
+    expect(focusFallback(controls)).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
   });
 
   it('keeps the text the dialog opened with when a poll changes whether the run would resume', async () => {
@@ -316,7 +362,8 @@ describe('autopilot in the Web UI', () => {
     expect(startRequests()).toEqual([]);
     expect(tree).toBeDisabled();
     expect(within(controls).getByTestId('autopilot-disabled-reason')).toHaveTextContent(i18n.t('autopilot.blocked', { root: X }));
-    expect(controls).toHaveFocus();
+    expect(focusFallback(controls)).toContainElement(within(controls).getByTestId('autopilot-disabled-reason'));
+    expect(focusFallback(controls)).toHaveFocus();
     expect(document.body).not.toHaveFocus();
   });
 
@@ -337,6 +384,7 @@ describe('autopilot in the Web UI', () => {
     expect(startRequests()).toEqual([]);
     expect(button).toBeEnabled();
     expect(button).toHaveFocus();
+    expect(focusFallback(controls)).not.toHaveFocus();
     expect(within(controls).queryByTestId('autopilot-disabled-reason')).not.toBeInTheDocument();
   });
 
@@ -380,7 +428,7 @@ describe('autopilot in the Web UI', () => {
     expect(within(card(C)).queryByTestId('autopilot-badge-processing')).not.toBeInTheDocument();
   });
 
-  it('disables the button on a ticket of an active run, with the reason under the action row', async () => {
+  it('disables the button on a ticket of an active run, with the reason under the button', async () => {
     seed({ runs: [run()] });
     const user = await renderApp();
     await waitFor(() => expect(within(card(C)).getByTestId('autopilot-badge-processing')).toBeInTheDocument());
@@ -392,8 +440,9 @@ describe('autopilot in the Web UI', () => {
     expect(button).toHaveAccessibleDescription(reason);
     const reasons = within(controls).getAllByTestId('autopilot-disabled-reason');
     expect(reasons).toHaveLength(1);
-    // Right under the action row.
-    expect(within(controls).getByTestId('autopilot-group').parentElement?.nextElementSibling).toBe(reasons[0]);
+    // Right under the button, inside the focus fallback.
+    expect(within(controls).getByTestId('autopilot-group').nextElementSibling).toBe(reasons[0]);
+    expect(focusFallback(controls)).toContainElement(reasons[0]);
     await user.click(button);
     expect(dialog()).not.toBeInTheDocument();
   });
@@ -484,6 +533,9 @@ describe('autopilot in the Web UI', () => {
 
     expect(await within(controls).findByTestId('autopilot-untrusted')).toHaveTextContent(notice);
     expect(within(controls).getByTestId('autopilot-message')).toHaveTextContent(i18n.t('autopilot.started', { runId: 'run-1' }));
+    // Both under the button, inside the focus fallback.
+    expect(focusFallback(controls)).toContainElement(within(controls).getByTestId('autopilot-untrusted'));
+    expect(focusFallback(controls)).toContainElement(within(controls).getByTestId('autopilot-message'));
     await waitFor(() => expect(within(controls).getAllByRole('status').some(r => r.textContent === notice)).toBe(true));
     const dismiss = within(controls).getByRole('button', { name: i18n.t('autopilot.untrustedDismiss') });
     expect(dismiss).toHaveAccessibleDescription(notice);
@@ -491,7 +543,7 @@ describe('autopilot in the Web UI', () => {
     await user.click(dismiss);
     expect(within(controls).queryByTestId('autopilot-untrusted')).not.toBeInTheDocument();
     expect(within(controls).getAllByRole('status').some(r => r.textContent === notice)).toBe(false);
-    expect(controls).toHaveFocus();
+    expect(focusFallback(controls)).toHaveFocus();
   });
 
   it('shows no untrusted-folder notice when the start response has none', async () => {

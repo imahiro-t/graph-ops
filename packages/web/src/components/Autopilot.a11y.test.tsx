@@ -275,8 +275,55 @@ describe('autopilot accessibility', () => {
     expect(screen.getByRole('dialog', { name: i18n.t('autopilot.confirm.title', { mode: i18n.t('autopilot.modes.ticket') }) })).toBeInTheDocument();
   });
 
-  it('keeps the focus fallback of the controls out of the Tab order', () => {
-    render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
-    expect(screen.getByTestId('autopilot-controls')).toHaveAttribute('tabindex', '-1');
+  it('keeps the focus fallback of the controls out of the Tab order', async () => {
+    const user = userEvent.setup();
+    render(
+      <AutopilotControls
+        ticketId="T"
+        status="TODO"
+        view={NO_AUTOPILOT}
+        actions={
+          <>
+            <button type="button">refine</button>
+            <button type="button">run</button>
+          </>
+        }
+      />
+    );
+    // DFLT-00218: the fallback is the autopilot column; the row around it
+    // takes no focus at all.
+    const fallback = screen.getByTestId('autopilot-focus-fallback');
+    expect(fallback).toHaveAttribute('tabindex', '-1');
+    expect(screen.getByTestId('autopilot-controls')).not.toHaveAttribute('tabindex');
+    // Tab stops only on the three buttons.
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'refine' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'run' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByTestId('autopilot-start')).toHaveFocus();
+    await user.tab();
+    expect(document.body).toHaveFocus();
+  });
+
+  // DFLT-00218: the regular actions share the row but stay outside the focus
+  // fallback, so its ring covers the autopilot alone.
+  it('lays the regular actions out in the row, outside the focus fallback', () => {
+    render(
+      <AutopilotControls
+        ticketId="T"
+        status="IN PROGRESS"
+        view={{ ...NO_AUTOPILOT, blockedBy: { ticket: 'R', tree: 'R' } }}
+        actions={<div data-testid="regular-actions"><button type="button">refine</button></div>}
+      />
+    );
+    const row = screen.getByTestId('autopilot-controls');
+    const fallback = screen.getByTestId('autopilot-focus-fallback');
+    const actions = screen.getByTestId('regular-actions');
+    expect(row).toContainElement(actions);
+    expect(fallback).not.toContainElement(actions);
+    expect(row.lastElementChild).toBe(fallback);
+    expect(fallback).toContainElement(screen.getByTestId('autopilot-start'));
+    expect(fallback).toContainElement(screen.getByTestId('autopilot-disabled-reason'));
   });
 });
