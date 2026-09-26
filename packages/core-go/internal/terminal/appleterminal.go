@@ -330,7 +330,7 @@ func launchAppleTerminalTab(workDir, claudeBin string, extraArgs []string, promp
 	var tabErr string
 	var disable bool
 	if unlock, busy := lockTabLaunch(); busy != "" {
-		// Another graph-ops process is still opening a tab: a quick,
+		// Other graph-ops processes kept the tab lock busy: a quick,
 		// passing failure like 9101-9104, so the tab stays enabled.
 		tabErr = busy
 	} else {
@@ -366,9 +366,24 @@ const tabLockMargin = 5 * time.Second
 // tabLockWait bounds how long lockTabLaunch waits for another process's tab
 // launch. That launch's osascript may run for all of tabScriptTimeout before
 // it is killed and the lock released, so the wait is tabScriptTimeout plus
-// tabLockMargin: a waiter never gives up just before the holder finishes.
+// tabLockMargin: a waiter never gives up just before one holder finishes.
 // It follows defaultTabScriptTimeout when that changes. A variable so tests
 // can shorten it.
+//
+// The wait covers one holder only. Each waiter counts it from when it
+// started waiting, and lockTabLaunch only polls, with no queue, so when
+// several launches wait at once the lock goes to whichever polls first
+// after a release, not to the one that has waited longest. If other
+// launches keep taking the lock in between, any of the waiters (not
+// necessarily the latest to arrive) can reach its deadline and fall back to
+// a new window. That is deliberate and not covered by a longer wait: an
+// osascript normally finishes in a few seconds, so the lock comes free well
+// within the wait; the wait runs out only when a holder runs close to
+// tabScriptTimeout (a permission prompt left unanswered, say), and then the
+// waiter's own tab would most likely fail the same way; and a wait that grew
+// with the number of waiters would stretch a launch's worst case (about 35
+// seconds) in proportion, where a bounded wait keeps it fixed. See the lock
+// in docs/autopilot.md.
 var tabLockWait = defaultTabScriptTimeout + tabLockMargin
 
 // tabLockPoll is how often lockTabLaunch retries a held lock.
@@ -381,9 +396,12 @@ const tabLockPoll = 50 * time.Millisecond
 // appear at once; the lock is what keeps that from happening in the first
 // place.
 //
-// It returns the function releasing the lock, or, when another process
-// held it for all of tabLockWait, a non-empty reason to fall back to a new
-// window. The lock is a convenience, not a requirement: if its file cannot
+// It returns the function releasing the lock, or, when other processes
+// (one, or several taking turns) held it for all of tabLockWait since this
+// call started waiting, a non-empty reason to fall back to a new window.
+// Waiters are not served in any order -- whichever polls first after a
+// release gets the lock -- so with several waiters any of them may fall
+// back; that is intended (see tabLockWait). The lock is a convenience, not a requirement: if its file cannot
 // be created or locked at all (no home directory, a sandbox refusing the
 // write), the tab is tried without it.
 func lockTabLaunch() (unlock func(), busy string) {
