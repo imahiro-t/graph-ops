@@ -215,6 +215,7 @@
       "approve": "Approve",
       "reject": "Reject",
       "reasonPlaceholder": "Reason for rejection (required)",
+      "reasonLabel": "Reason for rejection",
       "confirmReject": "Confirm rejection",
       "cancelReject": "Cancel",
       "pendingStatus": "Awaiting approval",

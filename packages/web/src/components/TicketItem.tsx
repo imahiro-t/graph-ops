@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronDown,
@@ -169,6 +169,11 @@ interface RejectReasonPromptProps {
   onConfirm: () => void;
   onCancel: () => void;
   isSubmitting: boolean;
+  // DFLT-00177: id of this node's approval error element, passed only while
+  // that error is shown. Marks the reason field invalid and points its
+  // description at the error, so the failure reason is read again when focus
+  // comes back to the field (the error's role="alert" announces it once).
+  errorId?: string;
   // Must be stable (useCallback) -- they are this component's effect deps.
   onMount: (nodeId: string) => void;
   onUnmount: (nodeId: string, hadFocus: boolean) => void;
@@ -198,6 +203,7 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
   onConfirm,
   onCancel,
   isSubmitting,
+  errorId,
   onMount,
   onUnmount
 }) => {
@@ -255,6 +261,13 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
         value={draft}
         onChange={e => onDraftChange(e.target.value)}
         placeholder={t('ticketItem.approvalGate.reasonPlaceholder')}
+        // DFLT-00177: a persistent accessible name (the placeholder vanishes
+        // once typing starts); aria-required keeps the "(required)" the
+        // placeholder carried, which the label now takes precedence over.
+        aria-label={t('ticketItem.approvalGate.reasonLabel')}
+        aria-required="true"
+        aria-invalid={errorId ? true : undefined}
+        aria-describedby={errorId}
         className="flex-1 text-[11px] border border-red-300 dark:border-red-800 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-red-400"
       />
       <button
@@ -464,6 +477,10 @@ export const TicketItem: React.FC<Props> = ({
   // relying on the buttons' disabled state having been rendered yet.
   const approvalsInFlightRef = useRef<Set<string>>(new Set());
   const [approvalErrors, setApprovalErrors] = useState<Record<string, string>>({});
+  // DFLT-00177: prefix for the approval error elements' ids (one per gate
+  // node), unique per TicketItem so the same node rendered twice can't clash.
+  const approvalErrorIdBase = useId();
+  const approvalErrorId = (nodeId: string) => `${approvalErrorIdBase}-approval-error-${nodeId}`;
   // DFLT-00016: rejecting an approval_gate now requires a free-text reason
   // (no more window.confirm -- the reason input itself, plus a distinctly
   // labeled confirm button, is the confirmation step). rejectPrompt tracks
@@ -1912,6 +1929,7 @@ export const TicketItem: React.FC<Props> = ({
                               onConfirm={() => handleApprovalDecision(node.id, false, rejectReasonDraft)}
                               onCancel={cancelRejecting}
                               isSubmitting={submittingApprovalNodeIds.has(node.id)}
+                              errorId={approvalErrors[node.id] ? approvalErrorId(node.id) : undefined}
                               onMount={handlePromptMount}
                               onUnmount={handlePromptUnmount}
                             />
@@ -1919,9 +1937,20 @@ export const TicketItem: React.FC<Props> = ({
 
                           {/* approval_gate approve/reject error (kept outside
                               the clickable header row so it doesn't toggle
-                              the artifacts accordion when clicked/read). */}
+                              the artifacts accordion when clicked/read).
+                              DFLT-00177: role="alert" so the failure is
+                              announced, whether or not the reject prompt is
+                              open. It is re-announced on a repeated failure
+                              with the same text only because
+                              handleApprovalDecision clears the error when a
+                              submit starts, so this element is removed and
+                              inserted anew -- keep that if changing it. */}
                           {approvalErrors[node.id] && (
-                            <div className="px-3 pb-2 -mt-1 text-[11px] text-red-600 dark:text-red-400 font-medium">
+                            <div
+                              id={approvalErrorId(node.id)}
+                              role="alert"
+                              className="px-3 pb-2 -mt-1 text-[11px] text-red-600 dark:text-red-400 font-medium"
+                            >
                               {approvalErrors[node.id]}
                             </div>
                           )}

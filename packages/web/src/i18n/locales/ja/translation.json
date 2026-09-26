@@ -214,6 +214,7 @@
       "approve": "承認",
       "reject": "却下",
       "reasonPlaceholder": "却下理由（必須）",
+      "reasonLabel": "却下理由",
       "confirmReject": "却下を確定",
       "cancelReject": "キャンセル",
       "pendingStatus": "承認待ち",
