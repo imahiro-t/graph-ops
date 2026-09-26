@@ -21,6 +21,7 @@ import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { useTransientAnnouncement } from '../../hooks/useTransientAnnouncement';
 import { StatusLiveRegion } from '../StatusLiveRegion';
 import { IconButton } from '../IconButton';
+import { SubmittingText, submittingProps } from '../Submitting';
 
 interface Props {
   // Every project that can be picked. An empty list disables the tab: there
@@ -106,10 +107,14 @@ export const LabelColorPalette: React.FC<PaletteProps> = ({ value, onChange, dis
 export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLabelsChanged }) => {
   const { t } = useTranslation();
   const { confirm, confirmDialog } = useConfirmDialog();
-  // Announces a delete (DFLT-00197, as DFLT-00194 did for node types,
-  // projects and tickets): focus moves to a neighbor afterwards, and this
-  // says why -- which label is gone.
-  const { message: deleteNotice, announce: announceDelete } = useTransientAnnouncement();
+  // Announces what happens to a row. A delete (DFLT-00197, as DFLT-00194 did
+  // for node types, projects and tickets): focus moves to a neighbor
+  // afterwards, and this says why -- which label is gone. A rename or recolor
+  // (DFLT-00210): "saving" when it starts and "saved" once it succeeds, since
+  // the row's spinner is aria-hidden and its disabled buttons only say they
+  // cannot be pressed. One region for both, so the announcements never talk
+  // over each other.
+  const { message: rowNotice, announce: announceRow, clear: clearRowNotice } = useTransientAnnouncement();
   // Start on the app's current project, but fall back to the first one that
   // exists: an app with no project selected yet would otherwise open this
   // tab disabled even though there are projects whose labels could be
@@ -137,8 +142,27 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   // Inline rename: which row is being renamed, and its draft.
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
-  // The row with a request in flight, if any.
-  const [busyId, setBusyId] = useState<string | null>(null);
+  // The rows with a request in flight (DFLT-00211). A set, not a single id:
+  // another row can be renamed, recolored or deleted while one is saving,
+  // and each row must stay busy until its own request settles -- neither
+  // another row's start nor another row's finish may change it.
+  const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(() => new Set());
+  // Always a new Set (React would not see an in-place change), and the
+  // previous one when nothing changes, so no re-render is spent on it.
+  const markBusy = (id: string) =>
+    setBusyIds(prev => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  const clearBusy = (id: string) =>
+    setBusyIds(prev => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
 
   // Where keyboard focus goes once the next render has settled: finishing a
   // rename unmounts its input and buttons, and deleting removes the focused
@@ -151,9 +175,9 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
     if (el && (el as HTMLButtonElement).disabled) return; // retry once re-enabled
     el?.focus();
     setPendingFocus(null);
-    // labels/renamingId/busyId/creating are what mount, unmount, disable and
+    // labels/renamingId/busyIds/creating are what mount, unmount, disable and
     // re-enable the target; they are listed so the effect re-runs on them.
-  }, [pendingFocus, labels, renamingId, busyId, creating]);
+  }, [pendingFocus, labels, renamingId, busyIds, creating]);
 
   // The project whose response may still be applied. Switching the selector
   // starts a new fetch without cancelling the previous one, so a slow backend
@@ -222,19 +246,28 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   };
 
   const applyUpdate = async (label: LabelUsage, patch: { name?: string; color?: LabelColor }) => {
-    setBusyId(label.id);
+    markBusy(label.id);
     setError('');
     setCreateFailed(false);
+    // Named by the current name, not the rename draft: the draft may be empty
+    // or rejected by the server.
+    const savingText = t('settings.labels.saving', { name: label.name });
+    announceRow(savingText);
     try {
       const updated = await updateLabel(t, label.id, patch);
       setLabels(prev => sortLabels(prev.map(l => (l.id === label.id ? { ...updated, ticket_count: l.ticket_count } : l))));
+      // The name as saved -- the new one after a rename.
+      announceRow(t('settings.labels.saveSuccess', { name: updated.name }));
       onLabelsChanged?.();
       return true;
     } catch (err) {
       setError(errorMessage(err, t('errors.UNKNOWN')));
+      // The role="alert" error says what went wrong; "saving" no longer
+      // holds. Only this save's text is cleared, not a newer announcement.
+      clearRowNotice(savingText);
       return false;
     } finally {
-      setBusyId(null);
+      clearBusy(label.id);
     }
   };
 
@@ -244,7 +277,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   };
 
   const handleRenameSave = async (label: LabelUsage) => {
-    if (busyId === label.id) return;
+    if (busyIds.has(label.id)) return;
     if (await applyUpdate(label, { name: renameDraft })) {
       finishRename(label);
     } else {
@@ -263,8 +296,8 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   };
 
   const handleDelete = async (label: LabelUsage) => {
-    if (busyId === label.id) return;
-    setBusyId(label.id);
+    if (busyIds.has(label.id)) return;
+    markBusy(label.id);
     setError('');
     setCreateFailed(false);
     try {
@@ -289,7 +322,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
         // Already deleted by someone else: nothing to confirm. The row still
         // vanishes and focus still moves because of the user's click, so say
         // what happened -- but not "deleted", since this user did not.
-        announceDelete(t('settings.labels.deleteAlreadyGone', { name: label.name }));
+        announceRow(t('settings.labels.deleteAlreadyGone', { name: label.name }));
         focusAfterRemoval(label, fresh);
         onLabelsChanged?.();
         return;
@@ -301,7 +334,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       // The in-app ConfirmDialog (DFLT-00148), on top of the settings modal.
       // The row stays busy (its buttons disabled) while it is open, so the
       // dialog cannot put focus back on the delete button when it closes;
-      // pendingFocus does, once busyId is cleared below.
+      // pendingFocus does, once the row leaves busyIds below.
       const confirmed = await confirm({
         title: t('settings.labels.confirmDeleteTitle'),
         message,
@@ -322,13 +355,15 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       }
       // Named as the confirmation named it: the re-read name, which may be
       // newer than the row the user clicked.
-      announceDelete(t('settings.labels.deleteSuccess', { name: current.name }));
+      announceRow(t('settings.labels.deleteSuccess', { name: current.name }));
       const remaining = fresh.filter(l => l.id !== label.id);
       setLabels(prev => prev.filter(l => l.id !== label.id));
       focusAfterRemoval(label, remaining);
       onLabelsChanged?.();
     } finally {
-      setBusyId(null);
+      // Only this row: a row that is still saving stays busy. After a
+      // successful delete the id is simply dropped from the set.
+      clearBusy(label.id);
     }
   };
 
@@ -406,10 +441,12 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
           <button
             type="submit"
             disabled={!canEdit || creating || newName.trim() === ''}
+            {...submittingProps(creating)}
             className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white font-semibold flex items-center gap-1"
           >
             {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Plus className="w-3.5 h-3.5" aria-hidden="true" />}
             {t('settings.labels.create')}
+            <SubmittingText busy={creating} />
           </button>
           {newName.trim() !== '' && <LabelChip name={newName.trim()} color={newColor} />}
         </div>
@@ -447,10 +484,19 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       {labels.length > 0 && (
         <ul className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg">
           {labels.map(label => {
-            const busy = busyId === label.id;
+            const busy = busyIds.has(label.id);
             const renaming = renamingId === label.id;
             return (
-              <li key={label.id} data-testid={`label-row-${label.id}`} className="p-3 flex flex-wrap items-center gap-3">
+              // aria-busy (DFLT-00210): the row is being saved or deleted --
+              // from the usage re-read through the confirmation to the
+              // delete itself -- and is dropped once that settles, whatever
+              // the outcome.
+              <li
+                key={label.id}
+                data-testid={`label-row-${label.id}`}
+                aria-busy={busy || undefined}
+                className="p-3 flex flex-wrap items-center gap-3"
+              >
                 <div className="min-w-[10rem] flex items-center gap-2">
                   {renaming ? (
                     <input
@@ -548,14 +594,15 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
         </ul>
       )}
 
-      {/* Outside the list: deleting the last label unmounts the <ul>, and
-          the announcement must outlive it. Last child on purpose: this
+      {/* Row announcements (saving, saved, deleted). Outside the list:
+          deleting the last label unmounts the <ul>, and the announcement
+          must outlive it. Last child on purpose: this
           container spaces its children with space-y-4, whose sibling
           selector gives every child after the first a top margin even
           though the region is absolutely positioned. As the first child it
           would push the heading down by 1rem; as the last one only the
           region itself takes that margin, so nothing visible moves. */}
-      <StatusLiveRegion message={deleteNotice} />
+      <StatusLiveRegion message={rowNotice} />
     </div>
   );
 };

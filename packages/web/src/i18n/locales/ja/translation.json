@@ -1,5 +1,6 @@
 {
   "common": {
+    "submitting": "（送信中）",
     "justNow": "たった今",
     "closeDialog": "閉じる",
     "confirmDialog": {
@@ -222,6 +223,7 @@
       "rejectedBadgeOne": "却下済み: {{name}}",
       "rejectedBadgeMany": "却下済み {{count}}件",
       "rejectedAnnouncement": "{{name}} を却下しました",
+      "approvedAnnouncement": "{{name}} を承認しました",
       "noLongerPendingAnnouncement": "{{name}} は承認待ちではなくなりました"
     },
     "artifactsCount": "成果物 {{count}}",
@@ -577,7 +579,9 @@
       "confirmDeleteTitle": "ラベルの削除",
       "confirmDeleteButton": "削除する",
       "deleteSuccess": "ラベル「{{name}}」を削除しました。",
-      "deleteAlreadyGone": "ラベル「{{name}}」は既に削除されていました。"
+      "deleteAlreadyGone": "ラベル「{{name}}」は既に削除されていました。",
+      "saving": "ラベル「{{name}}」を保存中です。",
+      "saveSuccess": "ラベル「{{name}}」を保存しました。"
     },
     "autopilot": {
       "title": "オートパイロット設定（{{project}}）",

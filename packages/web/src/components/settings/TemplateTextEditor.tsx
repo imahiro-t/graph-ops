@@ -16,6 +16,7 @@ import { SettingsTemplateTextResponse } from '../../types';
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
+import { submittingProps } from '../Submitting';
 
 export type TemplateFetcher = (
   t: TFunction
@@ -163,6 +164,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
               type="button"
               onClick={handleSave}
               disabled={saving || !isDirty}
+              {...submittingProps(saving)}
               className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
             >
               {saving ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Save aria-hidden="true" className="w-3.5 h-3.5" />}
