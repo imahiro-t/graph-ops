@@ -20,6 +20,11 @@
 // DFLT-00164: the load-failure retry button used to inherit that
 // text-slate-500, which drops to 4.34:1 on its slate-100 hover background,
 // so it sets text-slate-600 / dark:text-slate-300 of its own.
+//
+// DFLT-00167: the same retry button draws its own focus-visible ring
+// (blue-500 / dark:blue-400, as the TicketItem chevrons do) instead of the
+// browser's default outline, and no ring on a plain (mouse) focus. jsdom
+// draws no focus rings, so that test pins the classes too.
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -651,6 +656,31 @@ describe('App project scoping', () => {
       expect(retry).not.toHaveClass('dark:text-slate-400');
       // The hover backgrounds (state colors) are unchanged.
       expect(retry).toHaveClass('hover:bg-slate-100', 'dark:hover:bg-slate-800');
+    });
+
+    it('gives the retry button a focus-visible ring and no ring on a plain focus, keeping its colours (DFLT-00167)', async () => {
+      render(<App />);
+      await screen.findByText(i18n.t('projectSwitcher.loadFailed'));
+
+      const tokens = screen.getByRole('button', { name: i18n.t('projectSwitcher.retry') }).className.split(/\s+/);
+      for (const cls of [
+        'focus:outline-none',
+        'focus-visible:ring-2',
+        'focus-visible:ring-blue-500',
+        'dark:focus-visible:ring-blue-400',
+        // DFLT-00164's text, hover background and border colours stay.
+        'text-slate-600',
+        'dark:text-slate-300',
+        'hover:bg-slate-100',
+        'dark:hover:bg-slate-800',
+        'border',
+        'border-slate-300',
+        'dark:border-slate-700',
+      ]) {
+        expect(tokens).toContain(cls);
+      }
+      // Only focus-visible draws a ring, so a mouse click shows none.
+      expect(tokens.filter(c => c.startsWith('focus:ring') || c.startsWith('dark:focus:ring'))).toEqual([]);
     });
 
     // The failure screen deliberately keeps the header's switcher usable.

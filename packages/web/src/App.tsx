@@ -1364,10 +1364,13 @@ export const App: React.FC = () => {
               {/* DFLT-00164: the inherited slate-500 drops to 4.34:1 on the
                   slate-100 hover background, so the button sets slate-600 /
                   slate-300 (the DFLT-00162 pair) to keep WCAG 1.4.3's 4.5:1
-                  in both states and both themes. */}
+                  in both states and both themes.
+                  DFLT-00167: it also draws its own focus-visible ring (the
+                  TicketItem chevron's blue-500 / blue-400) instead of relying
+                  on the browser's default outline (WCAG 2.4.7). */}
               <button
                 onClick={retryCurrentProject}
-                className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold inline-flex items-center gap-1.5 transition"
+                className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold inline-flex items-center gap-1.5 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
               >
                 <RotateCw aria-hidden="true" className="w-4 h-4" />
                 {t('projectSwitcher.retry')}
