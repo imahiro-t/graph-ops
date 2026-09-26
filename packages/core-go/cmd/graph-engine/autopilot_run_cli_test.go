@@ -267,3 +267,53 @@ func TestAutopilotCLI_UsageErrors(t *testing.T) {
 	_, err = runAutopilot(t, repo, rc, "", "next", "../../etc")
 	assertAPIErrorCode(t, err, domain.ErrCodeValidation)
 }
+
+// DFLT-00182: start and launch print untrusted_folder only when the fake
+// home's ~/.claude.json shows the folder is not trusted; the run goes on
+// the same either way. The home is the sandbox's temp directory, never the
+// real one.
+func TestAutopilotCLI_UntrustedFolderNotice(t *testing.T) {
+	cases := []struct {
+		name      string
+		trusted   func(gitRepo string) string // the trusted key; "" writes no file
+		untrusted bool
+	}{
+		{name: "untrusted", trusted: func(string) string { return "/some/other/project" }, untrusted: true},
+		{name: "trusted", trusted: func(gitRepo string) string { return gitRepo }},
+		{name: "no file", trusted: func(string) string { return "" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			repo, rc, projectID, gitRepo, launches := autopilotCLISetup(t)
+			if key := tc.trusted(gitRepo); key != "" {
+				b, _ := json.Marshal(map[string]any{"projects": map[string]any{key: map[string]any{"hasTrustDialogAccepted": true}}})
+				if err := os.WriteFile(filepath.Join(rc.HomeDir, ".claude.json"), b, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			root, _ := engine.New(repo).CreateTicket(projectID, "Root", "")
+
+			start := mustAutopilot(t, repo, rc, "", "start", root.ID, "--mode", "ticket")
+			runID, _ := start["run_id"].(string)
+			if runID == "" || start["created"] != true {
+				t.Fatalf("start = %v", start)
+			}
+			got, present := start["untrusted_folder"]
+			if present != tc.untrusted || (tc.untrusted && got != gitRepo) {
+				t.Fatalf("start untrusted_folder = %v (present %v), want present %v", got, present, tc.untrusted)
+			}
+
+			mustAutopilot(t, repo, rc, "", "next", runID)
+			launch := mustAutopilot(t, repo, rc, "", "launch", runID, root.ID)
+			rootWT := filepath.Join(gitRepo, ".claude", "worktrees", root.ID)
+			if launch["worktree"] != rootWT || len(*launches) != 1 {
+				t.Fatalf("launch = %v, launches = %v", launch, *launches)
+			}
+			got, present = launch["untrusted_folder"]
+			if present != tc.untrusted || (tc.untrusted && got != rootWT) {
+				t.Fatalf("launch untrusted_folder = %v (present %v), want present %v", got, present, tc.untrusted)
+			}
+		})
+	}
+}

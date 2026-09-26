@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -426,5 +428,58 @@ func TestAutopilotRuns_EmptyAndErrors(t *testing.T) {
 	rec = doJSON(t, e.s, http.MethodGet, "/api/autopilot/runs?project_id=proj-nope", nil)
 	if rec.Code != http.StatusNotFound || decodeError(t, rec).Code != domain.ErrCodeProjectNotFound {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// DFLT-00182: the start response carries untrusted_folder only when the
+// (sandboxed) home's ~/.claude.json shows the project's local path is not
+// trusted; the orchestrator's terminal opens and the answer is 200 either
+// way.
+func TestAutopilotStart_UntrustedFolderNotice(t *testing.T) {
+	cases := []struct {
+		name      string
+		config    func(localPath string) string // "" writes no file
+		untrusted bool
+	}{
+		{name: "untrusted", config: func(string) string {
+			return `{"projects": {"/some/other/project": {"hasTrustDialogAccepted": true}}}`
+		}, untrusted: true},
+		{name: "trusted", config: func(localPath string) string {
+			b, _ := json.Marshal(map[string]any{"projects": map[string]any{localPath: map[string]any{"hasTrustDialogAccepted": true}}})
+			return string(b)
+		}},
+		{name: "no file", config: func(string) string { return "" }},
+		{name: "unexpected format", config: func(string) string { return `{"projects": {"/x": {"trust": "yes"}}}` }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			e := newAutopilotEnv(t)
+			local, err := filepath.EvalSymlinks(e.localPath())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if content := tc.config(local); content != "" {
+				if err := os.WriteFile(filepath.Join(e.s.cfg.HomeDir, ".claude.json"), []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r := e.ticket(t, "R", "")
+			rec := doJSON(t, e.s, http.MethodPost, startAutopilotPath(r), map[string]any{"mode": autopilot.ModeTicket})
+			res := decodeAutopilotStart(t, rec)
+			want := ""
+			if tc.untrusted {
+				want = local
+			}
+			if res.UntrustedFolder != want {
+				t.Fatalf("untrusted_folder = %q, want %q", res.UntrustedFolder, want)
+			}
+			if got := strings.Contains(rec.Body.String(), `"untrusted_folder"`); got != tc.untrusted {
+				t.Fatalf("body %s: untrusted_folder present = %v", rec.Body.String(), got)
+			}
+			if e.launcher.count() != 1 || res.State != autopilot.RunStarting || !res.Created {
+				t.Fatalf("launches = %d, res = %+v", e.launcher.count(), res)
+			}
+		})
 	}
 }

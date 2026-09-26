@@ -671,4 +671,9 @@ export interface AutopilotStartResponse {
   created: boolean;
   // An interrupted or stopped run of the same root and mode was taken over.
   resumed: boolean;
+  // DFLT-00182: the project's local path when Claude Code has evidently not
+  // trusted it yet, so the terminal just opened is likely waiting at the
+  // workspace trust prompt. Absent when trusted or when the server could not
+  // tell (a best-effort check of Claude Code's own ~/.claude.json).
+  untrusted_folder?: string;
 }

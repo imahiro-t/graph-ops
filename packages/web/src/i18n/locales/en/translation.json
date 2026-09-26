@@ -127,6 +127,8 @@
     "started": "The autopilot started ({{runId}}). The work begins in another terminal.",
     "resumed": "The stopped or interrupted autopilot was resumed ({{runId}}). The work continues in another terminal.",
     "failed": "Could not start the autopilot: {{message}}",
+    "untrustedFolder": "Claude Code has not trusted the folder {{path}} yet, so the new terminal is probably waiting at the workspace trust prompt. Accept it there, or open the folder in Claude Code once and trust it; the autopilot continues once it is accepted.",
+    "untrustedDismiss": "Dismiss",
     "blocked": "An autopilot run started from {{root}} is running, so none can be started from this ticket.",
     "blockedDescendant": "An autopilot run started from the descendant {{root}} is running, so a tree run cannot be started here.",
     "finished": "An autopilot cannot be started from a DONE or CLOSED ticket.",

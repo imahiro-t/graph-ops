@@ -349,6 +349,46 @@ describe('autopilot in the Web UI', () => {
     expect(message).not.toHaveTextContent('backend text');
   });
 
+  // DFLT-00182: the server's untrusted_folder turns into a notice that stays
+  // until dismissed and is announced through an always-mounted live region.
+  it('shows the untrusted-folder notice only when the start response has untrusted_folder', async () => {
+    seed({
+      start: (ticketId, mode) => ({
+        status: 200,
+        body: { run_id: 'run-1', mode, root: ticketId, state: 'starting', created: true, resumed: false, untrusted_folder: '/work/alpha' }
+      })
+    });
+    const user = await renderApp();
+    const controls = await expand(user, X);
+    const notice = i18n.t('autopilot.untrustedFolder', { path: '/work/alpha' });
+    const regions = within(controls).getAllByRole('status');
+    expect(regions.some(r => r.textContent === notice)).toBe(false);
+
+    await user.click(within(controls).getByTestId('autopilot-start-ticket'));
+    await confirmStart(user);
+
+    expect(await within(controls).findByTestId('autopilot-untrusted')).toHaveTextContent(notice);
+    expect(within(controls).getByTestId('autopilot-message')).toHaveTextContent(i18n.t('autopilot.started', { runId: 'run-1' }));
+    await waitFor(() => expect(within(controls).getAllByRole('status').some(r => r.textContent === notice)).toBe(true));
+    const dismiss = within(controls).getByRole('button', { name: i18n.t('autopilot.untrustedDismiss') });
+    expect(dismiss).toHaveAccessibleDescription(notice);
+
+    await user.click(dismiss);
+    expect(within(controls).queryByTestId('autopilot-untrusted')).not.toBeInTheDocument();
+    expect(within(controls).getAllByRole('status').some(r => r.textContent === notice)).toBe(false);
+    expect(controls).toHaveFocus();
+  });
+
+  it('shows no untrusted-folder notice when the start response has none', async () => {
+    seed();
+    const user = await renderApp();
+    const controls = await expand(user, X);
+    await user.click(within(controls).getByTestId('autopilot-start-ticket'));
+    await confirmStart(user);
+    expect(await within(controls).findByTestId('autopilot-message')).toHaveTextContent(i18n.t('autopilot.started', { runId: 'run-1' }));
+    expect(within(controls).queryByTestId('autopilot-untrusted')).not.toBeInTheDocument();
+  });
+
   it('refreshes the runs right after a start', async () => {
     seed();
     const user = await renderApp();
