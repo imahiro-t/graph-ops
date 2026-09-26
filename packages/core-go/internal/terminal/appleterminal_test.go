@@ -523,7 +523,7 @@ func TestLaunchWithOptions_TabLockBusyFallsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.UsedTab || out.DisableTab || !strings.Contains(out.TabError, "another graph-ops process") {
+	if out.UsedTab || out.DisableTab || !strings.Contains(out.TabError, "other graph-ops processes kept the Terminal tab lock") {
 		t.Fatalf("outcome = %+v, want a retryable fallback naming the lock", out)
 	}
 	if len(*calls) != 1 {

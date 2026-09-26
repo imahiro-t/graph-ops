@@ -435,7 +435,7 @@ func lockTabLaunch() (unlock func(), busy string) {
 		}
 		if !time.Now().Before(deadline) {
 			_ = f.Close()
-			return nil, fmt.Sprintf("another graph-ops process kept opening a Terminal tab for more than %s", tabLockWait)
+			return nil, fmt.Sprintf("other graph-ops processes kept the Terminal tab lock for more than %s", tabLockWait)
 		}
 		time.Sleep(tabLockPoll)
 	}
