@@ -45,6 +45,10 @@ In an autopilot run, the `work` session creates follow-up tickets with `--parent
 
 The project must have a **local path** in your environment (App Settings > project management, or `/graph-ops:ui` in the project's directory), because every child session works in a git worktree under it. Without one, starting from the Web UI fails with `PROJECT_LOCAL_PATH_NOT_SET` and launching a session from the CLI fails the same way.
 
+**Trust the project's folder first.** Before your first run, open the project's folder (its local path) in Claude Code once and accept the workspace trust prompt. In a folder Claude Code does not trust yet, the first session the autopilot opens in a new terminal stops at that prompt and waits for a person: when you start from the Web UI, that is the orchestrator, opened in the project's local path; when you start from Claude Code, it is the first child session, opened in `<local path>/.claude/worktrees/<ticketId>`. Trusting the project's folder once is enough -- the ticket worktrees under it are not asked again. The autopilot does not detect an untrusted folder or warn you about one; the prompt in the new terminal is the only sign.
+
+If a session is already waiting at the prompt, accept it in that terminal and the session carries on from there. If it waited too long -- a child session with no activity for `stallTimeoutMinutes` is failed as `unresponsive` and `onFailure` applies, and a Web UI orchestrator that never started lets the run's heartbeat go stale -- trust the folder, close the terminals left over, and resume the run as described in [Interrupting, resuming and unresponsive sessions](#interrupting-resuming-and-unresponsive-sessions).
+
 **From Claude Code**, in the project's directory:
 
 ```
@@ -252,6 +256,7 @@ The Web UI uses these endpoints of the local UI server. Like every state-changin
 
 ## Cautions and limitations
 
+- **Trust the project's folder before the first run.** In a folder Claude Code does not trust yet, the first session the autopilot opens in a new terminal stops at the workspace trust prompt and the run does not go on by itself. Open the folder in Claude Code once and accept the prompt; the ticket worktrees under it are not asked again. See [Starting a run](#starting-a-run), which also says what to do when a session is already waiting there.
 - **Shared backends run other people's tickets with your permissions.** With MySQL, Jira or another HTTP data source, `autopilot-tree` processes every unfinished descendant in the database -- including child tickets other people created, even while the run is going -- on your machine, with your child sessions' permission mode, and with approval gates decided automatically. Use tree mode on a shared backend only when you trust whoever can create tickets under the root, and do not combine it with `permissionMode: bypassPermissions`.
 - **Do not start from a ticket someone is working on elsewhere.** Descendants that are `IN PROGRESS` elsewhere are skipped, but the root is not, since you named it explicitly: starting from a ticket that is being worked on on another machine works on it a second time.
 - **Check the permission mode before `pull_request` or `merge`.** Pushing and opening or merging a pull request run `git push` and `gh` in the child session. If its permission mode refuses them (the default `auto` may), the session reports `failed` with `permission_denied` (or stops at the last stage that worked). Make sure your permission settings allow those commands for the child sessions before choosing these values.

@@ -195,6 +195,7 @@ Each setting is resolved on its own, first match wins: **the team file's `projec
 
 #### Before you use the autopilot
 
+- **Open the project's folder in Claude Code once and accept the workspace trust prompt before your first run.** In a folder Claude Code does not trust yet, the first session the autopilot opens in a new terminal -- the orchestrator when you start from the Web UI, otherwise the first child session -- stops at the trust prompt and waits for a person, so the run does not go on by itself. Trusting the project's folder once is enough: the ticket worktrees under it (`.claude/worktrees/<ticketId>`) are not asked again. The autopilot does not detect an untrusted folder for you. If a session is already waiting at the prompt, see [Starting a run](docs/autopilot.md#starting-a-run) in the autopilot reference.
 - **On a shared backend (MySQL, Jira, HTTP), a tree run also runs other people's tickets with your permissions.** `autopilot-tree` processes every unfinished descendant in the database, including child tickets other people created (even during the run), on your machine, with your permission mode, and with approval gates decided automatically. Use tree mode there only when you trust whoever can create tickets under the root, and never together with `bypassPermissions`.
 - **Do not start from a ticket being worked on on another machine.** Descendants in progress elsewhere are skipped, but the ticket you start from is not, even when it is `IN PROGRESS`.
 - **With `pull_request` or `merge`, make sure the child sessions' permission mode allows `git push` and `gh pr create` / `gh pr merge`.** If they are refused, the ticket ends `failed` (`permission_denied`) or stops at the last stage that worked.
@@ -423,6 +424,7 @@ projects:
 
 #### 使う前に知っておくこと
 
+- **最初の実行の前に、プロジェクトのフォルダを Claude Code で一度開き、ワークスペースの信頼（workspace trust）の確認を承認しておいてください。** Claude Code がまだ信頼していないフォルダでは、オートパイロットが新しいターミナルで開く最初のセッション（Web UI から起動したときはオーケストレーター、それ以外は最初の子セッション）が信頼の確認画面で止まり、人が承認するまで進みません。プロジェクトのフォルダを一度信頼すれば十分で、その下のチケットの worktree（`.claude/worktrees/<ticketId>`）では再確認されません。未信頼のフォルダをオートパイロットが自動で検知して知らせることはありません。確認画面で止まってしまったときの対処は、オートパイロットのリファレンスの [Starting a run](docs/autopilot.md#starting-a-run) を参照してください。
 - **共有のバックエンド（MySQL・Jira・HTTP）では、ツリーの処理は他人のチケットも自分の権限で実行します。** `autopilot-tree` は、DB 上の未完了の子孫をすべて処理します。他人が作った子チケット（実行中に作られたものも含む）も、自分のマシンで、自分の権限モードで、承認ゲートを自動判断しながら実行されます。子孫を作れる人を信頼できる場合にだけツリーモードを使い、`bypassPermissions` とは併用しないでください。
 - **別のマシンで作業中のチケットを起点にしないでください。** ほかで進行中の子孫は飛ばしますが、起点に指定したチケットは `IN PROGRESS` でも飛ばしません。
 - **`pull_request`／`merge` を使うときは、子セッションの権限モードで `git push` や `gh pr create`／`gh pr merge` が拒否されないことを確認してください。** 拒否されると、そのチケットは `failed`（`permission_denied`）になるか、できたところまでで止まります。
