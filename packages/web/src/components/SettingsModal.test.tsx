@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { getFocusableElements } from '../hooks/useModalDialog';
 import { SettingsModal } from './SettingsModal';
+import { openIconButtonTooltip, openIconButtonTooltips } from '../test/iconButtonTooltip';
 import { Project } from '../types';
 
 vi.mock('../lib/settingsApi', async () => {
@@ -294,6 +295,52 @@ describe('SettingsModal', () => {
       expect(discardDialog()).not.toBeInTheDocument();
 
       await user.keyboard('{Escape}');
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    // DFLT-00171: an icon button's tooltip is dismissed by Escape first; the
+    // modal only closes on the next Escape, once no tooltip is open.
+    it('lets Escape close an open icon button tooltip only, and closes on the next Escape', async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      renderModal(onClose);
+
+      await user.click(await screen.findByRole('button', { name: i18n.t('settings.nodeTypes.addType') }));
+      await user.tab();
+      const confirm = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.confirmAddType') });
+      expect(confirm).toHaveFocus();
+      expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.nodeTypes.confirmAddType'));
+
+      await user.keyboard('{Escape}');
+      expect(openIconButtonTooltips()).toHaveLength(0);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(confirm).toHaveFocus();
+
+      await user.keyboard('{Escape}');
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    // DFLT-00171: a tooltip opened by hover alone, with focus elsewhere, is
+    // dismissed by Escape too (WCAG 1.4.13) -- here on a default type's
+    // (aria-disabled) delete button, hovered while focus stays on another
+    // control -- and, since focus is not on the button, the press is not marked as handled: it goes on to the modal,
+    // which closes on it as it would with no tooltip open.
+    it('lets Escape dismiss a hover-opened icon button tooltip while focus is elsewhere, and close the modal', async () => {
+      (fetchSettingsNodeTypes as unknown as Mock).mockResolvedValue([{ type: 'plan', has_default: true, has_user_override: false }]);
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      renderModal(onClose);
+
+      const del = await screen.findByRole('button', { name: /^ノード種別の上書きを削除: / });
+      expect(del).toHaveAttribute('aria-disabled', 'true');
+      const add = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') });
+      act(() => add.focus());
+      await user.hover(del.parentElement as HTMLElement);
+      expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
+
+      await user.keyboard('{Escape}');
+      expect(openIconButtonTooltips()).toHaveLength(0);
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 

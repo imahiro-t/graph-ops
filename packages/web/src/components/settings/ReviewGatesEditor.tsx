@@ -16,6 +16,7 @@ import { fetchSettingsCatalog, saveSettingsCatalog } from '../../lib/settingsApi
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
+import { IconButton } from '../IconButton';
 
 interface Props {
   onDirtyChange: (dirty: boolean) => void;
@@ -239,9 +240,11 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     setGates(prev => [...prev, { id: '', name: '', criteria: '', enabled: true, isOverridden: true, origin: 'new', baseline: {}, hasDefault: false }]);
   };
 
-  // Only ever called from a button that's disabled unless g.isOverridden
-  // (see the JSX below); guarded here too so this can't remove a
-  // not-yet-overridden default row even if triggered some other way.
+  // Only ever called for an overridden row: a not-yet-overridden default
+  // row's delete button is aria-disabled (see the JSX below), IconButton
+  // swallows its clicks and its onClick checks g.isOverridden too. Guarded
+  // here as well so this can't remove such a row even if triggered some
+  // other way.
   const removeGate = (idx: number) => {
     setGates(prev => (prev[idx]?.isOverridden ? prev.filter((_, i) => i !== idx) : prev));
   };
@@ -377,6 +380,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           // What the delete button names: the ID, or on a new row that has
           // none yet, the name typed so far. Whitespace-only counts as empty.
           const deleteTarget = (g.id ?? '').trim() || (g.name ?? '').trim();
+          const deleteTooltip = g.isOverridden ? t('settings.reviewGates.deleteGate') : t('settings.reviewGates.cannotDeleteDefaultHint');
           const idInvalid = emptyIdErrorShown && g.id.trim() === '';
           return (
           <div key={idx} className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2 bg-white dark:bg-slate-900">
@@ -430,23 +434,32 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 />
                 {t('settings.reviewGates.enabledLabel')}
               </label>
-              <button
-                onClick={() => removeGate(idx)}
-                disabled={!g.isOverridden}
+              <IconButton
+                onClick={() => {
+                  if (g.isOverridden) removeGate(idx);
+                }}
+                // aria-disabled rather than disabled, so a default gate's
+                // button still takes keyboard focus and shows why it cannot
+                // be deleted (IconButton swallows the click).
+                aria-disabled={g.isOverridden ? undefined : true}
                 // The name carries the gate (its ID, or its name on a new row
                 // with no ID yet) so a screen reader can tell which row focus
-                // is on; title stays as the tooltip and -- no longer used for
-                // the name -- is exposed as the description, which keeps the
-                // "cannot delete a default" reason available. With neither an
-                // ID nor a name there is nothing to add, so no aria-label is
-                // set and title stays the name, rather than a name ending in
-                // an empty target.
-                aria-label={deleteTarget ? t('settings.reviewGates.deleteGateAriaLabel', { name: deleteTarget }) : undefined}
-                className="p-1 mb-0.5 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40 shrink-0"
-                title={g.isOverridden ? t('settings.reviewGates.deleteGate') : t('settings.reviewGates.cannotDeleteDefaultHint')}
+                // is on. With neither an ID nor a name there is nothing to
+                // add, so the tooltip text itself is the name, rather than a
+                // name ending in an empty target. The tooltip says "delete"
+                // -- already part of the name -- or, on a default gate, why
+                // it cannot be deleted; only that reason is added as the
+                // description, and only when it is not the name already.
+                label={deleteTarget ? t('settings.reviewGates.deleteGateAriaLabel', { name: deleteTarget }) : deleteTooltip}
+                tooltip={deleteTooltip}
+                describeWithTooltip={Boolean(deleteTarget) && !g.isOverridden}
+                wrapperClassName="mb-0.5 shrink-0"
+                className={`p-1 text-slate-500 dark:text-slate-400 ${
+                  g.isOverridden ? 'hover:text-red-600 dark:hover:text-red-400' : 'opacity-40 cursor-not-allowed'
+                }`}
               >
                 <Trash2 aria-hidden="true" className="w-3.5 h-3.5" />
-              </button>
+              </IconButton>
             </div>
             <div>
               <label htmlFor={`${idPrefix}-${idx}-criteria`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.criteriaLabel')}</label>

@@ -2,12 +2,13 @@
 // because `selected` changed) and F-1's structural non-regression (language
 // switch must never re-trigger a load and blow away an unsaved edit). See
 // this ticket's plan sections 3-2 (#3/#4) and 4-2.
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { NodeTypesEditor } from './NodeTypesEditor';
 import { SettingsNodeTypeInfo } from '../../types';
+import { openIconButtonTooltip } from '../../test/iconButtonTooltip';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -271,8 +272,12 @@ describe('NodeTypesEditor', () => {
     // slate-50 and 4.76:1 on a selected/hovered white row, 5.71:1 on
     // slate-800 and 6.96:1 on slate-900. The old text-slate-400 /
     // dark:text-slate-500 was 2.45:1 on slate-50. The red hover and the
-    // disabled opacity (a disabled control is exempt from 1.4.11) are kept.
-    it('rests the delete buttons at slate-500 / dark:slate-400, keeping the red hover and disabled opacity', async () => {
+    // dimmed look of an unavailable button (a disabled control is exempt
+    // from 1.4.11) are kept. DFLT-00203: a default type's button is
+    // aria-disabled rather than disabled, so its dimming is a plain
+    // opacity-30 (the disabled: variant no longer matches) and it gets no
+    // red hover.
+    it('rests the delete buttons at slate-500 / dark:slate-400, with the red hover only where deleting is possible', async () => {
       render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
       await screen.findByDisplayValue('implementation-tier-text');
 
@@ -287,12 +292,20 @@ describe('NodeTypesEditor', () => {
       ];
       expect(buttons).toHaveLength(3);
       expect(buttons[0]).toBeEnabled();
-      expect(buttons[1]).toBeDisabled();
+      expect(buttons[0]).not.toHaveAttribute('aria-disabled');
       for (const b of buttons) {
         expect(b).toHaveClass('text-slate-500', 'dark:text-slate-400');
         expect(b).not.toHaveClass('text-slate-400');
         expect(b).not.toHaveClass('dark:text-slate-500');
-        expect(b).toHaveClass('hover:text-red-600', 'dark:hover:text-red-400', 'disabled:opacity-30');
+      }
+      expect(buttons[0]).toHaveClass('hover:text-red-600', 'dark:hover:text-red-400');
+      expect(buttons[0]).not.toHaveClass('opacity-30');
+      for (const b of buttons.slice(1)) {
+        expect(b).toBeEnabled();
+        expect(b).toHaveAttribute('aria-disabled', 'true');
+        expect(b).toHaveClass('opacity-30');
+        expect(b).not.toHaveClass('hover:text-red-600');
+        expect(b).not.toHaveClass('dark:hover:text-red-400');
       }
     });
   });
@@ -343,14 +356,19 @@ describe('NodeTypesEditor focus after deleting a type', () => {
     expect(document.activeElement).not.toBe(document.body);
   });
 
-  it('moves focus to the next row\'s select button when that row is a plugin default (its delete button is disabled)', async () => {
+  // DFLT-00203: a plugin default's delete button is aria-disabled, not
+  // disabled, so it takes focus like any other row's -- and says why that
+  // row cannot be deleted.
+  it('moves focus to the next row\'s delete button even when that row is a plugin default', async () => {
     serveList([TYPES[0], custom('custom_a'), TYPES[1]]);
     const { container } = render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
 
     await deleteAndConfirm(container, 'custom_a');
 
-    await waitFor(() => expect(byKey(container, 'select-review')).toHaveFocus());
-    expect(byKey(container, 'delete-review')).toBeDisabled();
+    const next = byKey(container, 'delete-review');
+    await waitFor(() => expect(next).toHaveFocus());
+    expect(next).toHaveAttribute('aria-disabled', 'true');
+    expect(next).toHaveAccessibleDescription(i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
     expect(document.activeElement).not.toBe(document.body);
   });
 
@@ -490,18 +508,18 @@ describe('NodeTypesEditor icon accessibility', () => {
     expect(del).toBeEnabled();
     expectAllIconsHidden(del);
     // Default types' delete buttons are named after the type too, and keep
-    // the reason they are disabled as their description.
+    // the reason they are unavailable (aria-disabled) as their description.
     for (const type of ['implementation', 'review'] as const) {
       const disabledDel = screen.getByRole('button', {
         name: i18n.t('settings.nodeTypes.deleteTypeAriaLabel', { name: i18n.t(`nodeType.${type}`) })
       });
-      expect(disabledDel).toBeDisabled();
+      expect(disabledDel).toHaveAttribute('aria-disabled', 'true');
       expect(disabledDel).toHaveAccessibleDescription(i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
     }
 
     await user.click(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') }));
-    const yes = screen.getByRole('button', { name: i18n.t('settings.common.yes') });
-    const no = screen.getByRole('button', { name: i18n.t('settings.common.no') });
+    const yes = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.confirmAddType') });
+    const no = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.cancelAddType') });
     expectAllIconsHidden(yes);
     expectAllIconsHidden(no);
     expectAllIconsHidden(container);
@@ -519,7 +537,7 @@ describe('NodeTypesEditor icon accessibility', () => {
     await screen.findByDisplayValue('implementation-tier-text');
 
     await user.click(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') }));
-    const no = screen.getByRole('button', { name: i18n.t('settings.common.no') });
+    const no = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.cancelAddType') });
     expect(no).toHaveClass('text-slate-500', 'dark:text-slate-400', 'hover:text-slate-700', 'dark:hover:text-slate-200');
     expect(no).not.toHaveClass('text-slate-400');
     expect(no).not.toHaveClass('hover:text-slate-600');
@@ -530,6 +548,8 @@ describe('NodeTypesEditor icon accessibility', () => {
 // button, so each delete button's accessible name carries its type -- in
 // the "<action>: <target>" form LabelsEditor uses -- while the tooltip stays
 // as it was and a default type keeps "why it can't be deleted" as its
+// description. DFLT-00171: the tooltip is IconButton's, not a title, and
+// only that reason -- not the "delete" tooltip already in the name -- is a
 // description.
 describe('NodeTypesEditor delete button names', () => {
   beforeEach(() => {
@@ -554,12 +574,107 @@ describe('NodeTypesEditor delete button names', () => {
     const custom = screen.getByRole('button', { name: customName });
     expect(custom).toBe(container.querySelector('[data-focus-key="delete-custom_lint"]'));
     expect(custom).toBeEnabled();
-    expect(custom).toHaveAttribute('title', i18n.t('settings.nodeTypes.deleteType'));
+    expect(custom).not.toHaveAttribute('title');
+    expect(custom).toHaveAccessibleDescription('');
+    act(() => custom.focus());
+    expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.nodeTypes.deleteType'));
+    act(() => custom.blur());
 
     const byDefault = screen.getByRole('button', { name: defaultName });
     expect(byDefault).toBe(container.querySelector('[data-focus-key="delete-implementation"]'));
-    expect(byDefault).toBeDisabled();
-    expect(byDefault).toHaveAttribute('title', i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
+    expect(byDefault).toHaveAttribute('aria-disabled', 'true');
+    expect(byDefault).not.toHaveAttribute('title');
     expect(byDefault).toHaveAccessibleDescription(i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
+  });
+
+  // The reason is shown on hover and stays available to assistive
+  // technology as the description.
+  it('shows why a default type cannot be deleted on hover', async () => {
+    const user = userEvent.setup();
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+    const byDefault = screen.getByRole('button', {
+      name: i18n.t('settings.nodeTypes.deleteTypeAriaLabel', { name: i18n.t('nodeType.implementation') })
+    });
+    await user.hover(byDefault.parentElement as HTMLElement);
+    expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
+  });
+
+  // DFLT-00203: the button is aria-disabled rather than disabled, so it is
+  // in the Tab order and keyboard focus shows the same reason.
+  it('shows why a default type cannot be deleted on keyboard focus', async () => {
+    const user = userEvent.setup();
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+    const byDefault = screen.getByRole('button', {
+      name: i18n.t('settings.nodeTypes.deleteTypeAriaLabel', { name: i18n.t('nodeType.implementation') })
+    });
+    // Tab to it from the row's select button, the control just before it.
+    act(() => (byDefault.parentElement!.previousElementSibling as HTMLElement).focus());
+    await user.tab();
+    expect(byDefault).toHaveFocus();
+    expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
+    expect(byDefault).toHaveAccessibleDescription(i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
+  });
+
+  // DFLT-00203: neither a click nor Enter nor Space deletes a default type
+  // (no confirmation, no request).
+  it('does nothing when a default type\'s delete button is clicked or activated from the keyboard', async () => {
+    mockedSaveType.mockReset();
+    const user = userEvent.setup();
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+    const byDefault = screen.getByRole('button', {
+      name: i18n.t('settings.nodeTypes.deleteTypeAriaLabel', { name: i18n.t('nodeType.implementation') })
+    });
+
+    await user.click(byDefault);
+    act(() => byDefault.focus());
+    expect(byDefault).toHaveFocus();
+    await user.keyboard('{Enter}');
+    await user.keyboard(' ');
+
+    expect(screen.queryByTestId('node-type-delete-confirm-confirm')).toBeNull();
+    expect(mockedSaveType).not.toHaveBeenCalled();
+    expect(byDefault).toBeInTheDocument();
+  });
+});
+
+// DFLT-00171: the add row's confirm / cancel buttons say what they confirm
+// or cancel, instead of a bare "yes" / "no".
+describe('NodeTypesEditor add row button names', () => {
+  afterEach(async () => {
+    await i18n.changeLanguage('ja');
+  });
+
+  it.each([
+    ['ja', 'ノード種別を追加', '追加を取り消す'],
+    ['en', 'Add node type', 'Cancel adding']
+  ])('names the confirm and cancel buttons in %s, with no title', async (lng, confirmName, cancelName) => {
+    await i18n.changeLanguage(lng);
+    const user = userEvent.setup();
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') }));
+    const confirm = screen.getByRole('button', { name: confirmName });
+    const cancel = screen.getByRole('button', { name: cancelName });
+    for (const button of [confirm, cancel]) {
+      expect(button).not.toHaveAttribute('title');
+      expect(button).toHaveAccessibleDescription('');
+    }
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.yes') })).toBeNull();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.no') })).toBeNull();
+
+    // Keyboard focus shows the name as a tooltip.
+    await user.tab();
+    expect(confirm).toHaveFocus();
+    expect(openIconButtonTooltip()).toHaveTextContent(confirmName);
+    await user.tab();
+    expect(cancel).toHaveFocus();
+    expect(openIconButtonTooltip()).toHaveTextContent(cancelName);
+
+    await user.click(cancel);
+    expect(screen.queryByRole('button', { name: cancelName })).toBeNull();
   });
 });

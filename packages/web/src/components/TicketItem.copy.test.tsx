@@ -216,7 +216,9 @@ describe('TicketItem ID copy button', () => {
     expect(label).toContain(TICKET_ID);
     expect(copyButton).toHaveAttribute('type', 'button');
     expect(copyButton).toHaveAttribute('aria-label', label);
-    expect(copyButton).toHaveAttribute('title', label);
+    // DFLT-00171: the name is not repeated in a title; the tooltip is
+    // IconButton's own.
+    expect(copyButton).not.toHaveAttribute('title');
     expect(screen.getByRole('button', { name: label })).toBe(copyButton);
     expect(copyStatus(headerRow)).toBeEmptyDOMElement();
   });
@@ -235,7 +237,7 @@ describe('TicketItem ID copy button', () => {
     expect(onToggleExpand).not.toHaveBeenCalled();
     const copied = i18n.t('ticketItem.copyId.copied', { id: TICKET_ID });
     expect(copyButton).toHaveAttribute('aria-label', copied);
-    expect(copyButton).toHaveAttribute('title', copied);
+    expect(copyButton).not.toHaveAttribute('title');
     expect(copyStatus(headerRow)).toHaveTextContent(copied);
 
     act(() => {

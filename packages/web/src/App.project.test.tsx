@@ -133,7 +133,7 @@ describe('App project scoping', () => {
       await screen.findByText('ALP-00001');
       const before = ticketListRequests().length;
 
-      await user.click(screen.getByTitle(i18n.t('toolbar.refreshTitle')));
+      await user.click(screen.getByRole('button', { name: i18n.t('toolbar.refreshTitle') }));
       await waitFor(() => expect(ticketListRequests().length).toBeGreaterThan(before));
       expect(ticketListRequests().slice(before)).toEqual([`/api/tickets?project_id=${alpha.id}`]);
     });
@@ -229,11 +229,11 @@ describe('App project scoping', () => {
       // Alpha answers while Beta is still loading.
       releaseAlpha();
       await new Promise(r => setTimeout(r, 50));
-      expect(screen.getByTitle(i18n.t('toolbar.refreshTitle'))).toBeDisabled();
+      expect(screen.getByRole('button', { name: i18n.t('toolbar.refreshTitle') })).toBeDisabled();
 
       releaseBeta();
       await screen.findByText('BETA-00001');
-      await waitFor(() => expect(screen.getByTitle(i18n.t('toolbar.refreshTitle'))).toBeEnabled());
+      await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('toolbar.refreshTitle') })).toBeEnabled());
     });
 
     // The other way the header can move while a fetch is on its way: the
@@ -266,12 +266,12 @@ describe('App project scoping', () => {
 
       render(<App />);
       await screen.findByRole('button', { name: /^Alpha/ });
-      const refresh = screen.getByTitle(i18n.t('toolbar.refreshTitle'));
+      const refresh = screen.getByRole('button', { name: i18n.t('toolbar.refreshTitle') });
       await waitFor(() => expect(refresh).toBeDisabled());
 
-      await user.click(screen.getByTitle(i18n.t('header.settings')));
+      await user.click(screen.getByRole('button', { name: i18n.t('header.settings') }));
       await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.appSettings') }));
-      const [deleteAlpha] = await screen.findAllByTitle(i18n.t('settings.appSettings.projects.delete'));
+      const deleteAlpha = await screen.findByRole('button', { name: i18n.t('settings.appSettings.projects.deleteAriaLabel', { name: 'Alpha' }) });
       await user.click(deleteAlpha);
       // The in-app confirmation (DFLT-00148).
       await user.click(screen.getByTestId('project-delete-confirm-confirm'));
@@ -281,7 +281,7 @@ describe('App project scoping', () => {
       releaseAlpha();
       await new Promise(r => setTimeout(r, 50));
 
-      expect(screen.getByTitle(i18n.t('toolbar.refreshTitle'))).toBeEnabled();
+      expect(screen.getByRole('button', { name: i18n.t('toolbar.refreshTitle') })).toBeEnabled();
       expect(screen.queryByText('ALP-00001')).not.toBeInTheDocument();
     });
   });
@@ -459,7 +459,7 @@ describe('App project scoping', () => {
       render(<App />);
       await screen.findByRole('button', { name: /^Alpha/ });
       await waitFor(() => expect(ticketListRequests()).toHaveLength(1));
-      const refresh = screen.getByTitle(i18n.t('toolbar.refreshTitle'));
+      const refresh = screen.getByRole('button', { name: i18n.t('toolbar.refreshTitle') });
       expect(refresh).toBeDisabled();
 
       // The 15s tick falls inside the first fetch; the first fetch answers

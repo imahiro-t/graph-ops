@@ -182,7 +182,7 @@ describe('App label filter', () => {
     await user.keyboard('{Escape}');
     expect(labelFilterButton()).toHaveTextContent(i18n.t('toolbar.labelSelected', { count: 2 }));
 
-    await user.click(screen.getByTitle(i18n.t('header.settings')));
+    await user.click(screen.getByRole('button', { name: i18n.t('header.settings') }));
     await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.labels') }));
     await user.selectOptions(screen.getByLabelText(i18n.t('settings.labels.projectLabel')), alpha.id);
     const row = await screen.findByTestId('label-row-label-ui');
@@ -221,7 +221,7 @@ describe('App label filter', () => {
         .find(c => c.textContent === 'バグ' || c.textContent === '不具合');
     expect(rowChip('ALP-00001')).toHaveAttribute('data-label-color', 'red');
 
-    await user.click(screen.getByTitle(i18n.t('header.settings')));
+    await user.click(screen.getByRole('button', { name: i18n.t('header.settings') }));
     await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.labels') }));
     await user.selectOptions(screen.getByLabelText(i18n.t('settings.labels.projectLabel')), alpha.id);
     const row = await screen.findByTestId('label-row-label-bug');

@@ -14,6 +14,7 @@ import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, CheckCircle2, Loader2, Lock, RotateCcw, Save } from 'lucide-react';
 import { StatusLiveRegion } from '../StatusLiveRegion';
+import { IconButton } from '../IconButton';
 import {
   AUTOPILOT_SETTING_KEYS,
   AutopilotSettingItem,
@@ -289,16 +290,15 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
                   <div className="flex items-center gap-2 shrink-0">
                     {renderControl(it, inputId, `${hintId} ${sourceId}`)}
                     {!it.locked && (
-                      <button
-                        type="button"
+                      <IconButton
                         onClick={() => setDraft(d => ({ ...d, [it.key]: null }))}
                         disabled={!canClear || saving}
-                        title={t('settings.autopilot.clearLocal')}
-                        aria-label={t('settings.autopilot.clearLocalFor', { key: t(`settings.autopilot.keys.${it.key}.label`) })}
+                        label={t('settings.autopilot.clearLocalFor', { key: t(`settings.autopilot.keys.${it.key}.label`) })}
+                        tooltip={t('settings.autopilot.clearLocal')}
                         className="p-1 rounded text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30"
                       >
                         <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                      </button>
+                      </IconButton>
                     )}
                   </div>
                 </div>
