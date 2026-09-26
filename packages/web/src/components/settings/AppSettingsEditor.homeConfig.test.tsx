@@ -4,7 +4,7 @@
 // rather than printing an empty path. The second note that used to sit beside
 // it ("artifactsDir actually goes here instead") is gone with the second
 // file.
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, waitForElementToBeRemoved } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { AppSettingsEditor } from './AppSettingsEditor';
@@ -52,6 +52,21 @@ function makeResponse(overrides: Partial<AppSettingsResponse> = {}): AppSettings
   };
 }
 
+// DFLT-00192: waiting for fetchAppSettings to have been called is not the
+// same as waiting for its answer to be on screen. The fetch starts inside
+// render()'s own act, so such a waitFor passes on its first check, while the
+// re-render that swaps the loading spinner for the page is still to come --
+// and under the load of a full run it sometimes had not happened before the
+// next synchronous getByText. So wait for the spinner to go instead. It is
+// always there when render() returns (load() sets loading before it awaits the
+// fetch), which waitForElementToBeRemoved insists on: if that ever stops being
+// true, this fails loudly rather than waiting for nothing.
+async function renderLoadedEditor() {
+  renderEditor();
+  await waitForElementToBeRemoved(() => screen.queryByText(i18n.t('settings.common.loading')));
+  expect(mockedFetchAppSettings).toHaveBeenCalledTimes(1);
+}
+
 function renderEditor() {
   return render(
     <AppSettingsEditor
@@ -72,9 +87,8 @@ describe('AppSettingsEditor save-location note', () => {
 
   it('names the home config as the one destination', async () => {
     mockedFetchAppSettings.mockResolvedValueOnce(makeResponse());
-    renderEditor();
+    await renderLoadedEditor();
 
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
     expect(
       screen.getByText(i18n.t('settings.appSettings.restartNote', { path: HOME_CONFIG }), { exact: false })
     ).toBeInTheDocument();
@@ -85,9 +99,8 @@ describe('AppSettingsEditor save-location note', () => {
   // "saved to " with nothing after it.
   it('says where settings would go when the home directory cannot be resolved', async () => {
     mockedFetchAppSettings.mockResolvedValueOnce(makeResponse({ config_path: '' }));
-    renderEditor();
+    await renderLoadedEditor();
 
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
     expect(screen.getByText(i18n.t('settings.appSettings.restartNoteNoPath'))).toBeInTheDocument();
   });
 
@@ -111,9 +124,13 @@ describe('AppSettingsEditor save-location note', () => {
 
   it('says nothing about the home config when the server reports no warnings', async () => {
     mockedFetchAppSettings.mockResolvedValueOnce(makeResponse());
-    renderEditor();
+    await renderLoadedEditor();
 
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    // The page itself is up (its save-location note is there), so the absence
+    // below is about the warning, not about a page still loading.
+    expect(
+      screen.getByText(i18n.t('settings.appSettings.restartNote', { path: HOME_CONFIG }), { exact: false })
+    ).toBeInTheDocument();
     expect(
       screen.queryByText(i18n.t('settings.appSettings.homeConfigUnreadable', { path: HOME_CONFIG }))
     ).not.toBeInTheDocument();
