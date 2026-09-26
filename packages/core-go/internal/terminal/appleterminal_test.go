@@ -185,6 +185,7 @@ func TestLaunchWithOptions_TabFailureFallsBackToTheSameScript(t *testing.T) {
 		{name: "no automation permission", respond: exitFailure("execution error: Not authorized to send Apple events to Terminal. (-1743)"), wantDisable: true, wantInError: "-1743"},
 		{name: "no accessibility permission", respond: exitFailure("execution error: System Events got an error: osascript is not allowed to send keystrokes. (-25211)"), wantDisable: true, wantInError: "-25211"},
 		{name: "assistive access", respond: exitFailure("execution error: System Events got an error: osascript is not allowed assistive access. (-1719)"), wantDisable: true, wantInError: "-1719"},
+		{name: "front never readable (rethrown read error)", respond: exitFailure("0:1: execution error: graph-ops: Terminal's state could not be read while waiting for it to come to the front: System Events got an error: osascript is not allowed assistive access. (-1719)"), wantDisable: true, wantInError: "could not be read"},
 		{name: "osascript missing", respond: func(ctx context.Context, name string, args []string) ([]byte, error) {
 			if name == "osascript" {
 				return nil, &exec.Error{Name: "osascript", Err: exec.ErrNotFound}
@@ -318,6 +319,10 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 		"number 9102",
 		"number 9103",
 		"number 9104",
+		"on error errMsg number errNum",
+		"set pollOK to true",
+		"not pollOK",
+		"number lastErrNum",
 		"do script shellCommand in newTab",
 	} {
 		if !strings.Contains(script, want) {
@@ -333,7 +338,11 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 	// do script.
 	order := []string{
 		"set knownTTYs to",
+		"set pollOK to true",
 		"frontID is targetID",
+		"on error errMsg number errNum",
+		"not pollOK",
+		"number lastErrNum",
 		"number 9103",
 		`keystroke "t"`,
 		"knownTTYs does not contain v",
@@ -374,6 +383,62 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 		if err := os.WriteFile(out, []byte(script+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// TestClassifyTabFailure_FrontmostLoopRethrow covers what the script raises
+// when Terminal's state could not be read even once while it waited for
+// Terminal to come to the front: the last read error, rethrown with its own
+// number, in the form osascript prints it. Anything but 9101-9104 in
+// parentheses disables the tab, so such a failure is paid for once per run
+// rather than as about 2 seconds on every launch. The numbers are examples
+// of reads that keep failing; a missing permission usually shows up before
+// the wait, from the activate and frontmost statements, and already kept its
+// own number there.
+func TestClassifyTabFailure_FrontmostLoopRethrow(t *testing.T) {
+	const prefix = "0:1: execution error: graph-ops: Terminal's state could not be read while waiting for it to come to the front: "
+	cases := []struct {
+		name        string
+		msg         string
+		wantDisable bool
+	}{
+		{"assistive access", prefix + "System Events got an error: osascript is not allowed assistive access. (-1719)", true},
+		{"automation", prefix + "Not authorized to send Apple events to System Events. (-1743)", true},
+		{"accessibility 1002", prefix + "System Events got an error: osascript is not allowed to send keystrokes. (1002)", true},
+		{"accessibility -25211", prefix + "System Events got an error: osascript is not allowed assistive access. (-25211)", true},
+		{"no front window", prefix + "Terminal got an error: Can't get front window. (-1728)", true},
+		{"a bare 9103 in the text is not the error number", prefix + "code 9103 while reading (-1719)", true},
+		{"read at least once but not in front", "0:1: execution error: graph-ops: Terminal did not come to the front with the window of /dev/ttys003, so no key was sent (9103)", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyTabFailure(false, tc.msg); got != tc.wantDisable {
+				t.Fatalf("classifyTabFailure(%q) = %v, want %v", tc.msg, got, tc.wantDisable)
+			}
+		})
+	}
+}
+
+// TestTabLockWait_OutlastsTheScriptTimeout checks, on the package variables
+// launches actually use, that a launch waiting for the tab lock does not give
+// up before the holder's osascript has run for all of tabScriptTimeout.
+// It relies on every test that changes tabScriptTimeout or tabLockWait
+// restoring it with defer, and on this package having no t.Parallel, so the
+// variables still hold their initial values here; the first check catches a
+// test that forgot to restore tabScriptTimeout. Adding t.Parallel to this
+// package would break that assumption.
+func TestTabLockWait_OutlastsTheScriptTimeout(t *testing.T) {
+	if tabScriptTimeout != defaultTabScriptTimeout {
+		t.Fatalf("tabScriptTimeout = %s, not its initial %s: a test did not restore it", tabScriptTimeout, defaultTabScriptTimeout)
+	}
+	if tabLockMargin <= 0 {
+		t.Fatalf("tabLockMargin = %s, want > 0", tabLockMargin)
+	}
+	if tabLockWait <= tabScriptTimeout {
+		t.Fatalf("tabLockWait = %s, want more than tabScriptTimeout = %s", tabLockWait, tabScriptTimeout)
+	}
+	if tabLockWait-tabScriptTimeout < tabLockMargin {
+		t.Fatalf("tabLockWait = %s exceeds tabScriptTimeout = %s by less than tabLockMargin = %s", tabLockWait, tabScriptTimeout, tabLockMargin)
 	}
 }
 

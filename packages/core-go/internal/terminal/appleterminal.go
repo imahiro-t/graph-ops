@@ -107,15 +107,23 @@ const (
 	// orchestrator's window was closed), or it went away while waiting.
 	tabErrWindowNotFound = 9101
 	// tabErrTabNotOpened: no new tab appeared in the window after Cmd+T,
-	// or it closed before the command could be run in it.
+	// or it closed before the command could be run in it. A tab that opens
+	// late (or in another window) is left empty, not closed: see
+	// docs/autopilot.md for why.
 	tabErrTabNotOpened = 9102
 	// tabErrNotFrontmost: Terminal, with the target window in front, did
 	// not become the frontmost app, so Cmd+T was never sent (it would have
-	// gone to whatever app the user is working in).
+	// gone to whatever app the user is working in). Only when Terminal's
+	// state could be read at least once while waiting: if every read failed,
+	// the script rethrows the last read error with its own number instead,
+	// so a failure that would repeat is not taken for a passing one (a
+	// permission error usually surfaces earlier, from the activate and
+	// frontmost statements before the wait, with its own number anyway).
 	tabErrNotFrontmost = 9103
 	// tabErrNewTabAmbiguous: more than one new tab appeared in the window
 	// (another process opened one at the same time), so which one is ours
-	// cannot be told and the command is run in none of them.
+	// cannot be told and the command is run in none of them. The tab this
+	// launch opened is left empty among them, not closed (docs/autopilot.md).
 	tabErrNewTabAmbiguous = 9104
 )
 
@@ -138,7 +146,12 @@ const (
 //   - A keystroke goes to whatever app is frontmost, not to the process the
 //     tell names. So Cmd+T is sent only after Terminal is seen frontmost with
 //     the target window in front (polled for up to about 2 seconds);
-//     otherwise the script sends no key at all and fails with 9103.
+//     otherwise the script sends no key at all and fails with 9103 -- or,
+//     when Terminal's state could not be read even once while polling, with
+//     the last read error's own number, so that classifyTabFailure disables
+//     the tab instead of retrying it on every launch. (The permission errors
+//     of the activate and frontmost statements just before the polling are
+//     not caught at all and keep their numbers too.)
 //   - The command is never sent to "the selected tab", which the user (or
 //     another run's launch in the same window) can change at any moment.
 //     The ttys of every tab of every Terminal window are recorded before
@@ -208,18 +221,28 @@ on run argv
 	end tell
 	tell application "System Events" to set frontmost of process "Terminal" to true
 	set inFront to false
+	set pollOK to false
+	set lastErrMsg to ""
+	set lastErrNum to missing value
 	repeat 20 times
 		try
 			tell application "System Events" to set terminalFront to frontmost of process "Terminal"
 			tell application "Terminal" to set frontID to id of front window
+			set pollOK to true
 			if terminalFront and frontID is targetID then
 				set inFront to true
 				exit repeat
 			end if
+		on error errMsg number errNum
+			set lastErrMsg to errMsg
+			set lastErrNum to errNum
 		end try
 		delay 0.1
 	end repeat
-	if not inFront then error "graph-ops: Terminal did not come to the front with the window of " & targetTTY & ", so no key was sent" number 9103
+	if not inFront then
+		if not pollOK and lastErrNum is not missing value then error "graph-ops: Terminal's state could not be read while waiting for it to come to the front: " & lastErrMsg number lastErrNum
+		error "graph-ops: Terminal did not come to the front with the window of " & targetTTY & ", so no key was sent" number 9103
+	end if
 	tell application "System Events" to tell process "Terminal" to keystroke "t" using command down
 	set newTTY to missing value
 	repeat 30 times
@@ -281,12 +304,16 @@ on run argv
 	tell application "Terminal" to do script shellCommand in newTab
 end run`
 
+// defaultTabScriptTimeout is tabScriptTimeout's value; tabLockWait is
+// derived from it, so changing it here moves both.
+const defaultTabScriptTimeout = 10 * time.Second
+
 // tabScriptTimeout bounds the osascript run. The script itself gives up
 // after about 2 seconds of waiting for Terminal to come to the front and 3
 // seconds of waiting for the tab; what takes longer is almost
 // always a permission prompt nobody answers. A variable so tests can
 // shorten it.
-var tabScriptTimeout = 10 * time.Second
+var tabScriptTimeout = defaultTabScriptTimeout
 
 // maxTabErrorLen caps LaunchOutcome.TabError, which the runner keeps in the
 // run record.
@@ -332,10 +359,17 @@ var tabLockPath = func() (string, error) {
 	return filepath.Join(home, ".graph-ops", "autopilot", "terminal-tab.lock"), nil
 }
 
+// tabLockMargin is how much longer than tabScriptTimeout lockTabLaunch
+// waits for the lock.
+const tabLockMargin = 5 * time.Second
+
 // tabLockWait bounds how long lockTabLaunch waits for another process's tab
-// launch (which itself is bounded by tabScriptTimeout). A variable so tests
+// launch. That launch's osascript may run for all of tabScriptTimeout before
+// it is killed and the lock released, so the wait is tabScriptTimeout plus
+// tabLockMargin: a waiter never gives up just before the holder finishes.
+// It follows defaultTabScriptTimeout when that changes. A variable so tests
 // can shorten it.
-var tabLockWait = 10 * time.Second
+var tabLockWait = defaultTabScriptTimeout + tabLockMargin
 
 // tabLockPoll is how often lockTabLaunch retries a held lock.
 const tabLockPoll = 50 * time.Millisecond
@@ -418,7 +452,10 @@ var tabRetryableError = regexp.MustCompile(`\((` + strings.Join([]string{
 // only the script's own quick errors (9101-9104) keep the tab for the next
 // launch; everything else -- a timeout, a missing Automation (-1743) or
 // Accessibility (1002, -25211, -1719) permission, a sandbox refusing Apple
-// events, osascript missing, anything not foreseen -- disables it, so a run
+// events, Terminal's state that could not be read at all while waiting for
+// it to come to the front (the script rethrows that read error with its own
+// number rather than 9103), osascript missing, anything not foreseen --
+// disables it, so a run
 // pays for such a failure (up to tabScriptTimeout) once rather than on every
 // launch, without depending on a complete list of macOS error numbers.
 func classifyTabFailure(timedOut bool, msg string) bool {
