@@ -1,7 +1,7 @@
 // Regression coverage for behaviour DFLT-00023 left unverified (5-5) and for
 // F-1's structural non-regression (language switch must never re-trigger
 // this tab's load). See this ticket's plan section 4-2.
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, waitForElementToBeRemoved, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
@@ -64,6 +64,18 @@ function renderEditor() {
       onMyNameChanged={vi.fn()}
     />
   );
+}
+
+// DFLT-00198 (same reason as DFLT-00192): fetchAppSettings is called from the
+// mount effect inside render()'s act, so waiting for that call waits for
+// nothing -- under load the assertions then run against the loading spinner.
+// Wait for the spinner to go away instead. It is always showing when render()
+// returns (load() sets loading before awaiting the fetch), so if that ever
+// stops being true this fails loudly rather than passing without waiting.
+// Call it right after render(), with no await in between.
+async function waitForAppSettingsLoaded() {
+  await waitForElementToBeRemoved(() => screen.queryByText(i18n.t('settings.common.loading')));
+  expect(mockedFetchAppSettings).toHaveBeenCalledTimes(1);
 }
 
 describe('AppSettingsEditor', () => {
@@ -260,7 +272,7 @@ describe('AppSettingsEditor', () => {
         onMyNameChanged={vi.fn()}
       />
     );
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    await waitForAppSettingsLoaded();
 
     const names = screen.getAllByLabelText(i18n.t('settings.appSettings.projects.nameLabel'));
     expect(names.map(el => (el as HTMLInputElement).value)).toEqual(['Alpha', 'Beta']);
@@ -337,7 +349,7 @@ describe('AppSettingsEditor project local paths', () => {
 
   it('shows "not set" for a project without a local path and the path for one that has it', async () => {
     renderWithProjects([alpha, beta]);
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    await waitForAppSettingsLoaded();
 
     expect(localPathInput('p-alpha')).toHaveValue('/work/alpha');
     expect(localPathInput('p-beta')).toHaveValue('');
@@ -347,7 +359,7 @@ describe('AppSettingsEditor project local paths', () => {
 
   it('labels the field as this environment only and explains it is not stored in the DB', async () => {
     renderWithProjects([alpha]);
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    await waitForAppSettingsLoaded();
 
     expect(row('p-alpha').getByText(i18n.t('settings.appSettings.projects.localPathLabel'))).toBeInTheDocument();
     expect(i18n.t('settings.appSettings.projects.localPathLabel')).toBe('ローカルパス（この環境）');
@@ -358,7 +370,7 @@ describe('AppSettingsEditor project local paths', () => {
     const user = userEvent.setup();
     const onProjectsChanged = vi.fn();
     const { rerenderWith } = renderWithProjects([beta], onProjectsChanged);
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    await waitForAppSettingsLoaded();
 
     await user.type(localPathInput('p-beta'), '/work/beta');
     await user.click(saveButton('p-beta'));
@@ -373,7 +385,7 @@ describe('AppSettingsEditor project local paths', () => {
     const user = userEvent.setup();
     const onProjectsChanged = vi.fn();
     const { rerenderWith } = renderWithProjects([alpha], onProjectsChanged);
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    await waitForAppSettingsLoaded();
 
     await user.clear(localPathInput('p-alpha'));
     await user.type(localPathInput('p-alpha'), '/work/alpha2');
@@ -389,7 +401,7 @@ describe('AppSettingsEditor project local paths', () => {
     const user = userEvent.setup();
     const onProjectsChanged = vi.fn();
     const { rerenderWith } = renderWithProjects([alpha], onProjectsChanged);
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    await waitForAppSettingsLoaded();
 
     await user.clear(localPathInput('p-alpha'));
     expect(saveButton('p-alpha')).toBeEnabled();
@@ -416,7 +428,7 @@ describe('AppSettingsEditor project local paths', () => {
       const onProjectsChanged = vi.fn();
       const confirmSpy = vi.spyOn(window, 'confirm');
       renderWithProjects([alpha], onProjectsChanged);
-      await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+      await waitForAppSettingsLoaded();
 
       await user.click(deleteButton());
 
@@ -447,7 +459,7 @@ describe('AppSettingsEditor project local paths', () => {
       const user = userEvent.setup();
       const onProjectsChanged = vi.fn();
       renderWithProjects([alpha], onProjectsChanged);
-      await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+      await waitForAppSettingsLoaded();
 
       await user.click(deleteButton());
       await dismiss(user);
@@ -475,7 +487,7 @@ describe('AppSettingsEditor project local paths', () => {
         const user = userEvent.setup();
         const onProjectsChanged = vi.fn();
         const { rerenderWith } = renderWithProjects([alpha, beta, gamma], onProjectsChanged);
-        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+        await waitForAppSettingsLoaded();
 
         await confirmDelete('p-beta', user);
         await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
@@ -492,7 +504,7 @@ describe('AppSettingsEditor project local paths', () => {
         const user = userEvent.setup();
         const onProjectsChanged = vi.fn();
         const { rerenderWith } = renderWithProjects([alpha, beta], onProjectsChanged);
-        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+        await waitForAppSettingsLoaded();
 
         await confirmDelete('p-beta', user);
         await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
@@ -506,7 +518,7 @@ describe('AppSettingsEditor project local paths', () => {
         const user = userEvent.setup();
         const onProjectsChanged = vi.fn();
         const { rerenderWith } = renderWithProjects([alpha], onProjectsChanged);
-        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+        await waitForAppSettingsLoaded();
 
         await confirmDelete('p-alpha', user);
         await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
@@ -521,7 +533,7 @@ describe('AppSettingsEditor project local paths', () => {
         const user = userEvent.setup();
         const onProjectsChanged = vi.fn();
         const { rerenderWith } = renderWithProjects([alpha, beta, gamma], onProjectsChanged);
-        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+        await waitForAppSettingsLoaded();
         // Like a browser that drops focus from a button while it is disabled
         // (jsdom keeps it there), the button loses focus during the request.
         (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
@@ -553,7 +565,7 @@ describe('AppSettingsEditor project local paths', () => {
         const user = userEvent.setup();
         const onProjectsChanged = vi.fn();
         const { rerenderWith } = renderWithProjects([alpha, beta, gamma], onProjectsChanged);
-        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+        await waitForAppSettingsLoaded();
 
         await confirmDelete('p-beta', user);
         await waitFor(() => expect(onProjectsChanged).toHaveBeenCalledTimes(1));
@@ -570,7 +582,7 @@ describe('AppSettingsEditor project local paths', () => {
         const user = userEvent.setup();
         const onProjectsChanged = vi.fn();
         renderWithProjects([alpha, beta], onProjectsChanged);
-        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+        await waitForAppSettingsLoaded();
         // Like a browser that drops focus from a button while it is disabled
         // (jsdom keeps it there), the button loses focus during the request.
         (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
@@ -599,7 +611,10 @@ describe('AppSettingsEditor project local paths', () => {
         const user = userEvent.setup();
         const onProjectsChanged = vi.fn();
         const { rerenderWith } = renderWithProjects([alpha], onProjectsChanged);
-        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+        await waitForAppSettingsLoaded();
+        // The editor itself must be on screen before the negative assertion
+        // below means anything -- it would also pass against the spinner.
+        expect(deleteButton()).toBeInTheDocument();
         expect(statusTexts()).not.toContain(successText('Alpha'));
 
         await user.click(deleteButton());
@@ -619,7 +634,7 @@ describe('AppSettingsEditor project local paths', () => {
       it('names the project by its id when it has no name', async () => {
         const user = userEvent.setup();
         renderWithProjects([{ ...alpha, name: '' }]);
-        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+        await waitForAppSettingsLoaded();
 
         await user.click(row('p-alpha').getByTitle(i18n.t('settings.appSettings.projects.delete')));
         await user.click(screen.getByTestId('project-delete-confirm-confirm'));
@@ -630,7 +645,7 @@ describe('AppSettingsEditor project local paths', () => {
       it('announces nothing when the user cancels', async () => {
         const user = userEvent.setup();
         renderWithProjects([alpha]);
-        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+        await waitForAppSettingsLoaded();
 
         await user.click(deleteButton());
         await user.click(screen.getByTestId('project-delete-confirm-cancel'));
@@ -643,7 +658,7 @@ describe('AppSettingsEditor project local paths', () => {
         const user = userEvent.setup();
         const onProjectsChanged = vi.fn();
         renderWithProjects([alpha, beta], onProjectsChanged);
-        await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+        await waitForAppSettingsLoaded();
         (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
           ok: false,
           status: 500,
@@ -668,7 +683,7 @@ describe('AppSettingsEditor project local paths', () => {
   // deleting (a disabled control is exempt from 1.4.11) are kept.
   it('rests the project delete button at slate-500 / dark:slate-400, keeping the red hover and disabled opacity', async () => {
     renderWithProjects([alpha]);
-    await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+    await waitForAppSettingsLoaded();
 
     const del = row('p-alpha').getByTitle(i18n.t('settings.appSettings.projects.delete'));
     expect(del).toHaveClass('text-slate-500', 'dark:text-slate-400');
@@ -691,7 +706,7 @@ describe('AppSettingsEditor project local paths', () => {
     ])('names each delete button after its project in %s, keeping the tooltip', async (lng, alphaName, betaName, tooltip) => {
       await i18n.changeLanguage(lng);
       renderWithProjects([alpha, beta]);
-      await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+      await waitForAppSettingsLoaded();
 
       const alphaDelete = screen.getByRole('button', { name: alphaName });
       const betaDelete = screen.getByRole('button', { name: betaName });
@@ -702,7 +717,7 @@ describe('AppSettingsEditor project local paths', () => {
     it('keeps the saved name while the name is being edited, and falls back to the ID when the name is empty', async () => {
       const user = userEvent.setup();
       renderWithProjects([alpha, { ...beta, name: '' }]);
-      await waitFor(() => expect(mockedFetchAppSettings).toHaveBeenCalled());
+      await waitForAppSettingsLoaded();
 
       const nameInput = row('p-alpha').getByLabelText(i18n.t('settings.appSettings.projects.nameLabel'));
       await user.clear(nameInput);
