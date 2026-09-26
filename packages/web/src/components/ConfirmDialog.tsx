@@ -7,6 +7,13 @@
 // Mount it only while the confirmation is pending; it holds no text of its
 // own -- the caller passes every string, already translated.
 //
+// Optional `children` (DFLT-00181) are rendered between the message and the
+// button row, for a choice that belongs to the confirmation (the autopilot's
+// run scope, for example). They are not part of the dialog's description
+// (aria-describedby points at the message only): give them their own name,
+// such as a fieldset with a legend. Without children the dialog is exactly
+// the plain title / message / buttons one.
+//
 // Behaviour, shared with the app's other modals through useModalDialog:
 //
 // - Focus starts on the cancel button, not the confirm button, so an Enter
@@ -39,6 +46,7 @@ interface Props {
   // confirm button.
   tone?: 'default' | 'danger';
   testIdPrefix?: string;
+  children?: React.ReactNode;
 }
 
 export const ConfirmDialog: React.FC<Props> = ({
@@ -50,7 +58,8 @@ export const ConfirmDialog: React.FC<Props> = ({
   onCancel,
   returnFocusFallbackRef,
   tone = 'default',
-  testIdPrefix = 'confirm-dialog'
+  testIdPrefix = 'confirm-dialog',
+  children
 }) => {
   const idBase = useId();
   const titleId = `${idBase}-title`;
@@ -87,6 +96,7 @@ export const ConfirmDialog: React.FC<Props> = ({
         <p id={messageId} className="text-sm text-slate-700 dark:text-slate-300 mb-4 whitespace-pre-wrap break-words">
           {message}
         </p>
+        {children}
         <div className="flex justify-end gap-2 pt-2">
           <button
             ref={cancelRef}

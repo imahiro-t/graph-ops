@@ -10,11 +10,12 @@ interface HarnessProps {
   onCancel?: () => void;
   onOuterClick?: () => void;
   tone?: 'default' | 'danger';
+  children?: React.ReactNode;
 }
 
 // An opener that mounts the dialog while it is pending, inside a clickable
 // ancestor (like a ticket card's header).
-const Harness: React.FC<HarnessProps> = ({ onConfirm, onCancel, onOuterClick, tone }) => {
+const Harness: React.FC<HarnessProps> = ({ onConfirm, onCancel, onOuterClick, tone, children }) => {
   const [open, setOpen] = useState(false);
   const fallbackRef = useRef<HTMLDivElement>(null);
   return (
@@ -38,7 +39,9 @@ const Harness: React.FC<HarnessProps> = ({ onConfirm, onCancel, onOuterClick, to
             onCancel?.();
             setOpen(false);
           }}
-        />
+        >
+          {children}
+        </ConfirmDialog>
       )}
     </div>
   );
@@ -118,6 +121,22 @@ describe('ConfirmDialog', () => {
     expect(screen.getByTestId('confirm-dialog-cancel')).toHaveFocus();
     await user.tab({ shift: true });
     expect(screen.getByTestId('confirm-dialog-confirm')).toHaveFocus();
+  });
+
+  it('renders no extra content without children', async () => {
+    await openDialog();
+    const dialog = screen.getByRole('dialog');
+    expect(Array.from(dialog.children).map(c => c.tagName)).toEqual(['H2', 'P', 'DIV']);
+  });
+
+  it('renders children between the message and the buttons, outside the description', async () => {
+    await openDialog({ children: <fieldset data-testid="extra"><legend>Pick</legend></fieldset> });
+    const dialog = screen.getByRole('dialog', { name: 'Title' });
+    const extra = screen.getByTestId('extra');
+    expect(dialog).toContainElement(extra);
+    expect(extra.previousElementSibling).toBe(screen.getByText('Really?'));
+    expect(extra.nextElementSibling).toContainElement(screen.getByTestId('confirm-dialog-cancel'));
+    expect(dialog).toHaveAccessibleDescription('Really?');
   });
 
   it('is rendered outside the ancestor, directly under body', async () => {

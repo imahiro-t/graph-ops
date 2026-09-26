@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Bot, GitFork, Loader2 } from 'lucide-react';
+import { Bot, Loader2 } from 'lucide-react';
 import { AutopilotMode, TicketStatus } from '../types';
 import { startAutopilot, TicketAutopilotView } from '../lib/autopilotApi';
 import { errorMessage } from '../lib/apiError';
@@ -15,19 +15,22 @@ interface Props {
   // Called once a start request settles (success or failure), so the caller
   // can refresh the runs (and the badges) right away rather than at the
   // next poll. A returned promise is awaited -- for at most
-  // SETTLE_TIMEOUT_MS -- before the buttons leave their "starting" state, so
-  // they come back with the refreshed view (and focus goes back to a button
-  // only if that view still leaves it enabled).
+  // SETTLE_TIMEOUT_MS -- before the button leaves its "starting" state, so
+  // it comes back with the refreshed view (and focus goes back to it only if
+  // that view still leaves it enabled).
   onSettled?: () => void | Promise<void>;
+  // The action row's regular actions (refine, run), laid out on its left;
+  // the autopilot button sits at its right end (DFLT-00181).
+  actions?: React.ReactNode;
 }
 
 // How long the result of a start stays on screen.
 const MESSAGE_CLEAR_MS = 8000;
 
-// DFLT-00149: the longest the buttons wait on onSettled after a start. A
-// refresh that hangs (a stalled request) or fails must not leave them in
-// their "starting" state until the page is reloaded: past this, they follow
-// the view they have, and the next poll brings the refreshed runs. Shorter
+// DFLT-00149: the longest the button waits on onSettled after a start. A
+// refresh that hangs (a stalled request) or fails must not leave it in its
+// "starting" state until the page is reloaded: past this, it follows the
+// view it has, and the next poll brings the refreshed runs. Shorter
 // than the runs' poll interval, long enough for a normal refresh.
 export const SETTLE_TIMEOUT_MS = 10000;
 
@@ -59,46 +62,66 @@ async function awaitSettled(onSettled: (() => void | Promise<void>) | undefined)
   }
 }
 
-const MODES: AutopilotMode[] = ['ticket', 'tree'];
+// The dialog lists the tree first: it is the usual choice, and the initial
+// selection whenever it can start.
+const DIALOG_MODES: AutopilotMode[] = ['tree', 'ticket'];
 
-// The "autopilot (single)" / "autopilot (tree)" buttons of a ticket's action
-// footer (DFLT-00142 phase 5). A click asks for confirmation, then POSTs
-// /api/tickets/{id}/autopilot, which reserves the run and opens the
-// orchestrator's terminal.
+// The "autopilot" button of a ticket's action footer (DFLT-00142 phase 5;
+// one button since DFLT-00181). A click asks for confirmation -- where the
+// run's scope is chosen: the tree (this ticket and its descendants, the
+// initial choice) or this ticket only -- then POSTs
+// /api/tickets/{id}/autopilot with that mode, which reserves the run and
+// opens the orchestrator's terminal.
+//
+// Layout (DFLT-00181): this component lays out the whole action row -- the
+// caller's regular actions (`actions`: refine, run) on the left, the
+// autopilot button pushed to the right end (ml-auto) behind a divider on
+// sm+ screens -- and the lines under it (what a person is awaited for, the
+// disabled reasons, the result, the untrusted-folder notice). On a narrow
+// screen the row wraps and the button stays right-aligned on its own line,
+// set apart by that and by its violet colours. The row is inside the root so
+// the root, the focus fallback below, holds both the button and the text
+// about it.
 //
 // The confirmation is an in-app ConfirmDialog, not window.confirm
 // (DFLT-00147), so browser automation and tests can drive it:
 //
-// - Its title, text and confirm button label are fixed when it opens (resume
-//   or fresh start, from the view at that moment); a poll changing
-//   `resumable` while it is open does not swap the text under the reader.
-//   The server decides whether the run is actually resumed, and the result
-//   message follows its answer.
-// - If a poll shows the start would now be refused (the button gets a
-//   disabled reason), the dialog closes by itself without starting; the
-//   reason appears next to the buttons as usual. A start confirmed before the
-//   poll caught up still gets the server's 409, shown translated.
-// - The buttons stay enabled while the dialog is open (its overlay and Tab
-//   wrap keep them out of reach; handleClick ignores a click anyway). A
-//   button disabled while the dialog is open would, under React.StrictMode
-//   in development, make useModalDialog remember the fallback instead of the
+// - The scope is a pair of native radio buttons in a fieldset. A mode whose
+//   start would be refused is a disabled choice with its reason under it
+//   (aria-describedby); that follows the live view while the dialog is open.
+//   The initial choice is the tree, or this ticket alone when the tree
+//   cannot start. The choice is never switched by a poll.
+// - Its title, text and confirm button label follow the chosen mode. Whether
+//   they speak of a resume or a fresh start comes from `resumable` as it was
+//   when the dialog opened (for both modes), so a poll changing it while it
+//   is open does not swap the text under the reader. The server decides
+//   whether the run is actually resumed, and the result message follows its
+//   answer.
+// - If a poll shows the chosen mode's start would now be refused, the dialog
+//   closes by itself without starting; if only the other mode is refused, its
+//   choice is disabled and the dialog stays. A start confirmed before the poll
+//   caught up still gets the server's 409, shown translated.
+// - The button stays enabled while the dialog is open (its overlay and Tab
+//   wrap keep it out of reach; handleClick ignores a click anyway). A button
+//   disabled while the dialog is open would, under React.StrictMode in
+//   development, make useModalDialog remember the fallback instead of the
 //   button (see its notes).
-// - Focus: cancelling returns it to the clicked button. Confirming disables
-//   the buttons while the request runs, so it goes to this component's root
-//   (tabIndex={-1}) instead of falling to <body>, and back to the clicked
-//   button once the request settles -- only if focus is still on the root
-//   and the button is enabled in the refreshed view (a successful start
-//   usually disables it: the new run owns the ticket). The refresh is waited
-//   on for at most SETTLE_TIMEOUT_MS.
+// - Focus: cancelling returns it to the button. Confirming disables the
+//   button while the request runs, so it goes to this component's root
+//   (tabIndex={-1}) instead of falling to <body>, and back to the button once
+//   the request settles -- only if focus is still on the root and the button
+//   is enabled in the refreshed view (a successful start usually disables it:
+//   the new run owns the ticket). The refresh is waited on for at most
+//   SETTLE_TIMEOUT_MS.
 //
-// A button is disabled -- with the reason shown as text next to the buttons
-// and tied to it with aria-describedby, and as its tooltip -- when the start
-// would be refused anyway: an active run owns the ticket (or, for a tree
-// start, roots somewhere below it), or the ticket is DONE/CLOSED and there is
-// no stopped or interrupted run of it to resume. The server stays the
-// authority: a stale view that lets a duplicate through gets its 409, shown
-// translated.
-export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onSettled }) => {
+// A mode cannot start -- the start would be refused anyway -- when an active
+// run owns the ticket (or, for a tree start, roots somewhere below it), or
+// the ticket is DONE/CLOSED and there is no stopped or interrupted run of it
+// in that mode to resume. When neither mode can start, the button is
+// disabled, with the reasons shown as text under the action row, tied to it
+// with aria-describedby, and as its tooltip. The server stays the authority:
+// a stale view that lets a duplicate through gets its 409, shown translated.
+export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onSettled, actions }) => {
   const { t } = useTranslation();
   const [starting, setStarting] = useState<AutopilotMode | null>(null);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
@@ -108,19 +131,17 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
   // dismiss button or the next start.
   const [untrustedFolder, setUntrustedFolder] = useState('');
   const untrustedId = useId();
-  const [pending, setPending] = useState<{
-    mode: AutopilotMode;
-    title: string;
-    message: string;
-    confirmLabel: string;
-  } | null>(null);
+  // The open confirmation, with `resumable` as it was when it opened.
+  const [pending, setPending] = useState<{ resumable: Record<AutopilotMode, boolean> } | null>(null);
+  const [selectedMode, setSelectedMode] = useState<AutopilotMode>('tree');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reasonIdBase = useId();
+  const radioName = useId();
   const rootRef = useRef<HTMLDivElement>(null);
-  const buttonRefs = useRef<Partial<Record<AutopilotMode, HTMLButtonElement | null>>>({});
-  // The mode whose start is in flight, to put focus back on its button once
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  // Whether a start is in flight, to put focus back on the button once
   // `starting` returns to null.
-  const lastStarted = useRef<AutopilotMode | null>(null);
+  const lastStarted = useRef(false);
 
   useEffect(
     () => () => {
@@ -140,27 +161,31 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
     if (finished && !view.resumable[mode]) return t('autopilot.finished');
     return '';
   };
-  const reasons = MODES.map(reasonFor);
-  // One line per distinct reason (the two buttons usually share it).
-  const distinctReasons = reasons.filter((r, i) => r && reasons.indexOf(r) === i);
+  const reasons: Record<AutopilotMode, string> = { ticket: reasonFor('ticket'), tree: reasonFor('tree') };
+  // Neither mode can start: the button is disabled, with one line per
+  // distinct reason (the two modes usually share it) under the action row.
+  const noneStartable = reasons.ticket !== '' && reasons.tree !== '';
+  const distinctReasons = noneStartable
+    ? [reasons.ticket, reasons.tree].filter((r, i, all) => all.indexOf(r) === i)
+    : [];
+  const reasonIds = distinctReasons.map((_, i) => `${reasonIdBase}-reason-${i}`);
 
-  // Close the dialog, without starting, once the view says the start would
-  // be refused. Checked only while it is open, so the confirm path (which
-  // sets pending to null itself) never runs into it.
-  const pendingReason = pending ? reasonFor(pending.mode) : '';
+  // Close the dialog, without starting, once the view says the chosen mode's
+  // start would be refused. Checked only while it is open, so the confirm
+  // path (which sets pending to null itself) never runs into it.
+  const pendingReason = pending ? reasons[selectedMode] : '';
   useEffect(() => {
     if (pending && pendingReason) setPending(null);
   }, [pending, pendingReason]);
 
-  // Once a start settles: back to the clicked button, if focus is still where
-  // the dialog left it (the root) and the button is enabled. Otherwise focus
+  // Once a start settles: back to the button, if focus is still where the
+  // dialog left it (the root) and the button is enabled. Otherwise focus
   // stays where it is -- never taken from wherever the user moved it.
   useEffect(() => {
     if (starting !== null) return;
-    const mode = lastStarted.current;
-    if (mode === null) return;
-    lastStarted.current = null;
-    const button = buttonRefs.current[mode];
+    if (!lastStarted.current) return;
+    lastStarted.current = false;
+    const button = buttonRef.current;
     if (button && !button.disabled && document.activeElement === rootRef.current) button.focus();
   }, [starting]);
 
@@ -173,22 +198,16 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
     }, MESSAGE_CLEAR_MS);
   };
 
-  // Opens the confirmation, with its text fixed from the view as it is now.
-  const handleClick = (mode: AutopilotMode) => {
+  // Opens the confirmation on the tree, or on this ticket alone when the tree
+  // cannot start, with `resumable` fixed from the view as it is now.
+  const handleClick = () => {
     if (pending !== null || starting !== null) return;
-    const resume = view.resumable[mode];
-    setPending({
-      mode,
-      title: t(resume ? 'autopilot.confirm.resumeTitle' : 'autopilot.confirm.title'),
-      message: resume
-        ? t('autopilot.confirm.resume', { id: ticketId, mode: t(`autopilot.modes.${mode}`) })
-        : t(`autopilot.confirm.${mode}`, { id: ticketId }),
-      confirmLabel: t(resume ? 'autopilot.confirm.resumeStart' : 'autopilot.confirm.start')
-    });
+    setSelectedMode(reasons.tree ? 'ticket' : 'tree');
+    setPending({ resumable: { ...view.resumable } });
   };
 
   const runStart = async (mode: AutopilotMode) => {
-    lastStarted.current = mode;
+    lastStarted.current = true;
     setStarting(mode);
     setUntrustedFolder('');
     try {
@@ -211,13 +230,23 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
   };
 
   const handleConfirm = () => {
-    if (!pending) return;
-    const { mode } = pending;
-    // Closed in the same render that disables the buttons: the dialog's
+    if (!pending || reasons[selectedMode]) return;
+    const mode = selectedMode;
+    // Closed in the same render that disables the button: the dialog's
     // focus return then finds the button disabled and uses rootRef.
     setPending(null);
     void runStart(mode);
   };
+
+  // The dialog's text, for the chosen mode; resume or fresh start from
+  // `resumable` as it was when the dialog opened.
+  const resume = pending !== null && pending.resumable[selectedMode];
+  const modeName = t(`autopilot.modes.${selectedMode}`);
+  const dialogTitle = t(resume ? 'autopilot.confirm.resumeTitle' : 'autopilot.confirm.title', { mode: modeName });
+  const dialogMessage = resume
+    ? t('autopilot.confirm.resume', { id: ticketId, mode: modeName })
+    : t(`autopilot.confirm.${selectedMode}`, { id: ticketId });
+  const dialogConfirmLabel = t(resume ? 'autopilot.confirm.resumeStart' : 'autopilot.confirm.start');
 
   return (
     // tabIndex={-1}: the focus fallback while a confirmed start runs (see
@@ -230,37 +259,33 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
       className="flex flex-col gap-1.5 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
     >
       <div className="flex flex-wrap items-center gap-2">
-        {MODES.map((mode, i) => {
-          const reason = reasons[i];
-          const reasonId = reason ? `${reasonIdBase}-reason-${distinctReasons.indexOf(reason)}` : undefined;
-          return (
-            <button
-              key={mode}
-              ref={el => {
-                buttonRefs.current[mode] = el;
-              }}
-              type="button"
-              data-testid={`autopilot-start-${mode}`}
-              onClick={() => handleClick(mode)}
-              disabled={starting !== null || reason !== ''}
-              {...submittingProps(starting === mode)}
-              title={reason || undefined}
-              aria-describedby={reasonId}
-              className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-slate-700 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
-            >
-              {starting === mode ? (
-                <Loader2 className="w-3.5 h-3.5 motion-safe:animate-spin" aria-hidden="true" />
-              ) : mode === 'tree' ? (
-                <GitFork className="w-3.5 h-3.5" aria-hidden="true" />
-              ) : (
-                <Bot className="w-3.5 h-3.5" aria-hidden="true" />
-              )}
-              {t(`autopilot.buttons.${mode}`)}
-              {/* Only the mode being started shows the spinner, so only it is busy. */}
-              <SubmittingText busy={starting === mode} />
-            </button>
-          );
-        })}
+        {actions}
+        {/* Set apart from the regular actions: pushed to the right end (on
+            its own line too when the row wraps), behind a divider on sm+. */}
+        <div
+          data-testid="autopilot-group"
+          className="ml-auto flex items-center sm:border-l sm:pl-3 border-slate-200 dark:border-slate-700"
+        >
+          <button
+            ref={buttonRef}
+            type="button"
+            data-testid="autopilot-start"
+            onClick={handleClick}
+            disabled={starting !== null || noneStartable}
+            {...submittingProps(starting !== null)}
+            title={distinctReasons.length > 0 ? distinctReasons.join('\n') : undefined}
+            aria-describedby={reasonIds.length > 0 ? reasonIds.join(' ') : undefined}
+            className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-slate-700 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
+          >
+            {starting !== null ? (
+              <Loader2 className="w-3.5 h-3.5 motion-safe:animate-spin" aria-hidden="true" />
+            ) : (
+              <Bot className="w-3.5 h-3.5" aria-hidden="true" />
+            )}
+            {t('autopilot.button')}
+            <SubmittingText busy={starting !== null} />
+          </button>
+        </div>
       </div>
       {view.awaiting && (
         // What the person is waited on for, as text a sighted keyboard user
@@ -272,7 +297,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
       {distinctReasons.map((r, i) => (
         <p
           key={r}
-          id={`${reasonIdBase}-reason-${i}`}
+          id={reasonIds[i]}
           data-testid="autopilot-disabled-reason"
           className="text-[11px] text-slate-600 dark:text-slate-400"
         >
@@ -320,15 +345,58 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
       )}
       {pending && (
         <ConfirmDialog
-          title={pending.title}
-          message={pending.message}
-          confirmLabel={pending.confirmLabel}
+          title={dialogTitle}
+          message={dialogMessage}
+          confirmLabel={dialogConfirmLabel}
           cancelLabel={t('autopilot.confirm.cancel')}
           onConfirm={handleConfirm}
           onCancel={() => setPending(null)}
           returnFocusFallbackRef={rootRef}
           testIdPrefix="autopilot-confirm"
-        />
+        >
+          <fieldset data-testid="autopilot-mode" className="mb-4">
+            <legend className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+              {t('autopilot.confirm.modeLegend')}
+            </legend>
+            <div className="flex flex-col gap-2">
+              {DIALOG_MODES.map(mode => {
+                const reason = reasons[mode];
+                const reasonId = `${reasonIdBase}-mode-reason-${mode}`;
+                return (
+                  <div key={mode}>
+                    <label
+                      className={`flex items-center gap-2 text-sm text-slate-800 dark:text-slate-200 ${
+                        reason ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name={radioName}
+                        value={mode}
+                        data-testid={`autopilot-mode-${mode}`}
+                        checked={selectedMode === mode}
+                        disabled={reason !== ''}
+                        onChange={() => setSelectedMode(mode)}
+                        aria-describedby={reason ? reasonId : undefined}
+                        className="accent-violet-600"
+                      />
+                      {t(`autopilot.modeOptions.${mode}`)}
+                    </label>
+                    {reason && (
+                      <p
+                        id={reasonId}
+                        data-testid={`autopilot-mode-reason-${mode}`}
+                        className="ml-6 mt-0.5 text-[11px] text-slate-600 dark:text-slate-400"
+                      >
+                        {reason}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </fieldset>
+        </ConfirmDialog>
       )}
     </div>
   );

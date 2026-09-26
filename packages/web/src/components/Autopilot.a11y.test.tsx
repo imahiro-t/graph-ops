@@ -86,17 +86,18 @@ describe('autopilot accessibility', () => {
       await i18n.changeLanguage(lang);
       const user = userEvent.setup();
       const { unmount } = render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
-      const button = screen.getByTestId('autopilot-start-tree');
+      const button = screen.getByTestId('autopilot-start');
+      expect(button).toHaveAccessibleName(i18n.t('autopilot.button'));
       await user.click(button);
 
-      const dialog = screen.getByRole('dialog', { name: i18n.t('autopilot.confirm.title') });
+      const dialog = screen.getByRole('dialog', { name: i18n.t('autopilot.confirm.title', { mode: i18n.t('autopilot.modes.tree') }) });
       expect(dialog).toHaveAttribute('aria-modal', 'true');
       expect(dialog).toHaveAccessibleDescription(i18n.t('autopilot.confirm.tree', { id: 'T' }));
       const cancel = within(dialog).getByRole('button', { name: i18n.t('autopilot.confirm.cancel') });
       expect(cancel).toHaveFocus();
       expect(within(dialog).getByRole('button', { name: i18n.t('autopilot.confirm.start') })).toBeInTheDocument();
-      // The start buttons stay enabled while it is open (see
-      // AutopilotControls); the overlay keeps them out of reach.
+      // The start button stays enabled while it is open (see
+      // AutopilotControls); the overlay keeps it out of reach.
       expect(button).toBeEnabled();
 
       await user.keyboard('{Escape}');
@@ -121,7 +122,7 @@ describe('autopilot accessibility', () => {
         );
         const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
         render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
-        await user.click(screen.getByTestId('autopilot-start-tree'));
+        await user.click(screen.getByTestId('autopilot-start'));
         await user.click(screen.getByRole('button', { name: i18n.t('autopilot.confirm.start') }));
         const notice = await screen.findByTestId('autopilot-untrusted');
         expect(notice).toHaveTextContent(i18n.t('autopilot.untrustedFolder', { path: '/work/t' }));
@@ -154,8 +155,10 @@ describe('autopilot accessibility', () => {
           view={{ ...NO_AUTOPILOT, resumable: { ticket: false, tree: true } }}
         />
       );
-      await user.click(screen.getByTestId('autopilot-start-tree'));
-      const dialog = screen.getByRole('dialog', { name: i18n.t('autopilot.confirm.resumeTitle') });
+      await user.click(screen.getByTestId('autopilot-start'));
+      const dialog = screen.getByRole('dialog', {
+        name: i18n.t('autopilot.confirm.resumeTitle', { mode: i18n.t('autopilot.modes.tree') })
+      });
       expect(i18n.t('autopilot.confirm.resumeStart')).toBe(expected[lang].resume);
       expect(within(dialog).getByTestId('autopilot-confirm-confirm')).toHaveTextContent(expected[lang].resume);
       expect(within(dialog).getByRole('button', { name: expected[lang].resume })).toBeInTheDocument();
@@ -164,20 +167,22 @@ describe('autopilot accessibility', () => {
 
       // A fresh start keeps its "Start" label.
       const fresh = render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
-      await user.click(screen.getByTestId('autopilot-start-tree'));
-      const freshDialog = screen.getByRole('dialog', { name: i18n.t('autopilot.confirm.title') });
+      await user.click(screen.getByTestId('autopilot-start'));
+      const freshDialog = screen.getByRole('dialog', {
+        name: i18n.t('autopilot.confirm.title', { mode: i18n.t('autopilot.modes.tree') })
+      });
       expect(within(freshDialog).getByRole('button', { name: expected[lang].start })).toBeInTheDocument();
       fresh.unmount();
     }
   });
 
   // DFLT-00149: a refresh after the start that hangs or fails does not leave
-  // the buttons in their "starting" state.
+  // the button in its "starting" state.
   for (const [label, onSettled, advance] of [
     ['never settles', () => new Promise<void>(() => {}), true],
     ['rejects', () => Promise.reject(new Error('refresh failed')), false]
   ] as const) {
-    it(`re-enables the start buttons when the refresh after a start ${label}`, async () => {
+    it(`re-enables the start button when the refresh after a start ${label}`, async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       try {
         vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -190,20 +195,19 @@ describe('autopilot accessibility', () => {
         );
         const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
         render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} onSettled={onSettled} />);
-        const button = screen.getByTestId('autopilot-start-tree');
+        const button = screen.getByTestId('autopilot-start');
         await user.click(button);
         await user.click(screen.getByTestId('autopilot-confirm-confirm'));
         await screen.findByTestId('autopilot-message');
         if (advance) {
-          // Still waiting on the refresh: the buttons are in "starting".
+          // Still waiting on the refresh: the button is in "starting".
           expect(button).toBeDisabled();
-          expect(screen.getByTestId('autopilot-start-ticket')).toBeDisabled();
+          expect(button).toHaveAttribute('aria-busy', 'true');
           await act(async () => {
             vi.advanceTimersByTime(SETTLE_TIMEOUT_MS);
           });
         }
         await vi.waitFor(() => expect(button).toBeEnabled());
-        expect(screen.getByTestId('autopilot-start-ticket')).toBeEnabled();
       } finally {
         cleanup();
         vi.restoreAllMocks();
@@ -211,6 +215,65 @@ describe('autopilot accessibility', () => {
       }
     });
   }
+
+  // DFLT-00181: the run scope is chosen in the dialog.
+  it('names the scope choices with their legend and describes a disabled one with its reason, in both languages', async () => {
+    for (const lang of ['ja', 'en']) {
+      await i18n.changeLanguage(lang);
+      const user = userEvent.setup();
+      const { unmount } = render(
+        <AutopilotControls ticketId="T" status="IN PROGRESS" view={{ ...NO_AUTOPILOT, blockedBy: { ticket: '', tree: 'C' } }} />
+      );
+      const button = screen.getByTestId('autopilot-start');
+      expect(button).toBeEnabled();
+      expect(button).not.toHaveAttribute('aria-describedby');
+      await user.click(button);
+      const dialog = screen.getByRole('dialog');
+      // The description is the message only, not the choices.
+      expect(dialog).toHaveAccessibleDescription(i18n.t('autopilot.confirm.ticket', { id: 'T' }));
+      const group = within(dialog).getByRole('group', { name: i18n.t('autopilot.confirm.modeLegend') });
+      const tree = within(group).getByRole('radio', { name: i18n.t('autopilot.modeOptions.tree') });
+      const single = within(group).getByRole('radio', { name: i18n.t('autopilot.modeOptions.ticket') });
+      expect(tree).toBeDisabled();
+      expect(tree).toHaveAccessibleDescription(i18n.t('autopilot.blockedDescendant', { root: 'C' }));
+      expect(single).toBeEnabled();
+      expect(single).toBeChecked();
+      expect(single).not.toHaveAttribute('aria-describedby');
+      unmount();
+    }
+  });
+
+  it('wraps Tab through the scope choice and the two buttons, inside the dialog', async () => {
+    const user = userEvent.setup();
+    render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
+    await user.click(screen.getByTestId('autopilot-start'));
+    const tree = screen.getByTestId('autopilot-mode-tree');
+    const cancel = screen.getByTestId('autopilot-confirm-cancel');
+    const confirm = screen.getByTestId('autopilot-confirm-confirm');
+    expect(cancel).toHaveFocus();
+    await user.tab();
+    expect(confirm).toHaveFocus();
+    await user.tab();
+    // The radio group is one Tab stop, on its checked radio.
+    expect(tree).toHaveFocus();
+    await user.tab();
+    expect(cancel).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(tree).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(confirm).toHaveFocus();
+  });
+
+  it('switches the scope with the arrow keys', async () => {
+    const user = userEvent.setup();
+    render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
+    await user.click(screen.getByTestId('autopilot-start'));
+    const tree = screen.getByTestId('autopilot-mode-tree');
+    tree.focus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByTestId('autopilot-mode-ticket')).toBeChecked();
+    expect(screen.getByRole('dialog', { name: i18n.t('autopilot.confirm.title', { mode: i18n.t('autopilot.modes.ticket') }) })).toBeInTheDocument();
+  });
 
   it('keeps the focus fallback of the controls out of the Tab order', () => {
     render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);

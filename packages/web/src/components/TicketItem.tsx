@@ -2270,40 +2270,42 @@ export const TicketItem: React.FC<Props> = ({
 
           {/* Action Footer: Claude Execution Panel */}
           <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('ticketItem.actions.label')}</span>
-                <button
-                  onClick={() => handleRunClaude(t('claudePrompts.refineTicket', { ticketId: ticket.id }), ticket.id)}
-                  disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
-                  {...submittingProps(isRunning)}
-                  className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
-                >
-                  {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 text-indigo-600" />}
-                  {t('ticketItem.actions.refine')}
-                  <SubmittingText busy={isRunning} />
-                </button>
-                <button
-                  onClick={() => handleRunClaude(t('claudePrompts.processTicket', { ticketId: ticket.id }), ticket.id)}
-                  disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
-                  {...submittingProps(isRunning)}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
-                >
-                  {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5" />}
-                  {t('ticketItem.actions.run')}
-                  <SubmittingText busy={isRunning} />
-                </button>
-              </div>
-            </div>
-
-            {/* Autopilot starts (DFLT-00142): refine through release without
-                a person, in terminals of their own. */}
+            {/* The action row (DFLT-00181): the regular actions (refine, then
+                run) on the left, and at its right end, set apart from them,
+                the autopilot start (DFLT-00142: refine through release
+                without a person, in terminals of their own). AutopilotControls
+                lays out the row and the lines under it. */}
             <div className="mb-3">
               <AutopilotControls
                 ticketId={ticket.id}
                 status={ticket.status}
                 view={autopilot}
                 onSettled={onAutopilotChanged}
+                actions={
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('ticketItem.actions.label')}</span>
+                    <button
+                      onClick={() => handleRunClaude(t('claudePrompts.refineTicket', { ticketId: ticket.id }), ticket.id)}
+                      disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
+                      {...submittingProps(isRunning)}
+                      className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
+                    >
+                      {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 text-indigo-600" />}
+                      {t('ticketItem.actions.refine')}
+                      <SubmittingText busy={isRunning} />
+                    </button>
+                    <button
+                      onClick={() => handleRunClaude(t('claudePrompts.processTicket', { ticketId: ticket.id }), ticket.id)}
+                      disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
+                      {...submittingProps(isRunning)}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                    >
+                      {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5" />}
+                      {t('ticketItem.actions.run')}
+                      <SubmittingText busy={isRunning} />
+                    </button>
+                  </div>
+                }
               />
             </div>
 
