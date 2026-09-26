@@ -568,7 +568,9 @@
       "projectPlaceholder": "プロジェクトを選択",
       "noProjects": "プロジェクトがまだありません。先にプロジェクトを作成してください。",
       "confirmDeleteTitle": "ラベルの削除",
-      "confirmDeleteButton": "削除する"
+      "confirmDeleteButton": "削除する",
+      "deleteSuccess": "ラベル「{{name}}」を削除しました。",
+      "deleteAlreadyGone": "ラベル「{{name}}」は既に削除されていました。"
     },
     "autopilot": {
       "title": "オートパイロット設定（{{project}}）",

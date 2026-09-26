@@ -569,7 +569,9 @@
       "projectPlaceholder": "Select a project",
       "noProjects": "There are no projects yet. Create one before adding labels.",
       "confirmDeleteTitle": "Delete label",
-      "confirmDeleteButton": "Delete"
+      "confirmDeleteButton": "Delete",
+      "deleteSuccess": "Deleted the label \"{{name}}\".",
+      "deleteAlreadyGone": "The label \"{{name}}\" had already been deleted."
     },
     "autopilot": {
       "title": "Autopilot settings ({{project}})",
