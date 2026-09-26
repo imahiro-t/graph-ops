@@ -760,3 +760,199 @@ describe('LabelsEditor announcing a delete', () => {
     expect(statusTexts()).not.toContain(successText('バグ'));
   });
 });
+
+// DFLT-00210: a row whose rename, recolor or delete is in flight is aria-busy
+// until it settles, and a rename or recolor is announced as "saving" when it
+// starts and "saved" when it succeeds, in the same polite live region the
+// delete announcement uses. A delete is not announced as "saving": its
+// confirmation dialog would be read at the same time.
+describe('LabelsEditor announcing row saves', () => {
+  const savingText = (name: string) => i18n.t('settings.labels.saving', { name });
+  const savedText = (name: string) => i18n.t('settings.labels.saveSuccess', { name });
+  const row = (id: string) => screen.getByTestId(`label-row-${id}`);
+  const renameButton = (id: string, name: string) =>
+    within(row(id)).getByRole('button', { name: `${i18n.t('settings.labels.rename')}: ${name}` });
+  const deleteButton = (id: string, name: string) =>
+    within(row(id)).getByRole('button', { name: `${i18n.t('settings.labels.delete')}: ${name}` });
+  const colorButton = (id: string, name: string, color: LabelUsage['color']) =>
+    within(within(row(id)).getByRole('group', { name: i18n.t('settings.labels.colorGroup', { name }) })).getByRole('button', {
+      name: i18n.t(`labels.colors.${color}`)
+    });
+  const bug = label('label-bug', 'バグ', 'red', 2);
+  const feat = label('label-feat', '機能追加', 'blue', 0);
+
+  // A promise the test settles by hand, to look at the row mid-request.
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  beforeEach(() => {
+    mockedFetch.mockReset();
+    mockedUpdate.mockReset();
+    mockedDelete.mockReset();
+    mockedFetch.mockResolvedValue([bug, feat]);
+  });
+
+  async function startRename(user: User, newName: string) {
+    await user.click(renameButton('label-bug', 'バグ'));
+    const input = within(row('label-bug')).getByRole('textbox');
+    await user.clear(input);
+    await user.type(input, newName);
+    await user.click(within(row('label-bug')).getByRole('button', { name: i18n.t('settings.labels.save') }));
+  }
+
+  it('marks the row busy and announces "saving" while a rename is saved, then "saved" with the new name', async () => {
+    const update = deferred<LabelUsage>();
+    mockedUpdate.mockReturnValue(update.promise);
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+    expect(row('label-bug')).not.toHaveAttribute('aria-busy');
+
+    await startRename(user, '不具合');
+
+    expect(row('label-bug')).toHaveAttribute('aria-busy', 'true');
+    expect(row('label-feat')).not.toHaveAttribute('aria-busy');
+    expect(statusTexts()).toContain(savingText('バグ'));
+    // The spinner stays decorative: the row and the live region carry the state.
+    const spinner = row('label-bug').querySelector('svg.animate-spin');
+    expect(spinner).toHaveAttribute('aria-hidden', 'true');
+
+    await act(async () => update.resolve(label('label-bug', '不具合', 'red', 2)));
+
+    await waitFor(() => expect(row('label-bug')).not.toHaveAttribute('aria-busy'));
+    expect(statusTexts()).toContain(savedText('不具合'));
+    expect(statusTexts()).not.toContain(savingText('バグ'));
+    await waitFor(() => expect(renameButton('label-bug', '不具合')).toHaveFocus());
+  });
+
+  it('marks only the recolored row busy and announces "saving" and then "saved"', async () => {
+    const update = deferred<LabelUsage>();
+    mockedUpdate.mockReturnValue(update.promise);
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    await user.click(colorButton('label-bug', 'バグ', 'green'));
+
+    expect(mockedUpdate).toHaveBeenCalledWith(expect.anything(), 'label-bug', { color: 'green' });
+    expect(row('label-bug')).toHaveAttribute('aria-busy', 'true');
+    expect(row('label-feat')).not.toHaveAttribute('aria-busy');
+    expect(statusTexts()).toContain(savingText('バグ'));
+
+    await act(async () => update.resolve(label('label-bug', 'バグ', 'green', 2)));
+
+    await waitFor(() => expect(row('label-bug')).not.toHaveAttribute('aria-busy'));
+    expect(statusTexts()).toContain(savedText('バグ'));
+    expect(statusTexts()).not.toContain(savingText('バグ'));
+  });
+
+  it('drops aria-busy and the "saving" announcement, without saying "saved", when a rename fails', async () => {
+    const update = deferred<LabelUsage>();
+    mockedUpdate.mockReturnValue(update.promise);
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    await startRename(user, '機能追加');
+    expect(row('label-bug')).toHaveAttribute('aria-busy', 'true');
+    expect(statusTexts()).toContain(savingText('バグ'));
+
+    await act(async () => update.reject(new Error(i18n.t('errors.LABEL_NAME_TAKEN'))));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(i18n.t('errors.LABEL_NAME_TAKEN'));
+    expect(row('label-bug')).not.toHaveAttribute('aria-busy');
+    expect(statusTexts()).not.toContain(savingText('バグ'));
+    expect(statusTexts()).not.toContain(savedText('バグ'));
+    expect(statusTexts()).not.toContain(savedText('機能追加'));
+    await waitFor(() => expect(within(row('label-bug')).getByRole('textbox')).toHaveFocus());
+  });
+
+  it('drops aria-busy and the "saving" announcement, without saying "saved", when a recolor fails', async () => {
+    mockedUpdate.mockRejectedValue(new Error('boom'));
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    await user.click(colorButton('label-bug', 'バグ', 'green'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('boom');
+    expect(row('label-bug')).not.toHaveAttribute('aria-busy');
+    expect(statusTexts()).not.toContain(savingText('バグ'));
+    expect(statusTexts()).not.toContain(savedText('バグ'));
+  });
+
+  it('keeps the row busy through the usage re-read and the confirmation, without announcing "saving", and drops it on cancel', async () => {
+    const reread = deferred<LabelUsage[]>();
+    mockedFetch.mockResolvedValueOnce([bug, feat]).mockReturnValueOnce(reread.promise);
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    await user.click(deleteButton('label-bug', 'バグ'));
+    expect(row('label-bug')).toHaveAttribute('aria-busy', 'true');
+    expect(row('label-feat')).not.toHaveAttribute('aria-busy');
+    expect(statusTexts()).not.toContain(savingText('バグ'));
+
+    await act(async () => reread.resolve([bug, feat]));
+    await findDeleteDialog();
+    expect(row('label-bug')).toHaveAttribute('aria-busy', 'true');
+    expect(statusTexts()).not.toContain(savingText('バグ'));
+
+    await user.click(screen.getByTestId('label-delete-confirm-cancel'));
+
+    await waitFor(() => expect(row('label-bug')).not.toHaveAttribute('aria-busy'));
+    await waitFor(() => expect(deleteButton('label-bug', 'バグ')).toHaveFocus());
+  });
+
+  it('drops aria-busy when re-reading the usage count fails', async () => {
+    mockedFetch.mockResolvedValueOnce([bug, feat]).mockRejectedValueOnce(new Error('network down'));
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    await user.click(deleteButton('label-bug', 'バグ'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('network down');
+    expect(row('label-bug')).not.toHaveAttribute('aria-busy');
+  });
+
+  it('keeps the row busy while the confirmed delete is sent, and drops it when the delete fails', async () => {
+    const del = deferred<{ success: boolean; removed_ticket_count: number }>();
+    mockedDelete.mockReturnValue(del.promise);
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    await user.click(deleteButton('label-bug', 'バグ'));
+    await answerDelete(user, true);
+    expect(row('label-bug')).toHaveAttribute('aria-busy', 'true');
+    expect(statusTexts()).not.toContain(savingText('バグ'));
+
+    await act(async () => del.reject(new Error('boom')));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('boom');
+    expect(row('label-bug')).not.toHaveAttribute('aria-busy');
+  });
+
+  it('announces only the existing "deleted" message when the delete succeeds', async () => {
+    mockedDelete.mockResolvedValue({ success: true, removed_ticket_count: 2 });
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    await user.click(deleteButton('label-bug', 'バグ'));
+    await answerDelete(user, true);
+
+    await waitFor(() => expect(screen.queryByTestId('label-row-label-bug')).not.toBeInTheDocument());
+    expect(statusTexts()).toContain(i18n.t('settings.labels.deleteSuccess', { name: 'バグ' }));
+    expect(statusTexts()).not.toContain(savingText('バグ'));
+    expect(row('label-feat')).not.toHaveAttribute('aria-busy');
+  });
+});

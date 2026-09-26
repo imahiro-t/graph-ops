@@ -576,7 +576,9 @@
       "confirmDeleteTitle": "Delete label",
       "confirmDeleteButton": "Delete",
       "deleteSuccess": "Deleted the label \"{{name}}\".",
-      "deleteAlreadyGone": "The label \"{{name}}\" had already been deleted."
+      "deleteAlreadyGone": "The label \"{{name}}\" had already been deleted.",
+      "saving": "Saving the label \"{{name}}\"...",
+      "saveSuccess": "Saved the label \"{{name}}\"."
     },
     "autopilot": {
       "title": "Autopilot settings ({{project}})",

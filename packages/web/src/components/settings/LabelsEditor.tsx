@@ -107,10 +107,14 @@ export const LabelColorPalette: React.FC<PaletteProps> = ({ value, onChange, dis
 export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLabelsChanged }) => {
   const { t } = useTranslation();
   const { confirm, confirmDialog } = useConfirmDialog();
-  // Announces a delete (DFLT-00197, as DFLT-00194 did for node types,
-  // projects and tickets): focus moves to a neighbor afterwards, and this
-  // says why -- which label is gone.
-  const { message: deleteNotice, announce: announceDelete } = useTransientAnnouncement();
+  // Announces what happens to a row. A delete (DFLT-00197, as DFLT-00194 did
+  // for node types, projects and tickets): focus moves to a neighbor
+  // afterwards, and this says why -- which label is gone. A rename or recolor
+  // (DFLT-00210): "saving" when it starts and "saved" once it succeeds, since
+  // the row's spinner is aria-hidden and its disabled buttons only say they
+  // cannot be pressed. One region for both, so the announcements never talk
+  // over each other.
+  const { message: rowNotice, announce: announceRow, clear: clearRowNotice } = useTransientAnnouncement();
   // Start on the app's current project, but fall back to the first one that
   // exists: an app with no project selected yet would otherwise open this
   // tab disabled even though there are projects whose labels could be
@@ -226,13 +230,22 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
     setBusyId(label.id);
     setError('');
     setCreateFailed(false);
+    // Named by the current name, not the rename draft: the draft may be empty
+    // or rejected by the server.
+    const savingText = t('settings.labels.saving', { name: label.name });
+    announceRow(savingText);
     try {
       const updated = await updateLabel(t, label.id, patch);
       setLabels(prev => sortLabels(prev.map(l => (l.id === label.id ? { ...updated, ticket_count: l.ticket_count } : l))));
+      // The name as saved -- the new one after a rename.
+      announceRow(t('settings.labels.saveSuccess', { name: updated.name }));
       onLabelsChanged?.();
       return true;
     } catch (err) {
       setError(errorMessage(err, t('errors.UNKNOWN')));
+      // The role="alert" error says what went wrong; "saving" no longer
+      // holds. Only this save's text is cleared, not a newer announcement.
+      clearRowNotice(savingText);
       return false;
     } finally {
       setBusyId(null);
@@ -290,7 +303,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
         // Already deleted by someone else: nothing to confirm. The row still
         // vanishes and focus still moves because of the user's click, so say
         // what happened -- but not "deleted", since this user did not.
-        announceDelete(t('settings.labels.deleteAlreadyGone', { name: label.name }));
+        announceRow(t('settings.labels.deleteAlreadyGone', { name: label.name }));
         focusAfterRemoval(label, fresh);
         onLabelsChanged?.();
         return;
@@ -323,7 +336,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       }
       // Named as the confirmation named it: the re-read name, which may be
       // newer than the row the user clicked.
-      announceDelete(t('settings.labels.deleteSuccess', { name: current.name }));
+      announceRow(t('settings.labels.deleteSuccess', { name: current.name }));
       const remaining = fresh.filter(l => l.id !== label.id);
       setLabels(prev => prev.filter(l => l.id !== label.id));
       focusAfterRemoval(label, remaining);
@@ -453,7 +466,16 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
             const busy = busyId === label.id;
             const renaming = renamingId === label.id;
             return (
-              <li key={label.id} data-testid={`label-row-${label.id}`} className="p-3 flex flex-wrap items-center gap-3">
+              // aria-busy (DFLT-00210): the row is being saved or deleted --
+              // from the usage re-read through the confirmation to the
+              // delete itself -- and is dropped once that settles, whatever
+              // the outcome.
+              <li
+                key={label.id}
+                data-testid={`label-row-${label.id}`}
+                aria-busy={busy || undefined}
+                className="p-3 flex flex-wrap items-center gap-3"
+              >
                 <div className="min-w-[10rem] flex items-center gap-2">
                   {renaming ? (
                     <input
@@ -551,14 +573,15 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
         </ul>
       )}
 
-      {/* Outside the list: deleting the last label unmounts the <ul>, and
-          the announcement must outlive it. Last child on purpose: this
+      {/* Row announcements (saving, saved, deleted). Outside the list:
+          deleting the last label unmounts the <ul>, and the announcement
+          must outlive it. Last child on purpose: this
           container spaces its children with space-y-4, whose sibling
           selector gives every child after the first a top margin even
           though the region is absolutely positioned. As the first child it
           would push the heading down by 1rem; as the last one only the
           region itself takes that margin, so nothing visible moves. */}
-      <StatusLiveRegion message={deleteNotice} />
+      <StatusLiveRegion message={rowNotice} />
     </div>
   );
 };

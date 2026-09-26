@@ -65,4 +65,48 @@ describe('useTransientAnnouncement', () => {
     rerender();
     expect(result.current.announce).toBe(first);
   });
+
+  // DFLT-00210: clear() empties the region early; clear(expected) only while
+  // that text is still the one shown.
+  it('clear() empties the message at once and cancels the pending timer', () => {
+    const { result } = renderHook(() => useTransientAnnouncement());
+
+    act(() => result.current.announce('Saving "a"...'));
+    act(() => result.current.clear());
+    expect(result.current.message).toBe('');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('clear(expected) empties the message when that text is still shown', () => {
+    const { result } = renderHook(() => useTransientAnnouncement());
+
+    act(() => result.current.announce('Saving "a"...'));
+    act(() => result.current.clear('Saving "a"...'));
+    expect(result.current.message).toBe('');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('clear(expected) leaves a newer announcement and its timer alone', () => {
+    const { result } = renderHook(() => useTransientAnnouncement());
+
+    act(() => result.current.announce('Saving "a"...'));
+    act(() => result.current.announce('Deleted "b".'));
+    act(() => result.current.clear('Saving "a"...'));
+    expect(result.current.message).toBe('Deleted "b".');
+    expect(vi.getTimerCount()).toBe(1);
+
+    act(() => vi.advanceTimersByTime(TRANSIENT_ANNOUNCEMENT_DURATION_MS));
+    expect(result.current.message).toBe('');
+  });
+
+  it('clear(expected) does nothing once the text has already been cleared by its timer', () => {
+    const { result } = renderHook(() => useTransientAnnouncement());
+
+    act(() => result.current.announce('Saving "a"...'));
+    act(() => vi.advanceTimersByTime(TRANSIENT_ANNOUNCEMENT_DURATION_MS));
+    act(() => result.current.announce('Saved "c".'));
+    act(() => vi.advanceTimersByTime(1000));
+    act(() => result.current.clear('Saving "a"...'));
+    expect(result.current.message).toBe('Saved "c".');
+  });
 });

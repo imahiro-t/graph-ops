@@ -575,7 +575,9 @@
       "confirmDeleteTitle": "ラベルの削除",
       "confirmDeleteButton": "削除する",
       "deleteSuccess": "ラベル「{{name}}」を削除しました。",
-      "deleteAlreadyGone": "ラベル「{{name}}」は既に削除されていました。"
+      "deleteAlreadyGone": "ラベル「{{name}}」は既に削除されていました。",
+      "saving": "ラベル「{{name}}」を保存中です。",
+      "saveSuccess": "ラベル「{{name}}」を保存しました。"
     },
     "autopilot": {
       "title": "オートパイロット設定（{{project}}）",
