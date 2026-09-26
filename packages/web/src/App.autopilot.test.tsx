@@ -154,6 +154,15 @@ describe('autopilot in the Web UI', () => {
     expect(refine.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(runButton.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(row.lastElementChild).toBe(column);
+    // DFLT-00219: the row wraps below sm only. On sm+ the regular actions
+    // keep their width and the column stays on their line, so the divider
+    // never starts a line of its own.
+    expect(row).toHaveClass('flex-wrap', 'sm:flex-nowrap');
+    const actions = within(row).getByTestId('autopilot-row-actions');
+    expect(actions).toHaveClass('sm:shrink-0');
+    expect(actions).toContainElement(refine);
+    expect(actions).toContainElement(runButton);
+    expect(column).toHaveClass('min-w-0');
   });
 
   // DFLT-00218: the focus fallback holds the autopilot button and the lines

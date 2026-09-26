@@ -78,9 +78,16 @@ const DIALOG_MODES: AutopilotMode[] = ['tree', 'ticket'];
 // row -- the caller's regular actions (`actions`: refine, run) on the left,
 // and at the right end (ml-auto) the autopilot column: the button, behind a
 // divider on sm+ screens, and the lines under it (what a person is awaited
-// for, the disabled reasons, the result, the untrusted-folder notice). On a
-// narrow screen the row wraps and the column moves to its own line with the
-// button still right-aligned, set apart by that and by its violet colours.
+// for, the disabled reasons, the result, the untrusted-folder notice). Below
+// sm the row wraps and the column moves to its own line with the button
+// still right-aligned, set apart by that and by its violet colours -- no
+// divider there. On sm+ the row does not wrap (DFLT-00219): the divider
+// only makes sense right next to the regular actions, and a column moved to
+// the next line would leave it at the start of an otherwise empty line.
+// That did happen at 640-700px (in English and Japanese alike) once the
+// column had lines under the button, which widen it up to its max-w-xs. So
+// on sm+ the regular actions keep their natural width (sm:shrink-0) and the
+// column takes the rest (min-w-0), its lines wrapping inside it.
 // The outer element only lays out the row and never takes focus; the column
 // is the focus fallback below, so it holds the button and the text about it
 // but not the regular actions -- its focus ring (and what a screen reader
@@ -254,11 +261,17 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
 
   return (
     // The action row: lays it out only, never takes focus (DFLT-00218).
-    <div data-testid="autopilot-controls" className="flex flex-wrap items-start gap-2">
-      {actions}
+    // Wraps below sm only; on sm+ the column stays on the actions' line, so
+    // its divider never starts a line of its own (DFLT-00219).
+    <div data-testid="autopilot-controls" className="flex flex-wrap sm:flex-nowrap items-start gap-2">
+      {actions != null && (
+        <div data-testid="autopilot-row-actions" className="min-w-0 sm:shrink-0">
+          {actions}
+        </div>
+      )}
       {/* The autopilot column, set apart from the regular actions: pushed to
-          the right end (on its own line too when the row wraps), the button
-          right-aligned in it behind a divider on sm+, the lines about it
+          the right end (below sm, on its own line when the row wraps), the
+          button right-aligned in it behind a divider on sm+, the lines about it
           under the button. tabIndex={-1}: the focus fallback while a
           confirmed start runs (see above), so its ring surrounds the
           autopilot alone. Not a Tab stop; the ring shows when it gets focus
