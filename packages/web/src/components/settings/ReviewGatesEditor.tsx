@@ -147,7 +147,6 @@ type FetchedRows = {
 // data-focus-key values of the controls removeGate moves keyboard focus to
 // once the deleted row is gone (see pendingFocus).
 const deleteButtonKey = (rowKey: string) => `delete-${rowKey}`;
-const previewToggleKey = (rowKey: string) => `preview-${rowKey}`;
 const ADD_GATE_FOCUS_KEY = 'add-gate';
 
 // What a row is called when naming it to a screen reader (its delete button's
@@ -308,10 +307,11 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // other way.
   // The removed row's open state goes with it; its rowKey is never handed
   // out again, so no later row could pick it up anyway.
-  // Focus then moves to the row that took the removed one's place (else the
-  // new last row, else "Add Review Gate"): to its delete button, or -- when
-  // that is aria-disabled because the row is a not-yet-overridden default --
-  // to its merged preview toggle, the row's other usable button.
+  // Focus then moves to the delete button of the row that took the removed
+  // one's place (else of the new last row), whether that row is overridden
+  // or a not-yet-overridden default: the latter's delete button is
+  // aria-disabled but still focusable, and tells why it can't delete
+  // (DFLT-00203). With no row left, focus goes to "Add Review Gate".
   // The removal is then announced (see deleteNotice); a guarded-out call
   // removes nothing and announces nothing.
   const removeGate = (rowKey: string) => {
@@ -325,11 +325,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     });
     const neighborKey = neighborAfterRemoval(gates.map(g => g.rowKey), rowKey, remaining.map(g => g.rowKey));
     const neighbor = remaining.find(g => g.rowKey === neighborKey);
-    if (!neighbor) {
-      setPendingFocus(ADD_GATE_FOCUS_KEY);
-    } else {
-      setPendingFocus(neighbor.isOverridden ? deleteButtonKey(neighbor.rowKey) : previewToggleKey(neighbor.rowKey));
-    }
+    setPendingFocus(neighbor ? deleteButtonKey(neighbor.rowKey) : ADD_GATE_FOCUS_KEY);
     const removedName = gateDisplayName(removed);
     announceDelete(
       removedName
@@ -593,7 +589,6 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               <button
                 type="button"
                 onClick={() => setExpandedPreview(prev => ({ ...prev, [g.rowKey]: !prev[g.rowKey] }))}
-                data-focus-key={previewToggleKey(g.rowKey)}
                 // The preview is only rendered while open, so aria-controls is
                 // set only then and never points at an id missing from the DOM.
                 aria-expanded={previewOpen}
