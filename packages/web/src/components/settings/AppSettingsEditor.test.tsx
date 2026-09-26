@@ -13,14 +13,16 @@ vi.mock('../../lib/settingsApi', async () => {
   return {
     ...actual,
     fetchAppSettings: vi.fn(),
-    saveAppSettings: vi.fn()
+    saveAppSettings: vi.fn(),
+    testMySQLConnection: vi.fn()
   };
 });
 
-import { fetchAppSettings, saveAppSettings } from '../../lib/settingsApi';
+import { fetchAppSettings, saveAppSettings, testMySQLConnection } from '../../lib/settingsApi';
 
 const mockedFetchAppSettings = fetchAppSettings as unknown as ReturnType<typeof vi.fn>;
 const mockedSaveAppSettings = saveAppSettings as unknown as ReturnType<typeof vi.fn>;
+const mockedTestMySQLConnection = testMySQLConnection as unknown as ReturnType<typeof vi.fn>;
 
 function makeResponse(overrides: Partial<AppSettingsResponse['file']> = {}): AppSettingsResponse {
   return {
@@ -573,5 +575,207 @@ describe('AppSettingsEditor secondary text contrast (DFLT-00179)', () => {
     const warning = screen.getByText(i18n.t('settings.appSettings.storage.mysqlTlsDisabledWarning'));
     expect(warning).toHaveClass('text-[10px]', 'text-red-600', 'dark:text-red-400');
     expect(warning).not.toHaveClass('text-slate-500');
+  });
+});
+
+// DFLT-00180: every inline status message of this tab is announced through a
+// live region that is in the DOM from the first render, and only its text
+// changes -- a live region mounted together with its text is not reliably
+// announced (WCAG 2.2 SC 4.1.3). The visible copy next to the field is
+// aria-hidden so the message is not read twice, and aria-describedby points
+// at the live region, which holds the text whenever the message is shown.
+function liveRegionById(id: string): HTMLElement {
+  const el = document.getElementById(id);
+  expect(el).not.toBeNull();
+  return el as HTMLElement;
+}
+
+function expectEmptyLiveRegion(el: HTMLElement) {
+  expect(el).toHaveAttribute('role', 'status');
+  expect(el).toHaveAttribute('aria-live', 'polite');
+  expect(el.textContent).toBe('');
+}
+
+// The one visible copy of `message` (besides the live region itself and the
+// save button's blocked reason, which repeats some of these on purpose) is
+// hidden from assistive technology and is not a live region of its own.
+function expectVisibleCopyIsAriaHidden(message: string, region: HTMLElement) {
+  const copies = screen
+    .getAllByText(message)
+    .filter((el) => el !== region && el.id !== 'save-blocked-reason');
+  expect(copies).toHaveLength(1);
+  expect(copies[0]).toHaveAttribute('aria-hidden', 'true');
+  expect(copies[0]).not.toHaveAttribute('role');
+  expect(copies[0]).not.toHaveAttribute('aria-live');
+  expect(copies[0]).not.toHaveAttribute('id');
+}
+
+describe('AppSettingsEditor inline status messages use always-mounted live regions (DFLT-00180)', () => {
+  beforeEach(() => {
+    mockedFetchAppSettings.mockReset();
+    mockedSaveAppSettings.mockReset();
+    mockedTestMySQLConnection.mockReset();
+  });
+
+  afterEach(async () => {
+    await i18n.changeLanguage('ja');
+  });
+
+  const mysqlRadio = () => screen.getByRole('radio', { name: i18n.t('settings.appSettings.storage.dbBackendMysql') });
+  const sqliteRadio = () => screen.getByRole('radio', { name: i18n.t('settings.appSettings.storage.dbBackendSqlite') });
+
+  it('MySQL password retype hint: the region exists before MySQL is selected and fills when the saved password would be resent to another host', async () => {
+    const user = userEvent.setup();
+    mockedFetchAppSettings.mockResolvedValueOnce(
+      makeResponse({
+        dbBackend: 'sqlite',
+        mysqlHost: 'db.example.com',
+        mysqlDatabase: 'graphops',
+        mysqlUser: 'admin',
+        mysqlPassword: REDACTED_SECRET_PLACEHOLDER
+      })
+    );
+    renderEditor();
+    await screen.findByLabelText(i18n.t('settings.appSettings.storage.dbPathLabel'));
+
+    const region = liveRegionById('mysql-password-retype-hint');
+    expectEmptyLiveRegion(region);
+
+    await user.click(mysqlRadio());
+    expect(document.getElementById('mysql-password-retype-hint')).toBe(region);
+    expect(region.textContent).toBe('');
+
+    const hostInput = screen.getByLabelText(i18n.t('settings.appSettings.storage.mysqlHostLabel'));
+    await user.clear(hostInput);
+    await user.type(hostInput, 'other-host.example.com');
+
+    const hint = i18n.t('settings.appSettings.storage.mysqlPasswordRetypeHint');
+    expect(document.getElementById('mysql-password-retype-hint')).toBe(region);
+    expect(region).toHaveTextContent(hint);
+    expect(screen.getByLabelText(i18n.t('settings.appSettings.storage.mysqlPasswordLabel'))).toHaveAccessibleDescription(
+      expect.stringContaining(hint)
+    );
+    expectVisibleCopyIsAriaHidden(hint, region);
+
+    // The retype requirement survives the switch to sqlite (see Q-1), but its
+    // MySQL-block hint is off screen there, so nothing is announced for it.
+    await user.click(sqliteRadio());
+    expect(document.getElementById('mysql-password-retype-hint')).toBe(region);
+    expect(region.textContent).toBe('');
+  });
+
+  it('MySQL TLS CA required hint: the region exists from the start and fills when verify-ca has no CA file', async () => {
+    const user = userEvent.setup();
+    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse());
+    renderEditor();
+    await screen.findByLabelText(i18n.t('settings.appSettings.storage.dbPathLabel'));
+
+    const region = liveRegionById('mysql-tls-ca-required-hint');
+    expectEmptyLiveRegion(region);
+
+    await user.click(mysqlRadio());
+    expect(region.textContent).toBe('');
+    await user.click(screen.getByRole('radio', { name: i18n.t('settings.appSettings.storage.mysqlTlsVerifyCa') }));
+
+    const hint = i18n.t('settings.appSettings.storage.mysqlTlsCaRequiredHint');
+    expect(document.getElementById('mysql-tls-ca-required-hint')).toBe(region);
+    expect(region).toHaveTextContent(hint);
+    const caInput = screen.getByLabelText(i18n.t('settings.appSettings.storage.mysqlTlsCaLabel'));
+    expect(caInput).toHaveAccessibleDescription(expect.stringContaining(hint));
+    expectVisibleCopyIsAriaHidden(hint, region);
+
+    await user.type(caInput, '/etc/ssl/ca.pem');
+    expect(region.textContent).toBe('');
+    expect(screen.queryByText(hint)).not.toBeInTheDocument();
+  });
+
+  it('MySQL required fields hint: the region exists before MySQL is selected and fills as soon as it is', async () => {
+    const user = userEvent.setup();
+    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse());
+    renderEditor();
+    await screen.findByLabelText(i18n.t('settings.appSettings.storage.dbPathLabel'));
+
+    const region = liveRegionById('mysql-required-fields-hint');
+    expectEmptyLiveRegion(region);
+
+    await user.click(mysqlRadio());
+
+    const hint = i18n.t('settings.appSettings.storage.mysqlRequiredFieldsHint');
+    expect(document.getElementById('mysql-required-fields-hint')).toBe(region);
+    expect(region).toHaveTextContent(hint);
+    const hostInput = screen.getByLabelText(i18n.t('settings.appSettings.storage.mysqlHostLabel'));
+    expect(hostInput).toHaveAccessibleDescription(expect.stringContaining(hint));
+    expect(screen.getByRole('button', { name: i18n.t('settings.appSettings.storage.testConnection') })).toHaveAccessibleDescription(
+      expect.stringContaining(hint)
+    );
+    expectVisibleCopyIsAriaHidden(hint, region);
+
+    await user.type(hostInput, 'db.example.com');
+    await user.type(screen.getByLabelText(i18n.t('settings.appSettings.storage.mysqlDatabaseLabel')), 'graphops');
+    await user.type(screen.getByLabelText(i18n.t('settings.appSettings.storage.mysqlUserLabel')), 'admin');
+    expect(region.textContent).toBe('');
+  });
+
+  it('MySQL connection test result: announced through a region that was there before the test ran, for success and failure alike', async () => {
+    const user = userEvent.setup();
+    mockedFetchAppSettings.mockResolvedValueOnce(
+      makeResponse({ dbBackend: 'mysql', mysqlHost: 'db.example.com', mysqlDatabase: 'graphops', mysqlUser: 'admin' })
+    );
+    renderEditor();
+    const testButton = await screen.findByRole('button', { name: i18n.t('settings.appSettings.storage.testConnection') });
+
+    const regionsBefore = screen.getAllByRole('status');
+    for (const el of regionsBefore) expect(el).toHaveAttribute('aria-live', 'polite');
+
+    mockedTestMySQLConnection.mockResolvedValueOnce({ ok: true });
+    await user.click(testButton);
+
+    const success = i18n.t('settings.appSettings.storage.testConnectionSuccess');
+    await waitFor(() => expect(screen.getAllByRole('status').some((el) => el.textContent === success)).toBe(true));
+    const region = screen.getAllByRole('status').find((el) => el.textContent === success) as HTMLElement;
+    expect(regionsBefore).toContain(region);
+    expectVisibleCopyIsAriaHidden(success, region);
+
+    // A new test empties the region while it runs, so even a result identical
+    // to the previous one is a text change and gets announced again.
+    let resolveSecond: (r: { ok: boolean; error?: string }) => void = () => {};
+    mockedTestMySQLConnection.mockReturnValueOnce(new Promise((resolve) => { resolveSecond = resolve; }));
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.appSettings.storage.testConnection') }));
+    await waitFor(() => expect(region.textContent).toBe(''));
+    expect(screen.getAllByRole('status')).toContain(region);
+    resolveSecond({ ok: false, error: 'access denied' });
+
+    const failure = i18n.t('settings.appSettings.storage.testConnectionFailure', { error: 'access denied' });
+    await waitFor(() => expect(region).toHaveTextContent(failure));
+    expect(screen.getAllByRole('status')).toContain(region);
+    expectVisibleCopyIsAriaHidden(failure, region);
+
+    // Switching the backend clears the result, and the region stays behind empty.
+    await user.click(sqliteRadio());
+    expect(screen.getAllByRole('status')).toContain(region);
+    expect(region.textContent).toBe('');
+  });
+
+  it('team settings directory warning: the region exists from the start and fills for a relative path', async () => {
+    const user = userEvent.setup();
+    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse());
+    renderEditor();
+
+    const input = await screen.findByLabelText(i18n.t('settings.appSettings.teamExtensionsDir.title'));
+    const region = document.querySelector('[id$="-team-extensions-dir-invalid"]') as HTMLElement;
+    expect(region).not.toBeNull();
+    expectEmptyLiveRegion(region);
+
+    await user.type(input, 'shared/team');
+
+    const hint = i18n.t('settings.appSettings.teamExtensionsDir.notAbsolute');
+    expect(document.querySelector('[id$="-team-extensions-dir-invalid"]')).toBe(region);
+    expect(region).toHaveTextContent(hint);
+    expect(input).toHaveAccessibleDescription(expect.stringContaining(hint));
+    expectVisibleCopyIsAriaHidden(hint, region);
+
+    await user.clear(input);
+    await user.type(input, '/srv/team');
+    expect(region.textContent).toBe('');
   });
 });

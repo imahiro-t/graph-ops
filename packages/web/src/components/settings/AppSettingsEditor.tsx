@@ -476,6 +476,26 @@ export const AppSettingsEditor: React.FC<Props> = ({
             ? t('settings.common.noChangesToSave')
             : '';
 
+  // Inline status messages (DFLT-00180). Each one is announced through an
+  // always-mounted StatusLiveRegion -- a live region mounted together with its
+  // text is not reliably announced (SC 4.1.3, see StatusLiveRegion) -- while
+  // the visible copy next to its field is aria-hidden. Both read the same
+  // variable, '' meaning "not shown", so what is seen and what is announced
+  // cannot drift apart.
+  //
+  // The retype flags are deliberately not gated on the selected backend (see
+  // mysqlPasswordRetypeRequired above), but their visible hints live inside
+  // that backend's block, so the announced text is gated here to match.
+  const mysqlPasswordRetypeMessage =
+    mysqlSelected && mysqlPasswordRetypeRequired ? t('settings.appSettings.storage.mysqlPasswordRetypeHint') : '';
+  const mysqlTlsCaRequiredMessage = mysqlTlsCaInvalid ? t('settings.appSettings.storage.mysqlTlsCaRequiredHint') : '';
+  const mysqlRequiredFieldsMessage = mysqlRequiredMissing ? t('settings.appSettings.storage.mysqlRequiredFieldsHint') : '';
+  const connectionTestMessage = mysqlSelected && connectionTestResult ? connectionTestResult.message : '';
+  const httpTokenRetypeMessage =
+    httpSelected && httpTokenRetypeNeeded ? t('settings.appSettings.storage.httpTokenRetypeHint') : '';
+  const httpProblemMessage = httpProblem ? t(HTTP_PROBLEM_HINT_KEYS[httpProblem]) : '';
+  const teamDirInvalidMessage = teamDirInvalid ? t('settings.appSettings.teamExtensionsDir.notAbsolute') : '';
+
   return (
     <div className="flex flex-col gap-4 h-full min-h-0 overflow-auto">
       {/* 保存失敗はフォーカス移動を伴わずに現れ、しかもスクロールコンテナ最上部の
@@ -622,14 +642,11 @@ export const AppSettingsEditor: React.FC<Props> = ({
                     ? t('settings.appSettings.storage.mysqlPasswordFromEnvHint', { envVar: mysqlPasswordEnvVar })
                     : t('settings.appSettings.storage.mysqlPasswordPlaintextHint')}
               </p>
-              {mysqlPasswordRetypeRequired && (
-                <p
-                  id="mysql-password-retype-hint"
-                  role="status"
-                  aria-live="polite"
-                  className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5"
-                >
-                  {t('settings.appSettings.storage.mysqlPasswordRetypeHint')}
+              {/* 読み上げと aria-describedby の参照先は、Storage セクション末尾の
+                  常時マウントの live region が担当する（SC 4.1.3）。 */}
+              {mysqlPasswordRetypeMessage && (
+                <p aria-hidden="true" className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5">
+                  {mysqlPasswordRetypeMessage}
                 </p>
               )}
             </div>
@@ -686,16 +703,18 @@ export const AppSettingsEditor: React.FC<Props> = ({
                   className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
                 />
                 <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{t('settings.appSettings.storage.mysqlTlsCaHint')}</p>
-                {mysqlTlsCaInvalid && (
-                  <p id="mysql-tls-ca-required-hint" role="status" aria-live="polite" className="text-[10px] text-red-600 dark:text-red-400 mt-0.5">
-                    {t('settings.appSettings.storage.mysqlTlsCaRequiredHint')}
+                {/* 読み上げは Storage セクション末尾の常時マウントの live region（SC 4.1.3）。 */}
+                {mysqlTlsCaRequiredMessage && (
+                  <p aria-hidden="true" className="text-[10px] text-red-600 dark:text-red-400 mt-0.5">
+                    {mysqlTlsCaRequiredMessage}
                   </p>
                 )}
               </div>
             )}
 
-            {mysqlRequiredMissing && (
-              <p id="mysql-required-fields-hint" role="status" aria-live="polite" className="text-[10px] text-red-600 dark:text-red-400">{t('settings.appSettings.storage.mysqlRequiredFieldsHint')}</p>
+            {/* 読み上げは Storage セクション末尾の常時マウントの live region（SC 4.1.3）。 */}
+            {mysqlRequiredFieldsMessage && (
+              <p aria-hidden="true" className="text-[10px] text-red-600 dark:text-red-400">{mysqlRequiredFieldsMessage}</p>
             )}
 
             <div className="flex items-center gap-2 pt-1">
@@ -724,10 +743,10 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 {testingConnection ? <Loader2 className="w-3 h-3 animate-spin" /> : <PlugZap className="w-3 h-3" />}
                 {testingConnection ? t('settings.appSettings.storage.testingConnection') : t('settings.appSettings.storage.testConnection')}
               </button>
-              {connectionTestResult && (
+              {/* 読み上げは Storage セクション末尾の常時マウントの live region（SC 4.1.3）。 */}
+              {connectionTestResult && connectionTestMessage && (
                 <span
-                  role="status"
-                  aria-live="polite"
+                  aria-hidden="true"
                   className={`text-[11px] flex items-center gap-1 ${connectionTestResult.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}
                 >
                   {connectionTestResult.ok ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <XCircle className="w-3.5 h-3.5 shrink-0" />}
@@ -788,24 +807,34 @@ export const AppSettingsEditor: React.FC<Props> = ({
                     ? t('settings.appSettings.storage.httpTokenFromEnvHint', { envVar: httpTokenEnvVar })
                     : t('settings.appSettings.storage.httpTokenPlaintextHint')}
               </p>
-              {httpTokenRetypeNeeded && (
-                <p
-                  id={`${fieldId}-http-token-retype`}
-                  role="status"
-                  aria-live="polite"
-                  className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5"
-                >
-                  {t('settings.appSettings.storage.httpTokenRetypeHint')}
+              {/* 読み上げは Storage セクション末尾の常時マウントの live region（SC 4.1.3）。 */}
+              {httpTokenRetypeMessage && (
+                <p aria-hidden="true" className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5">
+                  {httpTokenRetypeMessage}
                 </p>
               )}
             </div>
-            {httpProblem && (
-              <p id={`${fieldId}-http-problem`} role="status" aria-live="polite" className="text-[10px] text-red-600 dark:text-red-400">
-                {t(HTTP_PROBLEM_HINT_KEYS[httpProblem])}
+            {/* 読み上げは Storage セクション末尾の常時マウントの live region（SC 4.1.3）。 */}
+            {httpProblemMessage && (
+              <p aria-hidden="true" className="text-[10px] text-red-600 dark:text-red-400">
+                {httpProblemMessage}
               </p>
             )}
           </div>
         )}
+
+        {/* 上の MySQL / HTTP ブロックのインラインメッセージの読み上げ役（SC 4.1.3）。
+            ブロックの内側に置くとバックエンドの切り替えで器と文言が同時に挿入され、
+            条件付きマウントと同じく読み上げが保証されないので、常に描画される
+            この外枠に置く。入力欄やボタンの aria-describedby はこの器の id を参照する
+            （見た目側は aria-hidden）。sr-only は position:absolute なので space-y
+            のレイアウトは変わらない。 */}
+        <StatusLiveRegion id="mysql-password-retype-hint" message={mysqlPasswordRetypeMessage} />
+        <StatusLiveRegion id="mysql-tls-ca-required-hint" message={mysqlTlsCaRequiredMessage} />
+        <StatusLiveRegion id="mysql-required-fields-hint" message={mysqlRequiredFieldsMessage} />
+        <StatusLiveRegion message={connectionTestMessage} />
+        <StatusLiveRegion id={`${fieldId}-http-token-retype`} message={httpTokenRetypeMessage} />
+        <StatusLiveRegion id={`${fieldId}-http-problem`} message={httpProblemMessage} />
 
         <div>
           <label htmlFor={`${fieldId}-artifacts-dir`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.artifactsDirLabel')}</label>
@@ -872,9 +901,12 @@ export const AppSettingsEditor: React.FC<Props> = ({
           placeholder={t('settings.appSettings.teamExtensionsDir.placeholder')}
           className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
         />
-        {teamDirInvalid && (
-          <p id={`${fieldId}-team-extensions-dir-invalid`} role="status" aria-live="polite" className="text-[10px] text-red-600 dark:text-red-400 mt-0.5">
-            {t('settings.appSettings.teamExtensionsDir.notAbsolute')}
+        {/* 読み上げと aria-describedby の参照先は常時マウントの live region が
+            担当する（SC 4.1.3）。見た目側は aria-hidden。 */}
+        <StatusLiveRegion id={`${fieldId}-team-extensions-dir-invalid`} message={teamDirInvalidMessage} />
+        {teamDirInvalidMessage && (
+          <p aria-hidden="true" className="text-[10px] text-red-600 dark:text-red-400 mt-0.5">
+            {teamDirInvalidMessage}
           </p>
         )}
         {effective && (
