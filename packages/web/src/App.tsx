@@ -1379,35 +1379,72 @@ export const App: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-6 py-6 space-y-6">
-        {/* Simple Summary Metrics */}
+      {/* Main Container. DFLT-00251: under 15rem (a 160px window at 200%
+          zoom, or a large default font on a narrow screen -- the rem query
+          of DFLT-00227: below 240px at 100%, below 480px at 200%) the page
+          pads with px-3 instead of px-6, which took almost a third of a
+          160px window and left the list, the summary card and the
+          pagination row too little room. DFLT-00252: below sm (640px, a px
+          query) it pads with px-3 too, whatever the text size -- a 200% root
+          font size set on the page itself leaves the rem query at 240px, and
+          at 320/360px the Send button's label broke onto several lines. The
+          15rem query stays: with a very large default font (over about 267%)
+          it still matches above 640px. From sm up, at a normal default font
+          size, nothing changes. */}
+      <main className="max-w-7xl mx-auto px-6 max-sm:px-3 [@media(max-width:15rem)]:px-3 py-6 space-y-6">
+        {/* Simple Summary Metrics. DFLT-00251: both children are min-w-0
+            max-w-full so neither can be wider than the card; the numbers
+            already wrap between items (flex-wrap). Each item is min-w-0
+            max-w-full as well, and its number may break: at 320px with a
+            32px root font the item has about 110px for its number, and the
+            node progress ("2204/2228", text-lg bold) was one unbreakable
+            word of about 180px that ran 2px past the window. It now breaks
+            after the slash first (<wbr>) and anywhere as a last resort. An
+            item only narrows when it is wider than a whole line of the
+            row, so with the default font nothing moves. */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm">{t('summary.title')}</span>
-            <span className="text-xs text-slate-500 dark:text-slate-400">{t('summary.subtitle')}</span>
+          {/* DFLT-00251: in English at 160px the title and its note kept
+              their min-content width ("Overview", "artifacts)") and ran 5px
+              past the window. Under 15rem the two may now wrap onto lines
+              of their own and break inside a long word. Only under 15rem:
+              at 320-414px with the default font the title and the note sit
+              side by side, each wrapping its own text, and letting them
+              wrap (or shrink below their longest word) there would change
+              that look. */}
+          <div
+            data-testid="summary-heading"
+            className="flex [@media(max-width:15rem)]:flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 max-w-full"
+          >
+            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm [@media(max-width:15rem)]:min-w-0 [@media(max-width:15rem)]:[overflow-wrap:anywhere]">{t('summary.title')}</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 [@media(max-width:15rem)]:min-w-0 [@media(max-width:15rem)]:[overflow-wrap:anywhere]">{t('summary.subtitle')}</span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 sm:divide-x divide-slate-200 dark:divide-slate-700 text-xs">
-            <div className="text-center px-3">
-              <div className="text-lg font-bold text-slate-800 dark:text-slate-200">{totalCount}</div>
+          <div
+            data-testid="summary-metrics"
+            className="flex flex-wrap items-center gap-x-6 gap-y-2 min-w-0 max-w-full sm:divide-x divide-slate-200 dark:divide-slate-700 text-xs"
+          >
+            <div className="text-center px-3 min-w-0 max-w-full">
+              <div className="text-lg font-bold [overflow-wrap:anywhere] text-slate-800 dark:text-slate-200">{totalCount}</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.total')}</div>
             </div>
-            <div className="text-center px-3">
-              <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{inProgressCount}</div>
+            <div className="text-center px-3 min-w-0 max-w-full">
+              <div className="text-lg font-bold [overflow-wrap:anywhere] text-blue-600 dark:text-blue-400">{inProgressCount}</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.inProgress')}</div>
             </div>
-            <div className="text-center px-3">
-              <div className="text-lg font-bold text-purple-600 dark:text-purple-400">{inReviewCount}</div>
+            <div className="text-center px-3 min-w-0 max-w-full">
+              <div className="text-lg font-bold [overflow-wrap:anywhere] text-purple-600 dark:text-purple-400">{inReviewCount}</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.inReview')}</div>
             </div>
-            <div className="text-center px-3">
-              <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{doneCount}</div>
+            <div className="text-center px-3 min-w-0 max-w-full">
+              <div className="text-lg font-bold [overflow-wrap:anywhere] text-emerald-600 dark:text-emerald-400">{doneCount}</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.done')}</div>
             </div>
-            <div className="text-center px-3">
-              <div className="text-lg font-bold text-slate-800 dark:text-slate-200">
-                {doneNodesCount}/{totalNodesCount}
+            <div className="text-center px-3 min-w-0 max-w-full">
+              <div
+                data-testid="summary-node-progress"
+                className="text-lg font-bold [overflow-wrap:anywhere] text-slate-800 dark:text-slate-200"
+              >
+                {doneNodesCount}/<wbr />{totalNodesCount}
               </div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.nodeProgress')}</div>
             </div>
@@ -1502,15 +1539,24 @@ export const App: React.FC = () => {
               ))}
 
               {totalPages > 1 && (
-                <div className="flex items-center justify-between mt-2 px-1 text-xs text-slate-500 dark:text-slate-400">
-                  <span>
+                // DFLT-00239: on a narrow line (200% text size on a 320px
+                // screen) the buttons move under the count instead of
+                // squeezing it into a column or pushing "next" past the
+                // window. The buttons stay one shrink-0 group, so previous,
+                // page number and next never split across lines.
+                // DFLT-00251: in a 160px window (200% zoom) the group was
+                // wider than the row with a two-digit page number
+                // ("10 / 23"), so under 15rem its gaps shrink to gap-2; and
+                // the count may break inside a long run of digits.
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mt-2 px-1 text-xs text-slate-500 dark:text-slate-400">
+                  <span className="min-w-0 [overflow-wrap:anywhere]">
                     {t('pagination.range', {
                       from: (currentPage - 1) * ticketsPerPage + 1,
                       to: Math.min(currentPage * ticketsPerPage, filteredTickets.length),
                       total: filteredTickets.length
                     })}
                   </span>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 [@media(max-width:15rem)]:gap-2 shrink-0">
                     <button
                       onClick={() => setPage(p => Math.max(1, p - 1))}
                       aria-label={t('pagination.previous')}

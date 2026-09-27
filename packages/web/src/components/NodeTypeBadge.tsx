@@ -11,6 +11,10 @@ interface Props {
   // surface -- see nodeTypeMeta.ts's note (DFLT-00023 D-2).
   theme: 'light' | 'dark';
   className?: string;
+  // Extra classes for the label span, which truncates by default (DFLT-00253:
+  // TicketItem lets it wrap instead where the row wraps, so a 200% default
+  // font on a narrow screen shows the whole label, not an ellipsis).
+  labelClassName?: string;
 }
 
 // Shared node-type badge (icon + color + label). Every surface that shows a
@@ -18,7 +22,7 @@ interface Props {
 // use the same rule to distinguish node types" holds by construction rather
 // than by two components happening to agree. TicketItem.tsx's node list is
 // its only caller at the moment (DFLT-00023 D-2 removed the other one).
-export const NodeTypeBadge: React.FC<Props> = ({ type, theme, className }) => {
+export const NodeTypeBadge: React.FC<Props> = ({ type, theme, className, labelClassName }) => {
   const { t } = useTranslation();
   const meta = getNodeTypeMeta(type);
   const colors = theme === 'dark' ? meta.dark : meta.light;
@@ -31,7 +35,7 @@ export const NodeTypeBadge: React.FC<Props> = ({ type, theme, className }) => {
       className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wide ${colors.bg} ${colors.text} ${colors.border} ${className || ''}`}
     >
       <Icon aria-hidden="true" className="w-3 h-3 shrink-0" />
-      <span className="truncate">{label}</span>
+      <span className={labelClassName ? `truncate ${labelClassName}` : 'truncate'}>{label}</span>
     </span>
   );
 };

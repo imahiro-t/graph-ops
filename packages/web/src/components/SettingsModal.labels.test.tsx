@@ -67,7 +67,7 @@ describe('SettingsModal labels tab', () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.labels') }));
+    await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.labels') }));
 
     const select = screen.getByLabelText(i18n.t('settings.labels.projectLabel'));
     expect(select).toHaveValue(alpha.id);
@@ -80,7 +80,7 @@ describe('SettingsModal labels tab', () => {
     const user = userEvent.setup();
     renderModal(onLabelsChanged);
 
-    await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.labels') }));
+    await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.labels') }));
 
     expect(await screen.findByTestId('label-row-label-bug')).toBeInTheDocument();
     expect(screen.getByTestId('label-row-label-feat')).toBeInTheDocument();

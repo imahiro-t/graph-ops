@@ -17,6 +17,41 @@
 // checks the classes and structure; the geometry at 320/375/480px (ja/en)
 // and at 1024-1440px was measured in a real browser (see the ticket's
 // implementation notes).
+//
+// DFLT-00253 moved that boundary from lg (1024px) to 80rem, a rem media
+// query (`[@media_not_all_and_(min-width:80rem)]:`, the rem form of max-xl:).
+// In English at 1024-1279px the one-line layout let the artifact badge run
+// over the status badge and the type badge over the approve button, and a
+// px boundary does not follow the browser's default font size, so a 20-32px
+// default font brought the same overlaps back at 1280px and wider. At the
+// default 16px, 80rem is 1280px, so the row from 1280px up is unchanged.
+// The right group now aligns right with justify-content: safe flex-end
+// instead of justify-end, so with a 200% default font on a 320-375px screen
+// the approve/reject buttons no longer run out past the row's left edge;
+// the buttons, their wrapper and the type badge may shrink there, and under
+// 15rem the row and the buttons pad less. The geometry (no two parts of a
+// row intersecting at 16px x 1024-1440px and 20/24/32px x 1024/1280px, the
+// buttons inside the card and hit by elementFromPoint at 200% x 320/375px)
+// was measured in a real browser (see the ticket's implementation notes).
+//
+// DFLT-00253 round 2 (review findings):
+// - From 80rem up (the one-line layout), in English a row carrying the
+//   retry, manual and artifact badges still ran its artifact badge under the
+//   approve button or the status badge at 1280px+ (the panel's width is
+//   capped, so a wider window does not help). The row now wraps there too,
+//   but only when it has to: the left group keeps flex-1 min-w-0 and adds
+//   min-w-min from 80rem, and the name (from 80rem) is width 0 with a content
+//   flex-basis, so it is laid out and truncated as before but adds nothing to
+//   that minimum. When the id and badges plus the right group do not fit on
+//   one line, the right group moves to the next line, right-aligned by its
+//   (now unprefixed) ml-auto. A row that fits is unchanged: its left group
+//   takes the free space, so ml-auto and the (now unprefixed) row-gap do
+//   nothing. Measured: row heights and tab positions at 16px x 1280/1440px
+//   (ja/en) match the pre-DFLT-00253 values, and no two parts of any row
+//   intersect with the reviewers' data.
+// - Under 80rem the type badge's label wraps instead of truncating, so a
+//   200% default font on a 320px screen shows the whole label (WCAG 1.4.4;
+//   the title tooltip reaches neither keyboard nor touch users).
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
@@ -115,14 +150,21 @@ const rowParts = (n: GraphNode) => {
 
 // Each class is checked on its own: `not.toHaveClass(a, b)` passes as soon as
 // one of them is missing, so it would not catch the other slipping in.
+// DFLT-00253: the wrapping layout's boundary, and the query for a large
+// default font on a narrow screen (DFLT-00227).
+const UNDER_80REM = '[@media_not_all_and_(min-width:80rem)]:';
+const FROM_80REM = '[@media(min-width:80rem)]:';
+const NARROW_LARGE_TEXT = '[@media(max-width:15rem)]:';
+
 const expectNoneOf = (el: Element, classes: string[]) => {
   for (const cls of classes) expect(el).not.toHaveClass(cls);
 };
 
 const classList = (el: Element) => (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
 
-// The classes each part had before DFLT-00242 (what lays the row out from lg
-// up), and the classes it added below lg.
+// The classes each part had before DFLT-00242 (what lays the row out from
+// 80rem up), and the classes added under 80rem (DFLT-00242, moved from
+// max-lg: by DFLT-00253) or under 15rem.
 const BEFORE = {
   row: 'flex items-center justify-between p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none',
   left: 'flex items-center gap-2.5 flex-1 min-w-0',
@@ -133,21 +175,72 @@ const BEFORE = {
   approvalButtons: 'flex items-center gap-1.5'
 };
 const ADDED = {
-  row: ['max-lg:flex-wrap', 'max-lg:gap-x-3', 'max-lg:gap-y-2'],
-  // Without max-lg:basis-auto the left group keeps flex-1's 0% basis and the
-  // right group never wraps to the next line, so this one is essential.
-  left: ['max-lg:basis-auto', 'max-lg:flex-wrap', 'max-lg:gap-y-1.5'],
-  right: ['max-lg:shrink', 'max-lg:min-w-0', 'max-lg:flex-wrap', 'max-lg:gap-y-1.5', 'max-lg:ml-auto', 'max-lg:justify-end'],
-  id: ['max-lg:shrink', 'max-lg:min-w-0', 'max-lg:whitespace-normal', 'max-lg:[overflow-wrap:anywhere]'],
-  name: ['max-lg:whitespace-normal', 'max-lg:[overflow-wrap:anywhere]'],
+  // flex-wrap and gap-y-2 hold at every width (DFLT-00253 round 2): a row
+  // that fits never wraps, so they only act when it does not.
+  row: ['flex-wrap', 'gap-y-2', `${UNDER_80REM}gap-x-3`, `${NARROW_LARGE_TEXT}p-2`],
+  // Without basis-auto the left group keeps flex-1's 0% basis and the right
+  // group never wraps to the next line, so this one is essential.
+  // From 80rem the left group is at least as wide as its parts other than
+  // the name, so a row they do not fit in wraps (DFLT-00253 round 2).
+  left: [`${FROM_80REM}min-w-min`, `${UNDER_80REM}basis-auto`, `${UNDER_80REM}flex-wrap`, `${UNDER_80REM}gap-y-1.5`],
+  right: [
+    'ml-auto',
+    `${UNDER_80REM}shrink`,
+    `${UNDER_80REM}min-w-0`,
+    `${UNDER_80REM}flex-wrap`,
+    `${UNDER_80REM}gap-y-1.5`,
+    `${UNDER_80REM}[justify-content:safe_flex-end]`
+  ],
+  id: [`${UNDER_80REM}shrink`, `${UNDER_80REM}min-w-0`, `${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}[overflow-wrap:anywhere]`],
+  // From 80rem the name adds nothing to the left group's min-content width
+  // (width 0) but is still laid out at its content width (content basis).
+  name: [`${FROM_80REM}w-0`, `${FROM_80REM}[flex-basis:content]`, `${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}[overflow-wrap:anywhere]`],
   time: ['whitespace-nowrap'],
-  approvalButtons: ['max-lg:flex-wrap']
+  approvalButtons: [`${UNDER_80REM}flex-wrap`, `${UNDER_80REM}min-w-0`, `${UNDER_80REM}max-w-full`],
+  // DFLT-00253: each approve/reject button and the type badge may shrink
+  // under 80rem, and the buttons pad less under 15rem.
+  approvalButton: [
+    `${UNDER_80REM}min-w-0`,
+    `${UNDER_80REM}max-w-full`,
+    `${UNDER_80REM}flex-wrap`,
+    `${UNDER_80REM}[overflow-wrap:anywhere]`,
+    `${NARROW_LARGE_TEXT}px-1`
+  ],
+  typeBadge: [`${UNDER_80REM}shrink`, `${UNDER_80REM}min-w-0`, `${UNDER_80REM}max-w-full`],
+  // DFLT-00253 round 2: the badge's label wraps under 80rem.
+  typeBadgeLabel: [`${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}[overflow-wrap:anywhere]`]
 };
-// The only unprefixed classes DFLT-00242 added: the status badge and the time
-// are one line from lg up already, so nowrap changes nothing there.
-const UNPREFIXED_ALLOWED = new Set(['whitespace-nowrap']);
-// Unprefixed wrap/size classes that would change the row from lg up.
-const FORBIDDEN_UNPREFIXED = ['flex-wrap', 'basis-auto', 'basis-full', 'whitespace-normal', 'shrink', 'ml-auto', 'justify-end', 'gap-y-2', 'gap-y-1.5'];
+// A prefix is allowed for an added class only if it is one of these.
+const ALLOWED_PREFIXES = [UNDER_80REM, FROM_80REM, NARROW_LARGE_TEXT];
+// px breakpoints, which do not follow the browser's default font size; none
+// of them may come back on a node row (DFLT-00253).
+const PX_PREFIXES = ['max-lg:', 'max-xl:', 'lg:', 'xl:', 'max-2xl:', '2xl:'];
+const hasPxPrefix = (cls: string) => PX_PREFIXES.some(p => cls.startsWith(p));
+// The only unprefixed classes added: whitespace-nowrap (DFLT-00242; the
+// status badge and the time are one line from lg up already, so nowrap
+// changes nothing there), and the row's flex-wrap / gap-y-2 and the right
+// group's ml-auto (DFLT-00253 round 2), which act only on a row that does not
+// fit on one line.
+const UNPREFIXED_ALLOWED: Record<string, Set<string>> = {
+  row: new Set(['flex-wrap', 'gap-y-2']),
+  right: new Set(['ml-auto']),
+  time: new Set(['whitespace-nowrap'])
+};
+const unprefixedAllowed = (key: string, cls: string) => UNPREFIXED_ALLOWED[key]?.has(cls) ?? false;
+// Unprefixed wrap/size classes that would change the row from 80rem up.
+const FORBIDDEN_UNPREFIXED = [
+  'flex-wrap',
+  'basis-auto',
+  'basis-full',
+  'whitespace-normal',
+  'shrink',
+  'ml-auto',
+  'justify-end',
+  'gap-y-2',
+  'gap-y-1.5',
+  'max-w-full',
+  '[justify-content:safe_flex-end]'
+];
 
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('[]', { status: 200 }))));
@@ -166,15 +259,18 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     await i18n.changeLanguage(lang);
   });
 
-  it.each(NODES.map(n => [n.id, n] as const))('%s: the row and both groups wrap below lg, the left group sized by its content', (_id, n) => {
+  it.each(NODES.map(n => [n.id, n] as const))('%s: the row and both groups wrap under 80rem, the left group sized by its content', (_id, n) => {
     renderTicket();
     const { row, left, right } = rowParts(n);
     expect(row).toHaveClass(...ADDED.row);
     expect(left).toHaveClass(...ADDED.left);
     expect(right).toHaveClass(...ADDED.right);
+    // The plain justify-end let an over-wide right group run out past the
+    // row's left edge (DFLT-00253); safe flex-end replaced it.
+    expectNoneOf(right, ['justify-end', 'max-lg:justify-end', `${UNDER_80REM}justify-end`]);
   });
 
-  it.each(NODES.map(n => [n.id, n] as const))('%s: the id and name may wrap below lg; the status badge and time never break', (_id, n) => {
+  it.each(NODES.map(n => [n.id, n] as const))('%s: the id and name may wrap under 80rem; the status badge and time never break', (_id, n) => {
     renderTicket();
     const { id, name, status, time } = rowParts(n);
     expect(id).toHaveClass(...ADDED.id);
@@ -183,7 +279,7 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     expect(time).toHaveClass('whitespace-nowrap');
   });
 
-  it.each(NODES.map(n => [n.id, n] as const))('%s: keeps every class it had before, so the row from lg up is unchanged', (_id, n) => {
+  it.each(NODES.map(n => [n.id, n] as const))('%s: keeps every class it had before, so the row from 80rem up is unchanged', (_id, n) => {
     renderTicket();
     const parts = rowParts(n);
     for (const key of ['row', 'left', 'right', 'id', 'name', 'time'] as const) {
@@ -197,7 +293,7 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     }
   });
 
-  it.each(NODES.map(n => [n.id, n] as const))('%s: everything added is max-lg: prefixed, apart from the allowed whitespace-nowrap', (_id, n) => {
+  it.each(NODES.map(n => [n.id, n] as const))('%s: everything added is 80rem/15rem prefixed, apart from the allowed unprefixed classes', (_id, n) => {
     renderTicket();
     const parts = rowParts(n);
     for (const key of ['row', 'left', 'right', 'id', 'name', 'time'] as const) {
@@ -205,20 +301,70 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
       const added = classList(parts[key]).filter(c => !before.has(c));
       expect(added.sort()).toEqual([...ADDED[key]].sort());
       for (const cls of added) {
-        if (!UNPREFIXED_ALLOWED.has(cls)) expect(cls.startsWith('max-lg:')).toBe(true);
+        if (!unprefixedAllowed(key, cls)) expect(ALLOWED_PREFIXES.some(p => cls.startsWith(p))).toBe(true);
       }
-      expectNoneOf(parts[key], FORBIDDEN_UNPREFIXED);
+      expectNoneOf(parts[key], FORBIDDEN_UNPREFIXED.filter(cls => !unprefixedAllowed(key, cls)));
     }
     expectNoneOf(parts.status, FORBIDDEN_UNPREFIXED);
   });
 
-  it('the approve/reject buttons wrap below lg and still do not toggle the row', () => {
+  it.each(NODES.map(n => [n.id, n] as const))('%s: no part of the row keeps a px breakpoint (they ignore the default font size)', (_id, n) => {
+    renderTicket();
+    const { row } = rowParts(n);
+    for (const el of [row, ...row.querySelectorAll('*')]) {
+      const px = classList(el).filter(hasPxPrefix);
+      expect(px).toEqual([]);
+    }
+  });
+
+  it.each(NODES.map(n => [n.id, n] as const))('%s: the type badge may shrink under 80rem and its label then wraps, showing the whole label', (_id, n) => {
+    renderTicket();
+    const { left } = rowParts(n);
+    const badge = left.querySelector('span[title]') as HTMLElement;
+    expect(badge).toHaveClass('shrink-0', ...ADDED.typeBadge);
+    expectNoneOf(badge, ['shrink', 'min-w-0', 'max-w-full']);
+    expect(badge.getAttribute('title')).not.toBe('');
+    // DFLT-00253 round 2: under 80rem the label wraps (anywhere, so even one
+    // long word fits a shrunk badge) rather than truncating -- the ellipsis
+    // hid part of the label at 200% x 320px, and the title tooltip reaches
+    // neither keyboard nor touch users. From 80rem up it keeps truncate, one
+    // line as before.
+    const label = badge.querySelector('span') as HTMLElement;
+    expect(label).toHaveClass('truncate', ...ADDED.typeBadgeLabel);
+    expectNoneOf(label, ['whitespace-normal', '[overflow-wrap:anywhere]', 'break-words']);
+    expect(classList(label).filter(c => c !== 'truncate' && !c.startsWith(UNDER_80REM))).toEqual([]);
+    expect(label).toHaveTextContent(badge.getAttribute('title')!);
+  });
+
+  it.each(NODES.map(n => [n.id, n] as const))('%s: from 80rem a row whose parts do not fit on one line moves its right group to the next line', (_id, n) => {
+    renderTicket();
+    const { row, left, name, right } = rowParts(n);
+    // The row may wrap at any width; the right group is pushed right on its own line.
+    expect(row).toHaveClass('flex-wrap', 'gap-y-2', 'justify-between');
+    expect(right).toHaveClass('ml-auto', 'shrink-0');
+    // The left group still takes the free space and may shrink to its
+    // min-content width, which (the name adding nothing) is the id and badges.
+    expect(left).toHaveClass('flex-1', 'min-w-0', `${FROM_80REM}min-w-min`);
+    expect(left).not.toHaveClass('min-w-min');
+    expect(name).toHaveClass('truncate', 'min-w-0', `${FROM_80REM}w-0`, `${FROM_80REM}[flex-basis:content]`);
+    expectNoneOf(name, ['w-0', '[flex-basis:content]', 'basis-0', 'grow', 'flex-1']);
+    // The one-line layout's badges still never wrap or shrink.
+    for (const badge of left.querySelectorAll('span.whitespace-nowrap')) expect(badge).toHaveClass('shrink-0');
+  });
+
+  it('the approve/reject buttons wrap and may shrink under 80rem, and still do not toggle the row', () => {
     renderTicket();
     const gate = NODES[2];
     const approve = screen.getByTestId(`node-approve-${gate.id}`);
     const buttons = approve.parentElement!;
     expect(buttons).toHaveClass(...BEFORE.approvalButtons.split(' '), ...ADDED.approvalButtons);
-    expectNoneOf(buttons, ['flex-wrap']);
+    expectNoneOf(buttons, ['flex-wrap', 'min-w-0', 'max-w-full']);
+    for (const button of [approve, screen.getByTestId(`node-reject-${gate.id}`)]) {
+      // px-2 stays the padding from 15rem up; under 15rem it is px-1.
+      expect(button).toHaveClass('px-2', 'flex', ...ADDED.approvalButton);
+      expectNoneOf(button, ['min-w-0', 'max-w-full', 'flex-wrap', 'px-1', '[overflow-wrap:anywhere]']);
+      expect(classList(button).filter(hasPxPrefix)).toEqual([]);
+    }
     // They stay inside the right group, which moves to its own line as a whole.
     const { right, toggle, row } = rowParts(gate);
     expect(right).toContainElement(buttons);

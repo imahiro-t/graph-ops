@@ -514,3 +514,65 @@ describe('ProjectSetupModal', () => {
     });
   });
 });
+
+// DFLT-00254: at a 200% default font on a short 320px screen the overlay
+// scrolls (as ConfirmDialog does since DFLT-00233) and the footer wraps, so
+// the title and both buttons stay reachable. jsdom does no layout, so these
+// pin the classes; the reach itself was checked in a real browser.
+describe('ProjectSetupModal at large text on a narrow, short screen', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('scrolls the overlay and centres the panel with auto margins', () => {
+    renderModal();
+    const dialog = screen.getByRole('dialog');
+    const overlay = dialog.parentElement as HTMLElement;
+
+    expect(overlay).toHaveClass('overflow-y-auto', 'overscroll-contain');
+    expect(overlay).not.toHaveClass('items-center');
+    expect(overlay).not.toHaveClass('justify-center');
+    expect(overlay.children).toHaveLength(1);
+    expect(dialog).toHaveClass('m-auto', 'min-w-0');
+  });
+
+  it('lets the title wrap instead of widening the panel', () => {
+    renderModal();
+
+    expect(screen.getByRole('heading', { level: 2 })).toHaveClass('min-w-0', 'break-words');
+  });
+
+  it('wraps the footer, each button at most as wide as the panel', () => {
+    renderModal();
+    const row = screen.getByTestId('project-setup-actions');
+
+    expect(row).toHaveClass('flex-wrap');
+    const buttons = Array.from(row.querySelectorAll('button'));
+    expect(buttons).toHaveLength(2);
+    for (const button of buttons) {
+      expect(button).toHaveClass('max-w-full', 'break-words');
+    }
+  });
+
+  it('keeps the spinner from shrinking while the submit label wraps', async () => {
+    // The create request never answers, so the button stays in its
+    // submitting state.
+    fetchMock().mockReturnValueOnce(new Promise(() => {}));
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.type(screen.getByLabelText(i18n.t('createProjectModal.nameLabel')), 'NewProj');
+    await user.click(screen.getByRole('button', { name: i18n.t('createModal.submit') }));
+
+    const button = await screen.findByRole('button', { name: submittingName(i18n.t('createModal.submit')) });
+    expect(button).toHaveAttribute('type', 'submit');
+    const spinner = button.querySelector('svg');
+    expect(spinner).not.toBeNull();
+    expect(spinner).toHaveClass('shrink-0');
+    expect(button).toHaveClass('max-w-full', 'break-words');
+  });
+});

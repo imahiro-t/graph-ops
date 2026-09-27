@@ -135,6 +135,36 @@ describe.each(['ja', 'en'] as const)('TicketItem prompt row layout (%s)', lng =>
     expect(icon).toHaveAttribute('aria-hidden', 'true');
   });
 
+  // DFLT-00252: keyboard focus shows as a ring (like the buttons around them),
+  // not only as the textarea's border colour. The Send button's ring sits off
+  // it by the footer's background (white / slate-900) so it stands out from
+  // the indigo fill. jsdom applies no :focus-visible styles, so this checks
+  // the classes; the rings were checked in a real browser.
+  it('shows a focus-visible ring on the Send button', () => {
+    renderTicket();
+    expect(sendButton()).toHaveClass(
+      'focus:outline-none',
+      'focus-visible:ring-2',
+      'focus-visible:ring-blue-500',
+      'dark:focus-visible:ring-blue-400',
+      'focus-visible:ring-offset-2',
+      'dark:focus-visible:ring-offset-slate-900'
+    );
+    // A ring on any focus (mouse clicks too) would change the pointer look.
+    expect(sendButton()).not.toHaveClass('focus:ring-2');
+  });
+
+  it('shows a focus-visible ring on the textarea besides its border colour', () => {
+    renderTicket();
+    expect(promptBox()).toHaveClass(
+      'focus:outline-none',
+      'focus:border-indigo-500',
+      'focus-visible:ring-2',
+      'focus-visible:ring-blue-500',
+      'dark:focus-visible:ring-blue-400'
+    );
+  });
+
   it('keeps the Send button disabled until text is typed', () => {
     renderTicket();
     expect(sendButton()).toBeDisabled();

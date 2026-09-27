@@ -9,6 +9,13 @@
 // layout (nor media queries), so this checks the classes; the widths
 // themselves were measured in a real browser, and the build output was
 // checked for the generated rule (see the ticket's implementation notes).
+//
+// DFLT-00252: both also pad with p-3 below sm (640px, a px query), whatever
+// the text size: a 200% root font size set on the page itself leaves the rem
+// query at 240px, and at 320/360px the Send button's label broke onto several
+// lines. The 15rem query stays, since with a very large default font (over
+// about 267%) it matches above 640px too. From sm up at a normal default font
+// size neither query matches, so sm+ keeps p-6 / p-4.
 import { render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
@@ -16,6 +23,7 @@ import { TicketDetail } from '../types';
 import { TicketItem } from './TicketItem';
 
 const NARROW_LARGE_TEXT_PADDING = '[@media(max-width:15rem)]:p-3';
+const BELOW_SM_PADDING = 'max-sm:p-3';
 
 const makeTicket = (): TicketDetail => ({
   id: 'TEST-00227',
@@ -79,18 +87,18 @@ describe.each(['ja', 'en'] as const)('TicketItem padding with large text on a na
     expect(within(footer).getByRole('button', { name: i18n.t('ticketItem.actions.refine') })).toBeInTheDocument();
   });
 
-  it('pads the expanded details less only with large text on a narrow screen', () => {
+  it('pads the expanded details less only below sm or with large text on a narrow screen', () => {
     renderTicket();
     const details = screen.getByTestId('ticket-details');
-    expect(details).toHaveClass('p-6', NARROW_LARGE_TEXT_PADDING);
-    // Unconditional or px-based forms would change the default size or sm+.
-    expectNoneOf(details, ['p-3', 'p-2', 'p-4', 'max-sm:p-3', 'sm:p-6', 'sm:p-3']);
+    expect(details).toHaveClass('p-6', BELOW_SM_PADDING, NARROW_LARGE_TEXT_PADDING);
+    // Unconditional or sm+ forms would change the look from sm up.
+    expectNoneOf(details, ['p-3', 'p-2', 'p-4', 'sm:p-6', 'sm:p-3', 'max-sm:p-2']);
   });
 
-  it('pads the Action Footer less only with large text on a narrow screen', () => {
+  it('pads the Action Footer less only below sm or with large text on a narrow screen', () => {
     renderTicket();
     const footer = screen.getByTestId('ticket-action-footer');
-    expect(footer).toHaveClass('p-4', NARROW_LARGE_TEXT_PADDING);
-    expectNoneOf(footer, ['p-3', 'p-2', 'p-6', 'max-sm:p-3', 'sm:p-4', 'sm:p-3']);
+    expect(footer).toHaveClass('p-4', BELOW_SM_PADDING, NARROW_LARGE_TEXT_PADDING);
+    expectNoneOf(footer, ['p-3', 'p-2', 'p-6', 'sm:p-4', 'sm:p-3', 'max-sm:p-2']);
   });
 });

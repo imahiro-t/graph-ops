@@ -184,3 +184,61 @@ describe('ClaudeRunnerModal', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+// DFLT-00254: at a 200% default font on a short 320px screen the overlay
+// scrolls (as ConfirmDialog does since DFLT-00233), so the title, the close
+// button and the launch button stay reachable. jsdom does no layout, so
+// these pin the classes; the reach itself was checked in a real browser.
+describe('ClaudeRunnerModal at large text on a narrow, short screen', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('scrolls the overlay and centres the panel with auto margins', () => {
+    render(<ClaudeRunnerModal isOpen onClose={() => {}} projectId="proj-x" />);
+    const dialog = screen.getByRole('dialog');
+    const overlay = dialog.parentElement as HTMLElement;
+
+    expect(overlay).toHaveClass('overflow-y-auto', 'overscroll-contain');
+    expect(overlay).not.toHaveClass('items-center');
+    expect(overlay).not.toHaveClass('justify-center');
+    expect(overlay.children).toHaveLength(1);
+    expect(dialog).toHaveClass('m-auto', 'min-w-0');
+  });
+
+  it('lets the title wrap and keeps the close button at its size', () => {
+    render(<ClaudeRunnerModal isOpen onClose={() => {}} projectId="proj-x" />);
+    const heading = screen.getByRole('heading', { level: 2, name: i18n.t('claudeRunnerModal.title') });
+
+    expect(heading).toHaveClass('min-w-0');
+    expect(screen.getByRole('button', { name: i18n.t('common.closeDialog') })).toHaveClass('shrink-0');
+  });
+
+  // A bare text node in the flex h2 is an anonymous flex item that cannot
+  // shrink below its longest word, so at 200% on a 320px screen the title ran
+  // under the close button. The text has to be its own shrinkable element.
+  it('puts the title text in its own shrinkable, wrappable element', () => {
+    render(<ClaudeRunnerModal isOpen onClose={() => {}} projectId="proj-x" />);
+    const heading = screen.getByRole('heading', { level: 2, name: i18n.t('claudeRunnerModal.title') });
+
+    const bareText = Array.from(heading.childNodes).filter(n => n.nodeType === Node.TEXT_NODE && n.textContent?.trim());
+    expect(bareText).toHaveLength(0);
+    const text = heading.querySelector('span');
+    expect(text).toHaveTextContent(i18n.t('claudeRunnerModal.title'));
+    expect(text).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
+  });
+
+  it('narrows the padding and drops the decorative icon under 15rem', () => {
+    render(<ClaudeRunnerModal isOpen onClose={() => {}} projectId="proj-x" />);
+    const heading = screen.getByRole('heading', { level: 2, name: i18n.t('claudeRunnerModal.title') });
+    const header = heading.parentElement as HTMLElement;
+
+    expect(header).toHaveClass('px-6', '[@media(max-width:15rem)]:px-3');
+    expect(heading.querySelector('svg')).toHaveClass('[@media(max-width:15rem)]:hidden');
+    expect(header.nextElementSibling).toHaveClass('p-6', '[@media(max-width:15rem)]:p-3');
+  });
+});
