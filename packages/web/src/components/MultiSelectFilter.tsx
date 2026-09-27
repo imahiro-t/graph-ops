@@ -327,25 +327,24 @@ export function MultiSelectFilter<T extends string>({
               <button type="button" onClick={selectAll} disabled={allSelected} className={FOOTER_BUTTON_CLASS}>
                 {t('toolbar.filterSelectAll')}
               </button>
-              {/* The clear button (the "select all" button above has its own
-                  notes in selectAll). The clear button is always rendered,
-                  disabled while nothing is selected, even when there are no
-                  options at all (an empty label filter). The old LabelFilter
-                  hid it in that case; rendering it unconditionally is what
-                  makes "every filter's panel has a clear button at the
-                  bottom" true by construction instead of per-filter, and a
-                  disabled control under "this project has no labels" states
-                  the same thing the hidden one left implicit. Covered by
-                  MultiSelectFilter.test.tsx.
+              {/* The clear button is always rendered (the "select all" button
+                  above has its own notes in selectAll), disabled while nothing
+                  is selected, even when there are no options at all (an empty
+                  label filter). The old LabelFilter hid it in that case;
+                  rendering it unconditionally is what makes "every filter's
+                  panel has a clear button at the bottom" true by construction
+                  instead of per-filter, and a disabled control under "this
+                  project has no labels" states the same thing the hidden one
+                  left implicit. Covered by MultiSelectFilter.test.tsx.
 
-                  Pressing the clear button disables it (the selection is now empty), and a
-                  disabled button drops focus to <body> -- outside this
-                  component's onKeyDown, so Escape stopped closing the panel
-                  (WCAG 2.4.3 / 3.2.2, DFLT-00087). Focus therefore moves to
-                  the trigger, which also announces the new "<filter>: All".
-                  This happens inside the click handler, before React 18
-                  re-renders the batched state update that sets `disabled`,
-                  so focus never passes through <body>. aria-disabled with an
+                  Pressing the clear button disables it (the selection is now
+                  empty), and a disabled button drops focus to <body> --
+                  outside this component's onKeyDown, so Escape stopped closing
+                  the panel (WCAG 2.4.3 / 3.2.2, DFLT-00087). Focus therefore
+                  moves to the trigger, which also announces the new "<filter>:
+                  All". This happens inside the click handler, before React 18
+                  re-renders the batched state update that sets `disabled`, so
+                  focus never passes through <body>. aria-disabled with an
                   early return was the alternative; it was not taken because it
                   would keep an inert button in the tab order and break the
                   existing "the clear button is disabled while empty" contract
