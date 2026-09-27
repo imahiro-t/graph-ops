@@ -30,10 +30,13 @@ describe('toolbar filter translations', () => {
     }
   );
 
-  it('shares one clear-button key across the filters and names the unassigned bucket', () => {
-    for (const key of ['filterClear', 'assigneeUnassigned']) {
+  it('shares one clear-button and one select-all key across the filters and names the unassigned bucket', () => {
+    // filterSelectAll: DFLT-00264.
+    for (const key of ['filterClear', 'filterSelectAll', 'assigneeUnassigned']) {
       expect(jaToolbar[key], `ja ${key}`).toBeTruthy();
       expect(enToolbar[key], `en ${key}`).toBeTruthy();
+      // Translated, not the other language copied over.
+      expect(jaToolbar[key], key).not.toBe(enToolbar[key]);
     }
   });
 

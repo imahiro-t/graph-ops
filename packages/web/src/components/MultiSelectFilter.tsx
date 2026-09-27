@@ -28,6 +28,18 @@ import { ChevronDown } from 'lucide-react';
 // can be changed in a row -- including for the assignee filter, which used
 // to close on every pick because a radio group only ever takes one.
 //
+// Next to "clear the selection" the panel has "select all" (DFLT-00264), for
+// when almost every value is wanted -- e.g. every status except Done and
+// Closed: press it, then uncheck the few that are not wanted. Selecting
+// every option deliberately does NOT fold the trigger back to "All": the
+// label filter is OR over the selected labels, so checking every label
+// still hides the tickets that carry no label at all, which "All" (no
+// filtering) shows; and the assignee options follow the 15-second poll, so
+// "every option" is only a snapshot of the moment it was pressed -- a new
+// assignee showing up later is not in the selection (and "select all"
+// becomes pressable again). The trigger keeps saying "N selected" so it
+// never claims more than the selection really does.
+//
 // Class names are written out literally (no `w-${size}` style composition):
 // Tailwind only generates classes it can find verbatim in the source.
 
@@ -73,6 +85,24 @@ interface Props<T extends string> {
 type PanelPlacement = { edge: 'left' } | { edge: 'right' } | { edge: 'shift'; left: number };
 
 const HANG_LEFT: PanelPlacement = { edge: 'left' };
+
+// The panel's two footer buttons ("select all" and "clear", DFLT-00264),
+// laid out by the footer row's `flex flex-wrap`. flex-auto (flex: 1 1 auto)
+// makes each button's flex-basis its own text width, so the two share one
+// line while their texts fit side by side, and otherwise the second wraps to
+// a line of its own -- where flex-auto's grow stretches it full width. Do not
+// use flex-1 or min-w-0 here: flex-1's basis is 0, so the row never wraps and
+// each button is squeezed into half the width, breaking its text.
+// break-keep [overflow-wrap:anywhere] is the trigger's policy (DFLT-00239):
+// keep-all leaves no break point inside "すべて選択" / "選択を解除" (they
+// contain no spaces), so a button that does not fit moves to the next line
+// whole; only if a single button is still wider than the panel (200% text on
+// a 320px screen) does overflow-wrap:anywhere break it between characters,
+// instead of widening the panel into a horizontal scroll -- and because
+// `anywhere` also lowers the min-content width, the default min-width: auto
+// lets the button shrink to the line.
+const FOOTER_BUTTON_CLASS =
+  'flex-auto break-keep [overflow-wrap:anywhere] text-left px-2 py-1.5 rounded hover:bg-slate-50 dark:hover:bg-slate-800 text-blue-700 dark:text-blue-400 font-medium disabled:opacity-50 disabled:hover:bg-transparent';
 
 // The gap a shifted panel keeps from the window's right edge: the same 1rem
 // per side that max-w-[calc(100vw-2rem)] leaves, so a panel capped by that
@@ -151,6 +181,17 @@ export function MultiSelectFilter<T extends string>({
     return () => window.removeEventListener('resize', place);
   }, [isOpen, place]);
 
+  const optionValues = options.map(o => o.value);
+  // Selected values that are NOT among the current options, in their
+  // existing relative order. The assignee options are derived from the loaded
+  // tickets and change with the 15-second poll, so a selected name can drop
+  // out of the panel; assigneeFilter.ts promises such a selection stays until
+  // cleared (DFLT-00087). Values without a checkbox can only be removed by the
+  // clear button, so both `toggle` and `selectAll` build their result as
+  // "options, in the panel's display order" followed by these -- the one
+  // ordering rule, defined here once.
+  const outsideOptions = selected.filter(v => !optionValues.includes(v));
+
   const toggle = (value: T) => {
     if (selected.includes(value)) {
       // Removing already leaves every other value alone, including ones that
@@ -158,18 +199,39 @@ export function MultiSelectFilter<T extends string>({
       onChange(selected.filter(x => x !== value));
       return;
     }
-    // Re-derive from `options` when adding so the selection always stays in
-    // the panel's display order, whatever order the user clicked in -- then
-    // append, in their existing relative order, any selected values that are
-    // NOT among the current options (DFLT-00087). The assignee options are
-    // derived from the loaded tickets and change with the 15-second poll, so
-    // a selected name can drop out of the panel; assigneeFilter.ts promises
-    // such a selection stays until cleared. Rebuilding from `options` alone
-    // silently dropped it the moment any other box was checked. Values
-    // without a checkbox can only be removed by the clear button.
-    const inOptions = options.map(o => o.value);
-    const kept = selected.filter(v => !inOptions.includes(v));
-    onChange([...inOptions.filter(v => v === value || selected.includes(v)), ...kept]);
+    // Re-derive from the options when adding so the selection always stays
+    // in the panel's display order, whatever order the user clicked in, then
+    // append `outsideOptions`. Rebuilding from the options alone silently
+    // dropped a selected assignee who had left the panel the moment any other
+    // box was checked (DFLT-00087).
+    onChange([...optionValues.filter(v => v === value || selected.includes(v)), ...outsideOptions]);
+  };
+
+  // True when every option is already checked -- and, because `every` of an
+  // empty list is true, also when there are no options at all (an empty label
+  // filter). Both are the states in which "select all" has nothing to add,
+  // so this one expression is its `disabled` condition. Selected values that
+  // are not among the options do not count either way.
+  const allSelected = optionValues.every(v => selected.includes(v));
+
+  const selectAll = () => {
+    // Every option in the panel's display order, then `outsideOptions` --
+    // the same ordering rule as `toggle`.
+    onChange([...optionValues, ...outsideOptions]);
+    // The panel stays open (no setIsOpen): the point is to go on and
+    // uncheck the unwanted values. Pressing it always disables it (every
+    // option is now checked), and a disabled button drops focus to <body>,
+    // outside this component's onKeyDown, where Escape no longer closes the
+    // panel (the same trap as the clear button, DFLT-00087). So focus moves,
+    // here in the click handler and before React re-renders with
+    // `disabled`, to the panel's first checkbox: that is where the next step
+    // -- unchecking -- happens, with Tab / Space, and Escape still closes the
+    // panel from there. Focusing it scrolls a scrolled panel (max-h-80) back
+    // to the top, which suits "now go through the list" too. The button is
+    // only enabled with at least one option, so the checkbox exists; the
+    // trigger is a fallback that should never be needed.
+    const firstCheckbox = panelRef.current?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    (firstCheckbox ?? buttonRef.current)?.focus();
   };
 
   return (
@@ -259,28 +321,34 @@ export function MultiSelectFilter<T extends string>({
                 {o.label}
               </label>
             ))}
-            {/* Always rendered, disabled while nothing is selected, even when
-                there are no options at all (an empty label filter). The old
-                LabelFilter hid the button in that case; rendering it
-                unconditionally is what makes "every filter's panel has a
-                clear button at the bottom" true by construction instead of
-                per-filter, and a disabled control under "this project has no
-                labels" states the same thing the hidden one left implicit.
-                Covered by MultiSelectFilter.test.tsx.
+            <div className="border-t border-slate-100 dark:border-slate-800 mt-1 pt-1 px-1 flex flex-wrap gap-1">
+              {/* "Select all" first, "clear" after it (DFLT-00264); what
+                  pressing it does, and where focus goes, is in selectAll. */}
+              <button type="button" onClick={selectAll} disabled={allSelected} className={FOOTER_BUTTON_CLASS}>
+                {t('toolbar.filterSelectAll')}
+              </button>
+              {/* The clear button is always rendered (the "select all" button
+                  above has its own notes in selectAll), disabled while nothing
+                  is selected, even when there are no options at all (an empty
+                  label filter). The old LabelFilter hid it in that case;
+                  rendering it unconditionally is what makes "every filter's
+                  panel has a clear button at the bottom" true by construction
+                  instead of per-filter, and a disabled control under "this
+                  project has no labels" states the same thing the hidden one
+                  left implicit. Covered by MultiSelectFilter.test.tsx.
 
-                Pressing it disables it (the selection is now empty), and a
-                disabled button drops focus to <body> -- outside this
-                component's onKeyDown, so Escape stopped closing the panel
-                (WCAG 2.4.3 / 3.2.2, DFLT-00087). Focus therefore moves to
-                the trigger, which also announces the new "<filter>: All".
-                This happens inside the click handler, before React 18
-                re-renders the batched state update that sets `disabled`,
-                so focus never passes through <body>. aria-disabled with an
-                early return was the alternative; it was not taken because it
-                would keep an inert button in the tab order and break the
-                existing "the clear button is disabled while empty" contract
-                (Gherkin + toBeDisabled() tests). */}
-            <div className="border-t border-slate-100 dark:border-slate-800 mt-1 pt-1 px-1">
+                  Pressing the clear button disables it (the selection is now
+                  empty), and a disabled button drops focus to <body> --
+                  outside this component's onKeyDown, so Escape stopped closing
+                  the panel (WCAG 2.4.3 / 3.2.2, DFLT-00087). Focus therefore
+                  moves to the trigger, which also announces the new "<filter>:
+                  All". This happens inside the click handler, before React 18
+                  re-renders the batched state update that sets `disabled`, so
+                  focus never passes through <body>. aria-disabled with an
+                  early return was the alternative; it was not taken because it
+                  would keep an inert button in the tab order and break the
+                  existing "the clear button is disabled while empty" contract
+                  (Gherkin + toBeDisabled() tests). */}
               <button
                 type="button"
                 onClick={() => {
@@ -288,7 +356,7 @@ export function MultiSelectFilter<T extends string>({
                   buttonRef.current?.focus();
                 }}
                 disabled={selected.length === 0}
-                className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-50 dark:hover:bg-slate-800 text-blue-700 dark:text-blue-400 font-medium disabled:opacity-50 disabled:hover:bg-transparent"
+                className={FOOTER_BUTTON_CLASS}
               >
                 {t('toolbar.filterClear')}
               </button>

@@ -44,6 +44,7 @@
     "labelSelected": "ラベル: {{count}}件選択",
     "labelGroupLabel": "ラベルで絞り込む",
     "labelEmpty": "このプロジェクトにはラベルがありません",
+    "filterSelectAll": "すべて選択",
     "filterClear": "選択を解除"
   },
   "summary": {

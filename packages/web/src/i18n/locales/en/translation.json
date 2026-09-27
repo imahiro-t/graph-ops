@@ -44,6 +44,7 @@
     "labelSelected": "Labels: {{count}} selected",
     "labelGroupLabel": "Filter by label",
     "labelEmpty": "This project has no labels",
+    "filterSelectAll": "Select all",
     "filterClear": "Clear selection"
   },
   "summary": {
