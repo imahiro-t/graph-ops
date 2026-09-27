@@ -21,6 +21,7 @@ import { StatusLiveRegion } from '../StatusLiveRegion';
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
 import { IconButton } from '../IconButton';
 import { submittingProps } from '../Submitting';
+import { ErrorBox } from './ErrorBox';
 
 interface Props {
   onDirtyChange: (dirty: boolean) => void;
@@ -409,7 +410,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   return (
     <div ref={containerRef} className="flex flex-col gap-3 h-full min-h-0">
       <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.intro')}</p>
-      {error && <div id={errorId} role="alert" className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900 whitespace-pre-wrap">{error}</div>}
+      {error && <ErrorBox id={errorId} role="alert" className="p-2.5 text-[11px] whitespace-pre-wrap">{error}</ErrorBox>}
 
       {warnings.length > 0 && (
         <div

@@ -58,6 +58,25 @@ function createForm() {
   return within(screen.getByTestId('label-create-form'));
 }
 
+// Label-row helpers shared by the row-error describes (DFLT-00214, DFLT-00222):
+// look up one label row by its id, find controls inside that row, and rename it.
+const row = (id: string) => screen.getByTestId(`label-row-${id}`);
+const renameButton = (id: string, name: string) =>
+  within(row(id)).getByRole('button', { name: `${i18n.t('settings.labels.rename')}: ${name}` });
+const saveButton = (id: string) => within(row(id)).getByRole('button', { name: i18n.t('settings.labels.save') });
+const rowErrorText = (name: string, message: string) => i18n.t('settings.labels.rowError', { name, message });
+// The row's own alert, or null. Plain DOM query, so it also works while the
+// confirmation dialog hides the rest of the page from the accessibility tree.
+const rowAlert = (id: string) => row(id).querySelector<HTMLElement>('[role="alert"]');
+
+async function renameRow(user: User, id: string, name: string, newName: string) {
+  await user.click(renameButton(id, name));
+  const input = within(row(id)).getByRole('textbox');
+  await user.clear(input);
+  await user.type(input, newName);
+  await user.click(saveButton(id));
+}
+
 describe('LabelsEditor', () => {
   beforeEach(() => {
     mockedFetch.mockReset();
@@ -1327,5 +1346,491 @@ describe('LabelsEditor announcing row saves', () => {
       expect(green).toHaveFocus();
       expect(renameButton('label-bug', '不具合')).not.toHaveFocus();
     });
+  });
+});
+
+// DFLT-00214: errors used to be a single value that every action cleared as
+// it started, so a failure of row A disappeared as soon as row B was
+// renamed, recolored or deleted -- and a screen reader user who missed the
+// one-off alert had no way to find it again. Each row now keeps its own
+// error until that same row starts its next action (a rename save, a
+// recolor or a delete); the create form's error and the load error are
+// separate from the rows' errors.
+describe("LabelsEditor keeping each row's error", () => {
+  const deleteButton = (id: string, name: string) =>
+    within(row(id)).getByRole('button', { name: `${i18n.t('settings.labels.delete')}: ${name}` });
+  const colorButton = (id: string, name: string, color: LabelUsage['color']) =>
+    within(within(row(id)).getByRole('group', { name: i18n.t('settings.labels.colorGroup', { name }) })).getByRole('button', {
+      name: i18n.t(`labels.colors.${color}`)
+    });
+  const taken = () => i18n.t('errors.LABEL_NAME_TAKEN');
+  const bug = label('label-bug', 'バグ', 'red', 2);
+  const feat = label('label-feat', '機能追加', 'blue', 0);
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  // Row A (label-bug) fails every update; row B (label-feat) saves whatever
+  // it is given.
+  function failRowA(message: string) {
+    mockedUpdate.mockImplementation((_t: unknown, id: string, patch: { name?: string; color?: LabelUsage['color'] }) =>
+      id === 'label-bug'
+        ? Promise.reject(new Error(message))
+        : Promise.resolve(label('label-feat', patch.name ?? '機能追加', patch.color ?? 'blue', 0))
+    );
+  }
+
+  async function renderEditor() {
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+    return user;
+  }
+
+  // Row A's error, shown in row A, naming row A, as an alert.
+  function expectRowAError(message: string) {
+    const alert = rowAlert('label-bug');
+    expect(alert).not.toBeNull();
+    expect(alert).toHaveTextContent(rowErrorText('バグ', message));
+  }
+
+  beforeEach(() => {
+    mockedFetch.mockReset();
+    mockedCreate.mockReset();
+    mockedUpdate.mockReset();
+    mockedDelete.mockReset();
+    mockedFetch.mockResolvedValue([bug, feat]);
+  });
+
+  it("shows a failed rename inside its own row, naming the label, as an alert that describes the rename input", async () => {
+    failRowA(taken());
+    const user = await renderEditor();
+
+    await renameRow(user, 'label-bug', 'バグ', '機能追加');
+
+    const alert = await within(row('label-bug')).findByRole('alert');
+    expect(alert).toHaveTextContent(rowErrorText('バグ', taken()));
+    expect(rowAlert('label-feat')).toBeNull();
+    // Only the row's alert: nothing in the create form's / load error place.
+    expect(screen.getAllByRole('alert')).toEqual([alert]);
+    const input = within(row('label-bug')).getByRole('textbox');
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAttribute('aria-describedby', alert.id);
+
+    // As in the create form, editing the name drops aria-invalid but the
+    // error text stays until the next save starts.
+    await user.type(input, 'X');
+    expect(input).not.toHaveAttribute('aria-invalid');
+    expect(input).not.toHaveAttribute('aria-describedby');
+    expect(within(row('label-bug')).getByRole('alert')).toBe(alert);
+  });
+
+  it("keeps row A's rename error while row B is renamed, from its start to its success", async () => {
+    failRowA(taken());
+    const user = await renderEditor();
+
+    await renameRow(user, 'label-bug', 'バグ', '機能追加');
+    await waitFor(() => expectRowAError(taken()));
+
+    await user.click(renameButton('label-feat', '機能追加'));
+    expectRowAError(taken());
+    const input = within(row('label-feat')).getByRole('textbox');
+    await user.clear(input);
+    await user.type(input, '新機能');
+    await user.click(saveButton('label-feat'));
+
+    await waitFor(() => expect(within(row('label-feat')).getByTestId('label-chip')).toHaveTextContent('新機能'));
+    expect(mockedUpdate).toHaveBeenLastCalledWith(expect.anything(), 'label-feat', { name: '新機能' });
+    expectRowAError(taken());
+    expect(rowAlert('label-feat')).toBeNull();
+  });
+
+  it("keeps row A's recolor error while row B is recolored and then deleted", async () => {
+    failRowA('boom');
+    mockedDelete.mockResolvedValue({ success: true, removed_ticket_count: 0 });
+    const user = await renderEditor();
+
+    await user.click(colorButton('label-bug', 'バグ', 'green'));
+    await waitFor(() => expectRowAError('boom'));
+
+    await user.click(colorButton('label-feat', '機能追加', 'green'));
+    await waitFor(() => expect(colorButton('label-feat', '機能追加', 'green')).toHaveAttribute('aria-pressed', 'true'));
+    expectRowAError('boom');
+
+    await user.click(deleteButton('label-feat', '機能追加'));
+    await findDeleteDialog();
+    // While the confirmation is open, too.
+    expectRowAError('boom');
+    await user.click(screen.getByTestId('label-delete-confirm-confirm'));
+
+    await waitFor(() => expect(screen.queryByTestId('label-row-label-feat')).not.toBeInTheDocument());
+    expect(mockedDelete).toHaveBeenCalledWith(expect.anything(), 'label-feat');
+    expectRowAError('boom');
+  });
+
+  it.each([
+    ['the delete request', 'delete'],
+    ['re-reading the usage count', 'reread']
+  ] as const)("keeps row A's error when %s fails and row B is then recolored and renamed", async (_case, failing) => {
+    failRowA('unused');
+    if (failing === 'delete') {
+      mockedDelete.mockRejectedValue(new Error('boom'));
+    } else {
+      mockedFetch.mockResolvedValueOnce([bug, feat]).mockRejectedValueOnce(new Error('boom'));
+    }
+    const user = await renderEditor();
+
+    await user.click(deleteButton('label-bug', 'バグ'));
+    if (failing === 'delete') await answerDelete(user, true);
+    await waitFor(() => expectRowAError('boom'));
+
+    await user.click(colorButton('label-feat', '機能追加', 'green'));
+    await waitFor(() => expect(colorButton('label-feat', '機能追加', 'green')).toHaveAttribute('aria-pressed', 'true'));
+    expectRowAError('boom');
+
+    await renameRow(user, 'label-feat', '機能追加', '新機能');
+    await waitFor(() => expect(within(row('label-feat')).getByTestId('label-chip')).toHaveTextContent('新機能'));
+    expectRowAError('boom');
+  });
+
+  it("keeps row A's error when A fails while B is still saving, and B then succeeds", async () => {
+    const a = deferred<LabelUsage>();
+    const b = deferred<LabelUsage>();
+    mockedUpdate.mockImplementation((_t: unknown, id: string) => (id === 'label-bug' ? a.promise : b.promise));
+    const user = await renderEditor();
+
+    await user.click(colorButton('label-bug', 'バグ', 'green'));
+    await user.click(colorButton('label-feat', '機能追加', 'green'));
+    expect(mockedUpdate).toHaveBeenCalledTimes(2);
+
+    await act(async () => a.reject(new Error('boom')));
+    await waitFor(() => expectRowAError('boom'));
+    expect(row('label-feat')).toHaveAttribute('aria-busy', 'true');
+
+    await act(async () => b.resolve(label('label-feat', '機能追加', 'green', 0)));
+    await waitFor(() => expect(row('label-feat')).not.toHaveAttribute('aria-busy'));
+    expectRowAError('boom');
+    expect(rowAlert('label-feat')).toBeNull();
+  });
+
+  // Criterion 2's "starting a rename" is starting its save: opening the
+  // rename input, or cancelling it, is not an action on the server and leaves
+  // the error in place.
+  it("keeps row A's error when A's rename is only opened or cancelled", async () => {
+    failRowA('boom');
+    const user = await renderEditor();
+    await user.click(colorButton('label-bug', 'バグ', 'green'));
+    await waitFor(() => expectRowAError('boom'));
+
+    await user.click(renameButton('label-bug', 'バグ'));
+    expectRowAError('boom');
+    // A recolor failure does not mark the name input.
+    expect(within(row('label-bug')).getByRole('textbox')).not.toHaveAttribute('aria-invalid');
+    await user.click(within(row('label-bug')).getByRole('button', { name: i18n.t('settings.labels.cancel') }));
+    expectRowAError('boom');
+  });
+
+  it.each(['rename save', 'recolor', 'delete'] as const)(
+    "clears row A's error, and only A's, when A itself starts a %s",
+    async action => {
+      // Both rows fail their first recolor, so both show an error.
+      mockedUpdate.mockRejectedValueOnce(new Error('boom A')).mockRejectedValueOnce(new Error('boom B'));
+      const held = deferred<LabelUsage>();
+      const heldDelete = deferred<{ success: boolean; removed_ticket_count: number }>();
+      const user = await renderEditor();
+      await user.click(colorButton('label-bug', 'バグ', 'green'));
+      await user.click(colorButton('label-feat', '機能追加', 'green'));
+      await waitFor(() => expectRowAError('boom A'));
+      await waitFor(() => expect(rowAlert('label-feat')).toHaveTextContent(rowErrorText('機能追加', 'boom B')));
+
+      // A's next request is held open, to look at the row as it starts.
+      mockedUpdate.mockReturnValueOnce(held.promise);
+      mockedDelete.mockReturnValueOnce(heldDelete.promise);
+      if (action === 'rename save') {
+        await renameRow(user, 'label-bug', 'バグ', '不具合');
+      } else if (action === 'recolor') {
+        await user.click(colorButton('label-bug', 'バグ', 'teal'));
+      } else {
+        await user.click(deleteButton('label-bug', 'バグ'));
+      }
+
+      await waitFor(() => expect(rowAlert('label-bug')).toBeNull());
+      expect(rowAlert('label-feat')).toHaveTextContent(rowErrorText('機能追加', 'boom B'));
+      if (action === 'delete') await answerDelete(user, false);
+      await act(async () => held.resolve(label('label-bug', 'バグ', 'teal', 2)));
+      expect(rowAlert('label-feat')).toHaveTextContent(rowErrorText('機能追加', 'boom B'));
+    }
+  );
+
+  it('announces the same failure again when a row fails a second time', async () => {
+    failRowA('boom');
+    const user = await renderEditor();
+    await user.click(colorButton('label-bug', 'バグ', 'green'));
+    await waitFor(() => expectRowAError('boom'));
+    const first = rowAlert('label-bug');
+
+    await user.click(colorButton('label-bug', 'バグ', 'teal'));
+
+    await waitFor(() => expectRowAError('boom'));
+    // A new alert element, so assistive technology announces it again.
+    expect(rowAlert('label-bug')).not.toBe(first);
+  });
+
+  it("keeps the create form's error through row actions, and a row's error through creates", async () => {
+    failRowA('boom');
+    mockedCreate.mockRejectedValueOnce(new Error(taken()));
+    const user = await renderEditor();
+    const input = createForm().getByRole('textbox');
+
+    await user.type(input, 'バグ{Enter}');
+    await waitFor(() => expect(input).toHaveAttribute('aria-invalid', 'true'));
+    const createAlert = document.getElementById(input.getAttribute('aria-describedby')!)!;
+    expect(createAlert).toHaveAttribute('role', 'alert');
+    expect(createAlert).toHaveTextContent(taken());
+
+    // A row failing, and another row succeeding, leave the create error and
+    // the name input's aria-invalid as they were.
+    await user.click(colorButton('label-bug', 'バグ', 'green'));
+    await waitFor(() => expectRowAError('boom'));
+    await user.click(colorButton('label-feat', '機能追加', 'green'));
+    await waitFor(() => expect(colorButton('label-feat', '機能追加', 'green')).toHaveAttribute('aria-pressed', 'true'));
+    expect(createAlert).toBeInTheDocument();
+    expect(createAlert).toHaveTextContent(taken());
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAttribute('aria-describedby', createAlert.id);
+
+    // Creating again, failing then succeeding, leaves row A's error alone;
+    // only the create's own error is replaced and then cleared.
+    mockedCreate.mockRejectedValueOnce(new Error('create boom'));
+    await user.click(createForm().getByRole('button', { name: i18n.t('settings.labels.create') }));
+    await waitFor(() => expect(document.getElementById(input.getAttribute('aria-describedby') ?? '')).toHaveTextContent('create boom'));
+    expectRowAError('boom');
+
+    mockedCreate.mockResolvedValueOnce(label('label-doc', 'ドキュメント', 'gray', 0));
+    await user.clear(input);
+    await user.type(input, 'ドキュメント');
+    await user.click(createForm().getByRole('button', { name: i18n.t('settings.labels.create') }));
+    await screen.findByTestId('label-row-label-doc');
+    expect(screen.queryByText('create boom')).not.toBeInTheDocument();
+    expect(input).not.toHaveAttribute('aria-invalid');
+    expectRowAError('boom');
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+
+  it('clears every row error and the create error when the project is switched', async () => {
+    failRowA('boom');
+    mockedCreate.mockRejectedValue(new Error(taken()));
+    const user = await renderEditor();
+    await user.click(colorButton('label-bug', 'バグ', 'green'));
+    await user.type(createForm().getByRole('textbox'), 'バグ{Enter}');
+    await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(2));
+
+    await user.selectOptions(screen.getByLabelText(i18n.t('settings.labels.projectLabel')), 'proj-B');
+    await waitFor(() => expect(screen.queryAllByRole('alert')).toHaveLength(0));
+    expect(createForm().getByRole('textbox')).not.toHaveAttribute('aria-invalid');
+
+    // Back to project A, whose rows come back without the old error.
+    await user.selectOptions(screen.getByLabelText(i18n.t('settings.labels.projectLabel')), 'proj-A');
+    await screen.findByTestId('label-row-label-bug');
+    expect(rowAlert('label-bug')).toBeNull();
+    expect(screen.queryAllByRole('alert')).toHaveLength(0);
+  });
+
+  it("keeps the load error when a label is created, since creating does not re-fetch the list", async () => {
+    mockedFetch.mockReset();
+    mockedFetch.mockRejectedValue(new Error('network down'));
+    mockedCreate.mockResolvedValue(label('label-doc', 'ドキュメント', 'gray', 0));
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('network down');
+
+    await user.type(createForm().getByRole('textbox'), 'ドキュメント{Enter}');
+    await screen.findByTestId('label-row-label-doc');
+    expect(screen.getByRole('alert')).toHaveTextContent('network down');
+    // The load error does not describe the name input: it is not about it.
+    expect(createForm().getByRole('textbox')).not.toHaveAttribute('aria-describedby');
+  });
+});
+
+// DFLT-00222: with errors on several rows, another row's successful rename
+// re-sorts the list, and the keyed <li> rows move in the DOM. Screen readers
+// must not re-announce the rows' existing role="alert" errors then. jsdom has
+// no accessibility tree and no screen reader, so these tests can only back up
+// the premise of the manual check (VoiceOver / NVDA, run from the ticket's
+// reproduction guide): React keeps each existing alert as the same DOM node
+// -- it only moves the <li> around it -- and a new failure inserts a new
+// alert. Whether a browser treats the move as "remove + insert" in its
+// accessibility tree, and re-announces the alert, is left to that check.
+//
+// Which <li> React moves depends on its reconciliation: towards the top, the
+// rows that shift down are re-inserted; towards the bottom, only the moved
+// row is. If a React update changes that, the "which rows moved" assertions
+// fail: treat it as a sign that the re-sort takes a different DOM path, and
+// revisit the manual check's premise.
+describe('LabelsEditor keeping row alerts as the same DOM nodes when the list is re-sorted', () => {
+  const rowOrder = () => screen.getAllByTestId(/^label-row-/).map(li => within(li).queryByTestId('label-chip')?.textContent);
+  const taken = () => i18n.t('errors.LABEL_NAME_TAKEN');
+
+  // Sorted by name: alpha, bravo, charlie, delta.
+  const labels = [
+    label('label-a', 'alpha', 'red', 0),
+    label('label-b', 'bravo', 'blue', 0),
+    label('label-c', 'charlie', 'green', 0),
+    label('label-d', 'delta', 'gray', 0)
+  ];
+
+  // Renaming alpha, bravo or charlie fails as a duplicate name; renaming
+  // delta (label-d) saves whatever name it is given.
+  function failAllButD() {
+    mockedUpdate.mockImplementation((_t: unknown, id: string, patch: { name?: string }) =>
+      id === 'label-d'
+        ? Promise.resolve(label('label-d', patch.name ?? 'delta', 'gray', 0))
+        : Promise.reject(new Error(taken()))
+    );
+  }
+
+  // A failed rename: its alert appears, focus is back in the input
+  // (DFLT-00213), and Escape closes the rename, leaving the error (DFLT-00214).
+  async function failRename(user: User, id: string, name: string, newName: string) {
+    await renameRow(user, id, name, newName);
+    await waitFor(() => expect(rowAlert(id)).toHaveTextContent(rowErrorText(name, taken())));
+    await waitFor(() => expect(within(row(id)).getByRole('textbox')).toHaveFocus());
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(within(row(id)).queryByRole('textbox')).not.toBeInTheDocument());
+  }
+
+  // Records the list's child-list mutations, from start() until stop().
+  function observeList() {
+    const list = row('label-a').closest('ul')!;
+    const removed: Node[] = [];
+    const added: Node[] = [];
+    const collect = (records: MutationRecord[]) => {
+      for (const r of records) {
+        removed.push(...Array.from(r.removedNodes));
+        added.push(...Array.from(r.addedNodes));
+      }
+    };
+    const observer = new MutationObserver(collect);
+    observer.observe(list, { childList: true, subtree: true });
+    return {
+      removed,
+      added,
+      // The callback runs in a microtask: take what is still queued.
+      stop() {
+        collect(observer.takeRecords());
+        observer.disconnect();
+      }
+    };
+  }
+
+  // Errors on alpha and bravo, then delta renamed to "aaa", which moves it to
+  // the top: alpha, bravo and charlie shift down. Returns the nodes held
+  // before the re-sort and the mutations recorded during it.
+  async function errorsThenSortToTop() {
+    failAllButD();
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-a');
+
+    await failRename(user, 'label-a', 'alpha', 'charlie');
+    await failRename(user, 'label-b', 'bravo', 'delta');
+    const held = {
+      liA: row('label-a'),
+      liB: row('label-b'),
+      alertA: rowAlert('label-a')!,
+      alertB: rowAlert('label-b')!
+    };
+    expect(held.alertA).not.toBeNull();
+    expect(held.alertB).not.toBeNull();
+
+    const sortMutations = observeList();
+    await renameRow(user, 'label-d', 'delta', 'aaa');
+    // The re-sort did happen.
+    await waitFor(() => expect(rowOrder()).toEqual(['aaa', 'alpha', 'bravo', 'charlie']));
+    sortMutations.stop();
+    return { user, held, sortMutations };
+  }
+
+  // The held alerts and rows are still the very same nodes, with their text.
+  function expectHeldUnchanged(held: Awaited<ReturnType<typeof errorsThenSortToTop>>['held']) {
+    expect(row('label-a')).toBe(held.liA);
+    expect(row('label-b')).toBe(held.liB);
+    expect(rowAlert('label-a')).toBe(held.alertA);
+    expect(rowAlert('label-b')).toBe(held.alertB);
+    expect(held.alertA).toHaveTextContent(rowErrorText('alpha', taken()));
+    expect(held.alertB).toHaveTextContent(rowErrorText('bravo', taken()));
+  }
+
+  beforeEach(() => {
+    mockedFetch.mockReset();
+    mockedCreate.mockReset();
+    mockedUpdate.mockReset();
+    mockedDelete.mockReset();
+    mockedFetch.mockResolvedValue(labels);
+  });
+
+  it('keeps each alert as the same DOM node when rows with alerts move up the list', async () => {
+    const { held, sortMutations } = await errorsThenSortToTop();
+
+    // The rows holding the alerts did move in the DOM (removed and inserted
+    // again) -- the path the manual screen reader check is about.
+    expect(sortMutations.removed).toEqual(expect.arrayContaining([held.liA, held.liB]));
+    expect(sortMutations.added).toEqual(expect.arrayContaining([held.liA, held.liB]));
+
+    expectHeldUnchanged(held);
+    // Only their <li> moved: the alerts themselves were neither removed nor
+    // re-created.
+    expect(sortMutations.removed).not.toContain(held.alertA);
+    expect(sortMutations.removed).not.toContain(held.alertB);
+    expect(sortMutations.added).not.toContain(held.alertA);
+    expect(sortMutations.added).not.toContain(held.alertB);
+  });
+
+  it('inserts a new alert for a failure after the re-sort, leaving the existing ones as they were', async () => {
+    const { user, held } = await errorsThenSortToTop();
+    expect(rowAlert('label-c')).toBeNull();
+
+    const failMutations = observeList();
+    await failRename(user, 'label-c', 'charlie', 'alpha');
+    failMutations.stop();
+
+    const alertC = rowAlert('label-c')!;
+    expect(alertC).toHaveTextContent(rowErrorText('charlie', taken()));
+    expect(alertC).not.toBe(held.alertA);
+    expect(alertC).not.toBe(held.alertB);
+    expect(failMutations.added).toContain(alertC);
+
+    expectHeldUnchanged(held);
+    for (const node of [held.liA, held.liB, held.alertA, held.alertB]) {
+      expect(failMutations.removed).not.toContain(node);
+      expect(failMutations.added).not.toContain(node);
+    }
+  });
+
+  it('keeps each alert as the same DOM node when only a row without an alert moves down the list', async () => {
+    const { user, held } = await errorsThenSortToTop();
+    const liD = row('label-d');
+
+    const sortMutations = observeList();
+    await renameRow(user, 'label-d', 'aaa', 'zzz');
+    await waitFor(() => expect(rowOrder()).toEqual(['alpha', 'bravo', 'charlie', 'zzz']));
+    sortMutations.stop();
+
+    // Only the renamed row moved; the rows holding the alerts stayed put.
+    expect(sortMutations.removed).toContain(liD);
+    expect(sortMutations.added).toContain(liD);
+    for (const node of [held.liA, held.liB, held.alertA, held.alertB]) {
+      expect(sortMutations.removed).not.toContain(node);
+      expect(sortMutations.added).not.toContain(node);
+    }
+    expectHeldUnchanged(held);
   });
 });

@@ -18,6 +18,7 @@ import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
 import { submittingProps } from '../Submitting';
+import { ErrorBox } from './ErrorBox';
 
 // Mirrors config.isSafeExtensionName (packages/core-go/internal/config/
 // extensions.go) so an obviously-invalid name is rejected here with a clear
@@ -416,7 +417,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
       {/* Right: editor */}
       <div className="flex-1 min-w-0 flex flex-col gap-3">
-        {error && <div className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900">{error}</div>}
+        {error && <ErrorBox className="p-2.5 text-[11px]">{error}</ErrorBox>}
         {loading ? (
           <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
             <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> {t('settings.common.loading')}
