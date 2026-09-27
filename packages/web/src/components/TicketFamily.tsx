@@ -27,11 +27,11 @@ export const TicketFamily: React.FC<Props> = ({ parent, childTickets = [], onOpe
         type="button"
         data-testid={testId}
         onClick={() => onOpenTicket?.(ref.id)}
-        className="inline-flex items-center gap-2 text-left rounded-md px-1.5 py-0.5 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+        className="inline-flex items-center gap-2 max-w-full text-left rounded-md px-1.5 py-0.5 hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
         title={t('ticketItem.family.open', { id: ref.id })}
       >
         <span className="font-mono text-indigo-600 dark:text-indigo-400 font-semibold">{ref.id}</span>
-        <span className="text-slate-700 dark:text-slate-300 truncate max-w-[28rem]">{ref.title}</span>
+        <span className="text-slate-700 dark:text-slate-300 truncate min-w-0 max-w-[28rem]">{ref.title}</span>
         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-sm ${meta.chip.bg} ${meta.chip.text}`}>
           {t(meta.labelKey)}
         </span>

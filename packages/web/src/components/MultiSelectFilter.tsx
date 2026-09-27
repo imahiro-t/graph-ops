@@ -1,4 +1,4 @@
-import { ReactNode, useRef, useState } from 'react';
+import { ReactNode, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown } from 'lucide-react';
 
@@ -79,7 +79,35 @@ export function MultiSelectFilter<T extends string>({
 }: Props<T>) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
+  // Which edge of the trigger the panel hangs from (DFLT-00220). Left by
+  // default; right when a left-hung panel would run past the right edge of
+  // the window. On a narrow screen the toolbar wraps, so a filter can end up
+  // near the right edge, and its panel then widened the page and brought in
+  // a horizontal scrollbar for as long as it was open.
+  const [alignRight, setAlignRight] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Re-checked after every render while open, not only when opening:
+  // checking a box changes the trigger's text ("All" -> "1 selected"), which
+  // can re-wrap the toolbar and move the trigger to another line. The result
+  // depends only on where the trigger is, so it settles after one pass.
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    const decide = () => {
+      const trigger = buttonRef.current?.getBoundingClientRect();
+      const panel = panelRef.current?.getBoundingClientRect();
+      if (!trigger || !panel) return;
+      const viewportWidth = document.documentElement.clientWidth;
+      // Hang right only when that actually fits; a panel wider than both
+      // sides allow stays on the left, where max-w keeps it on screen.
+      const next = trigger.left + panel.width > viewportWidth && trigger.right - panel.width >= 0;
+      setAlignRight(prev => (prev === next ? prev : next));
+    };
+    decide();
+    window.addEventListener('resize', decide);
+    return () => window.removeEventListener('resize', decide);
+  });
 
   const toggle = (value: T) => {
     if (selected.includes(value)) {
@@ -146,10 +174,11 @@ export function MultiSelectFilter<T extends string>({
             onClick={() => setIsOpen(false)}
           />
           <div
+            ref={panelRef}
             id={panelId}
             role="group"
             aria-label={t(groupLabelKey)}
-            className="absolute left-0 mt-1.5 w-56 max-h-80 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-xs"
+            className={`absolute ${alignRight ? 'right-0' : 'left-0'} mt-1.5 w-56 max-w-[calc(100vw-2rem)] max-h-80 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-xs`}
           >
             {options.length === 0 && emptyKey && (
               <div className="px-3 py-1.5 text-slate-500 dark:text-slate-400">{t(emptyKey)}</div>
