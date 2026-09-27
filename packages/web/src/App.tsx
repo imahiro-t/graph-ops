@@ -1502,15 +1502,20 @@ export const App: React.FC = () => {
               ))}
 
               {totalPages > 1 && (
-                <div className="flex items-center justify-between mt-2 px-1 text-xs text-slate-500 dark:text-slate-400">
-                  <span>
+                // DFLT-00239: on a narrow line (200% text size on a 320px
+                // screen) the buttons move under the count instead of
+                // squeezing it into a column or pushing "next" past the
+                // window. The buttons stay one shrink-0 group, so previous,
+                // page number and next never split across lines.
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mt-2 px-1 text-xs text-slate-500 dark:text-slate-400">
+                  <span className="min-w-0">
                     {t('pagination.range', {
                       from: (currentPage - 1) * ticketsPerPage + 1,
                       to: Math.min(currentPage * ticketsPerPage, filteredTickets.length),
                       total: filteredTickets.length
                     })}
                   </span>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 shrink-0">
                     <button
                       onClick={() => setPage(p => Math.max(1, p - 1))}
                       aria-label={t('pagination.previous')}

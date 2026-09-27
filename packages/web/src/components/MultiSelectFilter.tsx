@@ -173,8 +173,13 @@ export function MultiSelectFilter<T extends string>({
   };
 
   return (
+    // max-w-full / min-w-0 (DFLT-00239): lets this item -- and the trigger
+    // inside it -- be narrower than its text when the toolbar line is
+    // narrower than the text (200% text size on a 320px screen), instead of
+    // pushing the page wider than the window. flex-wrap still moves items to
+    // a new line at their full width first, so at 100% nothing shrinks.
     <div
-      className="relative"
+      className="relative max-w-full min-w-0"
       onKeyDown={e => {
         if (e.key === 'Escape' && isOpen) {
           // Closing unmounts the checkbox the user was on, so focus would
@@ -196,9 +201,22 @@ export function MultiSelectFilter<T extends string>({
         // testid below instead, named like the overlay's.
         aria-controls={isOpen ? panelId : undefined}
         data-testid={`${panelId}-trigger`}
-        className="px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5 whitespace-nowrap"
+        className="px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5 max-w-full min-w-0"
       >
-        {selected.length === 0 ? t(allKey) : t(selectedKey, { count: selected.length })}
+        {/* DFLT-00239: the text wraps inside the trigger rather than widening
+            the page (WCAG 1.4.10). It used to be whitespace-nowrap, and at
+            200% text size on a 320px screen "Assignee: 1 selected" ran up to
+            18px past the window. Wrapping rather than truncating keeps the
+            count visible, and the button's text stays its accessible name
+            (no aria-label, WCAG 2.5.3). break-keep (word-break: keep-all)
+            makes Japanese break at the space, like English, instead of
+            between any two characters: "ステータス: 1件選択" wraps as
+            "ステータス:" / "1件選択" rather than "ステータス: 1" / "件選択".
+            overflow-wrap:anywhere then breaks inside a word only when a
+            single word is still too wide for the line. */}
+        <span className="min-w-0 break-keep [overflow-wrap:anywhere] text-left">
+          {selected.length === 0 ? t(allKey) : t(selectedKey, { count: selected.length })}
+        </span>
         {/* DFLT-00163: WCAG 1.4.11 (3:1). The arrow shows the button opens a list. slate-500 is
             4.55:1 on the slate-50 button; slate-400 is 5.71:1 on the slate-800 button. */}
         <ChevronDown className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 shrink-0" aria-hidden="true" />

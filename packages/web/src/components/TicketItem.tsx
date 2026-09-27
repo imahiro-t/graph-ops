@@ -1737,14 +1737,19 @@ export const TicketItem: React.FC<Props> = ({
           {/* Description Card -- always visible (not tabbed) so the ticket's
               description has a permanent place to be checked. */}
           <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-            <div className="flex items-center justify-between mb-2">
+            {/* DFLT-00239: the header row and its right-hand group wrap on a
+                narrow line (200% text size on a 320px screen) instead of
+                squeezing or pushing the refined time and the expand button
+                past the card's edge. The horizontal gap is the old gap-3, so
+                a row that fits on one line looks as before. */}
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mb-2">
               <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <FileText aria-hidden="true" className="w-3.5 h-3.5 text-indigo-500" />
                 {t('ticketItem.description.title')}
               </span>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
                 {ticket.refined_at && (
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1 min-w-0">
                     <History aria-hidden="true" className="w-3 h-3" />
                     {t('ticketItem.description.refinedAt', { time: formatDateTime(ticket.refined_at, i18n.language) })}
                   </span>
