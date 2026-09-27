@@ -319,11 +319,13 @@ jobs:
       # skip everything MySQL, and pass.
       #
       # Negative check: every one of those skips begins with
-      # "GRAPH_TEST_MYSQL_HOST not set" (three sites --
-      # internal/store/mysql_test.go,
+      # "GRAPH_TEST_MYSQL_HOST not set". The message comes from one place,
+      # mysqltestenv.Load (internal/mysqltestenv/mysqltestenv.go), which all
+      # three callers go through (internal/store/mysql_test.go,
       # internal/store/claim_concurrency_mysql_test.go and
-      # cmd/graph-engine/ticket_delete_update_cli_test.go). A single such
-      # line means this job verified nothing. Note it is these skips that are
+      # cmd/graph-engine/ticket_delete_update_cli_test.go); changing the start
+      # of that message silently disables this check. A single such line
+      # means this job verified nothing. Note it is these skips that are
       # counted, not `--- SKIP` in general: internal/httpserver has skips that
       # fire only when the tests run as root, which have nothing to do with
       # MySQL.

@@ -71,6 +71,9 @@ func Load(tb testing.TB, what string) Settings {
 	tb.Helper()
 	host := os.Getenv("GRAPH_TEST_MYSQL_HOST")
 	if host == "" {
+		// .github/workflows/ci.yml's mysql job greps its logs for the
+		// start of this message ("GRAPH_TEST_MYSQL_HOST not set") to catch
+		// a run that skipped MySQL; keep the two in step.
 		tb.Skipf("GRAPH_TEST_MYSQL_HOST not set; skipping %s (run ./dev/mysql/test.sh)", what)
 	}
 	database := os.Getenv("GRAPH_TEST_MYSQL_DATABASE")
