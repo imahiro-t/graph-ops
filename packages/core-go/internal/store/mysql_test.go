@@ -1,12 +1,11 @@
 package store
 
 import (
-	"fmt"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/graph-ops/core-go/internal/domain"
+	"github.com/graph-ops/core-go/internal/mysqltestenv"
 )
 
 // mysqlTestConfig builds a store.Config from GRAPH_TEST_MYSQL_* env vars.
@@ -16,83 +15,31 @@ import (
 // a real server is configured for them to run against; the corresponding
 // manual test checklist (see the ticket's Gherkin/plan artifacts) is the
 // fallback verification path when no such server is available (e.g. in
-// this sandbox/CI environment).
+// this sandbox/CI environment). mysqltestenv.Load also refuses an empty or
+// working database name (see mysqltestenv.CheckDatabase), since
+// newTestMySQLRepo deletes every row of every table.
 func mysqlTestConfig(t *testing.T) Config {
 	t.Helper()
-	host := os.Getenv("GRAPH_TEST_MYSQL_HOST")
-	if host == "" {
-		t.Skip("GRAPH_TEST_MYSQL_HOST not set; skipping MySQLRepository tests (see mysqlTestConfig's doc comment)")
-	}
-	database := os.Getenv("GRAPH_TEST_MYSQL_DATABASE")
-	if err := checkMySQLTestDatabase(database); err != nil {
-		t.Fatalf("refusing to run MySQLRepository tests: %v", err)
-	}
-	port := 3306
-	if p := os.Getenv("GRAPH_TEST_MYSQL_PORT"); p != "" {
-		var err error
-		if port, err = parsePort(p); err != nil {
-			t.Fatalf("invalid GRAPH_TEST_MYSQL_PORT %q: %v", p, err)
-		}
-	}
+	env := mysqltestenv.Load(t, "MySQLRepository tests")
 	return Config{
 		Backend:       "mysql",
-		MySQLHost:     host,
-		MySQLPort:     port,
-		MySQLDatabase: database,
-		MySQLUser:     os.Getenv("GRAPH_TEST_MYSQL_USER"),
-		MySQLPassword: os.Getenv("GRAPH_TEST_MYSQL_PASSWORD"),
+		MySQLHost:     env.Host,
+		MySQLPort:     env.Port,
+		MySQLDatabase: env.Database,
+		MySQLUser:     env.User,
+		MySQLPassword: env.Password,
 		// Deliberately no test-only lenient default: an unset
 		// GRAPH_TEST_MYSQL_TLS normalizes to verify-full (the same
 		// default production gets), matching this ticket's execution
 		// plan (T-5) that the test suite must exercise the same secure
 		// default a real deployment gets, not a separately relaxed one.
-		MySQLTLSMode:   os.Getenv("GRAPH_TEST_MYSQL_TLS"),
-		MySQLTLSCAFile: os.Getenv("GRAPH_TEST_MYSQL_TLS_CA"),
+		MySQLTLSMode:   env.TLSMode,
+		MySQLTLSCAFile: env.TLSCAFile,
 	}
 }
 
-// workingMySQLDatabase is the database name dev/mysql/compose.yaml creates
-// for day-to-day GraphOps use. The throwaway test databases live on the same
-// server, so the database name is the only thing telling them apart.
-const workingMySQLDatabase = "graph_ops"
-
-// checkMySQLTestDatabase rejects database names the MySQL tests must never
-// run against: newTestMySQLRepo deletes every row of every table before each
-// test and some tests alter the schema, so pointing GRAPH_TEST_MYSQL_DATABASE
-// at the working database would wipe it. An empty name is rejected too, so
-// the target is always stated explicitly (dev/mysql/test.sh and CI always set
-// one). This is a deny list rather than an allow list so that the names
-// test.sh (graph_ops_test_<epoch>_<pid>) and CI (graph_ops_ci) use keep
-// working without a shared naming rule.
-func checkMySQLTestDatabase(name string) error {
-	if name == "" {
-		return fmt.Errorf("GRAPH_TEST_MYSQL_DATABASE is empty; set it to a throwaway database (dev/mysql/test.sh creates one per run)")
-	}
-	if strings.EqualFold(name, workingMySQLDatabase) {
-		return fmt.Errorf("GRAPH_TEST_MYSQL_DATABASE is %q, the working database; the tests delete every row, so use a throwaway database (dev/mysql/test.sh creates one per run)", name)
-	}
-	return nil
-}
-
-func TestCheckMySQLTestDatabase(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		wantErr bool
-	}{
-		{"", true},
-		{"graph_ops", true},
-		{"GRAPH_OPS", true},
-		{"Graph_Ops", true},
-		{"graph_ops_ci", false},
-		{"graph_ops_test_1_2", false},
-	} {
-		err := checkMySQLTestDatabase(tc.name)
-		if (err != nil) != tc.wantErr {
-			t.Errorf("checkMySQLTestDatabase(%q) = %v, want error: %v", tc.name, err, tc.wantErr)
-		}
-	}
-}
-
+// parsePort parses a decimal port number; splitHostPort in
+// mysql_tls_test.go uses it.
 func parsePort(s string) (int, error) {
 	n := 0
 	for _, c := range s {

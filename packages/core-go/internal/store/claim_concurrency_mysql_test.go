@@ -9,43 +9,32 @@
 package store_test
 
 import (
-	"os"
-	"strconv"
 	"sync"
 	"testing"
 
 	"github.com/graph-ops/core-go/internal/config"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
+	"github.com/graph-ops/core-go/internal/mysqltestenv"
 	"github.com/graph-ops/core-go/internal/store"
 )
 
-// mysqlRepoForClaimTest mirrors internal/store's own mysqlTestConfig, which is
-// unexported and so out of reach from here. Same environment variables, same
-// skip when no server is configured, same secure TLS default.
+// mysqlRepoForClaimTest opens the test MySQL server through the same
+// mysqltestenv.Load that internal/store's own mysqlTestConfig uses: same
+// environment variables, same skip when no server is configured, same
+// refusal of an empty or working database name, same secure TLS default.
 func mysqlRepoForClaimTest(t *testing.T) *store.MySQLRepository {
 	t.Helper()
-	host := os.Getenv("GRAPH_TEST_MYSQL_HOST")
-	if host == "" {
-		t.Skip("GRAPH_TEST_MYSQL_HOST not set; skipping the MySQL claim-concurrency test")
-	}
-	port := 3306
-	if p := os.Getenv("GRAPH_TEST_MYSQL_PORT"); p != "" {
-		n, err := strconv.Atoi(p)
-		if err != nil {
-			t.Fatalf("invalid GRAPH_TEST_MYSQL_PORT %q: %v", p, err)
-		}
-		port = n
-	}
+	env := mysqltestenv.Load(t, "the MySQL claim-concurrency test")
 	repo, err := store.NewMySQLRepository(store.Config{
 		Backend:        "mysql",
-		MySQLHost:      host,
-		MySQLPort:      port,
-		MySQLDatabase:  os.Getenv("GRAPH_TEST_MYSQL_DATABASE"),
-		MySQLUser:      os.Getenv("GRAPH_TEST_MYSQL_USER"),
-		MySQLPassword:  os.Getenv("GRAPH_TEST_MYSQL_PASSWORD"),
-		MySQLTLSMode:   os.Getenv("GRAPH_TEST_MYSQL_TLS"),
-		MySQLTLSCAFile: os.Getenv("GRAPH_TEST_MYSQL_TLS_CA"),
+		MySQLHost:      env.Host,
+		MySQLPort:      env.Port,
+		MySQLDatabase:  env.Database,
+		MySQLUser:      env.User,
+		MySQLPassword:  env.Password,
+		MySQLTLSMode:   env.TLSMode,
+		MySQLTLSCAFile: env.TLSCAFile,
 	})
 	if err != nil {
 		t.Fatalf("NewMySQLRepository: %v", err)
