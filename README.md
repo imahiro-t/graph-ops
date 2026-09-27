@@ -87,7 +87,7 @@ A project itself (name, prefix, tickets) lives in the database and can be shared
 
 - "All Tickets Overview" shows the total number of tickets, how many are in progress, in review, and done, and the node progress.
 - Search by ticket ID or title, filter by status, assignee, priority, and label, and page through the list. The list refreshes itself every 15 seconds; the refresh button next to the "Updated ..." time reloads it right away.
-- The four filters all work the same way: nothing selected means "All" (no filtering), and selecting several options within one filter shows the tickets that match any of them, while different filters narrow the list together. "Clear selection" at the bottom of a panel empties that filter back to All. The assignee filter takes several assignees too, and its "Unassigned" option narrows the list to tickets with nobody assigned.
+- The four filters all work the same way: nothing selected means "All" (no filtering), and selecting several options within one filter shows the tickets that match any of them, while different filters narrow the list together. "Clear selection" at the bottom of a panel empties that filter back to All, and "Select all" next to it checks every option of that filter (including "Unassigned") and leaves the panel open, so you can then uncheck the few you do not want -- for example, everything except Done and Closed. "Select all" is disabled when every option is already checked. With every option checked the filter still reads "n selected" rather than "All", because it is not the same as no filtering: for the label filter it hides tickets that have no label, and a newly appearing assignee is not included. The assignee filter takes several assignees too, and its "Unassigned" option narrows the list to tickets with nobody assigned.
 - A ticket's status (`TODO` / `REFINED` / `IN PROGRESS` / `IN REVIEW` / `IN RELEASE` / `DONE` / `CLOSED`) is derived automatically from its execution graph.
 - You can change a ticket's priority, assign it to yourself with "Assign to me", close it without completing it (with an optional reason), reopen it, or delete it (after a confirmation).
 - "Assign to me" appears once you set your name under Settings > App Settings > "My Profile".
@@ -317,7 +317,7 @@ claude plugin update graph-ops@graph-ops
 
 - 「全チケット概要」に、総チケット数、進行中・レビュー中・完了の件数、ノード進捗が表示されます。
 - チケット ID やタイトルで検索し、ステータス・担当者・優先度・ラベルで絞り込み、ページを切り替えられます。一覧は 15 秒ごとに自動で更新されます。「○○ 更新」の時刻の横にある更新ボタンで、すぐに最新の状態にできます。
-- 4つの絞り込みはどれも同じ操作です。何も選んでいない状態が「すべて」（絞り込みなし）で、同じ絞り込みの中で複数選ぶと、そのいずれかに一致するチケットが表示されます。異なる絞り込みどうしは、すべてに一致するチケットに絞られます。パネル下部の「選択を解除」を押すと、その絞り込みの選択が空（＝すべて）に戻ります。担当者も複数選べ、「未割り当て」を選ぶと担当者が未設定のチケットだけに絞り込めます。
+- 4つの絞り込みはどれも同じ操作です。何も選んでいない状態が「すべて」（絞り込みなし）で、同じ絞り込みの中で複数選ぶと、そのいずれかに一致するチケットが表示されます。異なる絞り込みどうしは、すべてに一致するチケットに絞られます。パネル下部の「選択を解除」を押すと、その絞り込みの選択が空（＝すべて）に戻ります。隣の「すべて選択」を押すと、その絞り込みの全項目（担当者の「未割り当て」を含む）にチェックが入り、パネルは開いたままなので、続けて不要な項目だけ外せます（例: 「完了」と「クローズ」以外のステータスを表示する）。全項目がチェック済みのときは「すべて選択」は押せません。全項目を選んだ状態は「◯件選択」と表示され、「すべて」とは表示されません。未選択（絞り込みなし）とは同じにならない場合があるためで、ラベルではラベルの付いていないチケットが除外され、担当者では後から現れた担当者は含まれません。担当者も複数選べ、「未割り当て」を選ぶと担当者が未設定のチケットだけに絞り込めます。
 - チケットのステータス（`TODO`／`REFINED`／`IN PROGRESS`／`IN REVIEW`／`IN RELEASE`／`DONE`／`CLOSED`。日本語表示ではそれぞれ「未着手」「リファイン済み」「進行中」「レビュー中」「リリース中」「完了」「クローズ」）は、実行グラフから自動的に決まります。
 - チケットの優先度の変更、「担当する」での自分への割り当て、完了せずにクローズ（理由は任意）、再オープン、削除（確認あり）ができます。
 - 「担当する」ボタンは、設定 > アプリ設定 > 「自分の情報」で名前を設定すると表示されます。
