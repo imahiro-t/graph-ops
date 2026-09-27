@@ -94,6 +94,18 @@ describe.each(['ja', 'en'] as const)('TicketItem description header wraps on a n
     expect(row).not.toHaveClass('flex-nowrap');
   });
 
+  // At 200% on 320-336px the English title "Description" is one word wider
+  // than the card, so without these it ran past the card and was clipped by
+  // the panel ("Descripti"). The title may shrink and break inside the word.
+  it('lets the title shrink and break inside a long word', () => {
+    renderExpanded();
+    const { row } = descriptionHeader();
+    const title = row.firstElementChild as HTMLElement;
+    expect(title).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
+    expect(title).not.toHaveClass('shrink-0');
+    expect(title).not.toHaveClass('whitespace-nowrap');
+  });
+
   it('wraps the right-hand group and lets it and the refined time shrink', () => {
     renderExpanded();
     const { refined, group } = descriptionHeader();

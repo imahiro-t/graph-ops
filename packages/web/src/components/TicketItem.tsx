@@ -1772,9 +1772,13 @@ export const TicketItem: React.FC<Props> = ({
                 narrow line (200% text size on a 320px screen) instead of
                 squeezing or pushing the refined time and the expand button
                 past the card's edge. The horizontal gap is the old gap-3, so
-                a row that fits on one line looks as before. */}
+                a row that fits on one line looks as before. The title itself
+                is min-w-0 with overflow-wrap:anywhere so a single long word
+                ("Description" in English) breaks inside the card instead of
+                keeping its min-content width and running past the card and
+                the panel's clip. */}
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mb-2">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 min-w-0 [overflow-wrap:anywhere]">
                 <FileText aria-hidden="true" className="w-3.5 h-3.5 text-indigo-500" />
                 {t('ticketItem.description.title')}
               </span>
