@@ -107,7 +107,7 @@ func TestLaunch_StandaloneChildIsCutFromMain(t *testing.T) {
 		t.Fatalf("res = %+v, %v", res, err)
 	}
 	ctx, _ := h.svc.WorkerContext(run.RunID, c)
-	if ctx.Position != "single" || ctx.TargetBranch != "" || ctx.DefaultBranch != "main" {
+	if ctx.Position != "single" || ctx.RootTicket != c || ctx.TargetBranch != "" || ctx.DefaultBranch != "main" {
 		t.Fatalf("ctx = %+v", ctx)
 	}
 }
@@ -120,7 +120,7 @@ func TestWorkerContext_TreeChild(t *testing.T) {
 	h.behave[c] = func(w *workerCall) { ctx = w.ctx(); defaultWorker(w) }
 	run := h.start(r, autopilot.ModeTree)
 	h.drive(run.RunID, nil)
-	if ctx.Position != "tree_child" || ctx.Role != "work" || ctx.BaseBranch != "worktree-"+r || ctx.TargetBranch != "worktree-"+r ||
+	if ctx.Position != "tree_child" || ctx.RootTicket != r || ctx.Role != "work" || ctx.BaseBranch != "worktree-"+r || ctx.TargetBranch != "worktree-"+r ||
 		ctx.Settings != h.settings || ctx.RunID != run.RunID || ctx.PendingDecisions == nil {
 		t.Fatalf("ctx = %+v", ctx)
 	}

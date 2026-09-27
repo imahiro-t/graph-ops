@@ -76,7 +76,14 @@ A ticket can have a parent ticket -- the ticket it was derived from. The autopil
 - **Deleting a parent** leaves its children in place with no parent.
 - **Storage**: SQLite and MySQL store it in a new `tickets.parent_ticket_id` column, added automatically the first time the new version opens an existing database. An HTTP custom data source needs [protocol 1.1](http-datasource/README.md); a plugin that still speaks 1.0 keeps working for everything else, but creating a ticket with a parent fails with `PARENT_TICKET_UNSUPPORTED` before anything is sent, so a parent is never dropped silently. The [Jira sample plugin](../examples/jira-datasource/README.md) speaks 1.1 and keeps the parent in its `graphops.ticket` issue property.
 
-In an autopilot run, the `work` session creates follow-up tickets with `--parent` set to the ticket it worked on. If that fails with `PARENT_TICKET_UNSUPPORTED`, it does not retry without `--parent` (the ticket would silently fall out of the tree) and creates no further tickets: the items that were not created are listed, with the title and description they would have had, in the `autopilot-decision-handoff` artifact, the ticket's result stays `done`, and its summary says how many items were left without a ticket.
+In an autopilot run, the `work` session sorts the open items it hands off into two kinds before creating anything:
+
+- **In scope**: a problem the ticket's own changes introduced or left unfinished, or one that stands in the way of the purpose of the run's root ticket (`root_ticket` in `graph-engine autopilot worker-context`). These become child tickets (`--parent` set to the ticket it worked on) and are worked on later in the same run.
+- **Out of scope**: everything else, typically a problem that was already there before the ticket, such as a layout break on a neighbouring screen found while testing. These all go into one low-priority ticket titled "Backlog: issues found while working on <ticketId>", created without a parent, so it stays out of the tree and the run never picks it up. No backlog ticket is created when there is nothing out of scope.
+
+This keeps a tree from growing without end: reviews that test a change under demanding conditions (large text, narrow screens) tend to find older problems nearby, and turning each of them into a child ticket makes every ticket spawn more. The `autopilot-decision-handoff` artifact records each item's kind and where it went.
+
+If creating a child ticket fails with `PARENT_TICKET_UNSUPPORTED`, it does not retry without `--parent` (the ticket would silently fall out of the tree) and creates no further tickets: the items that were not created are listed, with the title and description they would have had, in the `autopilot-decision-handoff` artifact, the ticket's result stays `done`, and its summary says how many items were left without a ticket.
 
 ## Starting a run
 
@@ -185,7 +192,7 @@ Autopilot settings are per project. Edit your own values in the Web UI under Set
 | `mainReflection` | `branch` / `pull_request` / `merge` | `branch` | How the root's work reaches the main branch (see [Branches](#branches)). |
 | `permissionMode` | `acceptEdits` / `auto` / `dontAsk` / `bypassPermissions` | `auto` | The `claude --permission-mode` of every child session, and of the orchestrator when it is started from the Web UI. `default` and `plan` are not accepted, since a session in those modes cannot run on its own. |
 | `autoApproveGates` | `true` / `false` | `true` | Whether the child session decides `approval_gate`s. When off, it waits for your decision as `process-ticket` does. |
-| `autoCreateTickets` | `true` / `false` | `true` | Whether the child session decides which open items become follow-up tickets and creates them. When off, it lists the items in its terminal and waits for you to pick. |
+| `autoCreateTickets` | `true` / `false` | `true` | Whether the child session decides which open items become follow-up tickets and creates them (in-scope items as child tickets, the rest in one backlog ticket outside the tree; see [Parent and child tickets](#parent-and-child-tickets)). When off, it lists the items in its terminal and waits for you to pick. |
 | `maxTickets` | 1-100 | 20 | Tickets launched as `work` per run, the root included. Relaunching the same ticket does not count again, a failed launch is given back, and `merge-up` / `finalize` sessions do not count. |
 | `maxDepth` | 0-10 | 3 | How deep derived tickets are processed (the root is 0). |
 | `onFailure` | `stop` / `continue` | `stop` | Stop the whole run on a failure or block, or skip only that ticket's subtree and continue. |
@@ -265,7 +272,7 @@ Child-session side (used by the `autopilot-worker` skill):
 
 | Subcommand | Output |
 | --- | --- |
-| `worker-context <runId> <ticketId>` | `{"run_id","ticket","mode","run_state","position","role","branch","worktree","base_branch","target_branch","target_ticket","default_branch","merge_source_branch","merge_worktree","settings","pending_decisions"}`; `position` is `single`, `tree_root` or `tree_child`. |
+| `worker-context <runId> <ticketId>` | `{"run_id","ticket","root_ticket","mode","run_state","position","role","branch","worktree","base_branch","target_branch","target_ticket","default_branch","merge_source_branch","merge_worktree","settings","pending_decisions"}`; `root_ticket` is the ticket the run started from; `position` is `single`, `tree_root` or `tree_child`. |
 | `record-decision <runId> <ticketId> <kind> <content\|->` | Keeps a decision in the run until it can be saved as an artifact. `{"recorded","ticket"}` |
 | `attach-decisions <runId> <ticketId> <nodeId>` | Saves the kept decisions on the node, skipping any already on the ticket. `{"attached":[...],"skipped":[...]}` |
 | `touch <runId> <ticketId> [--awaiting-human <what>]` | Records activity; `--awaiting-human` marks the session as waiting for a person. `{"touched","awaiting_human"}` |
