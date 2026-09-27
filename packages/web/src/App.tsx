@@ -1384,9 +1384,14 @@ export const App: React.FC = () => {
           of DFLT-00227: below 240px at 100%, below 480px at 200%) the page
           pads with px-3 instead of px-6, which took almost a third of a
           160px window and left the list, the summary card and the
-          pagination row too little room. 240px and up at 100% look as
-          before. */}
-      <main className="max-w-7xl mx-auto px-6 [@media(max-width:15rem)]:px-3 py-6 space-y-6">
+          pagination row too little room. DFLT-00252: below sm (640px, a px
+          query) it pads with px-3 too, whatever the text size -- a 200% root
+          font size set on the page itself leaves the rem query at 240px, and
+          at 320/360px the Send button's label broke onto several lines. The
+          15rem query stays: with a very large default font (over about 267%)
+          it still matches above 640px. From sm up, at a normal default font
+          size, nothing changes. */}
+      <main className="max-w-7xl mx-auto px-6 max-sm:px-3 [@media(max-width:15rem)]:px-3 py-6 space-y-6">
         {/* Simple Summary Metrics. DFLT-00251: both children are min-w-0
             max-w-full so neither can be wider than the card; the numbers
             already wrap between items (flex-wrap). Each item is min-w-0

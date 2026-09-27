@@ -1764,11 +1764,17 @@ export const TicketItem: React.FC<Props> = ({
           with p-3 instead. A rem media query follows that default size
           alone: at 100% it matches only below 240px (so 320px and up look as
           before), at 150% below 360px and at 200% below 480px (320px and
-          375px, but not sm+) (DFLT-00227). */}
+          375px, but not sm+) (DFLT-00227). DFLT-00252: below sm (640px, a px
+          query) both pad with p-3 as well, whatever the text size, so a 200%
+          root font size set on the page (which the rem query does not
+          follow) still leaves the Send button room for a one-line label at
+          320/360px. The 15rem query stays for a very large default font
+          (over about 267%), where it matches above 640px too. From sm up, at
+          a normal default font size, nothing changes. */}
       {isExpanded && (
         <div
           data-testid="ticket-details"
-          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 [@media(max-width:15rem)]:p-3 space-y-6"
+          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 max-sm:p-3 [@media(max-width:15rem)]:p-3 space-y-6"
         >
           {/* Metadata Bar */}
           <div className="flex flex-wrap items-center gap-y-2 gap-x-6 text-xs text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800 pb-3">
@@ -2567,10 +2573,11 @@ export const TicketItem: React.FC<Props> = ({
           </div>
 
           {/* Action Footer: Claude Execution Panel. p-3 with large text on
-              a narrow screen, like the details around it (DFLT-00227). */}
+              a narrow screen, like the details around it (DFLT-00227), and
+              below sm whatever the text size (DFLT-00252). */}
           <div
             data-testid="ticket-action-footer"
-            className="bg-white dark:bg-slate-900 p-4 [@media(max-width:15rem)]:p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs"
+            className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 [@media(max-width:15rem)]:p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs"
           >
             {/* The action row (DFLT-00181): the regular actions (refine, then
                 run) on the left, and at its right end, set apart from them,
@@ -2625,7 +2632,11 @@ export const TicketItem: React.FC<Props> = ({
                 text the button stays to the right of it down to 320px; the
                 button's vertical padding keeps it tall enough to press once
                 it no longer stretches to the textarea's height. From sm up
-                nothing changes (DFLT-00226). */}
+                nothing changes (DFLT-00226). Both show keyboard focus with a
+                blue ring (like the buttons around them), not only the
+                textarea's border colour; the button's ring sits off it by the
+                footer's own background so it stands out from the indigo fill
+                (DFLT-00252). */}
             <div className="flex max-sm:flex-wrap gap-2">
               <textarea
                 rows={2}
@@ -2641,13 +2652,13 @@ export const TicketItem: React.FC<Props> = ({
                 // DFLT-00205: a persistent accessible name (the placeholder
                 // vanishes once typing starts).
                 aria-label={t('ticketItem.promptLabel')}
-                className="flex-1 min-w-0 max-sm:basis-24 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-800 resize-none font-sans"
+                className="flex-1 min-w-0 max-sm:basis-24 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus:bg-white dark:focus:bg-slate-800 resize-none font-sans"
               />
               <button
                 onClick={handleSendPrompt}
                 disabled={isRunning || !promptText.trim()}
                 {...submittingProps(isRunning)}
-                className="px-4 max-sm:px-3 max-sm:py-2 max-sm:ml-auto max-w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex max-sm:flex-wrap max-sm:[overflow-wrap:anywhere] items-center justify-center gap-1.5 shadow-xs transition"
+                className="px-4 max-sm:px-3 max-sm:py-2 max-sm:ml-auto max-w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex max-sm:flex-wrap max-sm:[overflow-wrap:anywhere] items-center justify-center gap-1.5 shadow-xs transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
               >
                 {isRunning ? <Loader2 aria-hidden="true" className="w-4 h-4 shrink-0 animate-spin" /> : <Send aria-hidden="true" className="w-4 h-4 shrink-0" />}
                 {t('ticketItem.send')}

@@ -405,7 +405,10 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
             // the notice (DFLT-00224, see above). At any width, not only below
             // sm (DFLT-00225): on sm+ with large text the column can be as
             // narrow as its button, and the dismiss button (which does not
-            // shrink) squeezed the text to a letter a line.
+            // shrink) squeezed the text to a letter a line. The dismiss
+            // button is at least 1.5rem (24px at 100%) each way, a target
+            // large enough to press, with its label centred, and shows its
+            // focus ring in dark mode too (DFLT-00252, WCAG 2.5.8 / 2.4.7).
             <div
               data-testid="autopilot-untrusted"
               className="self-stretch flex flex-wrap items-start gap-2 p-2 rounded-lg border text-[0.6875rem] bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100"
@@ -418,7 +421,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
                 data-testid="autopilot-untrusted-dismiss"
                 onClick={dismissUntrusted}
                 aria-describedby={untrustedId}
-                className="shrink-0 max-w-full max-sm:[overflow-wrap:anywhere] px-2 py-0.5 rounded border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 font-semibold hover:bg-amber-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+                className="shrink-0 max-w-full max-sm:[overflow-wrap:anywhere] min-h-6 min-w-6 inline-flex items-center justify-center px-2 py-0.5 rounded border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 font-semibold hover:bg-amber-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 dark:focus-visible:ring-violet-400"
               >
                 {t('autopilot.untrustedDismiss')}
               </button>

@@ -166,11 +166,16 @@ describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 1
     await i18n.changeLanguage(lng);
   });
 
-  it('pads <main> less only under 15rem', async () => {
+  // DFLT-00252: also below sm (a px query), so a 200% root font size set on
+  // the page (which the rem query does not follow) still pads less at
+  // 320/360px; the 15rem query stays for a very large default font.
+  it('pads <main> less only below sm or under 15rem', async () => {
     await renderApp();
     const main = screen.getByRole('main');
-    expect(main).toHaveClass('px-6', `${NARROW}px-3`);
+    expect(main).toHaveClass('px-6', 'max-sm:px-3', `${NARROW}px-3`);
     expect(main).not.toHaveClass('px-3');
+    expect(main).not.toHaveClass('sm:px-6');
+    expect(main).not.toHaveClass('sm:px-3');
   });
 
   it('keeps the summary card\'s children inside the card and the numbers wrapping between items', async () => {

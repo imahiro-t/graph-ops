@@ -91,6 +91,45 @@ describe.each(['ja', 'en'] as const)('AutopilotControls sizes its small lines in
     expectBreaksAnywhere(notice.querySelector('p')!);
   });
 
+  // DFLT-00252: the notice's dismiss button was about 22.5px tall at 100%
+  // text, under the 24x24 CSS px of WCAG 2.5.8. min-h-6 / min-w-6 (1.5rem,
+  // 24px at 100%, larger with larger text) with its label centred; its focus
+  // ring shows in dark mode too. jsdom does no layout, so this checks the
+  // classes; the size was measured in a real browser.
+  it('gives the untrusted-folder dismiss button a 24px target and a focus ring, and it still dismisses', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          run_id: 'run-1',
+          mode: 'tree',
+          root: 'T',
+          state: 'starting',
+          created: true,
+          resumed: false,
+          untrusted_folder: '/work/t'
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+    const user = userEvent.setup();
+    render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
+    await user.click(screen.getByTestId('autopilot-start'));
+    await user.click(screen.getByRole('button', { name: i18n.t('autopilot.confirm.start') }));
+    const dismiss = await screen.findByTestId('autopilot-untrusted-dismiss');
+    expect(dismiss).toHaveAccessibleName(i18n.t('autopilot.untrustedDismiss'));
+    expect(dismiss).toHaveClass('min-h-6', 'min-w-6', 'inline-flex', 'items-center', 'justify-center');
+    expect(dismiss).toHaveClass(
+      'focus:outline-none',
+      'focus-visible:ring-2',
+      'focus-visible:ring-violet-500',
+      'dark:focus-visible:ring-violet-400'
+    );
+    // The existing wrapping stays (DFLT-00224 / DFLT-00225).
+    expect(dismiss).toHaveClass('shrink-0', 'max-w-full', 'max-sm:[overflow-wrap:anywhere]');
+    await user.click(dismiss);
+    expect(screen.queryByTestId('autopilot-untrusted')).not.toBeInTheDocument();
+  });
+
   it('sizes the reason under a disabled mode in the dialog in rem and breaks it anywhere', async () => {
     const user = userEvent.setup();
     render(
