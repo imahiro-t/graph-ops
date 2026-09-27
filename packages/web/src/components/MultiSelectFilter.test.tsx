@@ -305,6 +305,30 @@ describe('MultiSelectFilter', () => {
       expect(document.activeElement).toBe(trigger());
     });
 
+    it('becomes pressable again when a new option appears after it was pressed', async () => {
+      // The assignee options follow the 15-second poll: "select all" is a
+      // snapshot, so an assignee who shows up later is not selected and the
+      // button can add them. The selection itself is left as it was.
+      const onChange = vi.fn();
+      const user = userEvent.setup();
+      const { rerender } = render(<Harness options={OPTIONS.slice(0, 2)} onChange={onChange} />);
+
+      await user.click(trigger());
+      await user.click(selectAllButton());
+      expect(onChange).toHaveBeenLastCalledWith(['a', 'b']);
+      expect(selectAllButton()).toBeDisabled();
+
+      rerender(<Harness options={OPTIONS} onChange={onChange} />);
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('checkbox', { name: 'う' })).not.toBeChecked();
+      expect(trigger()).toHaveTextContent(i18n.t('toolbar.statusSelected', { count: 2 }));
+      expect(selectAllButton()).toBeEnabled();
+
+      await user.click(selectAllButton());
+      expect(onChange).toHaveBeenLastCalledWith(['a', 'b', 'c']);
+      expect(selectAllButton()).toBeDisabled();
+    });
+
     it('becomes pressable again once an option is unchecked, and clear still works', async () => {
       const onChange = vi.fn();
       const user = userEvent.setup();
