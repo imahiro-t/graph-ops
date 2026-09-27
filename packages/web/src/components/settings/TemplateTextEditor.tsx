@@ -17,6 +17,7 @@ import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 import { submittingProps } from '../Submitting';
+import { ErrorBox } from './ErrorBox';
 
 export type TemplateFetcher = (
   t: TFunction
@@ -113,9 +114,9 @@ export const TemplateTextEditor: React.FC<Props> = ({
     <div className="flex flex-col gap-3 h-full min-h-0">
       <p className="text-[11px] text-slate-500 dark:text-slate-400">{t(`${i18nPrefix}.intro`)}</p>
       {error && (
-        <div role="alert" className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900 whitespace-pre-wrap">
+        <ErrorBox role="alert" className="p-2.5 text-[11px] whitespace-pre-wrap">
           {error}
-        </div>
+        </ErrorBox>
       )}
       {loading ? (
         <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">

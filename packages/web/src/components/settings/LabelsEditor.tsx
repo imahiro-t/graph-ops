@@ -22,6 +22,7 @@ import { useTransientAnnouncement } from '../../hooks/useTransientAnnouncement';
 import { StatusLiveRegion } from '../StatusLiveRegion';
 import { IconButton } from '../IconButton';
 import { SubmittingText, submittingProps } from '../Submitting';
+import { ErrorBox } from './ErrorBox';
 
 interface Props {
   // Every project that can be picked. An empty list disables the tab: there
@@ -57,6 +58,26 @@ const CREATE_NAME_FOCUS_KEY = 'create-name';
 const renameButtonKey = (id: string) => `rename-${id}`;
 const renameInputKey = (id: string) => `rename-input-${id}`;
 const deleteButtonKey = (id: string) => `delete-${id}`;
+// The rename's "save" button (DFLT-00213). Together with the rename input it
+// is what a rename is operated from, and so where focus sits when the rename
+// was just saved: only from these two does a finished save move focus on
+// (see focusIsInRenameOf). The row's color buttons stay focusable while it
+// saves, but moving to one starts a different action, not a rename step.
+const renameSaveKey = (id: string) => `rename-save-${id}`;
+
+// Whether keyboard focus is still on `id`'s rename -- its name input or its
+// "save" button -- or nowhere (<body>, where a disabled "save" button may drop
+// it in a browser). Only then may a finished save move focus: the user has
+// otherwise gone on to something else (another row's rename or delete
+// confirmation, a color button, the create form), and a save started earlier
+// must not pull them away from it (DFLT-00213). Deliberately not "anywhere in
+// the row": the row's own color buttons are a separate action.
+function focusIsInRenameOf(id: string): boolean {
+  const active = document.activeElement;
+  if (active === null || active === document.body) return true;
+  const key = active.getAttribute('data-focus-key');
+  return key === renameInputKey(id) || key === renameSaveKey(id);
+}
 
 interface PaletteProps {
   value: LabelColor | null;
@@ -126,21 +147,72 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   const nameInputId = useId();
   const projectSelectId = useId();
   const errorId = useId();
+  // Each row's error element id is this plus the label id.
+  const rowErrorIdBase = useId();
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [labels, setLabels] = useState<LabelUsage[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  // Errors are kept apart by what raised them (DFLT-00214), so that starting
+  // one action never silently removes the report of another one's failure:
+  // - loadError: the list could not be fetched. Cleared only by the next
+  //   load (a project switch).
+  // - createError: the create form's last attempt failed. Cleared only by
+  //   the next create (or a load), never by a row's action.
+  // - rowErrors: per label id, the last failed rename/recolor/delete of that
+  //   row. Cleared only when that same row starts its next rename save,
+  //   recolor or delete (or by a load) -- not by another row's action and not
+  //   by a create. The same idea as busyIds (DFLT-00211): a row's state lives
+  //   and dies with that row's own requests.
+  const [loadError, setLoadError] = useState('');
+  const [createError, setCreateError] = useState('');
+  const [rowErrors, setRowErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
+  // Always a new Map (React would not see an in-place change), and the
+  // previous one when nothing changes, so no re-render is spent on it.
+  const setRowError = (id: string, message: string) =>
+    setRowErrors(prev => {
+      if (prev.get(id) === message) return prev;
+      const next = new Map(prev);
+      next.set(id, message);
+      return next;
+    });
+  const clearRowError = (id: string) =>
+    setRowErrors(prev => {
+      if (!prev.has(id)) return prev;
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
 
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState<LabelColor>('gray');
   const [creating, setCreating] = useState(false);
-  // Whether `error` is about the create form's name (it then marks the name
-  // input aria-invalid and describes it).
+  // Whether createError is about the name as it is still typed (it then marks
+  // the name input aria-invalid and describes it). Editing the name drops
+  // this, but leaves the error text on screen.
   const [createFailed, setCreateFailed] = useState(false);
+  // The row whose open rename input holds a name the server just rejected
+  // (it then marks that input aria-invalid and describes it with the row's
+  // error). Like createFailed, editing the draft drops it while the error
+  // text stays. One id is enough: only one row is renamed at a time.
+  const [renameFailedId, setRenameFailedId] = useState<string | null>(null);
 
-  // Inline rename: which row is being renamed, and its draft.
+  // Inline rename: which row is being renamed, and its draft. One row at a
+  // time. A finished save only closes the rename if its own row is still the
+  // one being renamed -- another row's rename may have been opened while it
+  // was saving, and must keep its input and draft -- and only moves focus if
+  // focus is still on its own name input or save button, or nowhere
+  // (DFLT-00213). renamingIdRef holds the latest value for that check, which
+  // runs after an await where the render's renamingId is stale; it is only
+  // ever updated through setRenaming, together with the state, so it is
+  // current from the moment a handler changes it, not only after the next
+  // render.
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const renamingIdRef = useRef<string | null>(null);
+  const setRenaming = useCallback((id: string | null) => {
+    renamingIdRef.current = id;
+    setRenamingId(id);
+  }, []);
   const [renameDraft, setRenameDraft] = useState('');
   // The rows with a request in flight (DFLT-00211). A set, not a single id:
   // another row can be renamed, recolored or deleted while one is saving,
@@ -193,9 +265,13 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
     // Not just `labels`: an error from the project being left, and the
     // aria-invalid/role="alert" state that goes with it, must not survive
     // into a selection where the form it describes is disabled
-    // (accessibility review condition A-2).
-    setError('');
+    // (accessibility review condition A-2). Every kind of error goes: the
+    // rows they belong to are being replaced (DFLT-00214).
+    setLoadError('');
+    setCreateError('');
     setCreateFailed(false);
+    setRowErrors(prev => (prev.size === 0 ? prev : new Map()));
+    setRenameFailedId(null);
     if (!projectId) {
       setLabels([]);
       setLoading(false);
@@ -208,7 +284,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       setLabels(fetched);
     } catch (e) {
       if (requestedProjectIdRef.current !== projectId) return;
-      setError(errorMessage(e, t('errors.UNKNOWN')));
+      setLoadError(errorMessage(e, t('errors.UNKNOWN')));
     } finally {
       // loading too: a late response must not clear the spinner belonging to
       // the request that is still in flight.
@@ -219,15 +295,18 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   }, [projectId]);
 
   useEffect(() => {
-    setRenamingId(null);
+    setRenaming(null);
     load();
-  }, [load]);
+  }, [load, setRenaming]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEdit || creating || newName.trim() === '') return;
     setCreating(true);
-    setError('');
+    // Only the create form's own error: a row's failure stays on its row, and
+    // a load failure stays until the next load (DFLT-00214) -- creating a
+    // label does not re-fetch the list, so the list is no less incomplete.
+    setCreateError('');
     setCreateFailed(false);
     try {
       const created = await createLabel(t, projectId, newName, newColor);
@@ -235,7 +314,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       setNewName('');
       onLabelsChanged?.();
     } catch (err) {
-      setError(errorMessage(err, t('errors.UNKNOWN')));
+      setCreateError(errorMessage(err, t('errors.UNKNOWN')));
       setCreateFailed(true);
     } finally {
       setCreating(false);
@@ -245,10 +324,24 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
     }
   };
 
-  const applyUpdate = async (label: LabelUsage, patch: { name?: string; color?: LabelColor }) => {
+  // Records a failure of `label`'s own action on its row -- unless the
+  // selector has moved on to another project meanwhile, whose rows the error
+  // does not belong to (the same late-response rule as load()).
+  const failRow = (label: LabelUsage, err: unknown, requestedFor: string) => {
+    if (requestedProjectIdRef.current !== requestedFor) return;
+    setRowError(label.id, errorMessage(err, t('errors.UNKNOWN')));
+  };
+
+  // A row's own action starts: its previous error has been dealt with (or is
+  // being retried), so it goes -- and only its own (DFLT-00214).
+  const startRowAction = (label: LabelUsage) => {
     markBusy(label.id);
-    setError('');
-    setCreateFailed(false);
+    clearRowError(label.id);
+    setRenameFailedId(prev => (prev === label.id ? null : prev));
+  };
+
+  const applyUpdate = async (label: LabelUsage, patch: { name?: string; color?: LabelColor }) => {
+    startRowAction(label);
     // Named by the current name, not the rename draft: the draft may be empty
     // or rejected by the server.
     const savingText = t('settings.labels.saving', { name: label.name });
@@ -261,7 +354,10 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       onLabelsChanged?.();
       return true;
     } catch (err) {
-      setError(errorMessage(err, t('errors.UNKNOWN')));
+      failRow(label, err, projectId);
+      // A rejected name marks the rename input, if this row's rename is
+      // still the one open (see renameFailedId).
+      if (patch.name !== undefined && renamingIdRef.current === label.id) setRenameFailedId(label.id);
       // The role="alert" error says what went wrong; "saving" no longer
       // holds. Only this save's text is cleared, not a newer announcement.
       clearRowNotice(savingText);
@@ -271,17 +367,35 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
     }
   };
 
+  // Cancel / Escape: the user acted on this row's rename, so it always closes
+  // and focus goes back to its "rename" button.
   const finishRename = (label: LabelUsage) => {
-    setRenamingId(null);
+    setRenaming(null);
     setPendingFocus(renameButtonKey(label.id));
+  };
+
+  // A successful save. Checked as of now, before the next render unmounts the
+  // input (which would drop focus to <body> and make the focus check always
+  // pass): see renamingId and focusIsInRenameOf.
+  const finishRenameAfterSave = (label: LabelUsage) => {
+    // Another row's rename opened while this one saved: leave it open. This
+    // row already shows its chip, which applyUpdate gave the new name.
+    if (renamingIdRef.current !== label.id) return;
+    const focusHere = focusIsInRenameOf(label.id);
+    setRenaming(null);
+    // Closed either way, but focus only moves on from this rename's own
+    // controls -- not away from, say, another row's delete confirmation.
+    if (focusHere) setPendingFocus(renameButtonKey(label.id));
   };
 
   const handleRenameSave = async (label: LabelUsage) => {
     if (busyIds.has(label.id)) return;
     if (await applyUpdate(label, { name: renameDraft })) {
-      finishRename(label);
-    } else {
-      // Stay in the rename, back in its input, to fix the name.
+      finishRenameAfterSave(label);
+    } else if (renamingIdRef.current === label.id && focusIsInRenameOf(label.id)) {
+      // Stay in the rename, back in its input, to fix the name -- unless
+      // another row's rename has replaced it or focus has moved elsewhere
+      // meanwhile (DFLT-00213). The error is shown either way.
       setPendingFocus(renameInputKey(label.id));
     }
   };
@@ -297,9 +411,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
 
   const handleDelete = async (label: LabelUsage) => {
     if (busyIds.has(label.id)) return;
-    markBusy(label.id);
-    setError('');
-    setCreateFailed(false);
+    startRowAction(label);
     try {
       // Re-read the usage counts first: labels are shared, so tickets may
       // have gained or lost this label since the tab loaded, and the
@@ -308,7 +420,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       try {
         fresh = sortLabels(await fetchLabels(t, projectId));
       } catch (err) {
-        setError(errorMessage(err, t('errors.UNKNOWN')));
+        failRow(label, err, projectId);
         setPendingFocus(deleteButtonKey(label.id));
         return;
       }
@@ -349,7 +461,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       try {
         await deleteLabel(t, label.id);
       } catch (err) {
-        setError(errorMessage(err, t('errors.UNKNOWN')));
+        failRow(label, err, projectId);
         setPendingFocus(deleteButtonKey(label.id));
         return;
       }
@@ -367,7 +479,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
     }
   };
 
-  const errorDescribesName = createFailed && error !== '';
+  const errorDescribesName = createFailed && createError !== '';
 
   return (
     <div ref={containerRef} className="h-full overflow-y-auto space-y-4 text-xs">
@@ -462,14 +574,17 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
         </div>
       </form>
 
-      {error && (
-        <div
-          id={errorId}
-          role="alert"
-          className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 rounded-lg border border-red-200 dark:border-red-800"
-        >
-          {error}
-        </div>
+      {/* Two separate alerts, so clearing one never takes the other with it
+          (DFLT-00214). Only the create error describes the name input. */}
+      {loadError && (
+        <ErrorBox role="alert" className="p-2.5">
+          {loadError}
+        </ErrorBox>
+      )}
+      {createError && (
+        <ErrorBox id={errorId} role="alert" className="p-2.5">
+          {createError}
+        </ErrorBox>
       )}
 
       {/* List */}
@@ -486,6 +601,9 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
           {labels.map(label => {
             const busy = busyIds.has(label.id);
             const renaming = renamingId === label.id;
+            const rowError = rowErrors.get(label.id);
+            const rowErrorId = `${rowErrorIdBase}-${label.id}`;
+            const renameInvalid = renaming && rowError !== undefined && renameFailedId === label.id;
             return (
               // aria-busy (DFLT-00210): the row is being saved or deleted --
               // from the usage re-read through the confirmation to the
@@ -503,7 +621,12 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                       type="text"
                       autoFocus
                       value={renameDraft}
-                      onChange={e => setRenameDraft(e.target.value)}
+                      onChange={e => {
+                        setRenameDraft(e.target.value);
+                        // As in the create form: a changed name is no longer
+                        // the rejected one, but the error text stays.
+                        setRenameFailedId(prev => (prev === label.id ? null : prev));
+                      }}
                       onKeyDown={e => {
                         if (isImeComposing(e)) return;
                         if (e.key === 'Enter') {
@@ -517,6 +640,8 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                       aria-label={t('settings.labels.renameLabel', { name: label.name })}
                       maxLength={LABEL_NAME_MAX_LENGTH}
                       readOnly={busy}
+                      aria-invalid={renameInvalid || undefined}
+                      aria-describedby={renameInvalid ? rowErrorId : undefined}
                       data-focus-key={renameInputKey(label.id)}
                       className="px-2 py-1 w-44 rounded bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                     />
@@ -547,6 +672,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                         type="button"
                         onClick={() => handleRenameSave(label)}
                         disabled={busy}
+                        data-focus-key={renameSaveKey(label.id)}
                         className="px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold"
                       >
                         {t('settings.labels.save')}
@@ -564,8 +690,12 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                     <button
                       type="button"
                       onClick={() => {
-                        setRenamingId(label.id);
+                        setRenaming(label.id);
                         setRenameDraft(label.name);
+                        // A fresh draft (the current name) is not the name
+                        // that was rejected. The row's error itself stays
+                        // until the next save starts.
+                        setRenameFailedId(null);
                       }}
                       disabled={busy}
                       aria-label={`${t('settings.labels.rename')}: ${label.name}`}
@@ -588,6 +718,17 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                     {t('settings.labels.delete')}
                   </button>
                 </div>
+                {/* The row's own last failure (DFLT-00214), on a line of its
+                    own under the row and naming the label, so it is clear
+                    which row failed. Inside the keyed <li>, so another row's
+                    action or re-render neither removes nor re-announces it;
+                    this row's next action removes it, so a repeated failure
+                    is announced again. The same ErrorBox as the create/load alert. */}
+                {rowError !== undefined && (
+                  <ErrorBox id={rowErrorId} role="alert" className="basis-full p-2">
+                    {t('settings.labels.rowError', { name: label.name, message: rowError })}
+                  </ErrorBox>
+                )}
               </li>
             );
           })}
