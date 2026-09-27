@@ -84,6 +84,21 @@ interface Props {
 // rest into "+N" -- the row already carries id/status/priority/title/assignee.
 const MAX_HEADER_LABELS = 3;
 
+// The artifact panel's tab buttons (DFLT-00238). Below lg a tab may shrink
+// under its longest word (max-lg:min-w-0, with its label span; the icon keeps
+// its size with max-lg:shrink-0) and pads less (px-3), so more of them share
+// a wrapped line. With a large default font on a narrow screen (under 15rem,
+// the query DFLT-00227 uses) it pads less still and puts the icon on a line
+// of its own, so a tab stays a few lines tall rather than a word per line.
+// From lg up nothing of this applies (lg:px-4 gives back the padding), so
+// the single row looks exactly as before.
+const artifactTabClass = (active: boolean) =>
+  `max-lg:min-w-0 py-3 px-3 lg:px-4 [@media(max-width:15rem)]:px-2 [@media(max-width:15rem)]:py-2 text-xs font-bold border-b-2 flex [@media(max-width:15rem)]:flex-wrap items-center gap-x-2 gap-y-1 transition ${
+    active
+      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+  }`;
+
 // How long the ID copy button shows its "copied"/"failed" state before going
 // back to idle (DFLT-00143).
 const COPY_FEEDBACK_MS = 1500;
@@ -1863,62 +1878,70 @@ export const TicketItem: React.FC<Props> = ({
               className="lg:col-span-8 flex flex-col bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs lg:sticky lg:top-20 min-h-[32rem]"
               style={nodeListCardHeight ? { height: nodeListCardHeight } : undefined}
             >
-              {/* Tab Navigation */}
-              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-4 bg-slate-50 dark:bg-slate-800 shrink-0">
-              <div className="flex">
+              {/* Tab Navigation.
+                  DFLT-00238: below lg the row, and the tab group inside it,
+                  wrap instead of running past the panel. At 320-375px (and
+                  with a 200% default font or zoom) the four tabs and the
+                  download link used to reach 415-1260px while the panel's
+                  overflow-hidden clipped them at its right edge, so the
+                  last tabs and the link could be focused but not seen.
+                  Below lg the tab group, each tab and the link may also
+                  shrink (min-w-0) and break their label inside, so one
+                  label wider than the panel still fits, and the link keeps
+                  to the right (ml-auto) when it drops to a line of its own.
+                  Under 15rem (a large default font on a narrow screen) the
+                  row, the tabs and the link pad less and put their icon on
+                  a line of its own; otherwise the stacked tabs grew taller
+                  than the panel, whose height is pinned to the graph's, and
+                  its overflow-hidden cut off their bottom instead.
+                  From lg up, lg:flex-nowrap, lg:pb-0, lg:px-4 and
+                  lg:shrink-0 (with the min-widths left alone) put back the
+                  single row with the link on the right exactly as before.
+                  jsdom does no layout, so TicketItem.tabRowWrap.test.tsx
+                  pins the classes; the widths and heights were measured in
+                  a real browser (see the ticket's implementation notes). */}
+              <div
+                data-testid="ticket-artifact-tabs"
+                className="flex flex-wrap lg:flex-nowrap items-center justify-between gap-y-1 border-b border-slate-200 dark:border-slate-800 px-4 [@media(max-width:15rem)]:px-2 pb-2 lg:pb-0 bg-slate-50 dark:bg-slate-800 shrink-0"
+              >
+              <div className="flex flex-wrap lg:flex-nowrap max-lg:min-w-0">
                 <button
                   onClick={() => setActiveTab('nodes')}
-                  className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition ${
-                    activeTab === 'nodes'
-                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
+                  className={artifactTabClass(activeTab === 'nodes')}
                 >
-                  <GitBranch aria-hidden="true" className="w-4 h-4" />
-                  {t('ticketItem.tabs.nodes', { count: totalNodes })}
+                  <GitBranch aria-hidden="true" className="w-4 h-4 max-lg:shrink-0" />
+                  <span className="max-lg:min-w-0 break-words">{t('ticketItem.tabs.nodes', { count: totalNodes })}</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('gherkin')}
-                  className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition ${
-                    activeTab === 'gherkin'
-                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
+                  className={artifactTabClass(activeTab === 'gherkin')}
                 >
-                  <FileCode aria-hidden="true" className="w-4 h-4 text-amber-500" />
-                  {t('ticketItem.tabs.gherkin', { count: gherkinArtifacts.length })}
+                  <FileCode aria-hidden="true" className="w-4 h-4 max-lg:shrink-0 text-amber-500" />
+                  <span className="max-lg:min-w-0 break-words">{t('ticketItem.tabs.gherkin', { count: gherkinArtifacts.length })}</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('html')}
-                  className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition ${
-                    activeTab === 'html'
-                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
+                  className={artifactTabClass(activeTab === 'html')}
                 >
-                  <Globe aria-hidden="true" className="w-4 h-4 text-cyan-500" />
-                  {t('ticketItem.tabs.html', { count: htmlArtifacts.length })}
+                  <Globe aria-hidden="true" className="w-4 h-4 max-lg:shrink-0 text-cyan-500" />
+                  <span className="max-lg:min-w-0 break-words">{t('ticketItem.tabs.html', { count: htmlArtifacts.length })}</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('artifacts')}
-                  className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition ${
-                    activeTab === 'artifacts'
-                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
+                  className={artifactTabClass(activeTab === 'artifacts')}
                 >
-                  <FileText aria-hidden="true" className="w-4 h-4 text-emerald-500" />
-                  {t('ticketItem.tabs.artifacts', { count: ticket.artifacts.length })}
+                  <FileText aria-hidden="true" className="w-4 h-4 max-lg:shrink-0 text-emerald-500" />
+                  <span className="max-lg:min-w-0 break-words">{t('ticketItem.tabs.artifacts', { count: ticket.artifacts.length })}</span>
                 </button>
               </div>
               {ticket.artifacts.length > 0 && (
                 <a
                   href={`/api/tickets/${ticket.id}/artifacts/download`}
-                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:border-indigo-400 dark:hover:border-indigo-500 transition"
+                  className="ml-auto min-w-0 lg:shrink-0 flex [@media(max-width:15rem)]:flex-wrap items-center gap-1.5 px-3 [@media(max-width:15rem)]:px-2 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:border-indigo-400 dark:hover:border-indigo-500 transition"
                   title={t('ticketItem.downloadAllArtifacts')}
                 >
-                  <Download aria-hidden="true" className="w-3.5 h-3.5" />
-                  {t('ticketItem.downloadAllArtifacts')}
+                  <Download aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />
+                  <span className="min-w-0 break-words">{t('ticketItem.downloadAllArtifacts')}</span>
                 </a>
               )}
               </div>
