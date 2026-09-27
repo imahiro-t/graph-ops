@@ -7,6 +7,9 @@
 // assigneeFilter.test.ts, statusMeta.test.ts, priorityMeta.test.ts); these
 // need App's own state, so fetch is served by the shared in-memory fake in
 // test/fakeBackend.ts.
+//
+// DFLT-00257: an expanded ticket that stops matching leaves the list like any
+// other, and comes back still expanded once the filter is cleared.
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -641,6 +644,55 @@ describe('App toolbar filters', () => {
       const user = await renderApp();
       await open(user, 'label');
       expect(within(panel('label')).getByRole('button', { name: 'すべて選択' })).toBeInTheDocument();
+    });
+  });
+
+  // DFLT-00257: decided to be the intended behavior, not a bug -- see the
+  // comment on filteredTickets in App.tsx. An expanded card gets no exemption
+  // from the filters, but its expanded state outlives being filtered out.
+  describe('an expanded ticket', () => {
+    const card = (id: string) => document.getElementById(`ticket-${id}`) as HTMLElement;
+    const toggleOf = (id: string) => within(card(id)).getByTestId('ticket-toggle-expand');
+
+    async function expand(user: User, id: string) {
+      await user.click(within(card(id)).getByTestId('ticket-header-row'));
+      return within(card(id)).findByTestId('ticket-details');
+    }
+
+    beforeEach(() => {
+      // TicketItem measures its graph panel with a ResizeObserver, which jsdom
+      // lacks (unstubbed again by the outer afterEach).
+      vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+    });
+
+    // Each pick drops DFLT-00001 (TODO / 佐藤 / HIGH / UI改善) and leaves only
+    // DFLT-00003. The ticket names label, status and priority; assignee is
+    // included so all four filters stay covered by the same table.
+    it.each([
+      ['status' as const, () => [status('done')]],
+      ['assignee' as const, () => ['鈴木']],
+      ['priority' as const, () => [priority('low')]],
+      ['label' as const, () => ['バグ修正']]
+    ])('leaves the list when the %s filter excludes it, and returns still expanded', async (f, pick) => {
+      const user = await renderApp();
+      expect(await expand(user, 'DFLT-00001')).toBeVisible();
+      expect(toggleOf('DFLT-00001')).toHaveAttribute('aria-expanded', 'true');
+
+      await filterBy(user, f, pick());
+      expectVisible(['DFLT-00003']);
+      expect(card('DFLT-00001')).toBeNull();
+      expect(screen.queryByTestId('ticket-details')).not.toBeInTheDocument();
+
+      await open(user, f);
+      await user.click(clearButton(f));
+      await close(user, f);
+      expectVisible(ALL_IDS);
+      // Back expanded without another click.
+      expect(await within(card('DFLT-00001')).findByTestId('ticket-details')).toBeVisible();
+      expect(toggleOf('DFLT-00001')).toHaveAttribute('aria-expanded', 'true');
+      // Only the ticket that was expanded comes back expanded.
+      expect(screen.getAllByTestId('ticket-details')).toHaveLength(1);
+      expect(toggleOf('DFLT-00003')).toHaveAttribute('aria-expanded', 'false');
     });
   });
 

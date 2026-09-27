@@ -980,6 +980,15 @@ export const App: React.FC = () => {
   // every one of them. Each predicate is OR across its own selection and
   // passes everything when that selection is empty, so a filter nobody has
   // touched contributes nothing (see components/MultiSelectFilter.tsx).
+  //
+  // An expanded ticket is no exception (DFLT-00257, by design): once it stops
+  // matching, it leaves the list -- details and all -- like any other ticket.
+  // Keeping it would break "the list is exactly the tickets that match",
+  // which the count ("x-y of n") and totalPages both rely on; handleOpenTicket
+  // (DFLT-00142) rests on the same premise when it clears the filters and says
+  // so before opening a hidden ticket. The filters never touch
+  // expandedTicketIds, so relaxing them brings the ticket back still
+  // expanded. App.filters.test.tsx pins this down.
   const filteredTickets = tickets.filter(t => {
     // Unexpected DB values count as TODO, matching the badge (statusMeta.ts).
     if (!matchesStatusFilter(t.status, filterStatuses)) return false;
