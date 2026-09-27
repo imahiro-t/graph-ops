@@ -1833,26 +1833,36 @@ export const TicketItem: React.FC<Props> = ({
 
           {/* Description Card -- always visible (not tabbed) so the ticket's
               description has a permanent place to be checked. */}
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+          {/* DFLT-00256: below sm (and with a large default font) the card's
+              padding is p-3 instead of p-4 -- the same pair as the detail
+              panel and the artifact card -- so at 200% text on a 320px
+              screen the header row and the body get 16px more width. */}
+          <div className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 [@media(max-width:15rem)]:p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
             {/* DFLT-00239: the header row and its right-hand group wrap on a
                 narrow line (200% text size on a 320px screen) instead of
                 squeezing or pushing the refined time and the expand button
                 past the card's edge. The horizontal gap is the old gap-3, so
-                a row that fits on one line looks as before. The title itself
-                is min-w-0 with overflow-wrap:anywhere so a single long word
+                a row that fits on one line looks as before. The title is
+                min-w-0 with overflow-wrap:anywhere so a single long word
                 ("Description" in English) breaks inside the card instead of
                 keeping its min-content width and running past the card and
-                the panel's clip. */}
+                the panel's clip.
+                DFLT-00256: the icons are shrink-0 and the texts sit in spans
+                of their own, so on a narrow line the title and the refined
+                time wrap instead of the FileText and History icons being
+                squeezed (to 0px for History at 200% on 320px). */}
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mb-2">
               <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 min-w-0 [overflow-wrap:anywhere]">
-                <FileText aria-hidden="true" className="w-3.5 h-3.5 text-indigo-500" />
-                {t('ticketItem.description.title')}
+                <FileText aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
+                <span className="min-w-0 [overflow-wrap:anywhere]">{t('ticketItem.description.title')}</span>
               </span>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
                 {ticket.refined_at && (
                   <span className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1 min-w-0">
-                    <History aria-hidden="true" className="w-3 h-3" />
-                    {t('ticketItem.description.refinedAt', { time: formatDateTime(ticket.refined_at, i18n.language) })}
+                    <History aria-hidden="true" className="w-3 h-3 shrink-0" />
+                    <span className="min-w-0 [overflow-wrap:anywhere]">
+                      {t('ticketItem.description.refinedAt', { time: formatDateTime(ticket.refined_at, i18n.language) })}
+                    </span>
                   </span>
                 )}
                 {description.length > 0 && (
@@ -1870,7 +1880,16 @@ export const TicketItem: React.FC<Props> = ({
             {description.length === 0 ? (
               <div className="text-slate-500 dark:text-slate-400 italic text-xs">{t('ticketItem.description.empty')}</div>
             ) : (
-              <div className={isDescriptionExpanded ? '' : 'max-h-56 overflow-y-auto'}>
+              // DFLT-00256: break-words (overflow-wrap: break-word, inherited)
+              // in both states, so a word wider than the body -- a path, an
+              // inline code span, "autopilot" at 200% text in a list item --
+              // breaks inside the card instead of running past the
+              // MarkdownViewer's overflow-x-auto box, where its end was
+              // hidden. break-word rather than anywhere: a table cell's
+              // min-content width is unchanged, so a wide table still
+              // scrolls inside its own box; code blocks (whitespace-pre) do
+              // not wrap and scroll as before.
+              <div className={`break-words${isDescriptionExpanded ? '' : ' max-h-56 overflow-y-auto'}`}>
                 <MarkdownViewer content={description} />
               </div>
             )}

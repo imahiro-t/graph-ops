@@ -11,7 +11,15 @@
 // elementFromPoint on each item and the row's height at 100% and 200%,
 // 320-1280px, were measured in a real browser (see the ticket's
 // implementation notes).
-import { render, screen } from '@testing-library/react';
+//
+// DFLT-00256: at 200% on 320-375px the FileText and History icons were
+// squeezed (History to 0px) and the body's long words ran past the
+// MarkdownViewer's overflow-x-auto box, which hid their end. The icons are
+// now shrink-0 with the texts in spans of their own (the texts wrap, not the
+// icons), the card's padding is p-3 below sm and with a large default font,
+// and the body wrapper is break-words in both the collapsed and the
+// expanded state. Measured in a real browser as above.
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { formatDateTime } from '../i18n/formatDate';
@@ -50,15 +58,22 @@ const renderExpanded = () =>
     />
   );
 
-// The refined time, the expand button and the two containers above them.
+// The refined time's text and the span around it (with the History icon),
+// the expand button, the two containers above them, the title's span and the
+// card itself. The title text is looked up only inside the header row, so the
+// same string elsewhere on the page is never picked up by mistake.
 function descriptionHeader() {
-  const refined = screen.getByText(
+  const refinedText = screen.getByText(
     i18n.t('ticketItem.description.refinedAt', { time: formatDateTime(REFINED_AT, i18n.language) })
   );
   const expand = screen.getByRole('button', { name: i18n.t('ticketItem.description.expand') });
+  const refined = refinedText.parentElement as HTMLElement;
   const group = refined.parentElement as HTMLElement;
   const row = group.parentElement as HTMLElement;
-  return { refined, expand, group, row };
+  const title = row.firstElementChild as HTMLElement;
+  const titleText = within(title).getByText(i18n.t('ticketItem.description.title'));
+  const card = row.parentElement as HTMLElement;
+  return { refinedText, refined, expand, group, row, title, titleText, card };
 }
 
 beforeEach(() => {
@@ -80,8 +95,8 @@ describe.each(['ja', 'en'] as const)('TicketItem description header wraps on a n
 
   it('shows the title, the refined time and the expand button in one header row', () => {
     renderExpanded();
-    const { refined, expand, group, row } = descriptionHeader();
-    expect(refined).toBeVisible();
+    const { refinedText, expand, group, row } = descriptionHeader();
+    expect(refinedText).toBeVisible();
     expect(expand).toBeVisible();
     expect(group).toContainElement(expand);
     expect(row.firstElementChild).toHaveTextContent(i18n.t('ticketItem.description.title'));
@@ -99,19 +114,65 @@ describe.each(['ja', 'en'] as const)('TicketItem description header wraps on a n
   // the panel ("Descripti"). The title may shrink and break inside the word.
   it('lets the title shrink and break inside a long word', () => {
     renderExpanded();
-    const { row } = descriptionHeader();
-    const title = row.firstElementChild as HTMLElement;
+    const { title, titleText } = descriptionHeader();
     expect(title).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
     expect(title).not.toHaveClass('shrink-0');
     expect(title).not.toHaveClass('whitespace-nowrap');
+    expect(titleText.tagName).toBe('SPAN');
+    expect(titleText).not.toBe(title);
+    expect(titleText).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
+    expect(titleText).not.toHaveClass('whitespace-nowrap');
   });
 
   it('wraps the right-hand group and lets it and the refined time shrink', () => {
     renderExpanded();
-    const { refined, group } = descriptionHeader();
+    const { refinedText, refined, group } = descriptionHeader();
     expect(group).toHaveClass('flex', 'flex-wrap', 'items-center', 'gap-x-3', 'gap-y-1', 'min-w-0');
     expect(group).not.toHaveClass('shrink-0');
     expect(refined).toHaveClass('min-w-0');
     expect(refined).not.toHaveClass('whitespace-nowrap');
+    expect(refinedText.tagName).toBe('SPAN');
+    expect(refinedText).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
+    expect(refinedText).not.toHaveClass('whitespace-nowrap');
+  });
+
+  // DFLT-00256: at 200% on 320-375px the FileText icon was squeezed to
+  // 8.5-18px (English) and the History icon to 0-2px.
+  it('keeps the FileText and History icons from shrinking and hidden from assistive technology', () => {
+    renderExpanded();
+    const { title, refined } = descriptionHeader();
+    const fileIcon = title.querySelector(':scope > svg');
+    const historyIcon = refined.querySelector(':scope > svg');
+    expect(fileIcon).not.toBeNull();
+    expect(historyIcon).not.toBeNull();
+    expect(fileIcon).toHaveClass('w-3.5', 'h-3.5', 'shrink-0');
+    expect(historyIcon).toHaveClass('w-3', 'h-3', 'shrink-0');
+    expect(fileIcon).toHaveAttribute('aria-hidden', 'true');
+    expect(historyIcon).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  // p-4 at sm and up with the default font; p-3 below sm and with a large
+  // default font (the same pair as the detail panel and the artifact card).
+  it('gives the card p-4, narrowed to p-3 on a narrow screen or with a large default font', () => {
+    renderExpanded();
+    const { card } = descriptionHeader();
+    expect(card).toHaveClass('p-4', 'max-sm:p-3', '[@media(max-width:15rem)]:p-3', 'rounded-xl');
+  });
+
+  // The body's long words (paths, inline code, "autopilot" at 200% in a list
+  // item) break inside the card in both states instead of running past the
+  // MarkdownViewer's overflow-x-auto box.
+  it('lets the body break long words both collapsed and expanded', () => {
+    renderExpanded();
+    const { card, expand } = descriptionHeader();
+    const body = card.children[1] as HTMLElement;
+    expect(body).toHaveTextContent('説明の本文');
+    expect(body).toHaveClass('break-words', 'max-h-56', 'overflow-y-auto');
+    expect(body).not.toHaveClass('[overflow-wrap:anywhere]');
+    fireEvent.click(expand);
+    expect(screen.getByRole('button', { name: i18n.t('ticketItem.description.collapse') })).toBeVisible();
+    expect(body).toHaveClass('break-words');
+    expect(body).not.toHaveClass('max-h-56');
+    expect(body).not.toHaveClass('overflow-y-auto');
   });
 });
