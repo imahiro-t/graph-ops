@@ -184,6 +184,145 @@ describe('MultiSelectFilter', () => {
     expect(clearButton()).toBeDisabled();
   });
 
+  // DFLT-00264: "select all" next to "clear", in the same footer row.
+  describe('select all', () => {
+    const selectAllButton = () => screen.getByRole('button', { name: i18n.t('toolbar.filterSelectAll') });
+
+    it('sits in the footer row before the clear button', async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await user.click(trigger());
+
+      const footer = clearButton().parentElement!;
+      expect(selectAllButton().parentElement).toBe(footer);
+      expect(within(footer).getAllByRole('button')).toEqual([selectAllButton(), clearButton()]);
+    });
+
+    it('lays the footer out to wrap by content width, not in fixed halves', async () => {
+      // jsdom has no layout, so -- like the panel placement tests -- the
+      // classes are checked; the real wrapping was checked in a browser.
+      const user = userEvent.setup();
+      render(<Harness />);
+      await user.click(trigger());
+
+      expect(clearButton().parentElement).toHaveClass('flex', 'flex-wrap');
+      for (const button of [selectAllButton(), clearButton()]) {
+        expect(button).toHaveClass('flex-auto', 'break-keep', '[overflow-wrap:anywhere]');
+        expect(button).not.toHaveClass('w-full');
+        expect(button).not.toHaveClass('flex-1');
+        expect(button).not.toHaveClass('min-w-0');
+      }
+    });
+
+    it('selects every option in display order from nothing, keeping the panel open', async () => {
+      const onChange = vi.fn();
+      const user = userEvent.setup();
+      render(<Harness onChange={onChange} />);
+
+      await user.click(trigger());
+      expect(selectAllButton()).toBeEnabled();
+      await user.click(selectAllButton());
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenLastCalledWith(['a', 'b', 'c']);
+      expect(screen.getByRole('group')).toBeInTheDocument();
+      for (const box of screen.getAllByRole('checkbox')) expect(box).toBeChecked();
+      // Still "N selected", never folded back to "All".
+      expect(trigger()).toHaveTextContent(i18n.t('toolbar.statusSelected', { count: 3 }));
+      expect(trigger()).not.toHaveTextContent(i18n.t('toolbar.statusAll'));
+    });
+
+    it('returns the display order even when the partial selection was in another order', async () => {
+      const onChange = vi.fn();
+      const user = userEvent.setup();
+      render(<Harness initialSelected={['c', 'a']} onChange={onChange} />);
+
+      await user.click(trigger());
+      expect(selectAllButton()).toBeEnabled();
+      await user.click(selectAllButton());
+      expect(onChange).toHaveBeenLastCalledWith(['a', 'b', 'c']);
+    });
+
+    it('keeps selected values that are not among the options, after them in their order', async () => {
+      // 'x' and 'y' have no checkbox -- assignees who dropped out with the poll.
+      const onChange = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <Harness
+          options={OPTIONS.slice(0, 2)}
+          initialSelected={['x', 'b', 'y']}
+          onChange={onChange}
+        />
+      );
+
+      await user.click(trigger());
+      await user.click(selectAllButton());
+      expect(onChange).toHaveBeenLastCalledWith(['a', 'b', 'x', 'y']);
+      expect(trigger()).toHaveTextContent(i18n.t('toolbar.statusSelected', { count: 4 }));
+    });
+
+    it('is disabled when every option is already selected', async () => {
+      const user = userEvent.setup();
+      render(<Harness options={OPTIONS.slice(0, 2)} initialSelected={['b', 'a']} />);
+      await user.click(trigger());
+      expect(selectAllButton()).toBeDisabled();
+    });
+
+    it.each([
+      ['nothing', []],
+      ['some options', ['a']],
+      ['only values outside the options', ['x']]
+    ])('is enabled when %s is selected', async (_, initialSelected) => {
+      const user = userEvent.setup();
+      render(<Harness options={OPTIONS.slice(0, 2)} initialSelected={initialSelected} />);
+      await user.click(trigger());
+      expect(selectAllButton()).toBeEnabled();
+    });
+
+    it('is disabled when there are no options at all', async () => {
+      const user = userEvent.setup();
+      render(<Harness options={[]} emptyKey="toolbar.labelEmpty" />);
+      await user.click(trigger());
+      expect(screen.getByText(i18n.t('toolbar.labelEmpty'))).toBeInTheDocument();
+      expect(selectAllButton()).toBeDisabled();
+    });
+
+    it('moves focus to the first checkbox, so Escape still closes the panel', async () => {
+      // Pressing it disables it; without moving focus it would fall to
+      // <body>, outside the Escape handler (as with the clear button,
+      // DFLT-00087).
+      const user = userEvent.setup();
+      render(<Harness />);
+
+      await user.click(trigger());
+      await user.click(selectAllButton());
+      expect(selectAllButton()).toBeDisabled();
+      expect(document.activeElement).not.toBe(document.body);
+      expect(document.activeElement).toBe(screen.getAllByRole('checkbox')[0]);
+
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('group')).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(trigger());
+    });
+
+    it('becomes pressable again once an option is unchecked, and clear still works', async () => {
+      const onChange = vi.fn();
+      const user = userEvent.setup();
+      render(<Harness onChange={onChange} />);
+
+      await user.click(trigger());
+      await user.click(selectAllButton());
+      await user.click(screen.getByRole('checkbox', { name: 'う' }));
+      expect(onChange).toHaveBeenLastCalledWith(['a', 'b']);
+      expect(selectAllButton()).toBeEnabled();
+
+      await user.click(clearButton());
+      expect(onChange).toHaveBeenLastCalledWith([]);
+      expect(trigger()).toHaveTextContent(i18n.t('toolbar.statusAll'));
+      expect(document.activeElement).toBe(trigger());
+    });
+  });
+
   it('closes on an outside click', async () => {
     const user = userEvent.setup();
     render(<Harness />);

@@ -102,6 +102,8 @@ async function filterBy(user: User, f: FilterName, optionLabels: string[]) {
 
 const clearButton = (f: FilterName) =>
   within(panel(f)).getByRole('button', { name: i18n.t('toolbar.filterClear') });
+const selectAllButton = (f: FilterName) =>
+  within(panel(f)).getByRole('button', { name: i18n.t('toolbar.filterSelectAll') });
 
 // Option labels, spelled the way the panel does. All of these are resolved
 // when a test runs, never at module level: setup.ts only pins the language
@@ -353,6 +355,115 @@ describe('App toolbar filters', () => {
     });
   });
 
+  // DFLT-00264: "select all" next to "clear" in every filter's panel.
+  describe('the select-all button', () => {
+    // How many options each filter offers for the seeded tickets: 7
+    // statuses, 4 assignee rows (unassigned + 佐藤 / 鈴木 / 田中), 3
+    // priorities, 2 labels.
+    const OPTION_COUNTS: Record<FilterName, number> = { status: 7, assignee: 4, priority: 3, label: 2 };
+
+    it.each(FILTER_NAMES)('sits before the clear button in the %s panel, enabled', async f => {
+      const user = await renderApp();
+      await open(user, f);
+      const footer = clearButton(f).parentElement!;
+      expect(selectAllButton(f).parentElement).toBe(footer);
+      expect(within(footer).getAllByRole('button')).toEqual([selectAllButton(f), clearButton(f)]);
+      expect(selectAllButton(f)).toBeEnabled();
+    });
+
+    it.each(FILTER_NAMES)(
+      'checks every %s option, keeps the panel open and still reads "N selected"',
+      async f => {
+        const user = await renderApp();
+        await open(user, f);
+        await user.click(selectAllButton(f));
+
+        const boxes = within(panel(f)).getAllByRole('checkbox');
+        expect(boxes).toHaveLength(OPTION_COUNTS[f]);
+        for (const box of boxes) expect(box).toBeChecked();
+        expect(panel(f)).toBeInTheDocument();
+        // Not folded back to "All": see MultiSelectFilter.tsx for why.
+        expect(trigger(f)).toHaveTextContent(selectedText(f, OPTION_COUNTS[f]));
+        expect(trigger(f)).not.toHaveTextContent(allText(f));
+      }
+    );
+
+    it.each(FILTER_NAMES)(
+      'disables itself in the %s panel without dropping focus to <body>',
+      async f => {
+        const user = await renderApp();
+        await open(user, f);
+        await user.click(selectAllButton(f));
+
+        expect(selectAllButton(f)).toBeDisabled();
+        expect(document.activeElement).not.toBe(document.body);
+        expect(document.activeElement).toBe(within(panel(f)).getAllByRole('checkbox')[0]);
+
+        await user.keyboard('{Escape}');
+        expect(screen.queryByRole('group', { name: groupLabel(f) })).not.toBeInTheDocument();
+        expect(trigger(f)).toHaveFocus();
+      }
+    );
+
+    it('includes the unassigned bucket in the assignee filter', async () => {
+      const user = await renderApp();
+      const p = await open(user, 'assignee');
+      await user.click(selectAllButton('assignee'));
+      for (const name of [unassigned(), '佐藤', '鈴木', '田中']) {
+        expect(within(p).getByRole('checkbox', { name })).toBeChecked();
+      }
+      await close(user, 'assignee');
+      // DFLT-00004 has no assignee.
+      expect(screen.getByText('DFLT-00004')).toBeInTheDocument();
+    });
+
+    it.each(['status', 'assignee', 'priority'] as const)(
+      'shows the same tickets as "All" when every %s option is selected',
+      async f => {
+        const user = await renderApp();
+        await open(user, f);
+        await user.click(selectAllButton(f));
+        await close(user, f);
+        expectVisible(ALL_IDS);
+      }
+    );
+
+    it('hides the unlabelled tickets when every label is selected, unlike "All"', async () => {
+      // Labels are OR over the selected ones, so a ticket with no label
+      // matches none of them -- the reason the trigger does not say "All".
+      const user = await renderApp();
+      await open(user, 'label');
+      await user.click(selectAllButton('label'));
+      await close(user, 'label');
+      expectVisible(['DFLT-00001', 'DFLT-00003', 'DFLT-00004']);
+      expect(screen.queryByText('DFLT-00002')).not.toBeInTheDocument();
+      expect(screen.queryByText('DFLT-00005')).not.toBeInTheDocument();
+    });
+
+    it('supports "select all, then uncheck Done and Closed"', async () => {
+      const user = await renderApp();
+      await open(user, 'status');
+      await user.click(selectAllButton('status'));
+      await toggle(user, 'status', [status('done'), status('closed')]);
+
+      expect(trigger('status')).toHaveTextContent(selectedText('status', 5));
+      expect(panel('status')).toBeInTheDocument();
+      expect(selectAllButton('status')).toBeEnabled();
+      expectVisible(['DFLT-00001', 'DFLT-00002', 'DFLT-00004', 'DFLT-00005']);
+    });
+
+    it('can be undone with the clear button', async () => {
+      const user = await renderApp();
+      await open(user, 'status');
+      await user.click(selectAllButton('status'));
+      await user.click(clearButton('status'));
+
+      expect(trigger('status')).toHaveTextContent(allText('status'));
+      expect(trigger('status')).toHaveFocus();
+      expect(selectAllButton('status')).toBeEnabled();
+    });
+  });
+
   describe('OR within a filter', () => {
     it('matches several statuses', async () => {
       const user = await renderApp();
@@ -517,12 +628,19 @@ describe('App toolbar filters', () => {
       expect(trigger(f)).toHaveTextContent(selectedText(f, 2));
     });
 
-    it('is translated, clear button included', async () => {
+    it('is translated, clear and select-all buttons included', async () => {
       await i18n.changeLanguage('en');
       const user = await renderApp();
       expect(trigger('status')).toHaveTextContent('Status: All');
       await open(user, 'status');
       expect(within(panel('status')).getByRole('button', { name: 'Clear selection' })).toBeInTheDocument();
+      expect(within(panel('status')).getByRole('button', { name: 'Select all' })).toBeInTheDocument();
+    });
+
+    it('names the select-all button in Japanese by default', async () => {
+      const user = await renderApp();
+      await open(user, 'label');
+      expect(within(panel('label')).getByRole('button', { name: 'すべて選択' })).toBeInTheDocument();
     });
   });
 
