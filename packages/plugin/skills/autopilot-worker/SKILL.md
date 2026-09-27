@@ -23,7 +23,7 @@ If the returned `content` is non-empty, follow it as additional rules on top of 
 graph-engine autopilot worker-context "<runId>" "<ticketId>"
 ```
 
-It prints one JSON line: `position` (`single`, `tree_root` or `tree_child`), `role`, `branch`, `worktree`, `target_branch` / `target_ticket` (where a tree child is merged), `default_branch` (where `single` and `finalize` reflect the work), `merge_source_branch` / `merge_worktree` (for `merge-up`), `settings` (the run's effective autopilot settings) and `pending_decisions`. If the command fails (for example `AUTOPILOT_RUN_NOT_FOUND`), print the error and stop -- there is no run to report to.
+It prints one JSON line: `root_ticket` (the ticket the run started from), `position` (`single`, `tree_root` or `tree_child`), `role`, `branch`, `worktree`, `target_branch` / `target_ticket` (where a tree child is merged), `default_branch` (where `single` and `finalize` reflect the work), `merge_source_branch` / `merge_worktree` (for `merge-up`), `settings` (the run's effective autopilot settings) and `pending_decisions`. If the command fails (for example `AUTOPILOT_RUN_NOT_FOUND`), print the error and stop -- there is no run to report to.
 
 - This session was started in the directory it works in: the ticket's worktree for `work` and `finalize`, `merge_worktree` for `merge-up`. Do not create or enter another worktree (ignore any instruction to use `EnterWorktree`); edit, test and commit only in that absolute path, and give that absolute path to every subagent you launch.
 - Never ask the person anything except where steps 3 and 5 say so (a setting turned off), and do not use AskUserQuestion. If the permission system refuses a command this role cannot do without, report `failed` with reason `permission_denied` (step 6) instead of waiting.
@@ -92,22 +92,33 @@ Save the reflection method and its result (the branch, the pull request URL, the
 Skip this step when the ticket ends `failed` or `blocked`: create no ticket under it and put the open items in the summary instead. Skip it also when the ticket already has an `autopilot-decision-handoff` artifact (a resumed session), and reuse that record for the summary.
 
 1. Collect the handoff items: the carry-over items under the last heading of the review artifacts, the remaining issues in the report, and the notes for later work in the implementation notes.
-2. With `settings.autoCreateTickets` on, decide for each item whether it needs its own ticket (concrete, still open, not already one of `get-ticket`'s `children`), and create each one under this ticket:
-   ```bash
-   graph-engine create-ticket "<title>" - --parent "<ticketId>" <<'EOF'
-   <what is left, why, and where it came from (this ticket and the artifact)>
-   EOF
-   ```
-   - If it fails with `PARENT_TICKET_UNSUPPORTED` (an HTTP data source still on protocol 1.0), do not retry without `--parent` -- a ticket without its parent silently falls out of the tree -- and create no further tickets. Record each remaining item as not created because of `PARENT_TICKET_UNSUPPORTED`, with the title and description you would have used, keep the result `done`, and state in the summary how many items were left without a ticket.
+2. Sort each item that is concrete and still open into one of two kinds (drop the rest, and anything already one of `get-ticket`'s `children`):
+   - **In scope**: a problem this ticket's own changes introduced or left unfinished, or one that stands in the way of the purpose of the run's root ticket (`root_ticket`; read its Why and completion criteria with `get-ticket`). Only these become child tickets, so only these are worked on in this run.
+   - **Out of scope**: anything else, typically a problem that was already there before this ticket (a pre-existing layout break found on a neighbouring screen, the same kind of issue in another component) or an improvement the root's purpose does not need. Being found while testing this ticket does not make an item in scope.
+3. With `settings.autoCreateTickets` on:
+   - Create each in-scope item as a child of this ticket:
+     ```bash
+     graph-engine create-ticket "<title>" - --parent "<ticketId>" <<'EOF'
+     <what is left, why, and where it came from (this ticket and the artifact)>
+     EOF
+     ```
+   - Put all out-of-scope items together into **one** backlog ticket, created **without** `--parent` so it stays out of the tree and the run never picks it up. Pass the project explicitly (`--project` with `get-ticket`'s `project_id` for this ticket):
+     ```bash
+     graph-engine create-ticket "Backlog: issues found while working on <ticketId>" - --project "<projectId>" --priority LOW <<'EOF'
+     <one section per item: what is wrong, where, how it was found, and why it was left out of the run>
+     EOF
+     ```
+     Create no backlog ticket when there are no out-of-scope items.
+   - If a child ticket fails with `PARENT_TICKET_UNSUPPORTED` (an HTTP data source still on protocol 1.0), do not retry without `--parent` -- a ticket without its parent silently falls out of the tree -- and create no further child tickets. Record each remaining in-scope item as not created because of `PARENT_TICKET_UNSUPPORTED`, with the title and description you would have used, keep the result `done`, and state in the summary how many items were left without a ticket. The backlog ticket is still created.
    - Treat any other `create-ticket` error the same way after one retry.
-3. With `settings.autoCreateTickets` off, run `graph-engine autopilot touch "<runId>" "<ticketId>" --awaiting-human "handoff: <n> items"`, present the items in plain text, end the turn, and create exactly the ones the person picks.
-4. Save every item with its decision (create or not), the reason and the created ticket id as a `text` artifact named `autopilot-decision-handoff` on the release node.
+4. With `settings.autoCreateTickets` off, run `graph-engine autopilot touch "<runId>" "<ticketId>" --awaiting-human "handoff: <n> items"`, present the items in plain text with the kind you gave each, end the turn, and create exactly the ones the person picks: in-scope ones as children, out-of-scope ones in the backlog ticket.
+5. Save every item with its kind, its decision (child ticket, backlog or not created), the reason and the created ticket id as a `text` artifact named `autopilot-decision-handoff` on the release node.
 
 ## 6. Report the result
 
 ```bash
 graph-engine autopilot report "<runId>" "<ticketId>" --result <done|failed|blocked> [--reason <code>] --summary - <<'EOF'
-<at most 3 lines: what was done, where the work is (branch or pull request), tickets created or items left open>
+<at most 3 lines: what was done, where the work is (branch or pull request), child tickets and the backlog ticket created, or items left open>
 EOF
 ```
 

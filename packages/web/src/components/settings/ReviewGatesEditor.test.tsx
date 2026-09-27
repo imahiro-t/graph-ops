@@ -860,7 +860,7 @@ describe('ReviewGatesEditor delete button accessible name', () => {
 // text, so its accessible name adds the row's gate the same way the delete
 // button's name does -- the ID, else the name on a new row, else "no ID" and
 // the 1-based row number. The name starts with the visible text (WCAG 2.5.3
-// Label in Name); aria-expanded / aria-controls / focus return are unchanged.
+// Label in Name); aria-expanded / aria-controls are unchanged.
 describe('ReviewGatesEditor merged preview toggle accessible name', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -983,8 +983,7 @@ describe('ReviewGatesEditor merged preview toggle accessible name', () => {
     }
   });
 
-  it('keeps aria-expanded / aria-controls toggling on a named toggle, and focus return to it after a deletion', async () => {
-    // Rows: code_review (default, delete aria-disabled), qa_review (overridden).
+  it('keeps aria-expanded / aria-controls toggling on a named toggle', async () => {
     mockedFetchCatalog.mockResolvedValue(CATALOG_RESPONSE);
     const user = userEvent.setup();
     render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
@@ -999,12 +998,6 @@ describe('ReviewGatesEditor merged preview toggle accessible name', () => {
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(toggle).not.toHaveAttribute('aria-controls');
-
-    screen.getByRole('button', { name: deleteName('qa_review') }).focus();
-    await user.keyboard('{Enter}');
-    await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole('button', { name: toggleName('code_review') }))
-    );
   });
 });
 
@@ -1295,9 +1288,10 @@ describe('ReviewGatesEditor merged preview state across row changes', () => {
 // Deleting a gate unmounts its row, focused delete button included; focus
 // must not drop to <body> (DFLT-00199, following DFLT-00191's rule). It goes
 // to the row that took the removed one's place, else the new last row, else
-// "Add Review Gate" -- on that row's delete button, or its merged preview
-// toggle when the delete button is aria-disabled (a not-yet-overridden
-// default).
+// "Add Review Gate" -- on that row's delete button, whether the row is
+// overridden or a not-yet-overridden default, as in NodeTypesEditor. A
+// default's delete button is aria-disabled but still takes focus and tells
+// why it can't delete (DFLT-00203).
 describe('ReviewGatesEditor focus after deleting a gate', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -1334,7 +1328,7 @@ describe('ReviewGatesEditor focus after deleting a gate', () => {
     await waitFor(() => expect(document.activeElement).toBe(deleteButton('qa_review')));
   });
 
-  it('moves focus to the neighbor\'s merged preview toggle when its delete button is aria-disabled', async () => {
+  it('moves focus to the neighbor\'s delete button even when the neighbor is a not-yet-overridden default gate', async () => {
     // Rows: code_review (default, delete aria-disabled), qa_review (overridden).
     mockedFetchCatalog.mockResolvedValue(CATALOG_RESPONSE);
     const user = userEvent.setup();
@@ -1344,7 +1338,8 @@ describe('ReviewGatesEditor focus after deleting a gate', () => {
     deleteButton('qa_review').focus();
     await user.keyboard('{Enter}');
 
-    await waitFor(() => expect(document.activeElement).toBe(toggles()[0]));
+    await waitFor(() => expect(document.activeElement).toBe(deleteButton('code_review')));
+    expect(deleteButton('code_review')).toHaveAttribute('aria-disabled', 'true');
     expect(toggles()).toHaveLength(1);
   });
 

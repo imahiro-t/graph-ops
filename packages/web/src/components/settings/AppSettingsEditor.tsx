@@ -32,6 +32,7 @@ import { useTransientAnnouncement } from '../../hooks/useTransientAnnouncement';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
 import { SubmittingText, submittingProps } from '../Submitting';
+import { ErrorBox } from './ErrorBox';
 
 interface Props {
   projects: Project[];
@@ -574,7 +575,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
       {/* Outside the project list, which swaps to its empty state when the
           last project is deleted and would take the region with it. */}
       <StatusLiveRegion message={projectDeleteNotice} />
-      {error && <div aria-hidden="true" className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900 whitespace-pre-wrap">{error}</div>}
+      {error && <ErrorBox aria-hidden="true" className="p-2.5 text-[11px] whitespace-pre-wrap">{error}</ErrorBox>}
 
       {/* Where a save lands. The server answers '' when it has no home
           directory to resolve, so name the file in words rather than

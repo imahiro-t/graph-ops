@@ -174,7 +174,7 @@ Settings are per project. Edit your own values in Settings > Autopilot; they are
 | `mainReflection` | **`branch`** / `pull_request` / `merge` | How the root's work reaches the main branch. |
 | `permissionMode` | `acceptEdits` / **`auto`** / `dontAsk` / `bypassPermissions` | The `--permission-mode` of the child sessions, and of the orchestrator started from the Web UI. |
 | `autoApproveGates` | **on** / off | Decide approval gates automatically. Off: the child session waits for you. |
-| `autoCreateTickets` | **on** / off | Decide and create follow-up tickets automatically. Off: the child session asks you which to create. |
+| `autoCreateTickets` | **on** / off | Decide and create follow-up tickets automatically: items caused by the ticket or needed for the root ticket's purpose become child tickets; other issues found along the way go into one backlog ticket outside the tree. Off: the child session asks you which to create. |
 | `maxTickets` | 1-100 (**20**) | Tickets processed per run, the root included. |
 | `maxDepth` | 0-10 (**3**) | How deep derived tickets are processed (the root is 0). |
 | `onFailure` | **`stop`** / `continue` | On a failed or blocked ticket, stop the run, or skip that ticket's subtree and continue. |
@@ -404,7 +404,7 @@ claude plugin update graph-ops@graph-ops
 | `mainReflection` | **`branch`**／`pull_request`／`merge` | 起点の成果を main へ反映する方法。 |
 | `permissionMode` | `acceptEdits`／**`auto`**／`dontAsk`／`bypassPermissions` | 子セッションと、Web UI から起動するオーケストレーターの `--permission-mode`。 |
 | `autoApproveGates` | **オン**／オフ | 承認ゲートを自動で判断するか。オフなら子セッションが人の判断を待ちます。 |
-| `autoCreateTickets` | **オン**／オフ | 申し送りのチケット化を自動で判断・作成するか。オフなら子セッションがどれを作るかを人に尋ねます。 |
+| `autoCreateTickets` | **オン**／オフ | 申し送りのチケット化を自動で判断・作成するか。そのチケットの変更が原因のものとルートチケットの目的に必要なものだけを子チケットにし、それ以外に見つかった問題はツリー外の 1 件のバックログチケットにまとめます。オフなら子セッションがどれを作るかを人に尋ねます。 |
 | `maxTickets` | 1〜100（**20**） | 1 回の実行で処理するチケット数（起点を含む）。 |
 | `maxDepth` | 0〜10（**3**） | 処理する派生の深さ（起点が 0）。 |
 | `onFailure` | **`stop`**／`continue` | チケットが失敗・ブロックしたとき、実行全体を止めるか、そのチケットの部分木だけ飛ばして続けるか。 |
