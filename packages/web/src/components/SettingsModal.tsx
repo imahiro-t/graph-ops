@@ -139,9 +139,14 @@ export const SettingsModal: React.FC<Props> = ({
   // changeTab, so an unsaved edit still asks first. If the user keeps the
   // edit, the selection stays and focus returns to the pressed tab. Modified
   // keys are left alone so browser shortcuts such as Alt+Left still work.
-  const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+  //
+  // The keys count from the tab that has focus (`from`, the tab the event
+  // came from), not from the selected one. They usually are the same tab,
+  // but not after a click on another tab asked about an unsaved edit and the
+  // user kept it: focus then comes back to the clicked (unselected) tab.
+  const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, from: Tab) => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    const index = SETTINGS_TABS.indexOf(tab);
+    const index = SETTINGS_TABS.indexOf(from);
     const last = SETTINGS_TABS.length - 1;
     let next: number;
     switch (event.key) {
@@ -161,8 +166,15 @@ export const SettingsModal: React.FC<Props> = ({
         return;
     }
     event.preventDefault();
+    const target = SETTINGS_TABS[next];
+    if (target === tab) {
+      // Moving onto the already selected tab: nothing to change or confirm,
+      // only focus moves (a no-op when it already has focus).
+      tabRefs.current[tab]?.focus();
+      return;
+    }
     focusTabAfterChangeRef.current = true;
-    void changeTab(SETTINGS_TABS[next]).then(switched => {
+    void changeTab(target).then(switched => {
       // Nothing changed (already selected, or the edit was kept): drop the
       // flag so a later click-driven change does not move focus by itself.
       if (!switched) focusTabAfterChangeRef.current = false;
@@ -239,7 +251,7 @@ export const SettingsModal: React.FC<Props> = ({
                 aria-controls={panelId}
                 tabIndex={selected ? 0 : -1}
                 onClick={() => void changeTab(key)}
-                onKeyDown={handleTabKeyDown}
+                onKeyDown={event => handleTabKeyDown(event, key)}
                 className={`max-w-full break-words px-3 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition ${
                   selected
                     ? 'border-blue-600 text-blue-700 dark:text-blue-400'

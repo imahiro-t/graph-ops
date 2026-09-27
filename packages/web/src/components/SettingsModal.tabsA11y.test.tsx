@@ -267,6 +267,61 @@ describe('SettingsModal tabs (WAI-ARIA tabs pattern)', () => {
     expect(screen.getByTestId('settings-discard-confirm')).toBeInTheDocument();
   });
 
+  // Clicking another tab with an unsaved edit and keeping the edit leaves
+  // focus on the clicked tab, which is not the selected one (Templates). The
+  // keys must count from the focused tab, per the APG tabs pattern.
+  async function clickAwayAndKeepEdit(user: ReturnType<typeof userEvent.setup>, clicked: TabKey) {
+    const textarea = await makeUnsavedTemplateEdit(user);
+    await user.click(getTab(clicked));
+    expect(screen.getByTestId('settings-discard-confirm')).toBeInTheDocument();
+    await user.click(screen.getByTestId('settings-discard-confirm-cancel'));
+    expect(screen.queryByTestId('settings-discard-confirm')).not.toBeInTheDocument();
+    expect(getTab('templates')).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(getTab(clicked)).toHaveFocus());
+    return textarea;
+  }
+
+  it.each<[TabKey, string, TabKey]>([
+    ['nodeTypes', 'ArrowRight', 'reviewGates'],
+    ['nodeTypes', 'ArrowLeft', 'appSettings'],
+    ['labels', 'Home', 'nodeTypes'],
+    ['skills', 'End', 'appSettings']
+  ])(
+    'after a kept edit leaves focus on the clicked %s tab, %s counts from it and moves to %s',
+    async (clicked, key, target) => {
+      const user = userEvent.setup();
+      render(modal);
+      await clickAwayAndKeepEdit(user, clicked);
+
+      await user.keyboard(`{${key}}`);
+      expect(screen.getByTestId('settings-discard-confirm')).toBeInTheDocument();
+      await user.click(screen.getByTestId('settings-discard-confirm-confirm'));
+
+      await waitFor(() => expect(getTab(target)).toHaveAttribute('aria-selected', 'true'));
+      await waitFor(() => expect(getTab(target)).toHaveFocus());
+      await expectPanelShows(target);
+    }
+  );
+
+  it.each<[TabKey, string]>([
+    ['skills', 'ArrowRight'],
+    ['labels', 'ArrowLeft']
+  ])(
+    'after a kept edit leaves focus on the clicked %s tab, %s onto the selected tab only moves focus, without asking',
+    async (clicked, key) => {
+      const user = userEvent.setup();
+      render(modal);
+      const textarea = await clickAwayAndKeepEdit(user, clicked);
+
+      await user.keyboard(`{${key}}`);
+
+      expect(screen.queryByTestId('settings-discard-confirm')).not.toBeInTheDocument();
+      expect(getTab('templates')).toHaveAttribute('aria-selected', 'true');
+      expect(getTab('templates')).toHaveFocus();
+      expect(textarea).toHaveValue('plan-tier edited');
+    }
+  );
+
   it('tabs from the close button to the selected tab, then to the tabpanel, skipping the other tabs', async () => {
     const user = userEvent.setup();
     render(modal);
