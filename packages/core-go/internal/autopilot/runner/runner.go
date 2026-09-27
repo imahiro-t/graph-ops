@@ -1165,6 +1165,9 @@ type WorkerContext struct {
 	Ticket   string `json:"ticket"`
 	Mode     string `json:"mode"`
 	RunState string `json:"run_state"`
+	// RootTicket is the ticket the run started from; its purpose decides
+	// which handoff items stay in the tree.
+	RootTicket string `json:"root_ticket"`
 	// Position: single (ticket mode), tree_root, or tree_child.
 	Position string `json:"position"`
 	Role     string `json:"role"`
@@ -1203,7 +1206,7 @@ func (s *Service) WorkerContext(runID, ticketID string) (WorkerContext, error) {
 			role = st.LastRole
 		}
 		out = WorkerContext{
-			RunID: run.ID, Ticket: st.ID, Mode: run.Mode, RunState: run.State, Role: role,
+			RunID: run.ID, Ticket: st.ID, RootTicket: run.RootTicketID, Mode: run.Mode, RunState: run.State, Role: role,
 			Branch: st.Branch, Worktree: st.Worktree, BaseBranch: st.BaseBranch,
 			Settings: run.Settings, PendingDecisions: []string{},
 		}
