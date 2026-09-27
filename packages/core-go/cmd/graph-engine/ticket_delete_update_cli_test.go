@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http/httptest"
-	"os"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -15,6 +13,7 @@ import (
 
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
+	"github.com/graph-ops/core-go/internal/mysqltestenv"
 	"github.com/graph-ops/core-go/internal/store"
 	"github.com/graph-ops/core-go/internal/store/httpdatasourcetest"
 )
@@ -45,34 +44,24 @@ func forEachBackend(t *testing.T, fn func(t *testing.T, repo store.GraphReposito
 }
 
 // newMySQLTestRepoWithProject opens the MySQL database named by the same
-// GRAPH_TEST_MYSQL_* variables internal/store's MySQL tests use (that
-// package's mysqlTestConfig lives in a _test.go file and is not importable).
+// GRAPH_TEST_MYSQL_* variables internal/store's MySQL tests use, read through
+// the same mysqltestenv.Load, which also refuses an empty or working
+// database name before anything connects.
 // The database is shared with other test packages run by ./dev/mysql/test.sh
 // (sequentially, -p 1), so this test only ever touches the project it
 // creates, and deletes it -- with its tickets -- when the test ends.
 func newMySQLTestRepoWithProject(t *testing.T) (store.GraphRepository, string) {
 	t.Helper()
-	host := os.Getenv("GRAPH_TEST_MYSQL_HOST")
-	if host == "" {
-		t.Skip("GRAPH_TEST_MYSQL_HOST not set; skipping the MySQL backend (run ./dev/mysql/test.sh)")
-	}
-	port := 3306
-	if p := os.Getenv("GRAPH_TEST_MYSQL_PORT"); p != "" {
-		n, err := strconv.Atoi(p)
-		if err != nil {
-			t.Fatalf("invalid GRAPH_TEST_MYSQL_PORT %q: %v", p, err)
-		}
-		port = n
-	}
+	env := mysqltestenv.Load(t, "the MySQL backend")
 	repo, err := store.Open(store.Config{
 		Backend:        "mysql",
-		MySQLHost:      host,
-		MySQLPort:      port,
-		MySQLDatabase:  os.Getenv("GRAPH_TEST_MYSQL_DATABASE"),
-		MySQLUser:      os.Getenv("GRAPH_TEST_MYSQL_USER"),
-		MySQLPassword:  os.Getenv("GRAPH_TEST_MYSQL_PASSWORD"),
-		MySQLTLSMode:   os.Getenv("GRAPH_TEST_MYSQL_TLS"),
-		MySQLTLSCAFile: os.Getenv("GRAPH_TEST_MYSQL_TLS_CA"),
+		MySQLHost:      env.Host,
+		MySQLPort:      env.Port,
+		MySQLDatabase:  env.Database,
+		MySQLUser:      env.User,
+		MySQLPassword:  env.Password,
+		MySQLTLSMode:   env.TLSMode,
+		MySQLTLSCAFile: env.TLSCAFile,
 	})
 	if err != nil {
 		t.Fatalf("store.Open(mysql): %v", err)

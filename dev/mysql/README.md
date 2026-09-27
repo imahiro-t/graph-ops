@@ -13,11 +13,12 @@ the same container.
 ## Running the MySQL tests
 
 The MySQL tests in `packages/core-go` are skipped unless `GRAPH_TEST_MYSQL_*`
-is set. Once `GRAPH_TEST_MYSQL_HOST` is set, the `internal/store` tests fail
-instead of running when `GRAPH_TEST_MYSQL_DATABASE` is empty or names the
-working `graph_ops` database (in any letter case), because they delete every
-row before each test; point them at a throwaway database, as the script
-below does. From the repository root (or any worktree):
+is set. Once `GRAPH_TEST_MYSQL_HOST` is set, every MySQL-backed test (in
+`internal/store` and `cmd/graph-engine`) fails instead of running when
+`GRAPH_TEST_MYSQL_DATABASE` is empty or names the working `graph_ops`
+database (in any letter case), because the tests delete or write rows; point
+them at a throwaway database, as the script below does. From the repository
+root (or any worktree):
 
 ```sh
 ./dev/mysql/test.sh                 # all three TLS modes
