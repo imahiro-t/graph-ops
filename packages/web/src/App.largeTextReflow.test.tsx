@@ -52,12 +52,8 @@ function seed() {
   installFakeBackend(backend);
 }
 
-const FILTERS = [
-  { name: 'status', prefix: 'status' },
-  { name: 'assignee', prefix: 'assignee' },
-  { name: 'priority', prefix: 'priority' },
-  { name: 'label', prefix: 'label' }
-] as const;
+// Each filter's name builds both its trigger's test ID and its i18n keys.
+const FILTERS = ['status', 'assignee', 'priority', 'label'] as const;
 
 const trigger = (name: string) => screen.getByTestId(`toolbar-${name}-filter-panel-trigger`);
 
@@ -82,7 +78,7 @@ describe.each(['ja', 'en'] as const)('toolbar filter triggers with large text (%
 
   it('wrap their text inside the trigger instead of widening the toolbar', async () => {
     await renderApp();
-    for (const { name } of FILTERS) {
+    for (const name of FILTERS) {
       const button = trigger(name);
       expect(button).not.toHaveClass('whitespace-nowrap');
       expect(button).toHaveClass('max-w-full', 'min-w-0');
@@ -94,17 +90,17 @@ describe.each(['ja', 'en'] as const)('toolbar filter triggers with large text (%
       // resort; the arrow stays full size and hidden from assistive tech.
       const text = button.querySelector('span') as HTMLElement;
       expect(text).toHaveClass('min-w-0', '[overflow-wrap:anywhere]', 'break-keep');
-      expect(text).toHaveTextContent(i18n.t(`toolbar.${FILTERS.find(f => f.name === name)!.prefix}All`));
+      expect(text).toHaveTextContent(i18n.t(`toolbar.${name}All`));
       const arrow = button.querySelector('svg') as SVGElement;
       expect(arrow).toHaveClass('shrink-0');
       expect(arrow).toHaveAttribute('aria-hidden', 'true');
     }
   });
 
-  it.each(FILTERS)('keep the selection in the $name trigger\'s accessible name after picking one value', async ({ name, prefix }) => {
+  it.each(FILTERS)('keep the selection in the %s trigger\'s accessible name after picking one value', async name => {
     const user = await renderApp();
     await user.click(trigger(name));
-    const panel = screen.getByRole('group', { name: i18n.t(`toolbar.${prefix}GroupLabel`) });
+    const panel = screen.getByRole('group', { name: i18n.t(`toolbar.${name}GroupLabel`) });
     // The label filter's options arrive with the labels request.
     const boxes = await waitFor(() => {
       const found = within(panel).getAllByRole('checkbox');
@@ -114,7 +110,7 @@ describe.each(['ja', 'en'] as const)('toolbar filter triggers with large text (%
     await user.click(boxes[0]);
     await user.keyboard('{Escape}');
 
-    const expected = i18n.t(`toolbar.${prefix}Selected`, { count: 1 });
+    const expected = i18n.t(`toolbar.${name}Selected`, { count: 1 });
     expect(screen.getByRole('button', { name: expected })).toBe(trigger(name));
     // The visible text is the name: no aria-label that could disagree with
     // it (WCAG 2.5.3).
