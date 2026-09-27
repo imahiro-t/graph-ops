@@ -383,6 +383,37 @@ export const TicketItem: React.FC<Props> = ({
     return () => observer.disconnect();
   }, [isExpanded, ticket.nodes.length, ticket.edges.length]);
 
+  // DFLT-00241: below lg the graph keeps a floor width (max-lg:min-w-[180px]
+  // on the <svg>) and its box scrolls sideways inside the panel when the
+  // panel is narrower than that -- 160px wide, or 320px with a 200% default
+  // font. Only while it actually scrolls does the box become a named,
+  // focusable region, so keyboard users can scroll it; from lg up (where it
+  // never scrolls) and on ordinary phones it adds no tab stop.
+  const graphScrollRef = useRef<HTMLDivElement>(null);
+  const graphTitleId = useId();
+  const [isGraphScrollable, setIsGraphScrollable] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!isExpanded) return;
+    const el = graphScrollRef.current;
+    if (!el) return;
+    // The graph's main column of nodes sits at its horizontal centre, so the
+    // box starts scrolled to the middle when it first becomes scrollable
+    // (scrollLeft 0 would show only the left edge -- loop arcs and side
+    // nodes). Later resizes leave the viewer's own scroll position alone.
+    let wasScrollable = false;
+    const update = () => {
+      const scrollable = el.scrollWidth > el.clientWidth + 1;
+      if (scrollable && !wasScrollable) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
+      wasScrollable = scrollable;
+      setIsGraphScrollable(scrollable);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isExpanded, ticket.nodes.length, ticket.edges.length]);
+
   const handleSendPrompt = async () => {
     if (isRunning || !promptText.trim()) return;
     // Only clear the free-text prompt on a successful send -- a failed one
@@ -1709,14 +1740,30 @@ export const TicketItem: React.FC<Props> = ({
                 always renders its full content with no scrollbar. When it
                 grows past that floor, nodeListCardHeight (measured via
                 ResizeObserver above) carries the same height over to the
-                node/artifact panel on the right. */}
-            <div ref={graphPanelRef} className="lg:col-span-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col min-h-[32rem]">
-              <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 w-full text-left flex items-center justify-between shrink-0">
-                <span>{t('ticketItem.graphTitle')}</span>
+                node/artifact panel on the right.
+                DFLT-00241: below lg (one column, so there is no height to
+                sync) the graph's height follows its width instead of the
+                fixed svgHeight -- max-lg:h-auto on the <svg> overrides the
+                height attribute, which still applies from lg up exactly as
+                before -- so a narrow panel shows the whole graph scaled
+                down in proportion rather than a thin strip in a tall empty
+                box. A graph with nodes never gets narrower than 180px (about
+                as wide as a 320px phone at the default font gives it); when the
+                panel is narrower still, the graph's box scrolls sideways
+                inside the panel instead of the page. mx-auto rather than
+                the container's items-center keeps the graph's left edge
+                reachable in that case. */}
+            <div ref={graphPanelRef} className="lg:col-span-4 min-w-0 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col min-h-[32rem]">
+              <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 w-full text-left flex items-center justify-between shrink-0 max-lg:flex-wrap max-lg:gap-x-2 max-lg:[overflow-wrap:anywhere]">
+                <span id={graphTitleId} className="max-lg:min-w-0">{t('ticketItem.graphTitle')}</span>
                 <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold">{t('ticketItem.progress', { percent: progressPercent })}</span>
               </div>
-              <div className="flex-1 flex flex-col items-center justify-center">
-              <svg className="w-full max-w-[340px] shrink-0" height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
+              <div
+                ref={graphScrollRef}
+                className="flex-1 flex flex-col items-center justify-center max-lg:overflow-x-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                {...(isGraphScrollable ? { role: 'region', 'aria-labelledby': graphTitleId, tabIndex: 0 } : {})}
+              >
+              <svg data-testid="ticket-graph" className={`w-full max-w-[340px] shrink-0 max-lg:h-auto max-lg:mx-auto${ticket.nodes.length > 0 ? ' max-lg:min-w-[180px]' : ''}`} height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
                 {/* 1. Forward edges -- straight lines between each node's actual
                     (level, column) position, so a fan-out to several nodes on
                     the same row reads as a fork instead of a straight line down. */}
@@ -1849,14 +1896,16 @@ export const TicketItem: React.FC<Props> = ({
                   );
                 })}
               </svg>
+              {/* sticky left-0 below lg keeps the hint in view while the
+                  graph's box is scrolled sideways (DFLT-00241). */}
               {hasParallelRows && (
-                <div className="w-full mt-2 text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold flex items-center gap-1 shrink-0">
+                <div className="w-full mt-2 text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold flex items-center gap-1 shrink-0 max-lg:sticky max-lg:left-0">
                   <Layers aria-hidden="true" className="w-3 h-3" />
                   {t('ticketItem.parallelHint')}
                 </div>
               )}
               </div>
-              <div className="w-full mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400 shrink-0">
+              <div className="w-full mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400 shrink-0 max-lg:[overflow-wrap:anywhere]">
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> {t('ticketItem.legend.done')}</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> {t('ticketItem.legend.inProgress')}</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500" /> {t('ticketItem.legend.review')}</span>
