@@ -2,7 +2,7 @@
 // own. How each filter's selection narrows the ticket list -- and that all
 // four really do use this component -- is covered by App.filters.test.tsx.
 import { useState } from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
@@ -283,12 +283,42 @@ describe('MultiSelectFilter', () => {
       expect(panel()).not.toHaveClass('left-0');
     });
 
-    it('stays on the left when neither side has room', async () => {
+    it('shifts it inside the window when neither edge has room', async () => {
       const user = userEvent.setup();
       triggerLeft = 100; // 100 + 224 > 320, but 100 + 110 - 224 < 0
       render(<Harness />);
       await user.click(trigger());
+      expect(panel()).not.toHaveClass('left-0');
+      expect(panel()).not.toHaveClass('right-0');
+      // The offset is from the trigger's left edge: the panel's right edge
+      // lands 16px inside the 320px window, and its left edge stays >= 0.
+      const offset = parseFloat(panel().style.left);
+      expect(offset).toBe(320 - 16 - PANEL_WIDTH - triggerLeft);
+      expect(triggerLeft + offset).toBeGreaterThanOrEqual(0);
+      expect(triggerLeft + offset + PANEL_WIDTH).toBeLessThanOrEqual(320);
+    });
+
+    it('re-decides on resize, with one listener per opening', async () => {
+      const user = userEvent.setup();
+      const add = vi.spyOn(window, 'addEventListener');
+      const remove = vi.spyOn(window, 'removeEventListener');
+      render(<Harness />);
+      await user.click(trigger());
       expect(panel()).toHaveClass('left-0');
+
+      // Re-renders while open (checking boxes) must not re-attach it.
+      await user.click(screen.getByRole('checkbox', { name: 'あ' }));
+      await user.click(screen.getByRole('checkbox', { name: 'あ' }));
+      expect(add.mock.calls.filter(([type]) => type === 'resize')).toHaveLength(1);
+
+      triggerLeft = 176;
+      act(() => {
+        window.dispatchEvent(new Event('resize'));
+      });
+      expect(panel()).toHaveClass('right-0');
+
+      await user.click(trigger());
+      expect(remove.mock.calls.filter(([type]) => type === 'resize')).toHaveLength(1);
     });
 
     it('re-decides while open when checking a box moves the trigger to another line', async () => {

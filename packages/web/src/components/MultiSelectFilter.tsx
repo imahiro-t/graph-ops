@@ -1,4 +1,4 @@
-import { ReactNode, useLayoutEffect, useRef, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown } from 'lucide-react';
 
@@ -67,6 +67,40 @@ interface Props<T extends string> {
   onChange: (next: T[]) => void;
 }
 
+// How the open panel is positioned against its trigger (DFLT-00220): hung
+// from the trigger's left or right edge, or -- when neither fits the window
+// -- shifted by `left` px from the trigger's left edge.
+type PanelPlacement = { edge: 'left' } | { edge: 'right' } | { edge: 'shift'; left: number };
+
+const HANG_LEFT: PanelPlacement = { edge: 'left' };
+
+// The gap a shifted panel keeps from the window's right edge: the same 1rem
+// per side that max-w-[calc(100vw-2rem)] leaves, so a panel capped by that
+// max-width still fits with the gap on both sides.
+const SHIFT_MARGIN = 16;
+
+// `trigger` is the trigger's viewport box, `panelWidth` the panel's rendered
+// width (w-56, capped by max-w), `viewportWidth` the window width excluding
+// any scrollbar.
+function decidePlacement(
+  trigger: { left: number; right: number },
+  panelWidth: number,
+  viewportWidth: number
+): PanelPlacement {
+  if (trigger.left + panelWidth <= viewportWidth) return HANG_LEFT;
+  if (trigger.right - panelWidth >= 0) return { edge: 'right' };
+  // Neither edge works: put the panel's right edge SHIFT_MARGIN inside the
+  // window, but never past the window's left edge. Both bounds hold because
+  // max-w keeps the panel at most viewportWidth - 2 * SHIFT_MARGIN wide.
+  const panelLeft = Math.max(0, viewportWidth - SHIFT_MARGIN - panelWidth);
+  return { edge: 'shift', left: panelLeft - trigger.left };
+}
+
+function samePlacement(a: PanelPlacement, b: PanelPlacement): boolean {
+  if (a.edge !== b.edge) return false;
+  return a.edge !== 'shift' || b.edge !== 'shift' || a.left === b.left;
+}
+
 export function MultiSelectFilter<T extends string>({
   panelId,
   allKey,
@@ -79,35 +113,43 @@ export function MultiSelectFilter<T extends string>({
 }: Props<T>) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
-  // Which edge of the trigger the panel hangs from (DFLT-00220). Left by
-  // default; right when a left-hung panel would run past the right edge of
-  // the window. On a narrow screen the toolbar wraps, so a filter can end up
-  // near the right edge, and its panel then widened the page and brought in
-  // a horizontal scrollbar for as long as it was open.
-  const [alignRight, setAlignRight] = useState(false);
+  // Where the panel sits relative to its trigger (DFLT-00220). Hung from the
+  // trigger's left edge by default; from its right edge when a left-hung
+  // panel would run past the right edge of the window; and, when neither
+  // fits, shifted by an explicit `left` offset so it lies inside the window.
+  // On a narrow screen the toolbar wraps, so a filter can end up near the
+  // right edge, and its panel then widened the page and brought in a
+  // horizontal scrollbar for as long as it was open.
+  const [placement, setPlacement] = useState<PanelPlacement>(HANG_LEFT);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // Reads only refs and the state setter, so it is stable across renders and
+  // the resize listener below can be attached once per opening.
+  const place = useCallback(() => {
+    const trigger = buttonRef.current?.getBoundingClientRect();
+    const panel = panelRef.current?.getBoundingClientRect();
+    if (!trigger || !panel) return;
+    setPlacement(prev => {
+      const next = decidePlacement(trigger, panel.width, document.documentElement.clientWidth);
+      return samePlacement(prev, next) ? prev : next;
+    });
+  }, []);
 
   // Re-checked after every render while open, not only when opening:
   // checking a box changes the trigger's text ("All" -> "1 selected"), which
   // can re-wrap the toolbar and move the trigger to another line. The result
-  // depends only on where the trigger is, so it settles after one pass.
+  // depends only on where the trigger is and how wide the panel is (neither
+  // of which the placement changes), so it settles after one pass.
   useLayoutEffect(() => {
-    if (!isOpen) return;
-    const decide = () => {
-      const trigger = buttonRef.current?.getBoundingClientRect();
-      const panel = panelRef.current?.getBoundingClientRect();
-      if (!trigger || !panel) return;
-      const viewportWidth = document.documentElement.clientWidth;
-      // Hang right only when that actually fits; a panel wider than both
-      // sides allow stays on the left, where max-w keeps it on screen.
-      const next = trigger.left + panel.width > viewportWidth && trigger.right - panel.width >= 0;
-      setAlignRight(prev => (prev === next ? prev : next));
-    };
-    decide();
-    window.addEventListener('resize', decide);
-    return () => window.removeEventListener('resize', decide);
+    if (isOpen) place();
   });
+
+  useEffect(() => {
+    if (!isOpen) return;
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [isOpen, place]);
 
   const toggle = (value: T) => {
     if (selected.includes(value)) {
@@ -178,7 +220,8 @@ export function MultiSelectFilter<T extends string>({
             id={panelId}
             role="group"
             aria-label={t(groupLabelKey)}
-            className={`absolute ${alignRight ? 'right-0' : 'left-0'} mt-1.5 w-56 max-w-[calc(100vw-2rem)] max-h-80 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-xs`}
+            style={placement.edge === 'shift' ? { left: placement.left } : undefined}
+            className={`absolute ${placement.edge === 'right' ? 'right-0' : placement.edge === 'left' ? 'left-0' : ''} mt-1.5 w-56 max-w-[calc(100vw-2rem)] max-h-80 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-xs`}
           >
             {options.length === 0 && emptyKey && (
               <div className="px-3 py-1.5 text-slate-500 dark:text-slate-400">{t(emptyKey)}</div>
