@@ -1379,16 +1379,38 @@ export const App: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-6 py-6 space-y-6">
-        {/* Simple Summary Metrics */}
+      {/* Main Container. DFLT-00251: under 15rem (a 160px window at 200%
+          zoom, or a large default font on a narrow screen -- the rem query
+          of DFLT-00227: below 240px at 100%, below 480px at 200%) the page
+          pads with px-3 instead of px-6, which took almost a third of a
+          160px window and left the list, the summary card and the
+          pagination row too little room. 240px and up at 100% look as
+          before. */}
+      <main className="max-w-7xl mx-auto px-6 [@media(max-width:15rem)]:px-3 py-6 space-y-6">
+        {/* Simple Summary Metrics. DFLT-00251: both children are min-w-0
+            max-w-full so neither can be wider than the card; the numbers
+            already wrap between items (flex-wrap). */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm">{t('summary.title')}</span>
-            <span className="text-xs text-slate-500 dark:text-slate-400">{t('summary.subtitle')}</span>
+          {/* DFLT-00251: in English at 160px the title and its note kept
+              their min-content width ("Overview", "artifacts)") and ran 5px
+              past the window. Under 15rem the two may now wrap onto lines
+              of their own and break inside a long word. Only under 15rem:
+              at 320-414px with the default font the title and the note sit
+              side by side, each wrapping its own text, and letting them
+              wrap (or shrink below their longest word) there would change
+              that look. */}
+          <div
+            data-testid="summary-heading"
+            className="flex [@media(max-width:15rem)]:flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 max-w-full"
+          >
+            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm [@media(max-width:15rem)]:min-w-0 [@media(max-width:15rem)]:[overflow-wrap:anywhere]">{t('summary.title')}</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 [@media(max-width:15rem)]:min-w-0 [@media(max-width:15rem)]:[overflow-wrap:anywhere]">{t('summary.subtitle')}</span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 sm:divide-x divide-slate-200 dark:divide-slate-700 text-xs">
+          <div
+            data-testid="summary-metrics"
+            className="flex flex-wrap items-center gap-x-6 gap-y-2 min-w-0 max-w-full sm:divide-x divide-slate-200 dark:divide-slate-700 text-xs"
+          >
             <div className="text-center px-3">
               <div className="text-lg font-bold text-slate-800 dark:text-slate-200">{totalCount}</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.total')}</div>
@@ -1507,15 +1529,19 @@ export const App: React.FC = () => {
                 // squeezing it into a column or pushing "next" past the
                 // window. The buttons stay one shrink-0 group, so previous,
                 // page number and next never split across lines.
+                // DFLT-00251: in a 160px window (200% zoom) the group was
+                // wider than the row with a two-digit page number
+                // ("10 / 23"), so under 15rem its gaps shrink to gap-2; and
+                // the count may break inside a long run of digits.
                 <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mt-2 px-1 text-xs text-slate-500 dark:text-slate-400">
-                  <span className="min-w-0">
+                  <span className="min-w-0 [overflow-wrap:anywhere]">
                     {t('pagination.range', {
                       from: (currentPage - 1) * ticketsPerPage + 1,
                       to: Math.min(currentPage * ticketsPerPage, filteredTickets.length),
                       total: filteredTickets.length
                     })}
                   </span>
-                  <div className="flex items-center gap-3 shrink-0">
+                  <div className="flex items-center gap-3 [@media(max-width:15rem)]:gap-2 shrink-0">
                     <button
                       onClick={() => setPage(p => Math.max(1, p - 1))}
                       aria-label={t('pagination.previous')}

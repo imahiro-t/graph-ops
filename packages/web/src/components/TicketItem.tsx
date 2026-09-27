@@ -1195,6 +1195,14 @@ export const TicketItem: React.FC<Props> = ({
   // rethink is needed). Surfaced separately, read-only, so it isn't confused
   // with pendingApprovalNodeIds' actionable approve/reject state.
   const rejectedApprovalNodes = ticket.nodes.filter(n => n.type === 'approval_gate' && n.status === 'REJECTED');
+  // The rejected badge's full text (DFLT-00251): the one gate's whole name,
+  // or every rejected gate's name, for its title and (several) sr-only text.
+  const rejectedBadgeFullText =
+    rejectedApprovalNodes.length === 1
+      ? t('ticketItem.approvalGate.rejectedBadgeOne', { name: rejectedApprovalNodes[0].name })
+      : t('ticketItem.approvalGate.rejectedBadgeNames', {
+          names: rejectedApprovalNodes.map(n => n.name).join(t('ticketItem.approvalGate.rejectedBadgeNameSeparator'))
+        });
   const loopEdges = ticket.edges.filter(e => e.condition === 'iteration_loop');
   const gherkinArtifacts = ticket.artifacts.filter(a => a.type === 'gherkin');
   const htmlArtifacts = ticket.artifacts.filter(a => a.type === 'html');
@@ -1366,10 +1374,15 @@ export const TicketItem: React.FC<Props> = ({
               (select-text over the row's select-none, DFLT-00143), so they
               can be dragged/double-clicked and copied without also picking
               up the chevron or the badges. handleHeaderClick keeps such a
-              selection from toggling the row. */}
+              selection from toggling the row.
+              DFLT-00251: it stays on one line (whitespace-nowrap) wherever
+              it fits; under 15rem (a 160px window at 200% zoom, or a large
+              default font on a narrow screen) it may break inside the ID
+              instead of running past the card's overflow-clip, and it is
+              never wider than the row (max-w-full). */}
           <span
             data-testid="ticket-header-id"
-            className="font-mono text-xs font-bold px-2 py-1 rounded bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0 whitespace-nowrap select-text cursor-text"
+            className="font-mono text-xs font-bold px-2 py-1 rounded bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0 whitespace-nowrap [@media(max-width:15rem)]:whitespace-normal [@media(max-width:15rem)]:[overflow-wrap:anywhere] min-w-0 max-w-full select-text cursor-text"
           >
             {ticket.id}
           </span>
@@ -1404,8 +1417,20 @@ export const TicketItem: React.FC<Props> = ({
           {/* Label/colors shared with the node badge via statusMeta.ts
               (DFLT-00030). No `uppercase`/`tracking-wider`: English labels
               are uppercase in the translation data itself, and the extra
-              letter-spacing looked broken on Japanese labels. */}
-          <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold shrink-0 whitespace-nowrap ${ticketStatusMeta.chip.bg} ${ticketStatusMeta.chip.text}`}>
+              letter-spacing looked broken on Japanese labels.
+              DFLT-00251: no whitespace-nowrap. As a shrink-0 item it is
+              still laid out at its full one-line width wherever that fits,
+              but "AWAITING FIX" / "リファイン済み" were wider than the row
+              at 320px with a 32px root font and at 160px, and the card's
+              overflow-clip cut them off. Now it is never wider than the row
+              and wraps inside itself there. Not only under 15rem: a larger
+              root font size set on the page does not move the rem query
+              (that follows the browser's default size), and the chip
+              overflowed there too. */}
+          <span
+            data-testid="ticket-header-status"
+            className={`text-xs px-2.5 py-0.5 rounded-full font-bold shrink-0 max-w-full [overflow-wrap:anywhere] ${ticketStatusMeta.chip.bg} ${ticketStatusMeta.chip.text}`}
+          >
             {t(ticketStatusMeta.labelKey)}
           </span>
 
@@ -1461,7 +1486,7 @@ export const TicketItem: React.FC<Props> = ({
                 <span
                   data-testid="ticket-header-labels-more"
                   title={ticketLabels.map(l => l.name).join(', ')}
-                  className="relative px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-semibold"
+                  className="relative px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[0.6875rem] font-semibold"
                 >
                   {/* The bare "+N" means nothing read aloud, and screen
                       readers don't reliably read title: they get the
@@ -1483,12 +1508,22 @@ export const TicketItem: React.FC<Props> = ({
 
           {/* DFLT-00232: no shrink-0 -- on a line of its own that is too
               narrow the badge shrinks (min-w-0 max-w-full) and its name
-              truncates further, instead of running past the card. */}
+              truncates further, instead of running past the card.
+              DFLT-00251: the truncated name can be read in full. The title
+              starts with the whole text (every gate's name when there are
+              several) before the hint. The one-gate name is whole in the
+              DOM text already (truncate only clips what is painted), and
+              the gate names behind "N rejected" are sr-only text, so
+              assistive technology gets them without relying on title. The
+              badge is relative so that the absolutely positioned sr-only
+              text is clipped by the card like the rest of the row (as with
+              "+N" and the autopilot badge). */}
           {rejectedApprovalNodes.length > 0 && (
             <span
-              className="flex items-center gap-1.5 min-w-0 max-w-full pl-2 pr-2 py-0.5 rounded-full bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-[11px] font-bold"
+              data-testid="ticket-header-rejected-badge"
+              className="relative flex items-center gap-1.5 min-w-0 max-w-full pl-2 pr-2 py-0.5 rounded-full bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-[0.6875rem] font-bold"
               onClick={e => e.stopPropagation()}
-              title={t('ticketItem.approvalGate.rejectedHint')}
+              title={`${rejectedBadgeFullText}\n${t('ticketItem.approvalGate.rejectedHint')}`}
             >
               <X aria-hidden="true" className="w-3 h-3 shrink-0" />
               <span className="truncate max-w-[12rem]">
@@ -1496,6 +1531,7 @@ export const TicketItem: React.FC<Props> = ({
                   ? t('ticketItem.approvalGate.rejectedBadgeOne', { name: rejectedApprovalNodes[0].name })
                   : t('ticketItem.approvalGate.rejectedBadgeMany', { count: rejectedApprovalNodes.length })}
               </span>
+              {rejectedApprovalNodes.length > 1 && <span className="sr-only">{rejectedBadgeFullText}</span>}
             </span>
           )}
 
@@ -1524,9 +1560,16 @@ export const TicketItem: React.FC<Props> = ({
               existing assignee (chip, any viewer) or a configured myName
               (assign button on an unassigned ticket). */}
           {(ticket.assignee || myName) && (
-            <span className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+            // DFLT-00251: the chips, the button and the error text may wrap
+            // (a long name ran out of the card at 160px), and none of them
+            // is wider than the row. Nothing changes while they fit.
+            <span
+              data-testid="ticket-header-assignee"
+              className="flex flex-wrap items-center gap-1.5 min-w-0 max-w-full"
+              onClick={e => e.stopPropagation()}
+            >
               {myName && isAssignedToMe ? (
-                <span className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-[11px] font-semibold">
+                <span className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-[0.6875rem] font-semibold min-w-0 max-w-full [overflow-wrap:anywhere]">
                   {ticket.assignee}
                   <IconButton
                     onClick={handleToggleAssignedToMe}
@@ -1547,7 +1590,7 @@ export const TicketItem: React.FC<Props> = ({
                 // one piece of assignee UI every viewer needs to see, with
                 // or without their own name configured.
                 <span
-                  className="inline-flex items-center gap-1 pl-2 pr-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold"
+                  className="inline-flex items-center gap-1 pl-2 pr-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[0.6875rem] font-semibold min-w-0 max-w-full [overflow-wrap:anywhere]"
                   title={t('ticketItem.selfAssign.assignedToOther', { name: ticket.assignee })}
                 >
                   {ticket.assignee}
@@ -1558,7 +1601,7 @@ export const TicketItem: React.FC<Props> = ({
                   onClick={handleToggleAssignedToMe}
                   disabled={assignToMeSaving}
                   {...submittingProps(assignToMeSaving)}
-                  className="px-2 py-0.5 rounded-full border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 disabled:opacity-50 text-[11px] font-semibold flex items-center gap-1 transition"
+                  className="px-2 py-0.5 rounded-full border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 disabled:opacity-50 text-[0.6875rem] font-semibold flex items-center gap-1 min-w-0 max-w-full [overflow-wrap:anywhere] transition"
                 >
                   {assignToMeSaving ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <UserPlus aria-hidden="true" className="w-3 h-3" />}
                   {t('ticketItem.selfAssign.assign')}
@@ -1566,7 +1609,7 @@ export const TicketItem: React.FC<Props> = ({
                 </button>
               ) : null}
               {assignToMeError && (
-                <span className="text-red-600 dark:text-red-400 font-medium">{assignToMeError}</span>
+                <span className="text-red-600 dark:text-red-400 font-medium min-w-0 max-w-full [overflow-wrap:anywhere]">{assignToMeError}</span>
               )}
             </span>
           )}
@@ -1793,7 +1836,7 @@ export const TicketItem: React.FC<Props> = ({
                   <button
                     type="button"
                     onClick={() => setIsDescriptionExpanded(v => !v)}
-                    className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold"
+                    className="text-[0.6875rem] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold"
                   >
                     {isDescriptionExpanded ? t('ticketItem.description.collapse') : t('ticketItem.description.expand')}
                   </button>

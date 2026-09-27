@@ -225,6 +225,8 @@
       "rejectedHint": "却下済み。process-ticketが却下理由をトリアージし（対象ノードを再実行するか）、または人手で解決するまでブロックされたままです。",
       "rejectedBadgeOne": "却下済み: {{name}}",
       "rejectedBadgeMany": "却下済み {{count}}件",
+      "rejectedBadgeNames": "却下されたゲート: {{names}}",
+      "rejectedBadgeNameSeparator": "、",
       "rejectedAnnouncement": "{{name}} を却下しました",
       "approvedAnnouncement": "{{name}} を承認しました",
       "noLongerPendingAnnouncement": "{{name}} は承認待ちではなくなりました",

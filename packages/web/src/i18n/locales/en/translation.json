@@ -226,6 +226,8 @@
       "rejectedHint": "Rejected -- blocked until process-ticket triages the rejection reason (reopening specific nodes) or a human resolves it.",
       "rejectedBadgeOne": "Rejected: {{name}}",
       "rejectedBadgeMany": "{{count}} rejected",
+      "rejectedBadgeNames": "Rejected gates: {{names}}",
+      "rejectedBadgeNameSeparator": ", ",
       "rejectedAnnouncement": "Rejected {{name}}",
       "approvedAnnouncement": "Approved {{name}}",
       "noLongerPendingAnnouncement": "{{name}} is no longer awaiting approval",

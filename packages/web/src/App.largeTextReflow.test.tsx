@@ -18,6 +18,19 @@
 // on each wrapped item, and unchanged measurements at 100% -- was measured
 // in a real browser (see the ticket's implementation notes).
 //
+// DFLT-00251 continues this for a 160px window (320px at 200% zoom). There
+// the English summary card heading ("All Tickets Overview (Click to
+// expand...)") kept the min-content width of its longest words and ran 5px
+// past the window, and the pagination buttons with a two-digit page number
+// ("10 / 25") ended past <main>'s padding. Under 15rem (the rem query of
+// DFLT-00227) <main> now pads with px-3, the heading wraps and may break
+// inside a word, and the pagination buttons close up to gap-2; at every
+// width the summary card's children are no wider than the card and the
+// numbers wrap between items (the original report, DFLT-00234, predates
+// DFLT-00220, and the numbers were already found to wrap: 100-200% at
+// 320-1024px measured no sideways scroll before this change). With the
+// default font at 320-1440px the page measures the same as before.
+//
 // fetch is served by test/fakeBackend.ts, like App.headerLayout.test.tsx.
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -142,5 +155,59 @@ describe.each(['ja', 'en'] as const)('pagination row with large text (%s)', lng 
     const range = screen.getByText(i18n.t('pagination.range', { from: 1, to: PAGE_SIZE, total: TICKET_COUNT }));
     expect(range.parentElement).toBe(row);
     expect(range).toHaveClass('min-w-0');
+  });
+});
+
+describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 160px window (%s)', lng => {
+  const NARROW = '[@media(max-width:15rem)]:';
+
+  beforeEach(async () => {
+    seed();
+    await i18n.changeLanguage(lng);
+  });
+
+  it('pads <main> less only under 15rem', async () => {
+    await renderApp();
+    const main = screen.getByRole('main');
+    expect(main).toHaveClass('px-6', `${NARROW}px-3`);
+    expect(main).not.toHaveClass('px-3');
+  });
+
+  it('keeps the summary card\'s children inside the card and the numbers wrapping between items', async () => {
+    await renderApp();
+    const metrics = screen.getByTestId('summary-metrics');
+    expect(metrics).toHaveClass('flex', 'flex-wrap', 'min-w-0', 'max-w-full');
+    expect(metrics).toHaveTextContent(i18n.t('summary.total'));
+    const heading = screen.getByTestId('summary-heading');
+    expect(heading).toHaveClass('min-w-0', 'max-w-full');
+    expect(heading.parentElement).toBe(metrics.parentElement);
+    expect(heading.parentElement).toHaveClass('flex', 'flex-wrap');
+  });
+
+  // Only under 15rem: at 320-414px with the default font the title and the
+  // note sit side by side, each wrapping its own text; letting them wrap
+  // onto lines of their own (or break inside a word) there would change
+  // that look.
+  it('lets the summary heading wrap and break inside a word only under 15rem', async () => {
+    await renderApp();
+    const heading = screen.getByTestId('summary-heading');
+    expect(heading).toHaveClass('flex', `${NARROW}flex-wrap`, 'items-center', 'gap-x-2', 'gap-y-0.5');
+    expect(heading).not.toHaveClass('flex-wrap');
+    const title = screen.getByText(i18n.t('summary.title'));
+    const note = screen.getByText(i18n.t('summary.subtitle'));
+    for (const el of [title, note]) {
+      expect(el.parentElement).toBe(heading);
+      expect(el).toHaveClass(`${NARROW}min-w-0`, `${NARROW}[overflow-wrap:anywhere]`);
+      expect(el).not.toHaveClass('[overflow-wrap:anywhere]');
+    }
+  });
+
+  it('closes up the pagination buttons under 15rem and lets the count break', async () => {
+    await renderApp();
+    const previous = screen.getByRole('button', { name: i18n.t('pagination.previous') });
+    const group = previous.parentElement as HTMLElement;
+    expect(group).toHaveClass('gap-3', `${NARROW}gap-2`, 'shrink-0');
+    const range = screen.getByText(i18n.t('pagination.range', { from: 1, to: PAGE_SIZE, total: TICKET_COUNT }));
+    expect(range).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
   });
 });
