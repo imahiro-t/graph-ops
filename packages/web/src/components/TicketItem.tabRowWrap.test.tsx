@@ -6,12 +6,14 @@
 // group wrap below lg, the tabs and the link may shrink and break their
 // label, and with a large default font on a narrow screen (under 15rem) they
 // pad less and put their icon on its own line, so the stacked tabs stay
-// within the panel's pinned height. From lg up the classes give back the
-// single row with the link on the right. jsdom does no layout (nor media
-// queries), so this checks the classes; the geometry at 320-1280px, with a
-// 200% default font and at 160/187px (200% zoom), and the pixel-identical
-// row at 1024/1280px were measured in a real browser (see the ticket's
-// implementation notes).
+// within the panel's pinned height. From lg up the tab group stays on one
+// line; DFLT-00240 moved the row's own single-line boundary to xl, because
+// at 1024px in English the link still ran about 14px past the panel, so
+// between lg and xl the link drops below the tabs when it does not fit, and
+// the tab icons keep their 16px at every width (shrink-0). jsdom does no
+// layout (nor media queries), so this checks the classes; the geometry at
+// 160-1440px, with a 200% default font and 3-digit counts, was measured in a
+// real browser (see the tickets' implementation notes).
 import { render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
@@ -104,12 +106,22 @@ describe.each(['ja', 'en'] as const)('TicketItem artifact tab row on a narrow sc
     expect(getDownloadLink(row)).toHaveAttribute('href', '/api/tickets/TEST-00238/artifacts/download');
   });
 
-  it('wraps the row below lg and keeps it on one line from lg up', () => {
+  it('wraps the row below xl and keeps it on one line from xl up', () => {
     renderTicket();
     const row = screen.getByTestId('ticket-artifact-tabs');
-    expect(row).toHaveClass('flex', 'flex-wrap', 'lg:flex-nowrap', 'justify-between', 'px-4', 'pb-2', 'lg:pb-0', `${NARROW_LARGE_TEXT}px-2`);
-    // An unconditional nowrap or horizontal clip would bring the cut-off back.
-    expectNoneOf(row, ['flex-nowrap', 'overflow-hidden', 'overflow-x-hidden', 'lg:flex-wrap', 'pb-0', 'px-2']);
+    expect(row).toHaveClass('flex', 'flex-wrap', 'xl:flex-nowrap', 'justify-between', 'px-4', 'pb-2', 'xl:pb-0', `${NARROW_LARGE_TEXT}px-2`);
+    // An unconditional nowrap or horizontal clip would bring the cut-off back,
+    // and the lg: forms would bring back the 14px overflow at 1024px (DFLT-00240).
+    expectNoneOf(row, [
+      'flex-nowrap',
+      'lg:flex-nowrap',
+      'lg:pb-0',
+      'overflow-hidden',
+      'overflow-x-hidden',
+      'lg:flex-wrap',
+      'pb-0',
+      'px-2'
+    ]);
   });
 
   it('wraps the tab group below lg and lets it shrink only there', () => {
@@ -135,9 +147,10 @@ describe.each(['ja', 'en'] as const)('TicketItem artifact tab row on a narrow sc
       );
       // Unconditional forms would change the single row from lg up.
       expectNoneOf(tab, ['whitespace-nowrap', 'shrink-0', 'min-w-0', 'px-4', 'flex-wrap', 'lg:min-w-0']);
+      // The icon keeps its 16px at every width, lg and up included (DFLT-00240).
       const icon = tab.querySelector('svg')!;
-      expect(icon).toHaveClass('max-lg:shrink-0');
-      expect(icon).not.toHaveClass('shrink-0');
+      expect(icon).toHaveClass('w-4', 'h-4', 'shrink-0');
+      expect(icon).not.toHaveClass('max-lg:shrink-0');
       const label = tab.querySelector('span')!;
       expect(label).toHaveClass('max-lg:min-w-0', 'break-words');
       expect(label).not.toHaveClass('whitespace-nowrap');

@@ -85,13 +85,14 @@ interface Props {
 const MAX_HEADER_LABELS = 3;
 
 // The artifact panel's tab buttons (DFLT-00238). Below lg a tab may shrink
-// under its longest word (max-lg:min-w-0, with its label span; the icon keeps
-// its size with max-lg:shrink-0) and pads less (px-3), so more of them share
-// a wrapped line. With a large default font on a narrow screen (under 15rem,
-// the query DFLT-00227 uses) it pads less still and puts the icon on a line
-// of its own, so a tab stays a few lines tall rather than a word per line.
-// From lg up nothing of this applies (lg:px-4 gives back the padding), so
-// the single row looks exactly as before.
+// under its longest word (max-lg:min-w-0, with its label span) and pads less
+// (px-3), so more of them share a wrapped line. With a large default font on
+// a narrow screen (under 15rem, the query DFLT-00227 uses) it pads less still
+// and puts the icon on a line of its own, so a tab stays a few lines tall
+// rather than a word per line. From lg up the tab keeps its min-width and
+// lg:px-4 gives back the padding. The icon keeps its 16px at every width
+// (shrink-0, DFLT-00240): from lg up it used to shrink to 6-13px whenever the
+// tab squeezed its label onto more lines.
 const artifactTabClass = (active: boolean) =>
   `max-lg:min-w-0 py-3 px-3 lg:px-4 [@media(max-width:15rem)]:px-2 [@media(max-width:15rem)]:py-2 text-xs font-bold border-b-2 flex [@media(max-width:15rem)]:flex-wrap items-center gap-x-2 gap-y-1 transition ${
     active
@@ -1894,43 +1895,49 @@ export const TicketItem: React.FC<Props> = ({
                   a line of its own; otherwise the stacked tabs grew taller
                   than the panel, whose height is pinned to the graph's, and
                   its overflow-hidden cut off their bottom instead.
-                  From lg up, lg:flex-nowrap, lg:pb-0, lg:px-4 and
-                  lg:shrink-0 (with the min-widths left alone) put back the
-                  single row with the link on the right exactly as before.
+                  From lg up the tab group stays on one line (lg:flex-nowrap)
+                  and the tabs and the link keep their min-widths
+                  (lg:px-4, lg:shrink-0). The row itself only stops wrapping
+                  from xl up (xl:flex-nowrap, xl:pb-0; DFLT-00240): at 1024px
+                  in English the four tabs already sat at their min-widths
+                  and the link ran about 14px past the panel, so between lg
+                  and xl the link drops to a line of its own, on the right
+                  (ml-auto), whenever it does not fit beside the tabs. From
+                  xl up the tabs and the link share one row as before.
                   jsdom does no layout, so TicketItem.tabRowWrap.test.tsx
                   pins the classes; the widths and heights were measured in
-                  a real browser (see the ticket's implementation notes). */}
+                  a real browser (see the tickets' implementation notes). */}
               <div
                 data-testid="ticket-artifact-tabs"
-                className="flex flex-wrap lg:flex-nowrap items-center justify-between gap-y-1 border-b border-slate-200 dark:border-slate-800 px-4 [@media(max-width:15rem)]:px-2 pb-2 lg:pb-0 bg-slate-50 dark:bg-slate-800 shrink-0"
+                className="flex flex-wrap xl:flex-nowrap items-center justify-between gap-y-1 border-b border-slate-200 dark:border-slate-800 px-4 [@media(max-width:15rem)]:px-2 pb-2 xl:pb-0 bg-slate-50 dark:bg-slate-800 shrink-0"
               >
               <div className="flex flex-wrap lg:flex-nowrap max-lg:min-w-0">
                 <button
                   onClick={() => setActiveTab('nodes')}
                   className={artifactTabClass(activeTab === 'nodes')}
                 >
-                  <GitBranch aria-hidden="true" className="w-4 h-4 max-lg:shrink-0" />
+                  <GitBranch aria-hidden="true" className="w-4 h-4 shrink-0" />
                   <span className="max-lg:min-w-0 break-words">{t('ticketItem.tabs.nodes', { count: totalNodes })}</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('gherkin')}
                   className={artifactTabClass(activeTab === 'gherkin')}
                 >
-                  <FileCode aria-hidden="true" className="w-4 h-4 max-lg:shrink-0 text-amber-500" />
+                  <FileCode aria-hidden="true" className="w-4 h-4 shrink-0 text-amber-500" />
                   <span className="max-lg:min-w-0 break-words">{t('ticketItem.tabs.gherkin', { count: gherkinArtifacts.length })}</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('html')}
                   className={artifactTabClass(activeTab === 'html')}
                 >
-                  <Globe aria-hidden="true" className="w-4 h-4 max-lg:shrink-0 text-cyan-500" />
+                  <Globe aria-hidden="true" className="w-4 h-4 shrink-0 text-cyan-500" />
                   <span className="max-lg:min-w-0 break-words">{t('ticketItem.tabs.html', { count: htmlArtifacts.length })}</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('artifacts')}
                   className={artifactTabClass(activeTab === 'artifacts')}
                 >
-                  <FileText aria-hidden="true" className="w-4 h-4 max-lg:shrink-0 text-emerald-500" />
+                  <FileText aria-hidden="true" className="w-4 h-4 shrink-0 text-emerald-500" />
                   <span className="max-lg:min-w-0 break-words">{t('ticketItem.tabs.artifacts', { count: ticket.artifacts.length })}</span>
                 </button>
               </div>
