@@ -1190,15 +1190,30 @@ export const TicketItem: React.FC<Props> = ({
           space once a long title stretches the flex-1 left group all the way
           to the right, so its last item (a label chip, "+N", the rejected
           badge or the title) would touch the first item on the right (the
-          assignee chip/button or the node progress). */}
+          assignee chip/button or the node progress).
+          DFLT-00232: the row, the left group and the right-hand group wrap
+          (flex-wrap) instead of running past the card. The card's
+          overflow-clip hid whatever ran past it (the autopilot badges first:
+          they come last), and an absolutely positioned sr-only text in it
+          whose containing block lies outside the card was not clipped at
+          all and widened the page, so a ticket waiting for a person made
+          the page scroll sideways at 320px, and at 375-700px with a 150-200%
+          default font size. Wrapping never happens while everything fits on
+          one line with the title at least 3rem wide (see the title), so the
+          default size on a wide screen looks as before. The left group's
+          basis-64 (16rem) is what it claims before the right-hand group
+          moves to a line of its own; it still grows to take the rest of the
+          line (flex-1). With a large default font on a narrow screen
+          (under 15rem, the same rem query as the expanded panel, DFLT-00227)
+          the row pads with p-3 instead of p-4. */}
       <div
         ref={headerRowRef}
         onMouseDown={handleHeaderMouseDown}
         onClick={handleHeaderClick}
         data-testid="ticket-header-row"
-        className="p-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition select-none"
+        className="p-4 [@media(max-width:15rem)]:p-3 flex flex-wrap items-center justify-between gap-4 gap-y-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition select-none"
       >
-        <div className="flex items-center gap-3 flex-1 min-w-0">
+        <div className="flex flex-wrap items-center gap-3 gap-y-2 flex-1 basis-64 min-w-0">
           {/* The chevron is the row's keyboard / assistive-technology entry
               point: a named button whose aria-expanded mirrors the row
               (DFLT-00152). It deliberately has no onClick of its own -- the
@@ -1294,19 +1309,30 @@ export const TicketItem: React.FC<Props> = ({
               actually shrink below its own text's natural width -- without
               it, a long title would instead push the id/status badges (and
               the right-hand action area) to wrap/overflow. This is the one
-              element in the row meant to give up space first. */}
+              element in the row meant to give up space first.
+              DFLT-00232: in the wrapping left group the title's flex basis
+              is 3rem (basis-12), capped at its own width (max-w-max), and it
+              grows into the rest of its line (grow). So a line break is only
+              taken once the title would be squeezed under 3rem -- before
+              that it truncates exactly as it did in the one-line row -- and
+              a short title still ends right after its text, with the labels
+              and badges next to it. */}
           <span
             data-testid="ticket-header-title"
-            className="font-bold text-slate-900 dark:text-slate-100 text-sm truncate min-w-0 select-text cursor-text"
+            className="grow basis-12 max-w-max font-bold text-slate-900 dark:text-slate-100 text-sm truncate min-w-0 select-text cursor-text"
           >
             {ticket.title}
           </span>
 
           {/* Labels (DFLT-00084): at most MAX_HEADER_LABELS chips, the rest
-              folded into "+N" whose title lists every label name. shrink-0
-              keeps them intact; the title above is what truncates. */}
+              folded into "+N" whose title lists every label name. The title
+              above is what truncates; the labels wrap onto the next line
+              instead (DFLT-00232), and only shrink -- wrapping their chips,
+              each of which truncates its own name -- when even a line of
+              their own is too narrow. "+N" is relative so that its sr-only
+              text is clipped by the card like the rest of the row. */}
           {ticketLabels.length > 0 && (
-            <span className="flex items-center gap-1 shrink-0" data-testid="ticket-header-labels">
+            <span className="flex flex-wrap items-center gap-1 min-w-0 max-w-full" data-testid="ticket-header-labels">
               {headerLabels.map(l => (
                 <LabelChip key={l.id} name={l.name} color={l.color} />
               ))}
@@ -1314,7 +1340,7 @@ export const TicketItem: React.FC<Props> = ({
                 <span
                   data-testid="ticket-header-labels-more"
                   title={ticketLabels.map(l => l.name).join(', ')}
-                  className="px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-semibold"
+                  className="relative px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-semibold"
                 >
                   {/* The bare "+N" means nothing read aloud, and screen
                       readers don't reliably read title: they get the
@@ -1334,9 +1360,12 @@ export const TicketItem: React.FC<Props> = ({
             </span>
           )}
 
+          {/* DFLT-00232: no shrink-0 -- on a line of its own that is too
+              narrow the badge shrinks (min-w-0 max-w-full) and its name
+              truncates further, instead of running past the card. */}
           {rejectedApprovalNodes.length > 0 && (
             <span
-              className="flex items-center gap-1.5 pl-2 pr-2 py-0.5 rounded-full bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-[11px] font-bold shrink-0"
+              className="flex items-center gap-1.5 min-w-0 max-w-full pl-2 pr-2 py-0.5 rounded-full bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-[11px] font-bold"
               onClick={e => e.stopPropagation()}
               title={t('ticketItem.approvalGate.rejectedHint')}
             >
@@ -1355,11 +1384,13 @@ export const TicketItem: React.FC<Props> = ({
           <AutopilotBadges view={autopilot} />
         </div>
 
-        {/* Right Info: Self-assign chip, Progress Pill. shrink-0 keeps this whole
-            group (and everything inside it) at its natural width -- the
-            ticket title above is the only thing that gives up space when
-            the row is too narrow. */}
-        <div className="flex items-center gap-4 text-xs shrink-0">
+        {/* Right Info: Self-assign chip, Progress Pill. While it shares a
+            line with the left group it keeps its natural width -- the
+            ticket title above is the only thing that gives up space. When
+            the left group's 16rem and this group do not fit side by side,
+            it moves to a line of its own, and only there, if still too
+            narrow, wraps its items and the node squares (DFLT-00232). */}
+        <div className="flex flex-wrap items-center gap-4 gap-y-2 text-xs min-w-0">
           {/* Assignee chip. The read-only "someone else has this" chip must
               stay visible regardless of whether the viewer has configured a
               "アプリ設定" myName -- it conveys who has the ticket, which has
@@ -1420,8 +1451,8 @@ export const TicketItem: React.FC<Props> = ({
           )}
 
           {totalNodes > 0 && (
-            <div className="flex items-center gap-2">
-              <div className="flex gap-0.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="flex flex-wrap gap-0.5 min-w-0">
                 {ticket.nodes.map(n => {
                   const displayStatus = getDisplayStatus(n);
                   const isPendingApproval = pendingApprovalNodeIds.has(n.id);

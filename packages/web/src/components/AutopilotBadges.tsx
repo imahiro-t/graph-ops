@@ -9,6 +9,15 @@ import { AutopilotBadge, TicketAutopilotView } from '../lib/autopilotApi';
 //
 // Each badge carries its meaning as text (never color or the icon alone);
 // the icons are decorative.
+//
+// DFLT-00232: the text is 0.6875rem (11px at the default 16px), so it
+// follows the browser's default font size; the icons were already rem-sized
+// (w-3 h-3, 0.75rem) and grow with it. The badges wrap -- onto the next line,
+// and within a badge that is wider than its line -- rather than running past
+// the ticket card, which would hide them. Each badge is relative so that the
+// sr-only text of "waiting for a person" is positioned inside it: with no
+// positioned ancestor inside the card, the card's overflow-clip did not clip
+// it, and it widened the page.
 const STYLE: Record<AutopilotBadge, string> = {
   running: 'bg-violet-50 dark:bg-violet-950 border-violet-200 dark:border-violet-800 text-violet-800 dark:text-violet-200',
   processing: 'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200',
@@ -27,13 +36,13 @@ export const AutopilotBadges: React.FC<{ view: TicketAutopilotView }> = ({ view 
   const { t } = useTranslation();
   if (view.badges.length === 0) return null;
   return (
-    <span className="flex items-center gap-1 shrink-0" data-testid="autopilot-badges">
+    <span className="flex flex-wrap items-center gap-1 min-w-0 max-w-full" data-testid="autopilot-badges">
       {view.badges.map(b => (
         <span
           key={b}
           data-testid={`autopilot-badge-${b}`}
           title={b === 'awaitingHuman' && view.awaiting ? t('autopilot.badges.awaitingTitle', { what: view.awaiting }) : undefined}
-          className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-bold whitespace-nowrap ${STYLE[b]}`}
+          className={`relative flex items-center gap-1 min-w-0 px-2 py-0.5 rounded-full border text-[0.6875rem] font-bold break-words [overflow-wrap:anywhere] ${STYLE[b]}`}
         >
           {ICON[b]}
           {t(`autopilot.badges.${b}`)}
