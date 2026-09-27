@@ -469,9 +469,10 @@ Commands:
                                            {"result":"needs_merge_session"} when that is not possible)
   autopilot worker-context|record-decision|attach-decisions|touch|report|merge-into-parent ...
                                           (used by the autopilot-worker child session: its context, automatic
-                                           decisions, activity, its result (report --result done|failed|blocked
-                                           [--reason <code>] --summary <text|->), and the fast-forward of its
-                                           branch into its merge target)
+                                           decisions, activity (touch [--awaiting-human <what>], which marks the
+                                           session as waiting for a person), its result (report --result
+                                           done|failed|blocked [--reason <code>] --summary <text|->), and the
+                                           fast-forward of its branch into its merge target)
   autopilot summary <runId>              (the run's summary as Markdown; also saved on the root ticket's
                                            release node as autopilot-tree-summary)
   autopilot status [--project <id>]      (the project's runs, newest first)
