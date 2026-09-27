@@ -2275,7 +2275,11 @@ export const TicketItem: React.FC<Props> = ({
                 the autopilot start (DFLT-00142: refine through release
                 without a person, in terminals of their own). AutopilotControls
                 lays out the row and the lines under the autopilot button;
-                these actions stay outside its focus fallback (DFLT-00218). */}
+                these actions stay outside its focus fallback (DFLT-00218).
+                Below sm their buttons may put the icon on a line of its own
+                and break the label anywhere, so with large text on a narrow
+                screen they stay inside the row (DFLT-00224, see
+                AutopilotControls). */}
             <div className="mb-3">
               <AutopilotControls
                 ticketId={ticket.id}
@@ -2289,9 +2293,9 @@ export const TicketItem: React.FC<Props> = ({
                       onClick={() => handleRunClaude(t('claudePrompts.refineTicket', { ticketId: ticket.id }), ticket.id)}
                       disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
                       {...submittingProps(isRunning)}
-                      className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
+                      className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:[overflow-wrap:anywhere] items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
                     >
-                      {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 text-indigo-600" />}
+                      {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-600" />}
                       {t('ticketItem.actions.refine')}
                       <SubmittingText busy={isRunning} />
                     </button>
@@ -2299,9 +2303,9 @@ export const TicketItem: React.FC<Props> = ({
                       onClick={() => handleRunClaude(t('claudePrompts.processTicket', { ticketId: ticket.id }), ticket.id)}
                       disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
                       {...submittingProps(isRunning)}
-                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:[overflow-wrap:anywhere] items-center gap-1.5 shadow-xs transition"
                     >
-                      {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5" />}
+                      {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />}
                       {t('ticketItem.actions.run')}
                       <SubmittingText busy={isRunning} />
                     </button>

@@ -108,6 +108,16 @@ const DIALOG_MODES: AutopilotMode[] = ['tree', 'ticket'];
 //   layout needs about 14rem, so the row never wraps with the divider on.
 //   Below that the autopilot is set apart by its place and colours alone,
 //   as below sm.
+// Below sm, with large text (a 200% default font size at 375px, say), the
+// row can be narrower than a button's icon, label and padding side by side
+// (DFLT-00224). The buttons -- the regular actions (see TicketItem) and the
+// autopilot -- then put the icon on a line of its own and break the label
+// anywhere (max-sm:flex-wrap, max-sm:[overflow-wrap:anywhere]), so they stay
+// inside the row instead of running past the card; the untrusted-folder
+// notice moves its dismiss button under the text the same way. Nothing
+// wraps while everything fits on a line, so the default size looks as
+// before. Only below sm: on sm+ the labels do not wrap, being the floors
+// the layout above is built on.
 // The outer element only lays out the row and never takes focus; the column
 // is the focus fallback below, so it holds the button and the text about it
 // but not the regular actions -- its focus ring (and what a screen reader
@@ -323,12 +333,12 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
               {...submittingProps(starting !== null)}
               title={distinctReasons.length > 0 ? distinctReasons.join('\n') : undefined}
               aria-describedby={reasonIds.length > 0 ? reasonIds.join(' ') : undefined}
-              className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-slate-700 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 rounded-lg text-xs font-semibold sm:whitespace-nowrap flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
+              className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-slate-700 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 rounded-lg text-xs font-semibold sm:whitespace-nowrap flex max-sm:flex-wrap max-sm:[overflow-wrap:anywhere] items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
             >
               {starting !== null ? (
-                <Loader2 className="w-3.5 h-3.5 motion-safe:animate-spin" aria-hidden="true" />
+                <Loader2 className="w-3.5 h-3.5 shrink-0 motion-safe:animate-spin" aria-hidden="true" />
               ) : (
-                <Bot className="w-3.5 h-3.5" aria-hidden="true" />
+                <Bot className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
               )}
               {t('autopilot.button')}
               <SubmittingText busy={starting !== null} />
@@ -372,11 +382,14 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
             message={untrustedFolder ? t('autopilot.untrustedFolder', { path: untrustedFolder }) : ''}
           />
           {untrustedFolder && (
+            // Below sm the dismiss button moves under the text once both no
+            // longer fit on one line (the text wants 6rem), and is never
+            // wider than the notice (DFLT-00224, see above).
             <div
               data-testid="autopilot-untrusted"
-              className="self-stretch flex items-start gap-2 p-2 rounded-lg border text-[11px] bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100"
+              className="self-stretch flex max-sm:flex-wrap items-start gap-2 p-2 rounded-lg border text-[11px] bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100"
             >
-              <p aria-hidden="true" className="flex-1 min-w-0 break-words [overflow-wrap:anywhere]">
+              <p aria-hidden="true" className="flex-1 max-sm:basis-24 min-w-0 break-words [overflow-wrap:anywhere]">
                 {t('autopilot.untrustedFolder', { path: untrustedFolder })}
               </p>
               <button
@@ -384,7 +397,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
                 data-testid="autopilot-untrusted-dismiss"
                 onClick={dismissUntrusted}
                 aria-describedby={untrustedId}
-                className="shrink-0 px-2 py-0.5 rounded border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 font-semibold hover:bg-amber-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+                className="shrink-0 max-w-full max-sm:[overflow-wrap:anywhere] px-2 py-0.5 rounded border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 font-semibold hover:bg-amber-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
               >
                 {t('autopilot.untrustedDismiss')}
               </button>

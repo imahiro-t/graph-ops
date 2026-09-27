@@ -176,6 +176,31 @@ describe('autopilot in the Web UI', () => {
     expect(button).toHaveClass('sm:whitespace-nowrap');
   });
 
+  // DFLT-00224: with a 200% default font size at 375px the action row is only
+  // a few words wide, narrower than a button's icon, label and padding side
+  // by side. Below sm each button may then put its icon on a line of its own
+  // and break its label anywhere, so the regular actions and the autopilot
+  // button stay inside the row instead of running past the card. Only below
+  // sm: on sm+ the labels do not wrap -- their width is the floor the row's
+  // layout is built on (DFLT-00219, above).
+  it('lets the action row\'s buttons wrap below sm, and only there', async () => {
+    seed();
+    const user = await renderApp();
+    const controls = await expand(user, X);
+    for (const button of [...regularActions(controls), startButton(controls)]) {
+      expect(button).toHaveClass('flex', 'max-sm:flex-wrap', 'max-sm:[overflow-wrap:anywhere]');
+      expect(button).not.toHaveClass('flex-wrap', '[overflow-wrap:anywhere]', 'break-words', 'sm:flex-wrap');
+      // The icon keeps its size when the label wraps.
+      const icon = button.querySelector('svg');
+      expect(icon).not.toBeNull();
+      expect(icon).toHaveClass('shrink-0');
+    }
+    expect(startButton(controls)).toHaveClass('sm:whitespace-nowrap');
+    // The layout the DFLT-00219 floors rely on is unchanged.
+    expect(within(controls).getByTestId('autopilot-row-actions')).toHaveClass('min-w-0', 'sm:min-w-min', 'sm:max-w-max');
+    expect(within(controls).getByTestId('autopilot-slot')).toHaveClass('min-w-0', 'max-w-full', 'sm:min-w-min');
+  });
+
   // DFLT-00218: the focus fallback holds the autopilot button and the lines
   // under it, not the regular actions, so its ring and what a screen reader
   // reads out there cover the autopilot alone.
@@ -559,6 +584,14 @@ describe('autopilot in the Web UI', () => {
     await waitFor(() => expect(within(controls).getAllByRole('status').some(r => r.textContent === notice)).toBe(true));
     const dismiss = within(controls).getByRole('button', { name: i18n.t('autopilot.untrustedDismiss') });
     expect(dismiss).toHaveAccessibleDescription(notice);
+    // DFLT-00224: below sm the dismiss button moves under the text once
+    // both no longer fit on one line (the text wants at least 6rem), and is
+    // never wider than the notice, so with large text on a narrow screen it
+    // does not run past the notice or squeeze the text to a letter a line.
+    const untrusted = within(controls).getByTestId('autopilot-untrusted');
+    expect(untrusted).toHaveClass('flex', 'max-sm:flex-wrap');
+    expect(untrusted.querySelector('p')).toHaveClass('flex-1', 'max-sm:basis-24', 'min-w-0');
+    expect(dismiss).toHaveClass('shrink-0', 'max-w-full', 'max-sm:[overflow-wrap:anywhere]');
 
     await user.click(dismiss);
     expect(within(controls).queryByTestId('autopilot-untrusted')).not.toBeInTheDocument();
