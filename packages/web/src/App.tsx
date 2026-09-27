@@ -1389,7 +1389,14 @@ export const App: React.FC = () => {
       <main className="max-w-7xl mx-auto px-6 [@media(max-width:15rem)]:px-3 py-6 space-y-6">
         {/* Simple Summary Metrics. DFLT-00251: both children are min-w-0
             max-w-full so neither can be wider than the card; the numbers
-            already wrap between items (flex-wrap). */}
+            already wrap between items (flex-wrap). Each item is min-w-0
+            max-w-full as well, and its number may break: at 320px with a
+            32px root font the item has about 110px for its number, and the
+            node progress ("2204/2228", text-lg bold) was one unbreakable
+            word of about 180px that ran 2px past the window. It now breaks
+            after the slash first (<wbr>) and anywhere as a last resort. An
+            item only narrows when it is wider than a whole line of the
+            row, so with the default font nothing moves. */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs flex flex-wrap items-center justify-between gap-4">
           {/* DFLT-00251: in English at 160px the title and its note kept
               their min-content width ("Overview", "artifacts)") and ran 5px
@@ -1411,25 +1418,28 @@ export const App: React.FC = () => {
             data-testid="summary-metrics"
             className="flex flex-wrap items-center gap-x-6 gap-y-2 min-w-0 max-w-full sm:divide-x divide-slate-200 dark:divide-slate-700 text-xs"
           >
-            <div className="text-center px-3">
-              <div className="text-lg font-bold text-slate-800 dark:text-slate-200">{totalCount}</div>
+            <div className="text-center px-3 min-w-0 max-w-full">
+              <div className="text-lg font-bold [overflow-wrap:anywhere] text-slate-800 dark:text-slate-200">{totalCount}</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.total')}</div>
             </div>
-            <div className="text-center px-3">
-              <div className="text-lg font-bold text-blue-600 dark:text-blue-400">{inProgressCount}</div>
+            <div className="text-center px-3 min-w-0 max-w-full">
+              <div className="text-lg font-bold [overflow-wrap:anywhere] text-blue-600 dark:text-blue-400">{inProgressCount}</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.inProgress')}</div>
             </div>
-            <div className="text-center px-3">
-              <div className="text-lg font-bold text-purple-600 dark:text-purple-400">{inReviewCount}</div>
+            <div className="text-center px-3 min-w-0 max-w-full">
+              <div className="text-lg font-bold [overflow-wrap:anywhere] text-purple-600 dark:text-purple-400">{inReviewCount}</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.inReview')}</div>
             </div>
-            <div className="text-center px-3">
-              <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{doneCount}</div>
+            <div className="text-center px-3 min-w-0 max-w-full">
+              <div className="text-lg font-bold [overflow-wrap:anywhere] text-emerald-600 dark:text-emerald-400">{doneCount}</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.done')}</div>
             </div>
-            <div className="text-center px-3">
-              <div className="text-lg font-bold text-slate-800 dark:text-slate-200">
-                {doneNodesCount}/{totalNodesCount}
+            <div className="text-center px-3 min-w-0 max-w-full">
+              <div
+                data-testid="summary-node-progress"
+                className="text-lg font-bold [overflow-wrap:anywhere] text-slate-800 dark:text-slate-200"
+              >
+                {doneNodesCount}/<wbr />{totalNodesCount}
               </div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.nodeProgress')}</div>
             </div>

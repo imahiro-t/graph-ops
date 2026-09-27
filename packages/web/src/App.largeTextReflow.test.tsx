@@ -211,3 +211,44 @@ describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 1
     expect(range).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
   });
 });
+
+// DFLT-00251 (after the release gate): at 320px with a 32px root font the
+// node progress number ("2204/2228" with a few thousand nodes, text-lg bold)
+// was one unbreakable word wider than its item and ran 2px past the window.
+// Every item is now no wider than the row and its number may break -- after
+// the slash first, anywhere as a last resort. An item only narrows when it
+// is wider than a whole line of the row, so with the default font nothing
+// moves (measured in a real browser at 320-1024px x 16/24/32px with
+// four-digit node counts; see the ticket's implementation notes).
+describe.each(['ja', 'en'] as const)('summary card numbers with large text (%s)', lng => {
+  beforeEach(async () => {
+    seed();
+    await i18n.changeLanguage(lng);
+  });
+
+  it('lets every number break inside an item that stays within the row', async () => {
+    await renderApp();
+    const metrics = screen.getByTestId('summary-metrics');
+    const items = Array.from(metrics.children) as HTMLElement[];
+    expect(items).toHaveLength(5);
+    for (const item of items) {
+      expect(item).toHaveClass('text-center', 'px-3', 'min-w-0', 'max-w-full');
+      const number = item.firstElementChild as HTMLElement;
+      expect(number).toHaveClass('text-lg', 'font-bold', '[overflow-wrap:anywhere]');
+    }
+    expect(items[4]).toHaveTextContent(i18n.t('summary.nodeProgress'));
+  });
+
+  it('offers a line break right after the slash of the node progress', async () => {
+    await renderApp();
+    const progress = screen.getByTestId('summary-node-progress');
+    expect(progress.parentElement?.parentElement).toBe(screen.getByTestId('summary-metrics'));
+    // The seeded tickets have no nodes. The text reads the same as before;
+    // the <wbr> adds no character.
+    expect(progress).toHaveTextContent(/^0\/0$/);
+    const wbr = progress.querySelector('wbr');
+    expect(wbr).not.toBeNull();
+    expect(wbr?.previousSibling?.textContent).toMatch(/\/$/);
+    expect(wbr?.nextSibling?.textContent).toBe('0');
+  });
+});
