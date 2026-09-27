@@ -225,7 +225,8 @@
       "rejectedBadgeMany": "{{count}} rejected",
       "rejectedAnnouncement": "Rejected {{name}}",
       "approvedAnnouncement": "Approved {{name}}",
-      "noLongerPendingAnnouncement": "{{name}} is no longer awaiting approval"
+      "noLongerPendingAnnouncement": "{{name}} is no longer awaiting approval",
+      "noLongerPendingWithErrorAnnouncement": "{{name}} is no longer awaiting approval. {{error}}"
     },
     "artifactsCount": "Artifacts {{count}}",
     "noArtifactsForNode": "No artifacts linked to this node yet",
