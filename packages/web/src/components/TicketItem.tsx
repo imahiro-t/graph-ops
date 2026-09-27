@@ -976,7 +976,7 @@ export const TicketItem: React.FC<Props> = ({
     const isInProgress = status === 'IN PROGRESS';
     const isNotStarted = meta === TODO_META;
     return (
-      <span className={`text-[11px] px-2 py-0.5 rounded-full ${isNotStarted ? 'font-medium' : 'font-bold'} ${meta.chip.bg} ${meta.chip.text}${isInProgress ? ' flex items-center gap-1' : ''}`}>
+      <span className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${isNotStarted ? 'font-medium' : 'font-bold'} ${meta.chip.bg} ${meta.chip.text}${isInProgress ? ' flex items-center gap-1' : ''}`}>
         {isInProgress && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />}
         {t(meta.labelKey)}
       </span>
@@ -2017,15 +2017,31 @@ export const TicketItem: React.FC<Props> = ({
                           key={node.id}
                           className="rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 overflow-hidden text-xs transition"
                         >
+                          {/* DFLT-00242: below lg the row wraps instead of
+                              letting the left group run under the right one.
+                              flex-wrap alone is not enough: flex-1 is a 0%
+                              basis, and with min-w-0 the left group counts as
+                              0px when lines are formed, so the right group
+                              would always stay on the first line and the
+                              overlap would remain. max-lg:basis-auto sizes
+                              the left group by its content, so when the two
+                              groups don't fit side by side the right group
+                              moves to the next line (right-aligned by its
+                              max-lg:ml-auto). From lg up the row is
+                              unchanged: one line, name truncated. */}
                           <div
                             onClick={() => toggleNodeExpand(node.id)}
-                            className="flex items-center justify-between p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none"
+                            className="flex items-center justify-between p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none max-lg:flex-wrap max-lg:gap-x-3 max-lg:gap-y-2"
                           >
-                            {/* flex-1 min-w-0 lets node.name (below) shrink
-                                and truncate first -- everything else in this
-                                row is shrink-0 so the id/type/retry/manual/
-                                artifact badges never wrap. */}
-                            <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                            {/* From lg up, flex-1 min-w-0 lets node.name
+                                (below) shrink and truncate first --
+                                everything else in this row is shrink-0 so the
+                                id/type/retry/manual/artifact badges never
+                                wrap. Below lg (DFLT-00242) the group wraps
+                                between those badges instead, and the name
+                                (and, only if it alone is wider than the row,
+                                the id) wraps rather than truncating. */}
+                            <div className="flex items-center gap-2.5 flex-1 min-w-0 max-lg:basis-auto max-lg:flex-wrap max-lg:gap-y-1.5">
                               {/* Named toggle for the node row (DFLT-00152).
                                   No onClick of its own: its click bubbles to
                                   the row's toggleNodeExpand, so it toggles
@@ -2059,11 +2075,11 @@ export const TicketItem: React.FC<Props> = ({
                                   id uses the same pair for the same reason
                                   (DFLT-00164). */}
                               <span className="font-mono text-slate-600 dark:text-slate-300 w-4 shrink-0">{index + 1}</span>
-                              <span className="font-mono font-bold text-slate-600 dark:text-slate-300 shrink-0 whitespace-nowrap">
+                              <span className="font-mono font-bold text-slate-600 dark:text-slate-300 shrink-0 whitespace-nowrap max-lg:shrink max-lg:min-w-0 max-lg:whitespace-normal max-lg:[overflow-wrap:anywhere]">
                                 {node.id}
                               </span>
                               <NodeTypeBadge type={node.type} theme="light" className="shrink-0" />
-                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate min-w-0">
+                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate min-w-0 max-lg:whitespace-normal max-lg:[overflow-wrap:anywhere]">
                                 {node.name}
                               </span>
                               {node.iteration_count > 0 && (
@@ -2089,14 +2105,14 @@ export const TicketItem: React.FC<Props> = ({
                               )}
                             </div>
 
-                            <div className="flex items-center gap-3 shrink-0">
+                            <div className="flex items-center gap-3 shrink-0 max-lg:shrink max-lg:min-w-0 max-lg:flex-wrap max-lg:gap-y-1.5 max-lg:ml-auto max-lg:justify-end">
                               {/* Approve/Reject show up for whichever
                                   approval_gate the ticket is actually
                                   stuck on (pendingApprovalNodeIds), even
                                   without expanding the node's row -- see
                                   DFLT ticket for blinking-gate fix. */}
                               {pendingApprovalNodeIds.has(node.id) && rejectingNodeId !== node.id && (
-                                <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                                <div className="flex items-center gap-1.5 max-lg:flex-wrap" onClick={e => e.stopPropagation()}>
                                   {/* DFLT-00207: aria-disabled, not disabled,
                                       while the decision is sent: the pressed
                                       button keeps focus (a disabled one drops
@@ -2140,7 +2156,7 @@ export const TicketItem: React.FC<Props> = ({
                               )}
                               {getNodeBadge(getDisplayStatus(node))}
                               {/* slate-600 / slate-300 for the hover background (DFLT-00162, see the sequence number above). */}
-                              <span className="text-[11px] text-slate-600 dark:text-slate-300 font-mono">
+                              <span className="text-[11px] text-slate-600 dark:text-slate-300 font-mono whitespace-nowrap">
                                 {formatTime(node.updated_at, i18n.language)}
                               </span>
                             </div>
