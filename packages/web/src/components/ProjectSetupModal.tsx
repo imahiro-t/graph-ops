@@ -252,12 +252,16 @@ export const ProjectSetupModal: React.FC<Props> = ({
     </div>
   );
 
+  // The footer row wraps and each button is at most as wide as the panel
+  // (DFLT-00254, as in ConfirmDialog): with `justify-end` an unwrapped row at
+  // 200% on a 320px screen would push Cancel off the left edge, where no
+  // scrolling reaches. The spinner keeps its size while the label wraps.
   const footer = (submitLabel: string, submitDisabled: boolean) => (
-    <div className="flex justify-end gap-2 pt-2">
+    <div data-testid="project-setup-actions" className="flex flex-wrap justify-end gap-2 pt-2">
       <button
         type="button"
         onClick={onClose}
-        className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 transition"
+        className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 transition max-w-full break-words"
       >
         {t('createModal.cancel')}
       </button>
@@ -265,26 +269,32 @@ export const ProjectSetupModal: React.FC<Props> = ({
         type="submit"
         disabled={saving || submitDisabled}
         {...submittingProps(saving)}
-        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white shadow-xs transition flex items-center gap-1.5"
+        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white shadow-xs transition flex items-center gap-1.5 max-w-full break-words"
       >
-        {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />}
+        {saving && <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" aria-hidden="true" />}
         {submitLabel}
         <SubmittingText busy={saving} />
       </button>
     </div>
   );
 
+  // Overlay and panel follow ConfirmDialog (DFLT-00233 / DFLT-00254): the
+  // overlay scrolls vertically and the panel is centred with `m-auto`
+  // instead of `items-center` / `justify-center`, so at a 200% default font
+  // on a short 320px screen the panel starts at the top of the scroll area
+  // and the title and footer buttons stay reachable. `min-w-0` lets it
+  // shrink to the overlay's width; it stays the overlay's direct child.
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex p-4 overflow-y-auto overscroll-contain">
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="project-setup-title"
         tabIndex={-1}
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md p-6 shadow-2xl focus:outline-none"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md m-auto min-w-0 p-6 shadow-2xl focus:outline-none"
       >
-        <h2 id="project-setup-title" className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">
+        <h2 id="project-setup-title" className="min-w-0 break-words text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">
           {offerExisting ? t('projectSetupModal.title') : t('createProjectModal.title')}
         </h2>
         <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 break-all">

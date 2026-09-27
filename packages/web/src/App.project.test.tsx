@@ -270,7 +270,7 @@ describe('App project scoping', () => {
       await waitFor(() => expect(refresh).toBeDisabled());
 
       await user.click(screen.getByRole('button', { name: i18n.t('header.settings') }));
-      await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.appSettings') }));
+      await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.appSettings') }));
       const deleteAlpha = await screen.findByRole('button', { name: i18n.t('settings.appSettings.projects.deleteAriaLabel', { name: 'Alpha' }) });
       await user.click(deleteAlpha);
       // The in-app confirmation (DFLT-00148).

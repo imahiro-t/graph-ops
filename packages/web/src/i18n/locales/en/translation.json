@@ -348,6 +348,7 @@
   },
   "settings": {
     "modalTitle": "Settings",
+    "tabListLabel": "Settings sections",
     "tabs": {
       "nodeTypes": "Node Types",
       "reviewGates": "Review Gates",

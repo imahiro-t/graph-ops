@@ -184,3 +184,36 @@ describe('ClaudeRunnerModal', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+// DFLT-00254: at a 200% default font on a short 320px screen the overlay
+// scrolls (as ConfirmDialog does since DFLT-00233), so the title, the close
+// button and the launch button stay reachable. jsdom does no layout, so
+// these pin the classes; the reach itself was checked in a real browser.
+describe('ClaudeRunnerModal at large text on a narrow, short screen', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('scrolls the overlay and centres the panel with auto margins', () => {
+    render(<ClaudeRunnerModal isOpen onClose={() => {}} projectId="proj-x" />);
+    const dialog = screen.getByRole('dialog');
+    const overlay = dialog.parentElement as HTMLElement;
+
+    expect(overlay).toHaveClass('overflow-y-auto', 'overscroll-contain');
+    expect(overlay).not.toHaveClass('items-center');
+    expect(overlay).not.toHaveClass('justify-center');
+    expect(overlay.children).toHaveLength(1);
+    expect(dialog).toHaveClass('m-auto', 'min-w-0');
+  });
+
+  it('lets the title wrap and keeps the close button at its size', () => {
+    render(<ClaudeRunnerModal isOpen onClose={() => {}} projectId="proj-x" />);
+
+    expect(screen.getByRole('heading', { level: 2 })).toHaveClass('min-w-0', 'break-words');
+    expect(screen.getByRole('button', { name: i18n.t('common.closeDialog') })).toHaveClass('shrink-0');
+  });
+});

@@ -75,10 +75,10 @@ describe('SettingsModal', () => {
   it('has a Templates tab and no standalone Report Template tab', async () => {
     renderModal();
 
-    expect(screen.getByRole('button', { name: 'テンプレート' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'レポートテンプレート' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'テンプレート' })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'レポートテンプレート' })).not.toBeInTheDocument();
     for (const key of ['nodeTypes', 'reviewGates', 'skills', 'appSettings']) {
-      expect(screen.getByRole('button', { name: i18n.t(`settings.tabs.${key}`) })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: i18n.t(`settings.tabs.${key}`) })).toBeInTheDocument();
     }
     await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
   });
@@ -87,7 +87,7 @@ describe('SettingsModal', () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.click(screen.getByRole('button', { name: 'テンプレート' }));
+    await user.click(screen.getByRole('tab', { name: 'テンプレート' }));
 
     const plan = screen.getByRole('button', { name: '実行計画' });
     expect(plan).toHaveAttribute('aria-current', 'true');
@@ -104,8 +104,8 @@ describe('SettingsModal', () => {
     });
     renderModal();
 
-    expect(screen.queryByRole('button', { name: 'Report Template' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Templates' }));
+    expect(screen.queryByRole('tab', { name: 'Report Template' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: 'Templates' }));
 
     expect(screen.getByRole('button', { name: 'Execution Plan' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Review' })).toBeInTheDocument();
@@ -119,13 +119,13 @@ describe('SettingsModal', () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.click(screen.getByRole('button', { name: 'テンプレート' }));
+    await user.click(screen.getByRole('tab', { name: 'テンプレート' }));
     await user.click(screen.getByRole('button', { name: 'レビュー' }));
     const textarea = await screen.findByDisplayValue('review-tier');
     await user.clear(textarea);
     await user.type(textarea, '# 編集途中');
 
-    const nodeTypesTab = screen.getByRole('button', { name: i18n.t('settings.tabs.nodeTypes') });
+    const nodeTypesTab = screen.getByRole('tab', { name: i18n.t('settings.tabs.nodeTypes') });
     await user.click(nodeTypesTab);
     const dialog = screen.getByRole('alertdialog', { name: i18n.t('settings.unsavedChanges.confirmTitle') });
     expect(dialog).toHaveAttribute('data-testid', 'settings-discard-confirm');
@@ -143,11 +143,11 @@ describe('SettingsModal', () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.click(screen.getByRole('button', { name: 'テンプレート' }));
+    await user.click(screen.getByRole('tab', { name: 'テンプレート' }));
     const textarea = await screen.findByDisplayValue('plan-tier');
     await user.type(textarea, ' edited');
 
-    await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.skills') }));
+    await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.skills') }));
     await user.click(screen.getByTestId('settings-discard-confirm-confirm'));
 
     expect(screen.queryByTestId('settings-discard-confirm')).not.toBeInTheDocument();
@@ -181,7 +181,7 @@ describe('SettingsModal', () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.click(screen.getByRole('button', { name: 'テンプレート' }));
+    await user.click(screen.getByRole('tab', { name: 'テンプレート' }));
     const textarea = await screen.findByDisplayValue('plan-tier');
     await user.type(textarea, ' edited');
     await user.click(screen.getByRole('button', { name: 'レビュー' }));
@@ -189,7 +189,7 @@ describe('SettingsModal', () => {
     await screen.findByDisplayValue('review-tier');
 
     await user.click(screen.getByRole('button', { name: 'レポート' }));
-    await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.skills') }));
+    await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.skills') }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     await waitFor(() => expect(fetchSettingsSkills).toHaveBeenCalled());
   });
@@ -200,7 +200,7 @@ describe('SettingsModal', () => {
 
     // Makes the plan template dirty the same way the tests above do.
     const makeTemplateEditDirty = async (user: ReturnType<typeof userEvent.setup>) => {
-      await user.click(screen.getByRole('button', { name: 'テンプレート' }));
+      await user.click(screen.getByRole('tab', { name: 'テンプレート' }));
       const textarea = await screen.findByDisplayValue('plan-tier');
       await user.type(textarea, ' edited');
       return textarea;
@@ -385,7 +385,7 @@ describe('SettingsModal', () => {
       const openDiscardFromTab = async (user: ReturnType<typeof userEvent.setup>, onClose = vi.fn()) => {
         renderModal(onClose);
         await makeTemplateEditDirty(user);
-        const skillsTab = screen.getByRole('button', { name: i18n.t('settings.tabs.skills') });
+        const skillsTab = screen.getByRole('tab', { name: i18n.t('settings.tabs.skills') });
         await user.click(skillsTab);
         expect(screen.getByTestId('settings-discard-confirm')).toBeInTheDocument();
         return skillsTab;
@@ -544,7 +544,7 @@ describe('SettingsModal', () => {
     );
     const projectSelect = () => screen.getByLabelText(i18n.t('settings.labels.projectLabel'));
     const openLabelsTab = (user: ReturnType<typeof userEvent.setup>) =>
-      user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.labels') }));
+      user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.labels') }));
 
     beforeEach(() => {
       vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([]), { status: 200 })));
@@ -606,5 +606,59 @@ describe('SettingsModal', () => {
 
       expect(projectSelect()).toHaveValue(alpha.id);
     });
+  });
+});
+
+// DFLT-00254: at a 200% default font on a short 320px screen the overlay
+// scrolls (as ConfirmDialog does since DFLT-00233), the panel keeps a
+// rem-based minimum height and the tab row wraps, so the title, the close
+// button and all seven tabs stay reachable. jsdom does no layout, so these
+// pin the classes; the reach itself was checked in a real browser.
+describe('SettingsModal at large text on a narrow, short screen', () => {
+  beforeEach(() => {
+    (fetchSettingsNodeTypes as unknown as Mock).mockResolvedValue([]);
+  });
+
+  it('scrolls the overlay and centres the panel with auto margins', async () => {
+    renderModal();
+    const dialog = screen.getByRole('dialog', { name: i18n.t('settings.modalTitle') });
+    const overlay = dialog.parentElement as HTMLElement;
+
+    expect(overlay).toHaveClass('overflow-y-auto', 'overscroll-contain');
+    expect(overlay).not.toHaveClass('items-center');
+    expect(overlay).not.toHaveClass('justify-center');
+    expect(overlay.children).toHaveLength(1);
+    expect(dialog).toHaveClass('m-auto', 'min-w-0');
+    await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
+  });
+
+  it('keeps the 85vh height with a rem-based minimum height', async () => {
+    renderModal();
+    const dialog = screen.getByRole('dialog', { name: i18n.t('settings.modalTitle') });
+
+    expect(dialog).toHaveClass('h-[85vh]');
+    expect(Array.from(dialog.classList).some(c => /^min-h-\[\d+(\.\d+)?rem\]$/.test(c))).toBe(true);
+    await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
+  });
+
+  it('lets the title wrap and keeps the close button at its size', async () => {
+    renderModal();
+
+    expect(screen.getByRole('heading', { level: 2, name: i18n.t('settings.modalTitle') })).toHaveClass('min-w-0', 'break-words');
+    expect(screen.getByRole('button', { name: i18n.t('common.closeDialog') })).toHaveClass('shrink-0');
+    await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
+  });
+
+  it('wraps the tab row, each tab at most as wide as the row', async () => {
+    renderModal();
+    const tablist = screen.getByRole('tablist');
+
+    expect(tablist).toHaveClass('flex-wrap');
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs).toHaveLength(7);
+    for (const tab of tabs) {
+      expect(tab).toHaveClass('max-w-full', 'break-words');
+    }
+    await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
   });
 });

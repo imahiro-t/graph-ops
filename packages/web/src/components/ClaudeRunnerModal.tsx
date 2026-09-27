@@ -65,27 +65,35 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
     }
   };
 
+  // Overlay and panel follow ConfirmDialog (DFLT-00233 / DFLT-00254): the
+  // overlay scrolls vertically and the panel is centred with `m-auto`
+  // instead of `items-center` / `justify-center`, so at a 200% default font
+  // on a short 320px screen the panel starts at the top of the scroll area
+  // and the title, close button and launch button stay reachable. `min-w-0`
+  // lets it shrink to the overlay's width; it stays the overlay's direct
+  // child. The panel's `overflow-hidden` only clips the rounded corners: it
+  // has no height cap, so nothing inside is cut off.
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex p-4 overflow-y-auto overscroll-contain">
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-xl shadow-2xl overflow-hidden focus:outline-none"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-xl m-auto min-w-0 shadow-2xl overflow-hidden focus:outline-none"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800">
-          <h2 id={titleId} className="flex items-center gap-2 font-bold text-base text-slate-800 dark:text-slate-200">
-            <Terminal className="w-5 h-5 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
+        <div className="flex items-center justify-between gap-2 px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800">
+          <h2 id={titleId} className="flex items-center gap-2 min-w-0 break-words font-bold text-base text-slate-800 dark:text-slate-200">
+            <Terminal className="w-5 h-5 shrink-0 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
             {t('claudeRunnerModal.title')}
           </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label={t('common.closeDialog')}
-            className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition"
+            className="shrink-0 p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition"
           >
             <X className="w-5 h-5" aria-hidden="true" />
           </button>
@@ -131,9 +139,9 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
               onClick={handleLaunch}
               disabled={isLaunching || !prompt.trim()}
               {...submittingProps(isLaunching)}
-              className="self-end px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg flex items-center gap-2 shadow-sm transition"
+              className="self-end px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg flex items-center gap-2 shadow-sm transition max-w-full break-words"
             >
-              {isLaunching ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <ExternalLink aria-hidden="true" className="w-4 h-4" />}
+              {isLaunching ? <Loader2 aria-hidden="true" className="w-4 h-4 shrink-0 animate-spin" /> : <ExternalLink aria-hidden="true" className="w-4 h-4 shrink-0" />}
               {t('claudeRunnerModal.launch')}
               <SubmittingText busy={isLaunching} />
             </button>

@@ -347,6 +347,7 @@
   },
   "settings": {
     "modalTitle": "設定",
+    "tabListLabel": "設定の項目",
     "tabs": {
       "nodeTypes": "ノード種別",
       "reviewGates": "レビューゲート",

@@ -183,7 +183,7 @@ describe('App label filter', () => {
     expect(labelFilterButton()).toHaveTextContent(i18n.t('toolbar.labelSelected', { count: 2 }));
 
     await user.click(screen.getByRole('button', { name: i18n.t('header.settings') }));
-    await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.labels') }));
+    await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.labels') }));
     await user.selectOptions(screen.getByLabelText(i18n.t('settings.labels.projectLabel')), alpha.id);
     const row = await screen.findByTestId('label-row-label-ui');
     await user.click(within(row).getByRole('button', { name: `${i18n.t('settings.labels.delete')}: UI` }));
@@ -222,7 +222,7 @@ describe('App label filter', () => {
     expect(rowChip('ALP-00001')).toHaveAttribute('data-label-color', 'red');
 
     await user.click(screen.getByRole('button', { name: i18n.t('header.settings') }));
-    await user.click(screen.getByRole('button', { name: i18n.t('settings.tabs.labels') }));
+    await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.labels') }));
     await user.selectOptions(screen.getByLabelText(i18n.t('settings.labels.projectLabel')), alpha.id);
     const row = await screen.findByTestId('label-row-label-bug');
     await user.click(within(row).getByRole('button', { name: `${i18n.t('settings.labels.rename')}: バグ` }));
