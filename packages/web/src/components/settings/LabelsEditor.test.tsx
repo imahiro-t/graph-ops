@@ -58,6 +58,25 @@ function createForm() {
   return within(screen.getByTestId('label-create-form'));
 }
 
+// Label-row helpers shared by the row-error describes (DFLT-00214, DFLT-00222):
+// look up one label row by its id, find controls inside that row, and rename it.
+const row = (id: string) => screen.getByTestId(`label-row-${id}`);
+const renameButton = (id: string, name: string) =>
+  within(row(id)).getByRole('button', { name: `${i18n.t('settings.labels.rename')}: ${name}` });
+const saveButton = (id: string) => within(row(id)).getByRole('button', { name: i18n.t('settings.labels.save') });
+const rowErrorText = (name: string, message: string) => i18n.t('settings.labels.rowError', { name, message });
+// The row's own alert, or null. Plain DOM query, so it also works while the
+// confirmation dialog hides the rest of the page from the accessibility tree.
+const rowAlert = (id: string) => row(id).querySelector<HTMLElement>('[role="alert"]');
+
+async function renameRow(user: User, id: string, name: string, newName: string) {
+  await user.click(renameButton(id, name));
+  const input = within(row(id)).getByRole('textbox');
+  await user.clear(input);
+  await user.type(input, newName);
+  await user.click(saveButton(id));
+}
+
 describe('LabelsEditor', () => {
   beforeEach(() => {
     mockedFetch.mockReset();
@@ -1338,20 +1357,12 @@ describe('LabelsEditor announcing row saves', () => {
 // recolor or a delete); the create form's error and the load error are
 // separate from the rows' errors.
 describe("LabelsEditor keeping each row's error", () => {
-  const row = (id: string) => screen.getByTestId(`label-row-${id}`);
-  const renameButton = (id: string, name: string) =>
-    within(row(id)).getByRole('button', { name: `${i18n.t('settings.labels.rename')}: ${name}` });
   const deleteButton = (id: string, name: string) =>
     within(row(id)).getByRole('button', { name: `${i18n.t('settings.labels.delete')}: ${name}` });
   const colorButton = (id: string, name: string, color: LabelUsage['color']) =>
     within(within(row(id)).getByRole('group', { name: i18n.t('settings.labels.colorGroup', { name }) })).getByRole('button', {
       name: i18n.t(`labels.colors.${color}`)
     });
-  const saveButton = (id: string) => within(row(id)).getByRole('button', { name: i18n.t('settings.labels.save') });
-  const rowErrorText = (name: string, message: string) => i18n.t('settings.labels.rowError', { name, message });
-  // The row's own alert, or null. Plain DOM query, so it also works while the
-  // confirmation dialog hides the rest of the page from the accessibility tree.
-  const rowAlert = (id: string) => row(id).querySelector<HTMLElement>('[role="alert"]');
   const taken = () => i18n.t('errors.LABEL_NAME_TAKEN');
   const bug = label('label-bug', 'バグ', 'red', 2);
   const feat = label('label-feat', '機能追加', 'blue', 0);
@@ -1374,14 +1385,6 @@ describe("LabelsEditor keeping each row's error", () => {
         ? Promise.reject(new Error(message))
         : Promise.resolve(label('label-feat', patch.name ?? '機能追加', patch.color ?? 'blue', 0))
     );
-  }
-
-  async function renameRow(user: User, id: string, name: string, newName: string) {
-    await user.click(renameButton(id, name));
-    const input = within(row(id)).getByRole('textbox');
-    await user.clear(input);
-    await user.type(input, newName);
-    await user.click(saveButton(id));
   }
 
   async function renderEditor() {
@@ -1673,13 +1676,7 @@ describe("LabelsEditor keeping each row's error", () => {
 // fail: treat it as a sign that the re-sort takes a different DOM path, and
 // revisit the manual check's premise.
 describe('LabelsEditor keeping row alerts as the same DOM nodes when the list is re-sorted', () => {
-  const row = (id: string) => screen.getByTestId(`label-row-${id}`);
   const rowOrder = () => screen.getAllByTestId(/^label-row-/).map(li => within(li).queryByTestId('label-chip')?.textContent);
-  const renameButton = (id: string, name: string) =>
-    within(row(id)).getByRole('button', { name: `${i18n.t('settings.labels.rename')}: ${name}` });
-  const saveButton = (id: string) => within(row(id)).getByRole('button', { name: i18n.t('settings.labels.save') });
-  const rowErrorText = (name: string, message: string) => i18n.t('settings.labels.rowError', { name, message });
-  const rowAlert = (id: string) => row(id).querySelector<HTMLElement>('[role="alert"]');
   const taken = () => i18n.t('errors.LABEL_NAME_TAKEN');
 
   // Sorted by name: alpha, bravo, charlie, delta.
@@ -1698,14 +1695,6 @@ describe('LabelsEditor keeping row alerts as the same DOM nodes when the list is
         ? Promise.resolve(label('label-d', patch.name ?? 'delta', 'gray', 0))
         : Promise.reject(new Error(taken()))
     );
-  }
-
-  async function renameRow(user: User, id: string, name: string, newName: string) {
-    await user.click(renameButton(id, name));
-    const input = within(row(id)).getByRole('textbox');
-    await user.clear(input);
-    await user.type(input, newName);
-    await user.click(saveButton(id));
   }
 
   // A failed rename: its alert appears, focus is back in the input
