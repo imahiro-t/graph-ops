@@ -84,10 +84,15 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
         className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-xl m-auto min-w-0 shadow-2xl overflow-hidden focus:outline-none"
       >
         {/* Header */}
-        <div className="flex items-center justify-between gap-2 px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800">
-          <h2 id={titleId} className="flex items-center gap-2 min-w-0 break-words font-bold text-base text-slate-800 dark:text-slate-200">
-            <Terminal className="w-5 h-5 shrink-0 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
-            {t('claudeRunnerModal.title')}
+        <div className="flex items-center justify-between gap-2 px-6 [@media(max-width:15rem)]:px-3 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800">
+          {/* The title text sits in its own span: as a bare text node it would
+              be an anonymous flex item that cannot shrink below its longest
+              word, so at a 200% font on a 320px screen it ran under the
+              shrink-0 close button (DFLT-00254). `min-w-0` plus
+              `overflow-wrap:anywhere` let it wrap inside the h2 instead. */}
+          <h2 id={titleId} className="flex items-center gap-2 min-w-0 font-bold text-base text-slate-800 dark:text-slate-200">
+            <Terminal className="w-5 h-5 shrink-0 [@media(max-width:15rem)]:hidden text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
+            <span className="min-w-0 [overflow-wrap:anywhere]">{t('claudeRunnerModal.title')}</span>
           </h2>
           <button
             type="button"
@@ -99,7 +104,7 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
           </button>
         </div>
 
-        <div className="p-6 space-y-4">
+        <div className="p-6 [@media(max-width:15rem)]:p-3 space-y-4">
           <p className="text-xs text-slate-500 dark:text-slate-400">
             {t('claudeRunnerModal.descriptionPrefix')} <span className="font-mono">claude</span> {t('claudeRunnerModal.descriptionSuffix')}
           </p>

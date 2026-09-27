@@ -213,9 +213,14 @@ export const SettingsModal: React.FC<Props> = ({
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-2 px-6 [@media(max-width:15rem)]:px-3 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 shrink-0">
-          <h2 id={titleId} className="flex items-center gap-2 min-w-0 break-words font-bold text-base text-slate-800 dark:text-slate-200">
-            <Settings className="w-5 h-5 shrink-0 text-slate-600 dark:text-slate-400" aria-hidden="true" />
-            {t('settings.modalTitle')}
+          {/* The title text sits in its own span: as a bare text node it would
+              be an anonymous flex item that cannot shrink below its longest
+              word, so at a 200% font on a 320px screen it ran under the
+              shrink-0 close button (DFLT-00254). `min-w-0` plus
+              `overflow-wrap:anywhere` let it wrap inside the h2 instead. */}
+          <h2 id={titleId} className="flex items-center gap-2 min-w-0 font-bold text-base text-slate-800 dark:text-slate-200">
+            <Settings className="w-5 h-5 shrink-0 [@media(max-width:15rem)]:hidden text-slate-600 dark:text-slate-400" aria-hidden="true" />
+            <span className="min-w-0 [overflow-wrap:anywhere]">{t('settings.modalTitle')}</span>
           </h2>
           <button
             type="button"

@@ -212,8 +212,33 @@ describe('ClaudeRunnerModal at large text on a narrow, short screen', () => {
 
   it('lets the title wrap and keeps the close button at its size', () => {
     render(<ClaudeRunnerModal isOpen onClose={() => {}} projectId="proj-x" />);
+    const heading = screen.getByRole('heading', { level: 2, name: i18n.t('claudeRunnerModal.title') });
 
-    expect(screen.getByRole('heading', { level: 2 })).toHaveClass('min-w-0', 'break-words');
+    expect(heading).toHaveClass('min-w-0');
     expect(screen.getByRole('button', { name: i18n.t('common.closeDialog') })).toHaveClass('shrink-0');
+  });
+
+  // A bare text node in the flex h2 is an anonymous flex item that cannot
+  // shrink below its longest word, so at 200% on a 320px screen the title ran
+  // under the close button. The text has to be its own shrinkable element.
+  it('puts the title text in its own shrinkable, wrappable element', () => {
+    render(<ClaudeRunnerModal isOpen onClose={() => {}} projectId="proj-x" />);
+    const heading = screen.getByRole('heading', { level: 2, name: i18n.t('claudeRunnerModal.title') });
+
+    const bareText = Array.from(heading.childNodes).filter(n => n.nodeType === Node.TEXT_NODE && n.textContent?.trim());
+    expect(bareText).toHaveLength(0);
+    const text = heading.querySelector('span');
+    expect(text).toHaveTextContent(i18n.t('claudeRunnerModal.title'));
+    expect(text).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
+  });
+
+  it('narrows the padding and drops the decorative icon under 15rem', () => {
+    render(<ClaudeRunnerModal isOpen onClose={() => {}} projectId="proj-x" />);
+    const heading = screen.getByRole('heading', { level: 2, name: i18n.t('claudeRunnerModal.title') });
+    const header = heading.parentElement as HTMLElement;
+
+    expect(header).toHaveClass('px-6', '[@media(max-width:15rem)]:px-3');
+    expect(heading.querySelector('svg')).toHaveClass('[@media(max-width:15rem)]:hidden');
+    expect(header.nextElementSibling).toHaveClass('p-6', '[@media(max-width:15rem)]:p-3');
   });
 });

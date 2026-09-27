@@ -644,8 +644,23 @@ describe('SettingsModal at large text on a narrow, short screen', () => {
   it('lets the title wrap and keeps the close button at its size', async () => {
     renderModal();
 
-    expect(screen.getByRole('heading', { level: 2, name: i18n.t('settings.modalTitle') })).toHaveClass('min-w-0', 'break-words');
+    expect(screen.getByRole('heading', { level: 2, name: i18n.t('settings.modalTitle') })).toHaveClass('min-w-0');
     expect(screen.getByRole('button', { name: i18n.t('common.closeDialog') })).toHaveClass('shrink-0');
+    await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
+  });
+
+  // See ClaudeRunnerModal.test.tsx: a bare text node in the flex h2 cannot
+  // shrink below its longest word and ran under the close button.
+  it('puts the title text in its own shrinkable, wrappable element and drops the icon under 15rem', async () => {
+    renderModal();
+    const heading = screen.getByRole('heading', { level: 2, name: i18n.t('settings.modalTitle') });
+
+    const bareText = Array.from(heading.childNodes).filter(n => n.nodeType === Node.TEXT_NODE && n.textContent?.trim());
+    expect(bareText).toHaveLength(0);
+    const text = heading.querySelector('span');
+    expect(text).toHaveTextContent(i18n.t('settings.modalTitle'));
+    expect(text).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
+    expect(heading.querySelector('svg')).toHaveClass('[@media(max-width:15rem)]:hidden');
     await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
   });
 
