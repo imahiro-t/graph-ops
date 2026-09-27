@@ -3,9 +3,11 @@
 // screen (375px). Below sm the row may wrap, putting the Send button on a
 // line of its own under the textarea, and the button may put its icon on a
 // line of its own and break its label anywhere; the textarea may shrink
-// below its intrinsic (cols) width. At 100% text and from sm up nothing
-// changes: every layout class added here is either limited to max-sm: or has
-// no effect while the row fits. jsdom does no layout, so this checks the
+// below its intrinsic (cols) width, and its small basis keeps the row on one
+// line at 100% text down to 320px. Once wrapped, the button keeps some
+// vertical padding instead of shrinking to its icon's height. At 100% text
+// and from sm up the layout does not change: every layout class added here is
+// either limited to max-sm: or has no effect while the row fits. jsdom does no layout, so this checks the
 // classes; the widths themselves were measured in a real browser (see the
 // ticket's implementation notes). It also checks that typing, sending (button
 // and shortcut), the submitting state and the accessible names still work.
@@ -94,12 +96,16 @@ describe.each(['ja', 'en'] as const)('TicketItem prompt row layout (%s)', lng =>
   it('lets the textarea shrink and gives it a basis that wraps the row only with large text below sm', () => {
     renderTicket();
     const textarea = promptBox();
-    expect(textarea).toHaveClass('flex-1', 'min-w-0', 'max-sm:basis-32');
-    // An unconditional basis would change the layout from sm up.
-    expect(textarea).not.toHaveClass('basis-32');
+    // 6rem: at 100% text a 320px screen still fits the textarea and the
+    // button on one line, while 200% text on a 375px screen wraps.
+    expect(textarea).toHaveClass('flex-1', 'min-w-0', 'max-sm:basis-24');
+    // An unconditional basis would change the layout from sm up, and the
+    // earlier 8rem basis wrapped the row at 100% text on a 320px screen.
+    expect(textarea).not.toHaveClass('basis-24');
+    expect(textarea).not.toHaveClass('max-sm:basis-32');
   });
 
-  it('keeps the Send button within the row and lets it wrap its contents below sm only', () => {
+  it('keeps the Send button within the row, padded, and lets it wrap its contents below sm only', () => {
     renderTicket();
     const button = sendButton();
     expect(button).toHaveClass(
@@ -107,6 +113,7 @@ describe.each(['ja', 'en'] as const)('TicketItem prompt row layout (%s)', lng =>
       'max-w-full',
       'px-4',
       'max-sm:px-3',
+      'max-sm:py-2',
       'max-sm:ml-auto',
       'max-sm:flex-wrap',
       'max-sm:[overflow-wrap:anywhere]'
@@ -120,6 +127,7 @@ describe.each(['ja', 'en'] as const)('TicketItem prompt row layout (%s)', lng =>
     expect(button).not.toHaveClass('break-all');
     expect(button).not.toHaveClass('ml-auto');
     expect(button).not.toHaveClass('px-3');
+    expect(button).not.toHaveClass('py-2');
 
     const icon = button.querySelector('svg');
     expect(icon).not.toBeNull();
