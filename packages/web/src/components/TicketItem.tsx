@@ -504,7 +504,10 @@ export const TicketItem: React.FC<Props> = ({
   // relying on the buttons' aria-disabled state (DFLT-00207) having been
   // rendered yet.
   const approvalsInFlightRef = useRef<Set<string>>(new Set());
-  const [approvalErrors, setApprovalErrors] = useState<Record<string, string>>({});
+  // `announce`: whether the error text itself is the live announcement
+  // (role="alert"). False when the failure was already read out, with its
+  // reason, by the "no longer awaiting approval" status message (DFLT-00217).
+  const [approvalErrors, setApprovalErrors] = useState<Record<string, { message: string; announce: boolean }>>({});
   // DFLT-00177: prefix for the approval error elements' ids (one per gate
   // node), unique per TicketItem so the same node rendered twice can't clash.
   const approvalErrorIdBase = useId();
@@ -620,10 +623,23 @@ export const TicketItem: React.FC<Props> = ({
   // other than our own rejection. Only a user who was inside the prompt
   // gets moved and told -- a background refresh must not steal focus or
   // read out something unrelated to what they are doing.
-  const settleNoLongerPending = (nodeId: string, hadFocus: boolean, deferred = false) => {
-    if (!hadFocus) return;
+  //
+  // DFLT-00217: `error` is the reason a decision on the gate failed, if one
+  // did. It is read out in the same status message, after the situation, and
+  // the caller shows the error text without role="alert": two live regions
+  // firing for one failure would talk over each other (the assertive alert
+  // cutting off the polite status) or say the same thing twice. Returns
+  // whether anything was announced, so the caller knows whether the error
+  // text still has to announce itself.
+  const settleNoLongerPending = (nodeId: string, hadFocus: boolean, deferred = false, error?: string): boolean => {
+    if (!hadFocus) return false;
     if (!deferred || focusIsNowhere()) focusNodeToggle(nodeId);
-    setApprovalAnnouncement(t('ticketItem.approvalGate.noLongerPendingAnnouncement', { name: gateName(nodeId) }));
+    setApprovalAnnouncement(
+      error === undefined
+        ? t('ticketItem.approvalGate.noLongerPendingAnnouncement', { name: gateName(nodeId) })
+        : t('ticketItem.approvalGate.noLongerPendingWithErrorAnnouncement', { name: gateName(nodeId), error })
+    );
+    return true;
   };
   // Our rejection went through. Focus follows unless the user has already
   // moved somewhere else on purpose. The confirm button stays focusable while
@@ -849,11 +865,22 @@ export const TicketItem: React.FC<Props> = ({
       setRejectPrompt(prev => (prev?.nodeId === nodeId ? null : prev));
       await onRefresh();
     } catch (err) {
-      setApprovalErrors(prev => ({ ...prev, [nodeId]: errorMessage(err, t('errors.UNKNOWN')) }));
+      const message = errorMessage(err, t('errors.UNKNOWN'));
+      // DFLT-00217: whether the "no longer awaiting approval" status message
+      // below already reads out this failure's reason. If so, the error text
+      // is shown without role="alert", so that one failure is announced by
+      // exactly one live region. Settled outside the setApprovalErrors
+      // updater (updaters may run twice under StrictMode).
+      let announcedWithStatus = false;
       // The prompt vanished mid-submit and the rejection failed: the gate
-      // stopped being pending some other way.
+      // stopped being pending some other way. Only when the POST itself
+      // failed (DFLT-00221, as on the approval side below): if it went
+      // through and onRefresh threw afterwards, settleSubmitted has already
+      // announced the rejection, and that must not be overwritten with "no
+      // longer awaiting approval" -- the refresh error is announced as an
+      // alert instead.
       const deferred = deferredClosuresRef.current.get(nodeId);
-      if (deferred) settleNoLongerPending(nodeId, deferred.hadFocus, true);
+      if (deferred && !requestSucceeded) announcedWithStatus = settleNoLongerPending(nodeId, deferred.hadFocus, true, message);
       // DFLT-00216: the approval failed after a poll had already removed this
       // gate's Approve and Reject buttons (it stopped being pending some other
       // way -- decided elsewhere, the ticket closed), so focus on them fell to
@@ -871,8 +898,12 @@ export const TicketItem: React.FC<Props> = ({
         findInTicket(`[data-testid="node-approve-${nodeId}"]`) === null &&
         focusIsNowhere()
       ) {
-        settleNoLongerPending(nodeId, true);
+        announcedWithStatus = settleNoLongerPending(nodeId, true, false, message) || announcedWithStatus;
       }
+      // One update, so the message and how it is announced land in the same
+      // commit as the status message: the element is inserted with its role
+      // already decided, never given or stripped of role="alert" afterwards.
+      setApprovalErrors(prev => ({ ...prev, [nodeId]: { message, announce: !announcedWithStatus } }));
     } finally {
       if (!passed) {
         // Only this gate's entries: another gate's reject may still be in
@@ -2059,14 +2090,19 @@ export const TicketItem: React.FC<Props> = ({
                               with the same text only because
                               handleApprovalDecision clears the error when a
                               submit starts, so this element is removed and
-                              inserted anew -- keep that if changing it. */}
+                              inserted anew -- keep that if changing it.
+                              DFLT-00217: no role="alert" when the "no longer
+                              awaiting approval" status message already read
+                              out this failure's reason (announce: false) --
+                              the text is still shown, and stays the target
+                              of the reject prompt's aria-describedby. */}
                           {approvalErrors[node.id] && (
                             <div
                               id={approvalErrorId(node.id)}
-                              role="alert"
+                              role={approvalErrors[node.id].announce ? 'alert' : undefined}
                               className="px-3 pb-2 -mt-1 text-[11px] text-red-600 dark:text-red-400 font-medium"
                             >
-                              {approvalErrors[node.id]}
+                              {approvalErrors[node.id].message}
                             </div>
                           )}
 

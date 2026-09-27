@@ -239,6 +239,9 @@ describe('TicketItem reject prompt focus and announcements', () => {
   const rejectedText = (name = GATE_NAME) => i18n.t('ticketItem.approvalGate.rejectedAnnouncement', { name });
   const noLongerPendingText = (name = GATE_NAME) =>
     i18n.t('ticketItem.approvalGate.noLongerPendingAnnouncement', { name });
+  // DFLT-00217: the same announcement with the failed decision's reason.
+  const noLongerPendingWithErrorText = (error: string, name = GATE_NAME) =>
+    i18n.t('ticketItem.approvalGate.noLongerPendingWithErrorAnnouncement', { name, error });
   // The announcement lives in a role="status" live region (there are several
   // such regions in TicketItem, so it is looked up by its text).
   const announcement = (text: string) =>
@@ -246,6 +249,7 @@ describe('TicketItem reject prompt focus and announcements', () => {
   const expectNoAnnouncement = () => {
     expect(screen.queryByText(rejectedText())).toBeNull();
     expect(screen.queryByText(noLongerPendingText())).toBeNull();
+    expect(screen.queryByText(noLongerPendingWithErrorText(i18n.t('errors.INVALID_NODE_STATE')))).toBeNull();
   };
 
   const openPrompt = () => {
@@ -670,9 +674,15 @@ describe('TicketItem reject prompt focus and announcements', () => {
       new Response(JSON.stringify({ error: { code: 'INVALID_NODE_STATE', message: 'closed' } }), { status: 409 })
     );
 
-    await waitFor(() => expect(announcement(noLongerPendingText())).toHaveLength(1));
+    // DFLT-00217: the reason is read out with the situation, in one status
+    // message; the error text is shown but not announced a second time.
+    await waitFor(() =>
+      expect(announcement(noLongerPendingWithErrorText(i18n.t('errors.INVALID_NODE_STATE')))).toHaveLength(1)
+    );
+    expect(screen.queryByText(noLongerPendingText())).toBeNull();
     expect(document.activeElement).toBe(toggleOf(GATE_ID));
     expect(screen.getByText(i18n.t('errors.INVALID_NODE_STATE'))).not.toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByText(rejectedText())).toBeNull();
   });
 
@@ -1236,9 +1246,12 @@ describe('TicketItem reject prompt focus and announcements', () => {
       await respond(GATE_ID, refused());
 
       await waitFor(() => expect(document.activeElement).toBe(toggleOf(GATE_ID)));
-      expect(announcement(noLongerPendingText())).toHaveLength(1);
+      // DFLT-00217: announced with its reason, in one status message.
+      expect(announcement(noLongerPendingWithErrorText(errorText()))).toHaveLength(1);
+      expect(screen.queryByText(noLongerPendingText())).toBeNull();
       expect(screen.queryByText(approvedText())).toBeNull();
       expect(screen.getByText(errorText())).not.toBeNull();
+      expect(screen.queryByRole('alert')).toBeNull();
       expect(completeCalls(GATE_ID)).toBe(1);
     });
 
@@ -1261,6 +1274,7 @@ describe('TicketItem reject prompt focus and announcements', () => {
       await waitFor(() => expect(screen.getByText(errorText())).not.toBeNull());
       expect(document.activeElement).toBe(elsewhere);
       expect(screen.queryByText(noLongerPendingText())).toBeNull();
+      expect(screen.queryByText(noLongerPendingWithErrorText(errorText()))).toBeNull();
       expect(screen.queryByText(approvedText())).toBeNull();
       expect(completeCalls(GATE_B_ID)).toBe(0);
     });
@@ -1279,7 +1293,210 @@ describe('TicketItem reject prompt focus and announcements', () => {
       expect(screen.getByText(errorText())).not.toBeNull();
       expect(document.activeElement).toBe(document.body);
       expect(screen.queryByText(noLongerPendingText())).toBeNull();
+      expect(screen.queryByText(noLongerPendingWithErrorText(errorText()))).toBeNull();
       expect(screen.queryByText(approvedText())).toBeNull();
+    });
+  });
+
+  // DFLT-00217: one failed decision is announced by exactly one live region.
+  // While the buttons (or the reject prompt) are still there, that is the
+  // error text's role="alert". Once they are gone, "<gate> is no longer
+  // awaiting approval" is announced with the reason in the same status
+  // message, and the error text is shown without role="alert" -- two regions
+  // firing at once would talk over each other or say it twice. Focus
+  // handling (DFLT-00172/00207/00215/00216) is unchanged.
+  describe('announces a failed decision once, with its reason', () => {
+    const refused = () =>
+      new Response(JSON.stringify({ error: { code: 'INVALID_NODE_STATE', message: 'refused' } }), { status: 409 });
+    const errorText = () => i18n.t('errors.INVALID_NODE_STATE');
+    // role="status" regions that read out the reason.
+    const statusesWithReason = () =>
+      screen.queryAllByRole('status').filter(el => (el.textContent ?? '').includes(errorText()));
+    const expectAnnouncedOnlyAsAlert = () => {
+      const alerts = screen.getAllByRole('alert');
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0].textContent).toBe(errorText());
+      expect(statusesWithReason()).toHaveLength(0);
+      return alerts[0];
+    };
+    const expectAnnouncedOnlyAsStatus = () => {
+      expect(announcement(noLongerPendingWithErrorText(errorText()))).toHaveLength(1);
+      expect(statusesWithReason()).toHaveLength(1);
+      expect(screen.queryAllByRole('alert')).toHaveLength(0);
+      // Still shown on screen, under its id.
+      const shown = screen.getByText(errorText());
+      expect(shown.id).not.toBe('');
+      expect(shown.getAttribute('role')).toBeNull();
+    };
+
+    it('announces it as an alert when the approval fails with the buttons still there', async () => {
+      const user = userEvent.setup();
+      const respond = stubHeldCompletes();
+      renderTicket('IN REVIEW', { strict: true });
+      await user.click(approveOf(GATE_ID));
+
+      await respond(GATE_ID, refused());
+
+      await waitFor(() => expect(screen.queryAllByRole('alert')).toHaveLength(1));
+      expectAnnouncedOnlyAsAlert();
+      expect(screen.queryByText(noLongerPendingText())).toBeNull();
+      expect(document.activeElement).toBe(approveOf(GATE_ID));
+    });
+
+    it('announces it as an alert tied to the reason field when the rejection fails with the prompt still there', async () => {
+      const respond = stubHeldCompletes();
+      renderTicket('IN REVIEW', { strict: true });
+      rejectWithReason(GATE_ID);
+
+      await respond(GATE_ID, refused());
+
+      await waitFor(() => expect(screen.queryAllByRole('alert')).toHaveLength(1));
+      const alert = expectAnnouncedOnlyAsAlert();
+      const input = reasonInput() as HTMLInputElement;
+      expect(input.getAttribute('aria-describedby')).toBe(alert.id);
+      expect(input).toHaveAccessibleDescription(errorText());
+      await waitFor(() => expect(document.activeElement).toBe(input));
+    });
+
+    it.each([
+      ['the gate was decided elsewhere', makeTicket('IN REVIEW', 'DONE')],
+      ['the ticket was closed', makeTicket('CLOSED')]
+    ])('announces it once with the situation when the approve buttons are gone because %s', async (_label, polled) => {
+      const user = userEvent.setup();
+      const respond = stubHeldCompletes();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { strict: true });
+      await user.click(approveOf(GATE_ID));
+      rerenderTicket(polled);
+      expect(document.activeElement).toBe(document.body);
+
+      await respond(GATE_ID, refused());
+
+      await waitFor(() => expect(document.activeElement).toBe(toggleOf(GATE_ID)));
+      expectAnnouncedOnlyAsStatus();
+    });
+
+    it('announces it once with the situation when a poll removed the reject prompt', async () => {
+      const respond = stubHeldCompletes();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { strict: true });
+      rejectWithReason(GATE_ID);
+      rerenderTicket(makeTicket('CLOSED'));
+      expect(reasonInput()).toBeNull();
+
+      await respond(GATE_ID, refused());
+
+      await waitFor(() => expect(document.activeElement).toBe(toggleOf(GATE_ID)));
+      expectAnnouncedOnlyAsStatus();
+    });
+
+    it('announces it as an alert when the user moved on after the approve buttons were gone', async () => {
+      const user = userEvent.setup();
+      const respond = stubHeldCompletes();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { ticket: twoGateTicket('IN REVIEW'), strict: true });
+      await user.click(approveOf(GATE_ID));
+      rerenderTicket(twoGateTicket('IN REVIEW', 'DONE'));
+      const elsewhere = approveOf(GATE_B_ID);
+      elsewhere.focus();
+
+      await respond(GATE_ID, refused());
+
+      await waitFor(() => expect(screen.queryAllByRole('alert')).toHaveLength(1));
+      expectAnnouncedOnlyAsAlert();
+      expect(screen.queryByText(noLongerPendingText())).toBeNull();
+      expect(document.activeElement).toBe(elsewhere);
+    });
+
+    it('announces it as an alert when focus was outside the reject prompt a poll removed', async () => {
+      const respond = stubHeldCompletes();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { strict: true });
+      rejectWithReason(GATE_ID);
+      const elsewhere = screen.getByTestId('ticket-copy-id');
+      elsewhere.focus();
+      rerenderTicket(makeTicket('CLOSED'));
+      expect(reasonInput()).toBeNull();
+
+      await respond(GATE_ID, refused());
+
+      await waitFor(() => expect(screen.queryAllByRole('alert')).toHaveLength(1));
+      expectAnnouncedOnlyAsAlert();
+      expect(screen.queryByText(noLongerPendingText())).toBeNull();
+      expect(document.activeElement).toBe(elsewhere);
+    });
+  });
+
+  // DFLT-00221: a decision whose POST succeeded is announced as done
+  // ("Rejected <name>" / "Approved <name>") before onRefresh runs. If that
+  // refresh then throws, the decision did not fail: the announcement must not
+  // be overwritten with "<name> is no longer awaiting approval. <error>", and
+  // the refresh error is announced as an alert like any other error. Only a
+  // failed POST settles as "no longer awaiting approval" -- the approval side
+  // already guarded this (DFLT-00216); the reject side now does too.
+  describe('keeps a successful decision announced when the refresh after it fails', () => {
+    const refreshError = 'refresh failed';
+    const failingRefresh = () => vi.fn().mockRejectedValue(new Error(refreshError));
+    const approvedText = (name = GATE_NAME) => i18n.t('ticketItem.approvalGate.approvedAnnouncement', { name });
+    const expectRefreshErrorAlerted = () => {
+      const alerts = screen.getAllByRole('alert');
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0].textContent).toBe(refreshError);
+    };
+
+    it('keeps "rejected" when a poll removed the reject prompt, the rejection succeeded and the refresh failed', async () => {
+      const respond = stubHeldCompletes();
+      const onRefresh = failingRefresh();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { onRefresh, strict: true });
+      rejectWithReason(GATE_ID);
+      rerenderTicket(makeTicket('IN REVIEW', 'REJECTED'));
+      expect(reasonInput()).toBeNull();
+
+      await respond(GATE_ID, new Response('{}', { status: 200 }));
+
+      await waitFor(() => expect(screen.queryAllByRole('alert')).toHaveLength(1));
+      expectRefreshErrorAlerted();
+      expect(announcement(rejectedText())).toHaveLength(1);
+      expect(screen.queryByText(noLongerPendingText())).toBeNull();
+      expect(screen.queryByText(noLongerPendingWithErrorText(refreshError))).toBeNull();
+      expect(document.activeElement).toBe(toggleOf(GATE_ID));
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('still says "no longer awaiting approval" with the reason when the rejection itself fails that way', async () => {
+      const respond = stubHeldCompletes();
+      const onRefresh = failingRefresh();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { onRefresh, strict: true });
+      rejectWithReason(GATE_ID);
+      rerenderTicket(makeTicket('IN REVIEW', 'REJECTED'));
+      expect(reasonInput()).toBeNull();
+
+      await respond(
+        GATE_ID,
+        new Response(JSON.stringify({ error: { code: 'INVALID_NODE_STATE', message: 'refused' } }), { status: 409 })
+      );
+
+      await waitFor(() => expect(document.activeElement).toBe(toggleOf(GATE_ID)));
+      expect(announcement(noLongerPendingWithErrorText(i18n.t('errors.INVALID_NODE_STATE')))).toHaveLength(1);
+      expect(screen.queryAllByRole('alert')).toHaveLength(0);
+      expect(screen.queryByText(rejectedText())).toBeNull();
+      expect(onRefresh).not.toHaveBeenCalled();
+    });
+
+    it('keeps "approved" when a poll removed the buttons, the approval succeeded and the refresh failed', async () => {
+      const user = userEvent.setup();
+      const respond = stubHeldCompletes();
+      const onRefresh = failingRefresh();
+      const { rerenderTicket } = renderTicket('IN REVIEW', { onRefresh, strict: true });
+      await user.click(approveOf(GATE_ID));
+      rerenderTicket(makeTicket('IN REVIEW', 'DONE'));
+      expect(document.activeElement).toBe(document.body);
+
+      await respond(GATE_ID, new Response('{}', { status: 200 }));
+
+      await waitFor(() => expect(screen.queryAllByRole('alert')).toHaveLength(1));
+      expectRefreshErrorAlerted();
+      expect(announcement(approvedText())).toHaveLength(1);
+      expect(screen.queryByText(noLongerPendingText())).toBeNull();
+      expect(screen.queryByText(noLongerPendingWithErrorText(refreshError))).toBeNull();
+      expect(document.activeElement).toBe(toggleOf(GATE_ID));
+      expect(onRefresh).toHaveBeenCalledTimes(1);
     });
   });
 
