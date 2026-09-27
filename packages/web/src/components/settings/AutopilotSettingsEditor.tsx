@@ -28,6 +28,7 @@ import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 import { submittingProps } from '../Submitting';
+import { ErrorBox } from './ErrorBox';
 
 interface Props {
   // The project whose settings are edited ('' when none is selected).
@@ -241,9 +242,9 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
       </div>
 
       {error && (
-        <div role="alert" className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900">
+        <ErrorBox role="alert" className="p-2.5 text-[11px]">
           {error}
-        </div>
+        </ErrorBox>
       )}
 
       {data && data.warnings.length > 0 && (
@@ -308,10 +309,10 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
           </div>
 
           {permissionShown === 'bypassPermissions' && (
-            <div role="note" className="p-2.5 flex gap-2 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900">
+            <ErrorBox role="note" className="p-2.5 flex gap-2 text-[11px]">
               <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden="true" />
               <span>{t('settings.autopilot.bypassWarning')}</span>
-            </div>
+            </ErrorBox>
           )}
 
           <div className="flex justify-end items-center gap-2">

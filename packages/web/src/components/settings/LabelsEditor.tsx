@@ -22,6 +22,7 @@ import { useTransientAnnouncement } from '../../hooks/useTransientAnnouncement';
 import { StatusLiveRegion } from '../StatusLiveRegion';
 import { IconButton } from '../IconButton';
 import { SubmittingText, submittingProps } from '../Submitting';
+import { ErrorBox } from './ErrorBox';
 
 interface Props {
   // Every project that can be picked. An empty list disables the tab: there
@@ -576,21 +577,14 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       {/* Two separate alerts, so clearing one never takes the other with it
           (DFLT-00214). Only the create error describes the name input. */}
       {loadError && (
-        <div
-          role="alert"
-          className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 rounded-lg border border-red-200 dark:border-red-800"
-        >
+        <ErrorBox role="alert" className="p-2.5">
           {loadError}
-        </div>
+        </ErrorBox>
       )}
       {createError && (
-        <div
-          id={errorId}
-          role="alert"
-          className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 rounded-lg border border-red-200 dark:border-red-800"
-        >
+        <ErrorBox id={errorId} role="alert" className="p-2.5">
           {createError}
-        </div>
+        </ErrorBox>
       )}
 
       {/* List */}
@@ -729,15 +723,11 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                     which row failed. Inside the keyed <li>, so another row's
                     action or re-render neither removes nor re-announces it;
                     this row's next action removes it, so a repeated failure
-                    is announced again. Same colors as the create/load alert. */}
+                    is announced again. The same ErrorBox as the create/load alert. */}
                 {rowError !== undefined && (
-                  <div
-                    id={rowErrorId}
-                    role="alert"
-                    className="basis-full p-2 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 rounded-lg border border-red-200 dark:border-red-800"
-                  >
+                  <ErrorBox id={rowErrorId} role="alert" className="basis-full p-2">
                     {t('settings.labels.rowError', { name: label.name, message: rowError })}
-                  </div>
+                  </ErrorBox>
                 )}
               </li>
             );
