@@ -114,7 +114,8 @@ const DIALOG_MODES: AutopilotMode[] = ['tree', 'ticket'];
 // autopilot -- then put the icon on a line of its own and break the label
 // anywhere (max-sm:flex-wrap, max-sm:[overflow-wrap:anywhere]), so they stay
 // inside the row instead of running past the card; the untrusted-folder
-// notice moves its dismiss button under the text the same way. Nothing
+// notice moves its dismiss button under the text the same way (at any
+// width since DFLT-00225, see below). Nothing
 // wraps while everything fits on a line, so the default size looks as
 // before. Only below sm: on sm+ the labels do not wrap, being the floors
 // the layout above is built on.
@@ -124,6 +125,12 @@ const DIALOG_MODES: AutopilotMode[] = ['tree', 'ticket'];
 // expanded details and the Action Footer less (a rem media query, so only
 // with large text on a narrow screen), which leaves the row about 124px
 // (DFLT-00227).
+// The lines under the button (and the mode reasons in the dialog) are sized
+// in rem too (text-[0.6875rem], 11px at the default 16px), so they grow with
+// the browser's default font size like the rest of the row (DFLT-00225).
+// With larger text the column can then be as narrow as its button on sm+
+// as well, so the untrusted-folder notice moves its dismiss button under
+// the text at any width, not only below sm.
 // The outer element only lays out the row and never takes focus; the column
 // is the focus fallback below, so it holds the button and the text about it
 // but not the regular actions -- its focus ring (and what a screen reader
@@ -353,7 +360,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
           {view.awaiting && (
             // What the person is waited on for, as text a sighted keyboard user
             // can read too (the badge only carries it as a tooltip).
-            <p data-testid="autopilot-awaiting" className="self-stretch text-[11px] text-amber-900 dark:text-amber-100">
+            <p data-testid="autopilot-awaiting" className="self-stretch text-[0.6875rem] text-amber-900 dark:text-amber-100">
               {t('autopilot.badges.awaitingTitle', { what: view.awaiting })}
             </p>
           )}
@@ -362,7 +369,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
               key={r}
               id={reasonIds[i]}
               data-testid="autopilot-disabled-reason"
-              className="self-stretch text-[11px] text-slate-600 dark:text-slate-400"
+              className="self-stretch text-[0.6875rem] text-slate-600 dark:text-slate-400"
             >
               {r}
             </p>
@@ -372,7 +379,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
             <div
               aria-hidden="true"
               data-testid="autopilot-message"
-              className={`self-stretch p-2 rounded-lg border text-[11px] ${
+              className={`self-stretch p-2 rounded-lg border text-[0.6875rem] ${
                 message.error
                   ? 'bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
                   : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
@@ -388,14 +395,17 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
             message={untrustedFolder ? t('autopilot.untrustedFolder', { path: untrustedFolder }) : ''}
           />
           {untrustedFolder && (
-            // Below sm the dismiss button moves under the text once both no
-            // longer fit on one line (the text wants 6rem), and is never
-            // wider than the notice (DFLT-00224, see above).
+            // The dismiss button moves under the text once both no longer
+            // fit on one line (the text wants 6rem), and is never wider than
+            // the notice (DFLT-00224, see above). At any width, not only below
+            // sm (DFLT-00225): on sm+ with large text the column can be as
+            // narrow as its button, and the dismiss button (which does not
+            // shrink) squeezed the text to a letter a line.
             <div
               data-testid="autopilot-untrusted"
-              className="self-stretch flex max-sm:flex-wrap items-start gap-2 p-2 rounded-lg border text-[11px] bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100"
+              className="self-stretch flex flex-wrap items-start gap-2 p-2 rounded-lg border text-[0.6875rem] bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100"
             >
-              <p aria-hidden="true" className="flex-1 max-sm:basis-24 min-w-0 break-words [overflow-wrap:anywhere]">
+              <p aria-hidden="true" className="flex-1 basis-24 min-w-0 break-words [overflow-wrap:anywhere]">
                 {t('autopilot.untrustedFolder', { path: untrustedFolder })}
               </p>
               <button
@@ -452,7 +462,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
                           <p
                             id={reasonId}
                             data-testid={`autopilot-mode-reason-${mode}`}
-                            className="ml-6 mt-0.5 text-[11px] text-slate-600 dark:text-slate-400"
+                            className="ml-6 mt-0.5 text-[0.6875rem] text-slate-600 dark:text-slate-400"
                           >
                             {reason}
                           </p>

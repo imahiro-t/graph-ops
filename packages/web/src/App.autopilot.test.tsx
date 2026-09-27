@@ -588,13 +588,16 @@ describe('autopilot in the Web UI', () => {
     await waitFor(() => expect(within(controls).getAllByRole('status').some(r => r.textContent === notice)).toBe(true));
     const dismiss = within(controls).getByRole('button', { name: i18n.t('autopilot.untrustedDismiss') });
     expect(dismiss).toHaveAccessibleDescription(notice);
-    // DFLT-00224: below sm the dismiss button moves under the text once
-    // both no longer fit on one line (the text wants at least 6rem), and is
-    // never wider than the notice, so with large text on a narrow screen it
-    // does not run past the notice or squeeze the text to a letter a line.
+    // DFLT-00224: the dismiss button moves under the text once both no
+    // longer fit on one line (the text wants at least 6rem), and is never
+    // wider than the notice, so with large text on a narrow screen it does
+    // not run past the notice or squeeze the text to a letter a line. At any
+    // width since DFLT-00225: on sm+ with large text the column is narrow too.
     const untrusted = within(controls).getByTestId('autopilot-untrusted');
-    expect(untrusted).toHaveClass('flex', 'max-sm:flex-wrap');
-    expect(untrusted.querySelector('p')).toHaveClass('flex-1', 'max-sm:basis-24', 'min-w-0');
+    expect(untrusted).toHaveClass('flex', 'flex-wrap');
+    expect(untrusted).not.toHaveClass('max-sm:flex-wrap');
+    expect(untrusted.querySelector('p')).toHaveClass('flex-1', 'basis-24', 'min-w-0');
+    expect(untrusted.querySelector('p')).not.toHaveClass('max-sm:basis-24');
     expect(dismiss).toHaveClass('shrink-0', 'max-w-full', 'max-sm:[overflow-wrap:anywhere]');
 
     await user.click(dismiss);
