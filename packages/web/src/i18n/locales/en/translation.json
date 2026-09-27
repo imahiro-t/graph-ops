@@ -212,6 +212,7 @@
       "html": "HTML Artifacts ({{count}})",
       "artifacts": "All Artifacts ({{count}})"
     },
+    "tabListLabel": "Nodes and artifacts",
     "retryCount": "(Retry: {{count}})",
     "manualApproval": "Manual Approval",
     "approvalGate": {

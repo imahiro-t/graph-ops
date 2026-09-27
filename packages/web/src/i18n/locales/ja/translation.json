@@ -211,6 +211,7 @@
       "html": "HTML成果物 ({{count}})",
       "artifacts": "全成果物 ({{count}})"
     },
+    "tabListLabel": "ノードと成果物",
     "retryCount": "(再試行: {{count}}回)",
     "manualApproval": "手動承認",
     "approvalGate": {

@@ -209,7 +209,7 @@ describe('artifacts', () => {
   it('keeps an expanded ticket’s artifacts across a polling round', async () => {
     seed(3);
     await renderApp();
-    const artifactsTab = () => screen.getByRole('button', { name: i18n.t('ticketItem.tabs.artifacts', { count: 2 }) });
+    const artifactsTab = () => screen.getByRole('tab', { name: i18n.t('ticketItem.tabs.artifacts', { count: 2 }) });
 
     await toggleTicket('DFLT-00001');
     expect(artifactsTab()).toBeInTheDocument();

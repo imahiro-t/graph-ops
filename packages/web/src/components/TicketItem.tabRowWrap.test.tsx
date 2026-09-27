@@ -88,7 +88,7 @@ const tabLabels = (artifactCount: number, gherkin: number, html: number) => [
 ];
 
 const getTabs = (row: HTMLElement, labels: string[]) =>
-  labels.map(name => within(row).getByRole('button', { name }));
+  labels.map(name => within(row).getByRole('tab', { name }));
 
 const getDownloadLink = (row: HTMLElement) =>
   within(row).getByRole('link', { name: i18n.t('ticketItem.downloadAllArtifacts') });

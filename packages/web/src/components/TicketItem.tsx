@@ -100,6 +100,13 @@ const artifactTabClass = (active: boolean) =>
       : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
   }`;
 
+// The artifact panel's tabs, in display order. They form a WAI-ARIA tab
+// pattern with automatic activation (DFLT-00243): only the selected tab is in
+// the Tab order, and the arrow keys (wrapping at the ends) and Home/End move
+// the selection along this list.
+const ARTIFACT_TABS = ['nodes', 'gherkin', 'html', 'artifacts'] as const;
+type ArtifactTab = (typeof ARTIFACT_TABS)[number];
+
 // How long the ID copy button shows its "copied"/"failed" state before going
 // back to idle (DFLT-00143).
 const COPY_FEEDBACK_MS = 1500;
@@ -352,7 +359,43 @@ export const TicketItem: React.FC<Props> = ({
 }) => {
   const { t, i18n } = useTranslation();
   const [promptText, setPromptText] = useState('');
-  const [activeTab, setActiveTab] = useState<'nodes' | 'gherkin' | 'html' | 'artifacts'>('nodes');
+  const [activeTab, setActiveTab] = useState<ArtifactTab>('nodes');
+  // Ids for the artifact tabs and their panel (DFLT-00243). useId keeps them
+  // unique when several tickets are expanded on the same page.
+  const artifactTabsIdBase = useId();
+  const artifactTabId = (tab: ArtifactTab) => `${artifactTabsIdBase}-tab-${tab}`;
+  const artifactPanelId = `${artifactTabsIdBase}-panel`;
+  const artifactTabRefs = useRef<Partial<Record<ArtifactTab, HTMLButtonElement | null>>>({});
+  // Arrow keys (wrapping), Home and End select a tab and move focus to it,
+  // per the APG tabs pattern with automatic activation. Modified keys are
+  // left alone so browser shortcuts such as Alt+Left still work.
+  const handleArtifactTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.currentTarget.getAttribute('role') !== 'tab') return;
+    const index = ARTIFACT_TABS.indexOf(activeTab);
+    const last = ARTIFACT_TABS.length - 1;
+    let next: number;
+    switch (event.key) {
+      case 'ArrowRight':
+        next = index === last ? 0 : index + 1;
+        break;
+      case 'ArrowLeft':
+        next = index === 0 ? last : index - 1;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = last;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    const tab = ARTIFACT_TABS[next];
+    setActiveTab(tab);
+    artifactTabRefs.current[tab]?.focus();
+  };
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
   const { isLaunching: isRunning, lastMessage: statusMessage, launch: handleRunClaude } = useClaudeLaunch(onRefresh);
@@ -1960,35 +2003,54 @@ export const TicketItem: React.FC<Props> = ({
                 data-testid="ticket-artifact-tabs"
                 className="flex flex-wrap xl:flex-nowrap items-center justify-between gap-y-1 border-b border-slate-200 dark:border-slate-800 px-4 [@media(max-width:15rem)]:px-2 pb-2 xl:pb-0 bg-slate-50 dark:bg-slate-800 shrink-0"
               >
-              <div className="flex flex-wrap lg:flex-nowrap max-lg:min-w-0">
-                <button
-                  onClick={() => setActiveTab('nodes')}
-                  className={artifactTabClass(activeTab === 'nodes')}
-                >
-                  <GitBranch aria-hidden="true" className="w-4 h-4 shrink-0" />
-                  <span className="max-lg:min-w-0 break-words">{t('ticketItem.tabs.nodes', { count: totalNodes })}</span>
-                </button>
-                <button
-                  onClick={() => setActiveTab('gherkin')}
-                  className={artifactTabClass(activeTab === 'gherkin')}
-                >
-                  <FileCode aria-hidden="true" className="w-4 h-4 shrink-0 text-amber-500" />
-                  <span className="max-lg:min-w-0 break-words">{t('ticketItem.tabs.gherkin', { count: gherkinArtifacts.length })}</span>
-                </button>
-                <button
-                  onClick={() => setActiveTab('html')}
-                  className={artifactTabClass(activeTab === 'html')}
-                >
-                  <Globe aria-hidden="true" className="w-4 h-4 shrink-0 text-cyan-500" />
-                  <span className="max-lg:min-w-0 break-words">{t('ticketItem.tabs.html', { count: htmlArtifacts.length })}</span>
-                </button>
-                <button
-                  onClick={() => setActiveTab('artifacts')}
-                  className={artifactTabClass(activeTab === 'artifacts')}
-                >
-                  <FileText aria-hidden="true" className="w-4 h-4 shrink-0 text-emerald-500" />
-                  <span className="max-lg:min-w-0 break-words">{t('ticketItem.tabs.artifacts', { count: ticket.artifacts.length })}</span>
-                </button>
+              <div
+                role="tablist"
+                aria-label={t('ticketItem.tabListLabel')}
+                className="flex flex-wrap lg:flex-nowrap max-lg:min-w-0"
+              >
+                {ARTIFACT_TABS.map((tab) => {
+                  const selected = activeTab === tab;
+                  let icon: React.ReactNode;
+                  let count: number;
+                  switch (tab) {
+                    case 'nodes':
+                      icon = <GitBranch aria-hidden="true" className="w-4 h-4 shrink-0" />;
+                      count = totalNodes;
+                      break;
+                    case 'gherkin':
+                      icon = <FileCode aria-hidden="true" className="w-4 h-4 shrink-0 text-amber-500" />;
+                      count = gherkinArtifacts.length;
+                      break;
+                    case 'html':
+                      icon = <Globe aria-hidden="true" className="w-4 h-4 shrink-0 text-cyan-500" />;
+                      count = htmlArtifacts.length;
+                      break;
+                    case 'artifacts':
+                      icon = <FileText aria-hidden="true" className="w-4 h-4 shrink-0 text-emerald-500" />;
+                      count = ticket.artifacts.length;
+                      break;
+                  }
+                  return (
+                    <button
+                      key={tab}
+                      ref={(el) => {
+                        artifactTabRefs.current[tab] = el;
+                      }}
+                      type="button"
+                      role="tab"
+                      id={artifactTabId(tab)}
+                      aria-selected={selected}
+                      aria-controls={artifactPanelId}
+                      tabIndex={selected ? 0 : -1}
+                      onClick={() => setActiveTab(tab)}
+                      onKeyDown={handleArtifactTabKeyDown}
+                      className={artifactTabClass(selected)}
+                    >
+                      {icon}
+                      <span className="max-lg:min-w-0 break-words">{t(`ticketItem.tabs.${tab}`, { count })}</span>
+                    </button>
+                  );
+                })}
               </div>
               {ticket.artifacts.length > 0 && (
                 <a
@@ -2002,8 +2064,19 @@ export const TicketItem: React.FC<Props> = ({
               )}
               </div>
 
-              {/* Tab Contents */}
-              <div className="p-4 flex-1 min-h-0 overflow-y-auto">
+              {/* Tab Contents. One tabpanel shows the selected tab's content
+                  (DFLT-00243). It is focusable (tabIndex 0, as the APG
+                  recommends when a panel may hold nothing focusable, e.g. an
+                  empty tab) so the keyboard can reach and scroll it; the
+                  ring shows only on keyboard focus and is inset so the
+                  scroll container does not clip it. */}
+              <div
+                role="tabpanel"
+                id={artifactPanelId}
+                aria-labelledby={artifactTabId(activeTab)}
+                tabIndex={0}
+                className="p-4 flex-1 min-h-0 overflow-y-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+              >
                 {/* 1. Nodes with Expandable Artifacts */}
                 {activeTab === 'nodes' && (
                   <div className="space-y-2">
