@@ -118,6 +118,12 @@ const DIALOG_MODES: AutopilotMode[] = ['tree', 'ticket'];
 // wraps while everything fits on a line, so the default size looks as
 // before. Only below sm: on sm+ the labels do not wrap, being the floors
 // the layout above is built on.
+// That alone was not enough at 320px with a 200% default font size, where
+// the rem padding of the nested cards left the row about 60px -- narrower
+// than one button or the "Actions:" label. There TicketItem pads the
+// expanded details and the Action Footer less (a rem media query, so only
+// with large text on a narrow screen), which leaves the row about 124px
+// (DFLT-00227).
 // The outer element only lays out the row and never takes focus; the column
 // is the focus fallback below, so it holds the button and the text about it
 // but not the regular actions -- its focus ring (and what a screen reader
