@@ -30,6 +30,20 @@
 // still bubble through the React tree (i.e. to the component that rendered
 // the dialog, such as a ticket card whose header toggles on click), so the
 // overlay stops click propagation.
+//
+// A dialog taller than the window (DFLT-00233: the autopilot confirmation
+// with its mode choice, at a 150-200% default font size on a 320-480px
+// screen) makes the overlay scroll vertically, so the title, the message,
+// the children and both buttons can all be reached; nothing is cut off
+// above or below the window. The dialog is centred with `m-auto` rather
+// than the overlay's `items-center` / `justify-center`: auto margins centre
+// it while there is room and drop to zero when it overflows, so it starts
+// at the top of the scroll area, whereas `items-center` would push its top
+// above the overlay where no scrolling reaches. `min-w-0` lets it shrink to
+// the overlay's width instead of widening it. The dialog stays a direct
+// child of the overlay -- no wrapper in between -- so a click on the
+// darkened area is still a click on the overlay itself
+// (e.target === e.currentTarget) and cancels.
 import React, { useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useModalDialog } from '../hooks/useModalDialog';
@@ -73,7 +87,7 @@ export const ConfirmDialog: React.FC<Props> = ({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex p-4 overflow-y-auto overscroll-contain"
       data-testid={`${testIdPrefix}-overlay`}
       onClick={e => {
         e.stopPropagation();
@@ -88,9 +102,9 @@ export const ConfirmDialog: React.FC<Props> = ({
         aria-describedby={messageId}
         tabIndex={-1}
         data-testid={testIdPrefix}
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md p-6 shadow-2xl focus:outline-none"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md min-w-0 m-auto p-6 shadow-2xl focus:outline-none"
       >
-        <h2 id={titleId} className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">
+        <h2 id={titleId} className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-4 break-words">
           {title}
         </h2>
         <p id={messageId} className="text-sm text-slate-700 dark:text-slate-300 mb-4 whitespace-pre-wrap break-words">

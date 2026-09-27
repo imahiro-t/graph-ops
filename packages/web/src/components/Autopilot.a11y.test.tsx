@@ -264,6 +264,24 @@ describe('autopilot accessibility', () => {
     expect(confirm).toHaveFocus();
   });
 
+  // DFLT-00233: with a 150-200% default font size on a narrow screen the start
+  // dialog, with its scope choice, is taller than the window; its overlay
+  // scrolls so everything in it can be reached.
+  it('puts the whole start dialog, scope choice included, in a vertically scrolling overlay', async () => {
+    const user = userEvent.setup();
+    render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
+    await user.click(screen.getByTestId('autopilot-start'));
+    const overlay = screen.getByTestId('autopilot-confirm-overlay');
+    const dialog = screen.getByRole('dialog');
+    expect(overlay).toHaveClass('overflow-y-auto');
+    expect(overlay).not.toHaveClass('items-center');
+    expect(dialog.parentElement).toBe(overlay);
+    expect(dialog).toHaveClass('m-auto', 'min-w-0');
+    expect(dialog).toContainElement(screen.getByRole('group', { name: i18n.t('autopilot.confirm.modeLegend') }));
+    expect(dialog).toContainElement(screen.getByTestId('autopilot-confirm-cancel'));
+    expect(dialog).toContainElement(screen.getByTestId('autopilot-confirm-confirm'));
+  });
+
   it('switches the scope with the arrow keys', async () => {
     const user = userEvent.setup();
     render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);

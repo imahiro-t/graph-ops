@@ -143,4 +143,62 @@ describe('ConfirmDialog', () => {
     await openDialog();
     expect(screen.getByTestId('outer')).not.toContainElement(screen.getByRole('dialog'));
   });
+
+  // DFLT-00233: jsdom does not lay anything out, so these check the structure
+  // that lets a dialog taller than the window scroll instead of being cut off.
+  describe('when taller than the window', () => {
+    it('scrolls the overlay vertically and centres the dialog with auto margins', async () => {
+      await openDialog();
+      const overlay = screen.getByTestId('confirm-dialog-overlay');
+      expect(overlay).toHaveClass('fixed', 'inset-0', 'flex', 'overflow-y-auto', 'overscroll-contain');
+      // items-center would push an overflowing dialog's top out of reach.
+      expect(overlay).not.toHaveClass('items-center');
+      expect(overlay).not.toHaveClass('justify-center');
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveClass('m-auto');
+    });
+
+    it('keeps the dialog a direct child of the overlay, as wide as it at most', async () => {
+      await openDialog();
+      const overlay = screen.getByTestId('confirm-dialog-overlay');
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.parentElement).toBe(overlay);
+      expect(dialog).toHaveClass('w-full', 'max-w-md', 'min-w-0');
+      expect(screen.getByRole('heading', { name: 'Title' })).toHaveClass('break-words');
+      expect(screen.getByText('Really?')).toHaveClass('break-words');
+    });
+
+    it('adds no horizontal scrolling', async () => {
+      await openDialog();
+      for (const el of [screen.getByTestId('confirm-dialog-overlay'), screen.getByRole('dialog')]) {
+        expect(el).not.toHaveClass('overflow-x-auto');
+        expect(el).not.toHaveClass('overflow-x-scroll');
+        expect(el).not.toHaveClass('overflow-auto');
+        expect(el).not.toHaveClass('overflow-scroll');
+      }
+    });
+
+    it('puts the title, message, children and both buttons inside the scrolling overlay', async () => {
+      await openDialog({ children: <fieldset data-testid="extra"><legend>Pick</legend></fieldset> });
+      const overlay = screen.getByTestId('confirm-dialog-overlay');
+      const dialog = screen.getByRole('dialog', { name: 'Title' });
+      for (const el of [
+        screen.getByRole('heading', { name: 'Title' }),
+        screen.getByText('Really?'),
+        screen.getByTestId('extra'),
+        screen.getByTestId('confirm-dialog-cancel'),
+        screen.getByTestId('confirm-dialog-confirm')
+      ]) {
+        expect(dialog).toContainElement(el);
+      }
+      expect(overlay).toContainElement(dialog);
+    });
+
+    it('still cancels on a click on the overlay beside the dialog', async () => {
+      const onCancel = vi.fn();
+      const user = await openDialog({ onCancel });
+      await user.click(screen.getByTestId('confirm-dialog-overlay'));
+      expect(onCancel).toHaveBeenCalledTimes(1);
+    });
+  });
 });
