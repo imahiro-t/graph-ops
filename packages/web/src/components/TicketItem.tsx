@@ -2236,10 +2236,26 @@ export const TicketItem: React.FC<Props> = ({
                               default font (1600px at 20px). Between 1024px
                               and 1279px at 16px a row that does not fit now
                               wraps, and a long name wraps instead of being
-                              truncated. */}
+                              truncated.
+                              From 80rem up the row may wrap too, but only
+                              when the one-line layout cannot hold it
+                              (DFLT-00253 round 2): in English a gate or node
+                              carrying the retry, manual and artifact badges
+                              ran its artifact badge under the approve button
+                              or the status badge even at 1280px+, since the
+                              panel's width is capped. There the left group
+                              is at least as wide as everything but the name
+                              (min-w-min, with the name contributing nothing
+                              to that minimum -- see the name below), so when
+                              those parts and the right group do not fit on
+                              one line the right group moves to the next line,
+                              right-aligned by its ml-auto. A row that fits is
+                              laid out exactly as before: the left group
+                              (flex-1) takes the free space, so ml-auto and
+                              row-gap change nothing. */}
                           <div
                             onClick={() => toggleNodeExpand(node.id)}
-                            className="flex items-center justify-between p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none [@media_not_all_and_(min-width:80rem)]:flex-wrap [@media_not_all_and_(min-width:80rem)]:gap-x-3 [@media_not_all_and_(min-width:80rem)]:gap-y-2 [@media(max-width:15rem)]:p-2"
+                            className="flex flex-wrap items-center justify-between gap-y-2 p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none [@media_not_all_and_(min-width:80rem)]:gap-x-3 [@media(max-width:15rem)]:p-2"
                           >
                             {/* From 80rem up, flex-1 min-w-0 lets node.name
                                 (below) shrink and truncate first --
@@ -2250,11 +2266,20 @@ export const TicketItem: React.FC<Props> = ({
                                 the name (and, only if it alone is wider than
                                 the row, the id) wraps rather than truncating.
                                 The type badge may shrink there too
-                                (DFLT-00253), so with a 200% default font on
-                                a 320px screen its label truncates inside the
-                                row (the full label stays in its title)
-                                rather than running past the card. */}
-                            <div className="flex items-center gap-2.5 flex-1 min-w-0 [@media_not_all_and_(min-width:80rem)]:basis-auto [@media_not_all_and_(min-width:80rem)]:flex-wrap [@media_not_all_and_(min-width:80rem)]:gap-y-1.5">
+                                (DFLT-00253), and its label then wraps rather
+                                than truncating, so with a 200% default font
+                                on a 320px screen the whole label stays
+                                visible inside the row (WCAG 1.4.4: a title
+                                tooltip reaches neither keyboard nor touch
+                                users). From 80rem up the label is one line
+                                and truncates as before.
+                                From 80rem up the name is width 0 with a
+                                content flex-basis: it is laid out at its
+                                content width and shrinks/truncates as before,
+                                but its min-content contribution is 0, so the
+                                left group's min-w-min counts only the other
+                                parts (the id and the badges). */}
+                            <div className="flex items-center gap-2.5 flex-1 min-w-0 [@media(min-width:80rem)]:min-w-min [@media_not_all_and_(min-width:80rem)]:basis-auto [@media_not_all_and_(min-width:80rem)]:flex-wrap [@media_not_all_and_(min-width:80rem)]:gap-y-1.5">
                               {/* Named toggle for the node row (DFLT-00152).
                                   No onClick of its own: its click bubbles to
                                   the row's toggleNodeExpand, so it toggles
@@ -2291,8 +2316,13 @@ export const TicketItem: React.FC<Props> = ({
                               <span className="font-mono font-bold text-slate-600 dark:text-slate-300 shrink-0 whitespace-nowrap [@media_not_all_and_(min-width:80rem)]:shrink [@media_not_all_and_(min-width:80rem)]:min-w-0 [@media_not_all_and_(min-width:80rem)]:whitespace-normal [@media_not_all_and_(min-width:80rem)]:[overflow-wrap:anywhere]">
                                 {node.id}
                               </span>
-                              <NodeTypeBadge type={node.type} theme="light" className="shrink-0 [@media_not_all_and_(min-width:80rem)]:shrink [@media_not_all_and_(min-width:80rem)]:min-w-0 [@media_not_all_and_(min-width:80rem)]:max-w-full" />
-                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate min-w-0 [@media_not_all_and_(min-width:80rem)]:whitespace-normal [@media_not_all_and_(min-width:80rem)]:[overflow-wrap:anywhere]">
+                              <NodeTypeBadge
+                                type={node.type}
+                                theme="light"
+                                className="shrink-0 [@media_not_all_and_(min-width:80rem)]:shrink [@media_not_all_and_(min-width:80rem)]:min-w-0 [@media_not_all_and_(min-width:80rem)]:max-w-full"
+                                labelClassName="[@media_not_all_and_(min-width:80rem)]:whitespace-normal [@media_not_all_and_(min-width:80rem)]:[overflow-wrap:anywhere]"
+                              />
+                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate min-w-0 [@media(min-width:80rem)]:w-0 [@media(min-width:80rem)]:[flex-basis:content] [@media_not_all_and_(min-width:80rem)]:whitespace-normal [@media_not_all_and_(min-width:80rem)]:[overflow-wrap:anywhere]">
                                 {node.name}
                               </span>
                               {node.iteration_count > 0 && (
@@ -2318,7 +2348,7 @@ export const TicketItem: React.FC<Props> = ({
                               )}
                             </div>
 
-                            <div className="flex items-center gap-3 shrink-0 [@media_not_all_and_(min-width:80rem)]:shrink [@media_not_all_and_(min-width:80rem)]:min-w-0 [@media_not_all_and_(min-width:80rem)]:flex-wrap [@media_not_all_and_(min-width:80rem)]:gap-y-1.5 [@media_not_all_and_(min-width:80rem)]:ml-auto [@media_not_all_and_(min-width:80rem)]:[justify-content:safe_flex-end]">
+                            <div className="flex items-center gap-3 shrink-0 ml-auto [@media_not_all_and_(min-width:80rem)]:shrink [@media_not_all_and_(min-width:80rem)]:min-w-0 [@media_not_all_and_(min-width:80rem)]:flex-wrap [@media_not_all_and_(min-width:80rem)]:gap-y-1.5 [@media_not_all_and_(min-width:80rem)]:[justify-content:safe_flex-end]">
                               {/* Approve/Reject show up for whichever
                                   approval_gate the ticket is actually
                                   stuck on (pendingApprovalNodeIds), even
