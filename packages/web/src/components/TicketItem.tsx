@@ -2314,8 +2314,14 @@ export const TicketItem: React.FC<Props> = ({
               />
             </div>
 
-            {/* Custom Prompt Box */}
-            <div className="flex gap-2">
+            {/* Custom Prompt Box. Below sm the row may wrap: with large text
+                on a narrow screen the Send button moves to a line of its own
+                under the textarea (kept at the right), and the button, with
+                a little less padding, may put its icon on a line of its own
+                and break the label anywhere, so both stay inside the card. At
+                100% text the button stays to the right of the textarea, and
+                from sm up nothing changes (DFLT-00226). */}
+            <div className="flex max-sm:flex-wrap gap-2">
               <textarea
                 rows={2}
                 value={promptText}
@@ -2330,15 +2336,15 @@ export const TicketItem: React.FC<Props> = ({
                 // DFLT-00205: a persistent accessible name (the placeholder
                 // vanishes once typing starts).
                 aria-label={t('ticketItem.promptLabel')}
-                className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-800 resize-none font-sans"
+                className="flex-1 min-w-0 max-sm:basis-32 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-800 resize-none font-sans"
               />
               <button
                 onClick={handleSendPrompt}
                 disabled={isRunning || !promptText.trim()}
                 {...submittingProps(isRunning)}
-                className="px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition"
+                className="px-4 max-sm:px-3 max-sm:ml-auto max-w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex max-sm:flex-wrap max-sm:[overflow-wrap:anywhere] items-center justify-center gap-1.5 shadow-xs transition"
               >
-                {isRunning ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <Send aria-hidden="true" className="w-4 h-4" />}
+                {isRunning ? <Loader2 aria-hidden="true" className="w-4 h-4 shrink-0 animate-spin" /> : <Send aria-hidden="true" className="w-4 h-4 shrink-0" />}
                 {t('ticketItem.send')}
                 <SubmittingText busy={isRunning} />
               </button>
