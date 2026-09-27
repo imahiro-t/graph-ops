@@ -44,6 +44,10 @@
 // child of the overlay -- no wrapper in between -- so a click on the
 // darkened area is still a click on the overlay itself
 // (e.target === e.currentTarget) and cancels.
+// The button row wraps (`flex-wrap`) and each button is at most as wide as
+// the dialog (`max-w-full break-words`): at 200% on a 320px screen Cancel and
+// Start do not fit side by side, and with `justify-end` an unwrapped row
+// would overflow to the left, where no scrolling reaches.
 import React, { useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useModalDialog } from '../hooks/useModalDialog';
@@ -111,13 +115,13 @@ export const ConfirmDialog: React.FC<Props> = ({
           {message}
         </p>
         {children}
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex flex-wrap justify-end gap-2 pt-2">
           <button
             ref={cancelRef}
             type="button"
             data-testid={`${testIdPrefix}-cancel`}
             onClick={onCancel}
-            className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 transition"
+            className="max-w-full break-words px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 transition"
           >
             {cancelLabel}
           </button>
@@ -125,7 +129,7 @@ export const ConfirmDialog: React.FC<Props> = ({
             type="button"
             data-testid={`${testIdPrefix}-confirm`}
             onClick={onConfirm}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold text-white shadow-xs transition ${
+            className={`max-w-full break-words px-4 py-2 rounded-lg text-xs font-semibold text-white shadow-xs transition ${
               tone === 'danger' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
             }`}
           >

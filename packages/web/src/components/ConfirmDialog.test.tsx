@@ -168,6 +168,20 @@ describe('ConfirmDialog', () => {
       expect(screen.getByText('Really?')).toHaveClass('break-words');
     });
 
+    it('wraps the button row and caps each button at the dialog width', async () => {
+      await openDialog();
+      const cancel = screen.getByTestId('confirm-dialog-cancel');
+      const confirm = screen.getByTestId('confirm-dialog-confirm');
+      const row = cancel.parentElement!;
+      expect(confirm.parentElement).toBe(row);
+      // justify-end without wrapping would push Cancel off the left edge,
+      // out of scrolling reach, when both buttons do not fit on one line.
+      expect(row).toHaveClass('flex', 'flex-wrap', 'justify-end');
+      for (const button of [cancel, confirm]) {
+        expect(button).toHaveClass('max-w-full', 'break-words');
+      }
+    });
+
     it('adds no horizontal scrolling', async () => {
       await openDialog();
       for (const el of [screen.getByTestId('confirm-dialog-overlay'), screen.getByRole('dialog')]) {
