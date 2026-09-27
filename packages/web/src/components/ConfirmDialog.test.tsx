@@ -10,11 +10,12 @@ interface HarnessProps {
   onCancel?: () => void;
   onOuterClick?: () => void;
   tone?: 'default' | 'danger';
+  children?: React.ReactNode;
 }
 
 // An opener that mounts the dialog while it is pending, inside a clickable
 // ancestor (like a ticket card's header).
-const Harness: React.FC<HarnessProps> = ({ onConfirm, onCancel, onOuterClick, tone }) => {
+const Harness: React.FC<HarnessProps> = ({ onConfirm, onCancel, onOuterClick, tone, children }) => {
   const [open, setOpen] = useState(false);
   const fallbackRef = useRef<HTMLDivElement>(null);
   return (
@@ -38,7 +39,9 @@ const Harness: React.FC<HarnessProps> = ({ onConfirm, onCancel, onOuterClick, to
             onCancel?.();
             setOpen(false);
           }}
-        />
+        >
+          {children}
+        </ConfirmDialog>
       )}
     </div>
   );
@@ -120,8 +123,96 @@ describe('ConfirmDialog', () => {
     expect(screen.getByTestId('confirm-dialog-confirm')).toHaveFocus();
   });
 
+  it('renders no extra content without children', async () => {
+    await openDialog();
+    const dialog = screen.getByRole('dialog');
+    expect(Array.from(dialog.children).map(c => c.tagName)).toEqual(['H2', 'P', 'DIV']);
+  });
+
+  it('renders children between the message and the buttons, outside the description', async () => {
+    await openDialog({ children: <fieldset data-testid="extra"><legend>Pick</legend></fieldset> });
+    const dialog = screen.getByRole('dialog', { name: 'Title' });
+    const extra = screen.getByTestId('extra');
+    expect(dialog).toContainElement(extra);
+    expect(extra.previousElementSibling).toBe(screen.getByText('Really?'));
+    expect(extra.nextElementSibling).toContainElement(screen.getByTestId('confirm-dialog-cancel'));
+    expect(dialog).toHaveAccessibleDescription('Really?');
+  });
+
   it('is rendered outside the ancestor, directly under body', async () => {
     await openDialog();
     expect(screen.getByTestId('outer')).not.toContainElement(screen.getByRole('dialog'));
+  });
+
+  // DFLT-00233: jsdom does not lay anything out, so these check the structure
+  // that lets a dialog taller than the window scroll instead of being cut off.
+  describe('when taller than the window', () => {
+    it('scrolls the overlay vertically and centres the dialog with auto margins', async () => {
+      await openDialog();
+      const overlay = screen.getByTestId('confirm-dialog-overlay');
+      expect(overlay).toHaveClass('fixed', 'inset-0', 'flex', 'overflow-y-auto', 'overscroll-contain');
+      // items-center would push an overflowing dialog's top out of reach.
+      expect(overlay).not.toHaveClass('items-center');
+      expect(overlay).not.toHaveClass('justify-center');
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveClass('m-auto');
+    });
+
+    it('keeps the dialog a direct child of the overlay, as wide as it at most', async () => {
+      await openDialog();
+      const overlay = screen.getByTestId('confirm-dialog-overlay');
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.parentElement).toBe(overlay);
+      expect(dialog).toHaveClass('w-full', 'max-w-md', 'min-w-0');
+      expect(screen.getByRole('heading', { name: 'Title' })).toHaveClass('break-words');
+      expect(screen.getByText('Really?')).toHaveClass('break-words');
+    });
+
+    it('wraps the button row and caps each button at the dialog width', async () => {
+      await openDialog();
+      const cancel = screen.getByTestId('confirm-dialog-cancel');
+      const confirm = screen.getByTestId('confirm-dialog-confirm');
+      const row = cancel.parentElement!;
+      expect(confirm.parentElement).toBe(row);
+      // justify-end without wrapping would push Cancel off the left edge,
+      // out of scrolling reach, when both buttons do not fit on one line.
+      expect(row).toHaveClass('flex', 'flex-wrap', 'justify-end');
+      for (const button of [cancel, confirm]) {
+        expect(button).toHaveClass('max-w-full', 'break-words');
+      }
+    });
+
+    it('adds no horizontal scrolling', async () => {
+      await openDialog();
+      for (const el of [screen.getByTestId('confirm-dialog-overlay'), screen.getByRole('dialog')]) {
+        expect(el).not.toHaveClass('overflow-x-auto');
+        expect(el).not.toHaveClass('overflow-x-scroll');
+        expect(el).not.toHaveClass('overflow-auto');
+        expect(el).not.toHaveClass('overflow-scroll');
+      }
+    });
+
+    it('puts the title, message, children and both buttons inside the scrolling overlay', async () => {
+      await openDialog({ children: <fieldset data-testid="extra"><legend>Pick</legend></fieldset> });
+      const overlay = screen.getByTestId('confirm-dialog-overlay');
+      const dialog = screen.getByRole('dialog', { name: 'Title' });
+      for (const el of [
+        screen.getByRole('heading', { name: 'Title' }),
+        screen.getByText('Really?'),
+        screen.getByTestId('extra'),
+        screen.getByTestId('confirm-dialog-cancel'),
+        screen.getByTestId('confirm-dialog-confirm')
+      ]) {
+        expect(dialog).toContainElement(el);
+      }
+      expect(overlay).toContainElement(dialog);
+    });
+
+    it('still cancels on a click on the overlay beside the dialog', async () => {
+      const onCancel = vi.fn();
+      const user = await openDialog({ onCancel });
+      await user.click(screen.getByTestId('confirm-dialog-overlay'));
+      expect(onCancel).toHaveBeenCalledTimes(1);
+    });
   });
 });

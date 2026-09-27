@@ -1094,10 +1094,15 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans">
-      {/* Top Header */}
-      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-3.5 sticky top-0 z-30 shadow-xs">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
+      {/* Top Header. Sticky only from lg up (DFLT-00220): below that its rows
+          wrap, and a header several lines tall pinned to the top covered the
+          expanded ticket's Action Footer while scrolling. `relative` keeps
+          z-30 in effect there, so the project switcher's and the filters'
+          panels still open in front of <main>. At lg and up it looks and
+          behaves as before (same padding, one line, sticky). */}
+      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 lg:px-6 py-3.5 relative lg:sticky lg:top-0 z-30 shadow-xs">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
             {/* Same file as the favicon, so the two never drift apart. It paints its own indigo
                 background, so it stays visible on both light and dark headers without `dark:` variants.
                 Decorative: the adjacent "GraphOps" text already names the app. */}
@@ -1108,9 +1113,9 @@ export const App: React.FC = () => {
             <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">{t('header.subtitle')}</span>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 min-w-0">
             <div
-              className="relative"
+              className="relative min-w-0"
               onKeyDown={handleProjectSwitcherKeyDown}
               onPointerDown={handleProjectSwitcherPointerDown}
               onBlur={handleProjectSwitcherBlur}
@@ -1276,8 +1281,8 @@ export const App: React.FC = () => {
 
         {/* Filter Toolbar */}
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative">
+          <div className="flex flex-wrap items-center gap-3 min-w-0">
+            <div className="relative max-w-full">
               {/* DFLT-00163: WCAG 1.4.11 (3:1). The magnifier marks this as a search field once the
                   placeholder is gone. slate-500 is 4.55:1 on the slate-50 input; slate-400 is
                   5.71:1 on the slate-800 input. */}
@@ -1294,7 +1299,7 @@ export const App: React.FC = () => {
                 // (WCAG 2.4.7). blue-500 is 3.52:1 on the slate-50 input and 3.68:1 on the white
                 // toolbar; blue-400 is 5.75:1 on the slate-800 input and 7.02:1 on the slate-900
                 // toolbar (WCAG 1.4.11). Text fields match :focus-visible on a click as well.
-                className="pl-8 pr-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs focus:outline-none focus:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 w-56 text-slate-900 dark:text-slate-100"
+                className="pl-8 pr-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs focus:outline-none focus:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 w-56 max-w-full text-slate-900 dark:text-slate-100"
               />
             </div>
 
@@ -1383,7 +1388,7 @@ export const App: React.FC = () => {
             <span className="text-xs text-slate-500 dark:text-slate-400">{t('summary.subtitle')}</span>
           </div>
 
-          <div className="flex items-center gap-6 divide-x divide-slate-200 dark:divide-slate-700 text-xs">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 sm:divide-x divide-slate-200 dark:divide-slate-700 text-xs">
             <div className="text-center px-3">
               <div className="text-lg font-bold text-slate-800 dark:text-slate-200">{totalCount}</div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.total')}</div>

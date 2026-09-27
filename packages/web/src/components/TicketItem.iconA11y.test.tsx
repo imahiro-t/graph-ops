@@ -93,7 +93,7 @@ describe('TicketItem icon accessibility', () => {
     ];
     for (const name of tabs) {
       // The tab buttons are named by their text; the icon in front adds nothing.
-      const tab = screen.getByRole('button', { name });
+      const tab = screen.getByRole('tab', { name });
       expectAllIconsHidden(tab);
       fireEvent.click(tab);
       expectAllIconsHidden(container);

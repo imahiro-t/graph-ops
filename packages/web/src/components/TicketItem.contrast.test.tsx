@@ -168,7 +168,7 @@ describe('TicketItem secondary text contrast (WCAG 1.4.3, DFLT-00162)', () => {
   it('draws the "no artifacts yet" placeholder in slate-500 / dark:slate-400', async () => {
     const user = userEvent.setup();
     renderItem(makeTicket(), true);
-    await user.click(screen.getByRole('button', { name: i18n.t('ticketItem.tabs.artifacts', { count: 0 }) }));
+    await user.click(screen.getByRole('tab', { name: i18n.t('ticketItem.tabs.artifacts', { count: 0 }) }));
     expectContrastColors(screen.getByText(i18n.t('ticketItem.noArtifactsYet')));
   });
 

@@ -114,7 +114,10 @@ describe('TicketItem labels', () => {
 
     const labels = screen.getByTestId('ticket-header-labels');
     expect(row).toContainElement(labels);
-    expect(labels).toHaveClass('shrink-0');
+    // DFLT-00232: the labels wrap onto the next line (and, on a line of
+    // their own that is too narrow, wrap their chips) rather than being
+    // held at their full width past the card; the title still truncates.
+    expect(labels).toHaveClass('flex-wrap', 'min-w-0', 'max-w-full');
 
     // The left group is the row's first child and holds the title and labels;
     // it must be able to shrink so the title truncates instead of overflowing.

@@ -84,6 +84,29 @@ interface Props {
 // rest into "+N" -- the row already carries id/status/priority/title/assignee.
 const MAX_HEADER_LABELS = 3;
 
+// The artifact panel's tab buttons (DFLT-00238). Below lg a tab may shrink
+// under its longest word (max-lg:min-w-0, with its label span) and pads less
+// (px-3), so more of them share a wrapped line. With a large default font on
+// a narrow screen (under 15rem, the query DFLT-00227 uses) it pads less still
+// and puts the icon on a line of its own, so a tab stays a few lines tall
+// rather than a word per line. From lg up the tab keeps its min-width and
+// lg:px-4 gives back the padding. The icon keeps its 16px at every width
+// (shrink-0, DFLT-00240): from lg up it used to shrink to 6-13px whenever the
+// tab squeezed its label onto more lines.
+const artifactTabClass = (active: boolean) =>
+  `max-lg:min-w-0 py-3 px-3 lg:px-4 [@media(max-width:15rem)]:px-2 [@media(max-width:15rem)]:py-2 text-xs font-bold border-b-2 flex [@media(max-width:15rem)]:flex-wrap items-center gap-x-2 gap-y-1 transition ${
+    active
+      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+  }`;
+
+// The artifact panel's tabs, in display order. They form a WAI-ARIA tab
+// pattern with automatic activation (DFLT-00243): only the selected tab is in
+// the Tab order, and the arrow keys (wrapping at the ends) and Home/End move
+// the selection along this list.
+const ARTIFACT_TABS = ['nodes', 'gherkin', 'html', 'artifacts'] as const;
+type ArtifactTab = (typeof ARTIFACT_TABS)[number];
+
 // How long the ID copy button shows its "copied"/"failed" state before going
 // back to idle (DFLT-00143).
 const COPY_FEEDBACK_MS = 1500;
@@ -336,7 +359,43 @@ export const TicketItem: React.FC<Props> = ({
 }) => {
   const { t, i18n } = useTranslation();
   const [promptText, setPromptText] = useState('');
-  const [activeTab, setActiveTab] = useState<'nodes' | 'gherkin' | 'html' | 'artifacts'>('nodes');
+  const [activeTab, setActiveTab] = useState<ArtifactTab>('nodes');
+  // Ids for the artifact tabs and their panel (DFLT-00243). useId keeps them
+  // unique when several tickets are expanded on the same page.
+  const artifactTabsIdBase = useId();
+  const artifactTabId = (tab: ArtifactTab) => `${artifactTabsIdBase}-tab-${tab}`;
+  const artifactPanelId = `${artifactTabsIdBase}-panel`;
+  const artifactTabRefs = useRef<Partial<Record<ArtifactTab, HTMLButtonElement | null>>>({});
+  // Arrow keys (wrapping), Home and End select a tab and move focus to it,
+  // per the APG tabs pattern with automatic activation. Modified keys are
+  // left alone so browser shortcuts such as Alt+Left still work.
+  const handleArtifactTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.currentTarget.getAttribute('role') !== 'tab') return;
+    const index = ARTIFACT_TABS.indexOf(activeTab);
+    const last = ARTIFACT_TABS.length - 1;
+    let next: number;
+    switch (event.key) {
+      case 'ArrowRight':
+        next = index === last ? 0 : index + 1;
+        break;
+      case 'ArrowLeft':
+        next = index === 0 ? last : index - 1;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = last;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    const tab = ARTIFACT_TABS[next];
+    setActiveTab(tab);
+    artifactTabRefs.current[tab]?.focus();
+  };
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
   const { isLaunching: isRunning, lastMessage: statusMessage, launch: handleRunClaude } = useClaudeLaunch(onRefresh);
@@ -363,6 +422,37 @@ export const TicketItem: React.FC<Props> = ({
     const updateHeight = () => setNodeListCardHeight(el.getBoundingClientRect().height);
     updateHeight();
     const observer = new ResizeObserver(updateHeight);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isExpanded, ticket.nodes.length, ticket.edges.length]);
+
+  // DFLT-00241: below lg the graph keeps a floor width (max-lg:min-w-[180px]
+  // on the <svg>) and its box scrolls sideways inside the panel when the
+  // panel is narrower than that -- 160px wide, or 320px with a 200% default
+  // font. Only while it actually scrolls does the box become a named,
+  // focusable region, so keyboard users can scroll it; from lg up (where it
+  // never scrolls) and on ordinary phones it adds no tab stop.
+  const graphScrollRef = useRef<HTMLDivElement>(null);
+  const graphTitleId = useId();
+  const [isGraphScrollable, setIsGraphScrollable] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!isExpanded) return;
+    const el = graphScrollRef.current;
+    if (!el) return;
+    // The graph's main column of nodes sits at its horizontal centre, so the
+    // box starts scrolled to the middle when it first becomes scrollable
+    // (scrollLeft 0 would show only the left edge -- loop arcs and side
+    // nodes). Later resizes leave the viewer's own scroll position alone.
+    let wasScrollable = false;
+    const update = () => {
+      const scrollable = el.scrollWidth > el.clientWidth + 1;
+      if (scrollable && !wasScrollable) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
+      wasScrollable = scrollable;
+      setIsGraphScrollable(scrollable);
+    };
+    update();
+    const observer = new ResizeObserver(update);
     observer.observe(el);
     return () => observer.disconnect();
   }, [isExpanded, ticket.nodes.length, ticket.edges.length]);
@@ -960,7 +1050,7 @@ export const TicketItem: React.FC<Props> = ({
     const isInProgress = status === 'IN PROGRESS';
     const isNotStarted = meta === TODO_META;
     return (
-      <span className={`text-[11px] px-2 py-0.5 rounded-full ${isNotStarted ? 'font-medium' : 'font-bold'} ${meta.chip.bg} ${meta.chip.text}${isInProgress ? ' flex items-center gap-1' : ''}`}>
+      <span className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${isNotStarted ? 'font-medium' : 'font-bold'} ${meta.chip.bg} ${meta.chip.text}${isInProgress ? ' flex items-center gap-1' : ''}`}>
         {isInProgress && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />}
         {t(meta.labelKey)}
       </span>
@@ -1221,15 +1311,30 @@ export const TicketItem: React.FC<Props> = ({
           space once a long title stretches the flex-1 left group all the way
           to the right, so its last item (a label chip, "+N", the rejected
           badge or the title) would touch the first item on the right (the
-          assignee chip/button or the node progress). */}
+          assignee chip/button or the node progress).
+          DFLT-00232: the row, the left group and the right-hand group wrap
+          (flex-wrap) instead of running past the card. The card's
+          overflow-clip hid whatever ran past it (the autopilot badges first:
+          they come last), and an absolutely positioned sr-only text in it
+          whose containing block lies outside the card was not clipped at
+          all and widened the page, so a ticket waiting for a person made
+          the page scroll sideways at 320px, and at 375-700px with a 150-200%
+          default font size. Wrapping never happens while everything fits on
+          one line with the title at least 3rem wide (see the title), so the
+          default size on a wide screen looks as before. The left group's
+          basis-64 (16rem) is what it claims before the right-hand group
+          moves to a line of its own; it still grows to take the rest of the
+          line (flex-1). With a large default font on a narrow screen
+          (under 15rem, the same rem query as the expanded panel, DFLT-00227)
+          the row pads with p-3 instead of p-4. */}
       <div
         ref={headerRowRef}
         onMouseDown={handleHeaderMouseDown}
         onClick={handleHeaderClick}
         data-testid="ticket-header-row"
-        className="p-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition select-none"
+        className="p-4 [@media(max-width:15rem)]:p-3 flex flex-wrap items-center justify-between gap-4 gap-y-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition select-none"
       >
-        <div className="flex items-center gap-3 flex-1 min-w-0">
+        <div className="flex flex-wrap items-center gap-3 gap-y-2 flex-1 basis-64 min-w-0">
           {/* The chevron is the row's keyboard / assistive-technology entry
               point: a named button whose aria-expanded mirrors the row
               (DFLT-00152). It deliberately has no onClick of its own -- the
@@ -1325,19 +1430,30 @@ export const TicketItem: React.FC<Props> = ({
               actually shrink below its own text's natural width -- without
               it, a long title would instead push the id/status badges (and
               the right-hand action area) to wrap/overflow. This is the one
-              element in the row meant to give up space first. */}
+              element in the row meant to give up space first.
+              DFLT-00232: in the wrapping left group the title's flex basis
+              is 3rem (basis-12), capped at its own width (max-w-max), and it
+              grows into the rest of its line (grow). So a line break is only
+              taken once the title would be squeezed under 3rem -- before
+              that it truncates exactly as it did in the one-line row -- and
+              a short title still ends right after its text, with the labels
+              and badges next to it. */}
           <span
             data-testid="ticket-header-title"
-            className="font-bold text-slate-900 dark:text-slate-100 text-sm truncate min-w-0 select-text cursor-text"
+            className="grow basis-12 max-w-max font-bold text-slate-900 dark:text-slate-100 text-sm truncate min-w-0 select-text cursor-text"
           >
             {ticket.title}
           </span>
 
           {/* Labels (DFLT-00084): at most MAX_HEADER_LABELS chips, the rest
-              folded into "+N" whose title lists every label name. shrink-0
-              keeps them intact; the title above is what truncates. */}
+              folded into "+N" whose title lists every label name. The title
+              above is what truncates; the labels wrap onto the next line
+              instead (DFLT-00232), and only shrink -- wrapping their chips,
+              each of which truncates its own name -- when even a line of
+              their own is too narrow. "+N" is relative so that its sr-only
+              text is clipped by the card like the rest of the row. */}
           {ticketLabels.length > 0 && (
-            <span className="flex items-center gap-1 shrink-0" data-testid="ticket-header-labels">
+            <span className="flex flex-wrap items-center gap-1 min-w-0 max-w-full" data-testid="ticket-header-labels">
               {headerLabels.map(l => (
                 <LabelChip key={l.id} name={l.name} color={l.color} />
               ))}
@@ -1345,7 +1461,7 @@ export const TicketItem: React.FC<Props> = ({
                 <span
                   data-testid="ticket-header-labels-more"
                   title={ticketLabels.map(l => l.name).join(', ')}
-                  className="px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-semibold"
+                  className="relative px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-semibold"
                 >
                   {/* The bare "+N" means nothing read aloud, and screen
                       readers don't reliably read title: they get the
@@ -1365,9 +1481,12 @@ export const TicketItem: React.FC<Props> = ({
             </span>
           )}
 
+          {/* DFLT-00232: no shrink-0 -- on a line of its own that is too
+              narrow the badge shrinks (min-w-0 max-w-full) and its name
+              truncates further, instead of running past the card. */}
           {rejectedApprovalNodes.length > 0 && (
             <span
-              className="flex items-center gap-1.5 pl-2 pr-2 py-0.5 rounded-full bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-[11px] font-bold shrink-0"
+              className="flex items-center gap-1.5 min-w-0 max-w-full pl-2 pr-2 py-0.5 rounded-full bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-[11px] font-bold"
               onClick={e => e.stopPropagation()}
               title={t('ticketItem.approvalGate.rejectedHint')}
             >
@@ -1386,11 +1505,13 @@ export const TicketItem: React.FC<Props> = ({
           <AutopilotBadges view={autopilot} />
         </div>
 
-        {/* Right Info: Self-assign chip, Progress Pill. shrink-0 keeps this whole
-            group (and everything inside it) at its natural width -- the
-            ticket title above is the only thing that gives up space when
-            the row is too narrow. */}
-        <div className="flex items-center gap-4 text-xs shrink-0">
+        {/* Right Info: Self-assign chip, Progress Pill. While it shares a
+            line with the left group it keeps its natural width -- the
+            ticket title above is the only thing that gives up space. When
+            the left group's 16rem and this group do not fit side by side,
+            it moves to a line of its own, and only there, if still too
+            narrow, wraps its items and the node squares (DFLT-00232). */}
+        <div className="flex flex-wrap items-center gap-4 gap-y-2 text-xs min-w-0">
           {/* Assignee chip. The read-only "someone else has this" chip must
               stay visible regardless of whether the viewer has configured a
               "アプリ設定" myName -- it conveys who has the ticket, which has
@@ -1451,8 +1572,8 @@ export const TicketItem: React.FC<Props> = ({
           )}
 
           {totalNodes > 0 && (
-            <div className="flex items-center gap-2">
-              <div className="flex gap-0.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="flex flex-wrap gap-0.5 min-w-0">
                 {ticket.nodes.map(n => {
                   const displayStatus = getDisplayStatus(n);
                   const isPendingApproval = pendingApprovalNodeIds.has(n.id);
@@ -1592,9 +1713,20 @@ export const TicketItem: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Expanded Ticket Details */}
+      {/* Expanded Ticket Details. Its padding and the Action Footer's are in
+          rem, so they double with a 200% default font size; nested inside
+          the page's own padding, at 320px they left the action row about
+          60px. So with large text on a narrow screen -- a viewport under
+          15rem wide, in the browser's default font size -- both cards pad
+          with p-3 instead. A rem media query follows that default size
+          alone: at 100% it matches only below 240px (so 320px and up look as
+          before), at 150% below 360px and at 200% below 480px (320px and
+          375px, but not sm+) (DFLT-00227). */}
       {isExpanded && (
-        <div className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 space-y-6">
+        <div
+          data-testid="ticket-details"
+          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 [@media(max-width:15rem)]:p-3 space-y-6"
+        >
           {/* Metadata Bar */}
           <div className="flex flex-wrap items-center gap-y-2 gap-x-6 text-xs text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800 pb-3">
             <div>
@@ -1682,14 +1814,30 @@ export const TicketItem: React.FC<Props> = ({
                 always renders its full content with no scrollbar. When it
                 grows past that floor, nodeListCardHeight (measured via
                 ResizeObserver above) carries the same height over to the
-                node/artifact panel on the right. */}
-            <div ref={graphPanelRef} className="lg:col-span-4 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col min-h-[32rem]">
-              <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 w-full text-left flex items-center justify-between shrink-0">
-                <span>{t('ticketItem.graphTitle')}</span>
+                node/artifact panel on the right.
+                DFLT-00241: below lg (one column, so there is no height to
+                sync) the graph's height follows its width instead of the
+                fixed svgHeight -- max-lg:h-auto on the <svg> overrides the
+                height attribute, which still applies from lg up exactly as
+                before -- so a narrow panel shows the whole graph scaled
+                down in proportion rather than a thin strip in a tall empty
+                box. A graph with nodes never gets narrower than 180px (about
+                as wide as a 320px phone at the default font gives it); when the
+                panel is narrower still, the graph's box scrolls sideways
+                inside the panel instead of the page. mx-auto rather than
+                the container's items-center keeps the graph's left edge
+                reachable in that case. */}
+            <div ref={graphPanelRef} className="lg:col-span-4 min-w-0 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col min-h-[32rem]">
+              <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 w-full text-left flex items-center justify-between shrink-0 max-lg:flex-wrap max-lg:gap-x-2 max-lg:[overflow-wrap:anywhere]">
+                <span id={graphTitleId} className="max-lg:min-w-0">{t('ticketItem.graphTitle')}</span>
                 <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold">{t('ticketItem.progress', { percent: progressPercent })}</span>
               </div>
-              <div className="flex-1 flex flex-col items-center justify-center">
-              <svg className="w-full max-w-[340px] shrink-0" height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
+              <div
+                ref={graphScrollRef}
+                className="flex-1 flex flex-col items-center justify-center max-lg:overflow-x-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                {...(isGraphScrollable ? { role: 'region', 'aria-labelledby': graphTitleId, tabIndex: 0 } : {})}
+              >
+              <svg data-testid="ticket-graph" className={`w-full max-w-[340px] shrink-0 max-lg:h-auto max-lg:mx-auto${ticket.nodes.length > 0 ? ' max-lg:min-w-[180px]' : ''}`} height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
                 {/* 1. Forward edges -- straight lines between each node's actual
                     (level, column) position, so a fan-out to several nodes on
                     the same row reads as a fork instead of a straight line down. */}
@@ -1822,14 +1970,16 @@ export const TicketItem: React.FC<Props> = ({
                   );
                 })}
               </svg>
+              {/* sticky left-0 below lg keeps the hint in view while the
+                  graph's box is scrolled sideways (DFLT-00241). */}
               {hasParallelRows && (
-                <div className="w-full mt-2 text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold flex items-center gap-1 shrink-0">
+                <div className="w-full mt-2 text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold flex items-center gap-1 shrink-0 max-lg:sticky max-lg:left-0">
                   <Layers aria-hidden="true" className="w-3 h-3" />
                   {t('ticketItem.parallelHint')}
                 </div>
               )}
               </div>
-              <div className="w-full mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400 shrink-0">
+              <div className="w-full mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400 shrink-0 max-lg:[overflow-wrap:anywhere]">
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> {t('ticketItem.legend.done')}</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> {t('ticketItem.legend.inProgress')}</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500" /> {t('ticketItem.legend.review')}</span>
@@ -1852,68 +2002,112 @@ export const TicketItem: React.FC<Props> = ({
               className="lg:col-span-8 flex flex-col bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs lg:sticky lg:top-20 min-h-[32rem]"
               style={nodeListCardHeight ? { height: nodeListCardHeight } : undefined}
             >
-              {/* Tab Navigation */}
-              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 px-4 bg-slate-50 dark:bg-slate-800 shrink-0">
-              <div className="flex">
-                <button
-                  onClick={() => setActiveTab('nodes')}
-                  className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition ${
-                    activeTab === 'nodes'
-                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <GitBranch aria-hidden="true" className="w-4 h-4" />
-                  {t('ticketItem.tabs.nodes', { count: totalNodes })}
-                </button>
-                <button
-                  onClick={() => setActiveTab('gherkin')}
-                  className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition ${
-                    activeTab === 'gherkin'
-                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <FileCode aria-hidden="true" className="w-4 h-4 text-amber-500" />
-                  {t('ticketItem.tabs.gherkin', { count: gherkinArtifacts.length })}
-                </button>
-                <button
-                  onClick={() => setActiveTab('html')}
-                  className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition ${
-                    activeTab === 'html'
-                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <Globe aria-hidden="true" className="w-4 h-4 text-cyan-500" />
-                  {t('ticketItem.tabs.html', { count: htmlArtifacts.length })}
-                </button>
-                <button
-                  onClick={() => setActiveTab('artifacts')}
-                  className={`py-3 px-4 text-xs font-bold border-b-2 flex items-center gap-2 transition ${
-                    activeTab === 'artifacts'
-                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <FileText aria-hidden="true" className="w-4 h-4 text-emerald-500" />
-                  {t('ticketItem.tabs.artifacts', { count: ticket.artifacts.length })}
-                </button>
+              {/* Tab Navigation.
+                  DFLT-00238: below lg the row, and the tab group inside it,
+                  wrap instead of running past the panel. At 320-375px (and
+                  with a 200% default font or zoom) the four tabs and the
+                  download link used to reach 415-1260px while the panel's
+                  overflow-hidden clipped them at its right edge, so the
+                  last tabs and the link could be focused but not seen.
+                  Below lg the tab group, each tab and the link may also
+                  shrink (min-w-0) and break their label inside, so one
+                  label wider than the panel still fits, and the link keeps
+                  to the right (ml-auto) when it drops to a line of its own.
+                  Under 15rem (a large default font on a narrow screen) the
+                  row, the tabs and the link pad less and put their icon on
+                  a line of its own; otherwise the stacked tabs grew taller
+                  than the panel, whose height is pinned to the graph's, and
+                  its overflow-hidden cut off their bottom instead.
+                  From lg up the tab group stays on one line (lg:flex-nowrap)
+                  and the tabs and the link keep their min-widths
+                  (lg:px-4, lg:shrink-0). The row itself only stops wrapping
+                  from xl up (xl:flex-nowrap, xl:pb-0; DFLT-00240): at 1024px
+                  in English the four tabs already sat at their min-widths
+                  and the link ran about 14px past the panel, so between lg
+                  and xl the link drops to a line of its own, on the right
+                  (ml-auto), whenever it does not fit beside the tabs. From
+                  xl up the tabs and the link share one row as before.
+                  jsdom does no layout, so TicketItem.tabRowWrap.test.tsx
+                  pins the classes; the widths and heights were measured in
+                  a real browser (see the tickets' implementation notes). */}
+              <div
+                data-testid="ticket-artifact-tabs"
+                className="flex flex-wrap xl:flex-nowrap items-center justify-between gap-y-1 border-b border-slate-200 dark:border-slate-800 px-4 [@media(max-width:15rem)]:px-2 pb-2 xl:pb-0 bg-slate-50 dark:bg-slate-800 shrink-0"
+              >
+              <div
+                role="tablist"
+                aria-label={t('ticketItem.tabListLabel')}
+                className="flex flex-wrap lg:flex-nowrap max-lg:min-w-0"
+              >
+                {ARTIFACT_TABS.map((tab) => {
+                  const selected = activeTab === tab;
+                  let icon: React.ReactNode;
+                  let count: number;
+                  switch (tab) {
+                    case 'nodes':
+                      icon = <GitBranch aria-hidden="true" className="w-4 h-4 shrink-0" />;
+                      count = totalNodes;
+                      break;
+                    case 'gherkin':
+                      icon = <FileCode aria-hidden="true" className="w-4 h-4 shrink-0 text-amber-500" />;
+                      count = gherkinArtifacts.length;
+                      break;
+                    case 'html':
+                      icon = <Globe aria-hidden="true" className="w-4 h-4 shrink-0 text-cyan-500" />;
+                      count = htmlArtifacts.length;
+                      break;
+                    case 'artifacts':
+                      icon = <FileText aria-hidden="true" className="w-4 h-4 shrink-0 text-emerald-500" />;
+                      count = ticket.artifacts.length;
+                      break;
+                  }
+                  return (
+                    <button
+                      key={tab}
+                      ref={(el) => {
+                        artifactTabRefs.current[tab] = el;
+                      }}
+                      type="button"
+                      role="tab"
+                      id={artifactTabId(tab)}
+                      aria-selected={selected}
+                      aria-controls={artifactPanelId}
+                      tabIndex={selected ? 0 : -1}
+                      onClick={() => setActiveTab(tab)}
+                      onKeyDown={handleArtifactTabKeyDown}
+                      className={artifactTabClass(selected)}
+                    >
+                      {icon}
+                      <span className="max-lg:min-w-0 break-words">{t(`ticketItem.tabs.${tab}`, { count })}</span>
+                    </button>
+                  );
+                })}
               </div>
               {ticket.artifacts.length > 0 && (
                 <a
                   href={`/api/tickets/${ticket.id}/artifacts/download`}
-                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:border-indigo-400 dark:hover:border-indigo-500 transition"
+                  className="ml-auto min-w-0 lg:shrink-0 flex [@media(max-width:15rem)]:flex-wrap items-center gap-1.5 px-3 [@media(max-width:15rem)]:px-2 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:border-indigo-400 dark:hover:border-indigo-500 transition"
                   title={t('ticketItem.downloadAllArtifacts')}
                 >
-                  <Download aria-hidden="true" className="w-3.5 h-3.5" />
-                  {t('ticketItem.downloadAllArtifacts')}
+                  <Download aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />
+                  <span className="min-w-0 break-words">{t('ticketItem.downloadAllArtifacts')}</span>
                 </a>
               )}
               </div>
 
-              {/* Tab Contents */}
-              <div className="p-4 flex-1 min-h-0 overflow-y-auto">
+              {/* Tab Contents. One tabpanel shows the selected tab's content
+                  (DFLT-00243). It is focusable (tabIndex 0, as the APG
+                  recommends when a panel may hold nothing focusable, e.g. an
+                  empty tab) so the keyboard can reach and scroll it; the
+                  ring shows only on keyboard focus and is inset so the
+                  scroll container does not clip it. */}
+              <div
+                role="tabpanel"
+                id={artifactPanelId}
+                aria-labelledby={artifactTabId(activeTab)}
+                tabIndex={0}
+                className="p-4 flex-1 min-h-0 overflow-y-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+              >
                 {/* 1. Nodes with Expandable Artifacts */}
                 {activeTab === 'nodes' && (
                   <div className="space-y-2">
@@ -1927,15 +2121,31 @@ export const TicketItem: React.FC<Props> = ({
                           key={node.id}
                           className="rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 overflow-hidden text-xs transition"
                         >
+                          {/* DFLT-00242: below lg the row wraps instead of
+                              letting the left group run under the right one.
+                              flex-wrap alone is not enough: flex-1 is a 0%
+                              basis, and with min-w-0 the left group counts as
+                              0px when lines are formed, so the right group
+                              would always stay on the first line and the
+                              overlap would remain. max-lg:basis-auto sizes
+                              the left group by its content, so when the two
+                              groups don't fit side by side the right group
+                              moves to the next line (right-aligned by its
+                              max-lg:ml-auto). From lg up the row is
+                              unchanged: one line, name truncated. */}
                           <div
                             onClick={() => toggleNodeExpand(node.id)}
-                            className="flex items-center justify-between p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none"
+                            className="flex items-center justify-between p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none max-lg:flex-wrap max-lg:gap-x-3 max-lg:gap-y-2"
                           >
-                            {/* flex-1 min-w-0 lets node.name (below) shrink
-                                and truncate first -- everything else in this
-                                row is shrink-0 so the id/type/retry/manual/
-                                artifact badges never wrap. */}
-                            <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                            {/* From lg up, flex-1 min-w-0 lets node.name
+                                (below) shrink and truncate first --
+                                everything else in this row is shrink-0 so the
+                                id/type/retry/manual/artifact badges never
+                                wrap. Below lg (DFLT-00242) the group wraps
+                                between those badges instead, and the name
+                                (and, only if it alone is wider than the row,
+                                the id) wraps rather than truncating. */}
+                            <div className="flex items-center gap-2.5 flex-1 min-w-0 max-lg:basis-auto max-lg:flex-wrap max-lg:gap-y-1.5">
                               {/* Named toggle for the node row (DFLT-00152).
                                   No onClick of its own: its click bubbles to
                                   the row's toggleNodeExpand, so it toggles
@@ -1969,11 +2179,11 @@ export const TicketItem: React.FC<Props> = ({
                                   id uses the same pair for the same reason
                                   (DFLT-00164). */}
                               <span className="font-mono text-slate-600 dark:text-slate-300 w-4 shrink-0">{index + 1}</span>
-                              <span className="font-mono font-bold text-slate-600 dark:text-slate-300 shrink-0 whitespace-nowrap">
+                              <span className="font-mono font-bold text-slate-600 dark:text-slate-300 shrink-0 whitespace-nowrap max-lg:shrink max-lg:min-w-0 max-lg:whitespace-normal max-lg:[overflow-wrap:anywhere]">
                                 {node.id}
                               </span>
                               <NodeTypeBadge type={node.type} theme="light" className="shrink-0" />
-                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate min-w-0">
+                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate min-w-0 max-lg:whitespace-normal max-lg:[overflow-wrap:anywhere]">
                                 {node.name}
                               </span>
                               {node.iteration_count > 0 && (
@@ -1999,14 +2209,14 @@ export const TicketItem: React.FC<Props> = ({
                               )}
                             </div>
 
-                            <div className="flex items-center gap-3 shrink-0">
+                            <div className="flex items-center gap-3 shrink-0 max-lg:shrink max-lg:min-w-0 max-lg:flex-wrap max-lg:gap-y-1.5 max-lg:ml-auto max-lg:justify-end">
                               {/* Approve/Reject show up for whichever
                                   approval_gate the ticket is actually
                                   stuck on (pendingApprovalNodeIds), even
                                   without expanding the node's row -- see
                                   DFLT ticket for blinking-gate fix. */}
                               {pendingApprovalNodeIds.has(node.id) && rejectingNodeId !== node.id && (
-                                <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                                <div className="flex items-center gap-1.5 max-lg:flex-wrap" onClick={e => e.stopPropagation()}>
                                   {/* DFLT-00207: aria-disabled, not disabled,
                                       while the decision is sent: the pressed
                                       button keeps focus (a disabled one drops
@@ -2050,7 +2260,7 @@ export const TicketItem: React.FC<Props> = ({
                               )}
                               {getNodeBadge(getDisplayStatus(node))}
                               {/* slate-600 / slate-300 for the hover background (DFLT-00162, see the sequence number above). */}
-                              <span className="text-[11px] text-slate-600 dark:text-slate-300 font-mono">
+                              <span className="text-[11px] text-slate-600 dark:text-slate-300 font-mono whitespace-nowrap">
                                 {formatTime(node.updated_at, i18n.language)}
                               </span>
                             </div>
@@ -2304,47 +2514,67 @@ export const TicketItem: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* Action Footer: Claude Execution Panel */}
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('ticketItem.actions.label')}</span>
-                <button
-                  onClick={() => handleRunClaude(t('claudePrompts.refineTicket', { ticketId: ticket.id }), ticket.id)}
-                  disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
-                  {...submittingProps(isRunning)}
-                  className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
-                >
-                  {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 text-indigo-600" />}
-                  {t('ticketItem.actions.refine')}
-                  <SubmittingText busy={isRunning} />
-                </button>
-                <button
-                  onClick={() => handleRunClaude(t('claudePrompts.processTicket', { ticketId: ticket.id }), ticket.id)}
-                  disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
-                  {...submittingProps(isRunning)}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
-                >
-                  {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5" />}
-                  {t('ticketItem.actions.run')}
-                  <SubmittingText busy={isRunning} />
-                </button>
-              </div>
-            </div>
-
-            {/* Autopilot starts (DFLT-00142): refine through release without
-                a person, in terminals of their own. */}
+          {/* Action Footer: Claude Execution Panel. p-3 with large text on
+              a narrow screen, like the details around it (DFLT-00227). */}
+          <div
+            data-testid="ticket-action-footer"
+            className="bg-white dark:bg-slate-900 p-4 [@media(max-width:15rem)]:p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs"
+          >
+            {/* The action row (DFLT-00181): the regular actions (refine, then
+                run) on the left, and at its right end, set apart from them,
+                the autopilot start (DFLT-00142: refine through release
+                without a person, in terminals of their own). AutopilotControls
+                lays out the row and the lines under the autopilot button;
+                these actions stay outside its focus fallback (DFLT-00218).
+                Below sm their buttons may put the icon on a line of its own
+                and break the label anywhere, so with large text on a narrow
+                screen they stay inside the row (DFLT-00224, see
+                AutopilotControls). */}
             <div className="mb-3">
               <AutopilotControls
                 ticketId={ticket.id}
                 status={ticket.status}
                 view={autopilot}
                 onSettled={onAutopilotChanged}
+                actions={
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('ticketItem.actions.label')}</span>
+                    <button
+                      onClick={() => handleRunClaude(t('claudePrompts.refineTicket', { ticketId: ticket.id }), ticket.id)}
+                      disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
+                      {...submittingProps(isRunning)}
+                      className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:[overflow-wrap:anywhere] items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
+                    >
+                      {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-600" />}
+                      {t('ticketItem.actions.refine')}
+                      <SubmittingText busy={isRunning} />
+                    </button>
+                    <button
+                      onClick={() => handleRunClaude(t('claudePrompts.processTicket', { ticketId: ticket.id }), ticket.id)}
+                      disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
+                      {...submittingProps(isRunning)}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:[overflow-wrap:anywhere] items-center gap-1.5 shadow-xs transition"
+                    >
+                      {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />}
+                      {t('ticketItem.actions.run')}
+                      <SubmittingText busy={isRunning} />
+                    </button>
+                  </div>
+                }
               />
             </div>
 
-            {/* Custom Prompt Box */}
-            <div className="flex gap-2">
+            {/* Custom Prompt Box. Below sm the row may wrap: with large text
+                on a narrow screen the Send button moves to a line of its own
+                under the textarea (kept at the right), and the button, with
+                a little less side padding, may put its icon on a line of its
+                own and break the label anywhere, so both stay inside the
+                card. The textarea's basis (6rem) is small enough that at 100%
+                text the button stays to the right of it down to 320px; the
+                button's vertical padding keeps it tall enough to press once
+                it no longer stretches to the textarea's height. From sm up
+                nothing changes (DFLT-00226). */}
+            <div className="flex max-sm:flex-wrap gap-2">
               <textarea
                 rows={2}
                 value={promptText}
@@ -2359,15 +2589,15 @@ export const TicketItem: React.FC<Props> = ({
                 // DFLT-00205: a persistent accessible name (the placeholder
                 // vanishes once typing starts).
                 aria-label={t('ticketItem.promptLabel')}
-                className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-800 resize-none font-sans"
+                className="flex-1 min-w-0 max-sm:basis-24 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus:bg-white dark:focus:bg-slate-800 resize-none font-sans"
               />
               <button
                 onClick={handleSendPrompt}
                 disabled={isRunning || !promptText.trim()}
                 {...submittingProps(isRunning)}
-                className="px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition"
+                className="px-4 max-sm:px-3 max-sm:py-2 max-sm:ml-auto max-w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex max-sm:flex-wrap max-sm:[overflow-wrap:anywhere] items-center justify-center gap-1.5 shadow-xs transition"
               >
-                {isRunning ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <Send aria-hidden="true" className="w-4 h-4" />}
+                {isRunning ? <Loader2 aria-hidden="true" className="w-4 h-4 shrink-0 animate-spin" /> : <Send aria-hidden="true" className="w-4 h-4 shrink-0" />}
                 {t('ticketItem.send')}
                 <SubmittingText busy={isRunning} />
               </button>

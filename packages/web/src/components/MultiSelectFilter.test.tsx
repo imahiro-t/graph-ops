@@ -2,9 +2,9 @@
 // own. How each filter's selection narrows the ticket list -- and that all
 // four really do use this component -- is covered by App.filters.test.tsx.
 import { useState } from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { MultiSelectFilter, MultiSelectFilterOption } from './MultiSelectFilter';
 
@@ -236,5 +236,103 @@ describe('MultiSelectFilter', () => {
     expect(arrow).not.toHaveClass('dark:text-slate-500');
     expect(arrow).toHaveClass('w-3.5', 'h-3.5', 'shrink-0');
     expect(arrow).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  // DFLT-00220: on a narrow screen the toolbar wraps and a filter can sit
+  // near the right edge, where a left-hung panel widened the page. jsdom has
+  // no layout, so the trigger's and panel's boxes and the window width are
+  // stubbed; the real-browser measurements are in the ticket's notes.
+  describe('panel alignment near the right edge of the window', () => {
+    const PANEL_WIDTH = 224; // w-56 at the default 16px root font size
+    let triggerLeft = 0;
+    const TRIGGER_WIDTH = 110;
+
+    beforeEach(() => {
+      triggerLeft = 16;
+      Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, get: () => 320 });
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        if (this.dataset.testid === `${KEYS.panelId}-trigger`) {
+          return DOMRect.fromRect({ x: triggerLeft, y: 0, width: TRIGGER_WIDTH, height: 30 });
+        }
+        if (this.id === KEYS.panelId) return DOMRect.fromRect({ x: 0, y: 0, width: PANEL_WIDTH, height: 200 });
+        return DOMRect.fromRect({ x: 0, y: 0, width: 0, height: 0 });
+      });
+    });
+
+    afterEach(() => {
+      delete (document.documentElement as unknown as { clientWidth?: number }).clientWidth;
+      vi.restoreAllMocks();
+    });
+
+    const panel = () => screen.getByRole('group');
+
+    it('hangs the panel from the left edge of the trigger when it fits', async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await user.click(trigger());
+      expect(panel()).toHaveClass('left-0', 'w-56', 'max-w-[calc(100vw-2rem)]');
+      expect(panel()).not.toHaveClass('right-0');
+    });
+
+    it('hangs it from the right edge when a left-hung panel would pass the window edge', async () => {
+      const user = userEvent.setup();
+      triggerLeft = 176; // 176 + 224 > 320, and 176 + 110 - 224 >= 0
+      render(<Harness />);
+      await user.click(trigger());
+      expect(panel()).toHaveClass('right-0');
+      expect(panel()).not.toHaveClass('left-0');
+    });
+
+    it('shifts it inside the window when neither edge has room', async () => {
+      const user = userEvent.setup();
+      triggerLeft = 100; // 100 + 224 > 320, but 100 + 110 - 224 < 0
+      render(<Harness />);
+      await user.click(trigger());
+      expect(panel()).not.toHaveClass('left-0');
+      expect(panel()).not.toHaveClass('right-0');
+      // The offset is from the trigger's left edge: the panel's right edge
+      // lands 16px inside the 320px window, and its left edge stays >= 0.
+      const offset = parseFloat(panel().style.left);
+      expect(offset).toBe(320 - 16 - PANEL_WIDTH - triggerLeft);
+      expect(triggerLeft + offset).toBeGreaterThanOrEqual(0);
+      expect(triggerLeft + offset + PANEL_WIDTH).toBeLessThanOrEqual(320);
+    });
+
+    it('re-decides on resize, with one listener per opening', async () => {
+      const user = userEvent.setup();
+      const add = vi.spyOn(window, 'addEventListener');
+      const remove = vi.spyOn(window, 'removeEventListener');
+      render(<Harness />);
+      await user.click(trigger());
+      expect(panel()).toHaveClass('left-0');
+
+      // Re-renders while open (checking boxes) must not re-attach it.
+      await user.click(screen.getByRole('checkbox', { name: 'あ' }));
+      await user.click(screen.getByRole('checkbox', { name: 'あ' }));
+      expect(add.mock.calls.filter(([type]) => type === 'resize')).toHaveLength(1);
+
+      triggerLeft = 176;
+      act(() => {
+        window.dispatchEvent(new Event('resize'));
+      });
+      expect(panel()).toHaveClass('right-0');
+
+      await user.click(trigger());
+      expect(remove.mock.calls.filter(([type]) => type === 'resize')).toHaveLength(1);
+    });
+
+    it('re-decides while open when checking a box moves the trigger to another line', async () => {
+      const user = userEvent.setup();
+      triggerLeft = 176;
+      // "All" -> "1 selected" widens the trigger, and the toolbar re-wraps
+      // it to the start of the next line.
+      render(<Harness onChange={() => { triggerLeft = 16; }} />);
+      await user.click(trigger());
+      expect(panel()).toHaveClass('right-0');
+
+      await user.click(screen.getByRole('checkbox', { name: 'あ' }));
+      expect(panel()).toHaveClass('left-0');
+      expect(panel()).not.toHaveClass('right-0');
+    });
   });
 });
