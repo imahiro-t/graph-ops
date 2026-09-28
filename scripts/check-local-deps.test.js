@@ -13,11 +13,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { checkLocalDeps, REQUIRED_PACKAGES } = require('./check-local-deps.js');
+const { checkLocalDeps, shellQuote, REQUIRED_PACKAGES } = require('./check-local-deps.js');
 
-function makeBase() {
+function makeBase(rootName = 'repo') {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'check-local-deps-test-'));
-  const root = path.join(base, 'repo');
+  const root = path.join(base, rootName);
   fs.mkdirSync(path.join(root, 'packages', 'web'), { recursive: true });
   return { base, root };
 }
@@ -81,6 +81,22 @@ test('fails when a package is found nowhere', () => {
   } finally {
     cleanup(base);
   }
+});
+
+test('quotes a root containing spaces in the printed cd command', () => {
+  const { base, root } = makeBase('My Projects');
+  try {
+    const result = checkLocalDeps(root);
+    assert.strictEqual(result.ok, false);
+    assert.ok(result.message.includes(`  cd '${root}' && npm ci`), result.message);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test('shellQuote wraps in single quotes and escapes embedded single quotes', () => {
+  assert.strictEqual(shellQuote('/a b/c'), "'/a b/c'");
+  assert.strictEqual(shellQuote("/it's/$HOME"), "'/it'\\''s/$HOME'");
 });
 
 test('treats packages inside the checkout as inside when the root is given through a symlink', () => {

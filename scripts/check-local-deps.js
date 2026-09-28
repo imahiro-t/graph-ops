@@ -45,6 +45,13 @@ function isInside(root, target) {
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
+// Quotes `value` for a POSIX shell so the command printed in the failure
+// message can be copied and run as is, even when the path contains spaces or
+// shell metacharacters. An embedded ' becomes '\''.
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
 // Returns { ok: true } or { ok: false, message }.
 function checkLocalDeps(root = repoRoot, packages = REQUIRED_PACKAGES) {
   const webDir = path.join(root, 'packages', 'web');
@@ -67,7 +74,7 @@ function checkLocalDeps(root = repoRoot, packages = REQUIRED_PACKAGES) {
   lines.push(
     '',
     'Run `npm ci` in the repository (worktree) root first:',
-    `  cd ${root} && npm ci`,
+    `  cd ${shellQuote(root)} && npm ci`,
     '',
     'A new git worktree has no node_modules of its own; without this check the',
     "parent repository's tools would be picked up and fail in confusing ways."
@@ -83,4 +90,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { checkLocalDeps, findPackageDir, isInside, REQUIRED_PACKAGES };
+module.exports = { checkLocalDeps, findPackageDir, isInside, shellQuote, REQUIRED_PACKAGES };
