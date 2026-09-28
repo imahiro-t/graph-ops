@@ -1179,6 +1179,14 @@ describe('AppSettingsEditor narrow reflow (DFLT-00261)', () => {
     const localPath = projectRow.getByLabelText(new RegExp(i18n.t('settings.appSettings.projects.localPathLabel').replace(/[()]/g, '\\$&')));
     expect(localPath.parentElement?.parentElement).toHaveClass('flex', 'items-end', 'gap-2', 'narrow:flex-wrap');
 
+    // Each input column takes a whole line in the narrow layout so it is not
+    // squeezed to a character or two next to the prefix badge / Save button;
+    // the wide layout keeps the flex-1 column on the same line.
+    expect(nameInput.parentElement).toHaveClass('flex-1', 'min-w-0', 'flex', 'flex-col', 'narrow:basis-full');
+    expect(localPath.parentElement).toHaveClass('flex-1', 'min-w-0', 'flex', 'flex-col', 'narrow:basis-full');
+    expect(nameInput.parentElement).not.toHaveClass('basis-full');
+    expect(localPath.parentElement).not.toHaveClass('basis-full');
+
     expect(screen.getByText(i18n.t('settings.appSettings.restartNote', { path: '/home/me/.graph-ops/config.json' }))).toHaveClass('wrap-anywhere');
     const inEffect = screen.getAllByText(text => text.startsWith(i18n.t('settings.appSettings.currentlyInEffect', { value: '' }).trim()));
     expect(inEffect.length).toBeGreaterThan(0);

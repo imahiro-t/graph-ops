@@ -1055,12 +1055,15 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 {/* Name and local path each get a small visible label above
                     the input (the placeholders stay as a hint); items-end
                     keeps the prefix badge and buttons aligned with the
-                    inputs. */}
+                    inputs. In the narrow layout the name and local-path
+                    columns take a whole line (narrow:basis-full) so they
+                    are not squeezed to a character or two next to the
+                    badge or the Save button. */}
                 <div className="flex items-end gap-2 narrow:flex-wrap">
                   <span className="mb-1 font-mono text-[10px] px-1.5 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-sm shrink-0">
                     {p.prefix}
                   </span>
-                  <div className="flex-1 min-w-0 flex flex-col">
+                  <div className="flex-1 min-w-0 flex flex-col narrow:basis-full">
                     <label htmlFor={`${fieldId}-project-${p.id}-name`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
                       {t('settings.appSettings.projects.nameLabel')}
                     </label>
@@ -1086,7 +1089,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                   </IconButton>
                 </div>
                 <div className="flex items-end gap-2 narrow:flex-wrap">
-                  <div className="flex-1 min-w-0 flex flex-col">
+                  <div className="flex-1 min-w-0 flex flex-col narrow:basis-full">
                     <label htmlFor={`${fieldId}-project-${p.id}-local-path`} className="flex items-center gap-2 text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
                       {t('settings.appSettings.projects.localPathLabel')}
                       {!localPathValue(p) && (
