@@ -72,9 +72,34 @@
 //   label ran up to 41px past the card with a 200% default font on a
 //   320-336px screen, so under 80rem it may shrink and wrap too; from 80rem
 //   up it stays one line.
+//
+// DFLT-00280: in English with a 200% default font at 320-375px (and at 16px
+// in a 160px window) the status badge wrapped inside its words ("IN / PROGR
+// / ESS", "AWAITIN / G FIX") and, still rounded-full, looked like a tall
+// oval. `anywhere` makes a single character the badge's min-content width,
+// so the shrinking right group squeezed it that narrow. Under 80rem it is
+// now break-words (overflow-wrap: break-word), which keeps the longest word
+// as the min-content width, so it wraps at the spaces and breaks inside a
+// word only when that word cannot fit on a line of its own; and it is
+// rounded-xl there, a rounded rectangle when wrapped and still a pill on one
+// line (0.75rem is at least half the one-line height). The IN PROGRESS
+// badge's label sits in a min-w-0 span, since the badge is a flex box and an
+// anonymous flex item would not shrink below its longest word.
+// That alone did not fit: at 200% x 320-336px and 16px x 160px the badge
+// already took the row's whole width and still had no room for "PROGRESS"
+// (next to the dot) or "AWAITING" on a line of their own (measured: 138px
+// available for 116px + 32px padding + the dot; 66px for 62px + 16px). So
+// under 80rem the IN PROGRESS badge is a block with the dot inline in front
+// of the label ("• IN" / "PROGRESS"), and under 15rem the badge and the
+// row pad 0.25rem at the sides instead of 0.5rem. Measured in a real browser
+// (en, Chrome's default font size set to 32px / 16px): no word is broken at
+// 32px x 320/336/375px or 16px x 160px, the badges stay inside the row with
+// no horizontal scroll, one-line badges are still pills, 80rem up is
+// unchanged (rounded-full), and in Japanese every badge is one line.
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
+import { getStatusMeta } from '../statusMeta';
 import { Artifact, GraphEdge, GraphNode, TicketDetail } from '../types';
 import { TicketItem } from './TicketItem';
 
@@ -200,7 +225,10 @@ const ADDED = {
   // that fits never wraps, so they only act when it does not. gap-x-1 keeps
   // the left and right groups 0.25rem apart from 80rem up (DFLT-00260);
   // under 80rem gap-x-3 overrides it.
-  row: ['flex-wrap', 'gap-x-1', 'gap-y-2', `${UNDER_80REM}gap-x-3`, `${NARROW_LARGE_TEXT}p-2`],
+  // Under 15rem the row pads 0.5rem above and below and 0.25rem at the
+  // sides (DFLT-00280; 0.5rem all round before), so the status badge has
+  // room for one word per line at 200% x 320px and 16px x 160px.
+  row: ['flex-wrap', 'gap-x-1', 'gap-y-2', `${UNDER_80REM}gap-x-3`, `${NARROW_LARGE_TEXT}px-1`, `${NARROW_LARGE_TEXT}py-2`],
   // Without basis-auto the left group keeps flex-1's 0% basis and the right
   // group never wraps to the next line, so this one is essential.
   // From 80rem the left group is at least as wide as its parts other than
@@ -242,12 +270,16 @@ const ADDED = {
     `${UNDER_80REM}[overflow-wrap:anywhere]`
   ],
   // DFLT-00260: the status badge may wrap under 80rem (it sits in the right
-  // group, whose items shrink by default).
+  // group, whose items shrink by default). DFLT-00280: at the spaces
+  // (break-words, not anywhere), and as a rounded rectangle (rounded-xl);
+  // under 15rem it pads 0.25rem at the sides.
   statusBadge: [
     `${UNDER_80REM}min-w-0`,
     `${UNDER_80REM}max-w-full`,
     `${UNDER_80REM}whitespace-normal`,
-    `${UNDER_80REM}[overflow-wrap:anywhere]`
+    `${UNDER_80REM}break-words`,
+    `${UNDER_80REM}rounded-xl`,
+    `${NARROW_LARGE_TEXT}px-1`
   ]
 };
 // A prefix is allowed for an added class only if it is one of these.
@@ -317,8 +349,10 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     expect(id).toHaveClass(...ADDED.id);
     expect(name).toHaveClass(...ADDED.name);
     // One line from 80rem up; under 80rem it may wrap (DFLT-00260).
-    expect(status).toHaveClass('whitespace-nowrap', ...ADDED.statusBadge);
-    expectNoneOf(status, ['min-w-0', 'max-w-full', 'whitespace-normal', '[overflow-wrap:anywhere]']);
+    expect(status).toHaveClass('rounded-full', 'whitespace-nowrap', 'px-2', ...ADDED.statusBadge);
+    expectNoneOf(status, ['min-w-0', 'max-w-full', 'whitespace-normal', '[overflow-wrap:anywhere]', 'break-words', 'rounded-xl', 'px-1']);
+    // DFLT-00280: `anywhere` broke "IN PROGRESS" inside its words.
+    expectNoneOf(status, [`${UNDER_80REM}[overflow-wrap:anywhere]`]);
     expect(time).toHaveClass('whitespace-nowrap');
   });
 
@@ -411,6 +445,43 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     const { row } = rowParts(n);
     expect(row).toHaveClass('gap-x-1', `${UNDER_80REM}gap-x-3`);
     expectNoneOf(row, ['gap-x-3', 'gap-2', 'gap-3']);
+  });
+
+  // DFLT-00280: from 80rem up the IN PROGRESS badge is the flex box it was
+  // (dot, then label). Under 80rem it is a block and the dot flows inline in
+  // front of the label, so the badge wraps as "• IN" / "PROGRESS" instead
+  // of giving the dot a column of its own beside a squeezed label.
+  it('the IN PROGRESS badge keeps its label in a min-w-0 span next to the pulsing dot', () => {
+    renderTicket();
+    const n = NODES.find(x => x.status === 'IN PROGRESS')!;
+    const { status } = rowParts(n);
+    expect(status).toHaveClass('flex', 'items-center', 'gap-1', `${UNDER_80REM}block`);
+    expectNoneOf(status, ['block', 'inline', 'inline-block']);
+    const [dot, label] = Array.from(status.children) as HTMLElement[];
+    expect(dot).toHaveClass(
+      'w-1.5',
+      'h-1.5',
+      'shrink-0',
+      'rounded-full',
+      'animate-pulse',
+      `${UNDER_80REM}inline-block`,
+      `${UNDER_80REM}mr-1`,
+      `${UNDER_80REM}align-middle`
+    );
+    expectNoneOf(dot, ['inline-block', 'mr-1', 'align-middle']);
+    expect(label.tagName).toBe('SPAN');
+    expect(label).toHaveClass('min-w-0');
+    expect(label).toHaveTextContent(i18n.t(getStatusMeta('IN PROGRESS').labelKey));
+    expect(status.children).toHaveLength(2);
+  });
+
+  it('the other status badges keep their label as plain text', () => {
+    renderTicket();
+    for (const n of NODES.filter(x => x.status !== 'IN PROGRESS')) {
+      const { status } = rowParts(n);
+      expect(status.children).toHaveLength(0);
+      expectNoneOf(status, ['flex', `${UNDER_80REM}block`]);
+    }
   });
 
   it('the retry, manual and artifact badges may shrink and wrap under 80rem and stay one line from 80rem up', () => {

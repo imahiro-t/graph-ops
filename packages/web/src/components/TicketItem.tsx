@@ -1075,10 +1075,28 @@ export const TicketItem: React.FC<Props> = ({
     const meta = getStatusMeta(status);
     const isInProgress = status === 'IN PROGRESS';
     const isNotStarted = meta === TODO_META;
+    // Under 80rem the badge may shrink and wrap (DFLT-00260). DFLT-00280: it
+    // wraps at the spaces (break-words keeps the longest word as its
+    // min-content width; `anywhere` let the row squeeze it into
+    // "IN / PROGR / ESS") and only breaks inside a word that cannot fit on a
+    // line of its own, and it is rounded-xl there so a wrapped badge is a
+    // rounded rectangle rather than a tall oval. One line, rounded-xl
+    // (0.75rem) is still at least half the badge's height, so it looks like
+    // the same pill. From 80rem up it stays a one-line rounded-full pill.
+    // Under 15rem (a large default font on a narrow screen) it pads 0.25rem
+    // at the sides, and the row does too, so a word like "PROGRESS" or
+    // "AWAITING" still fits on a line of its own at 200% x 320px and at
+    // 16px x 160px.
+    // The IN PROGRESS badge is a flex box from 80rem up (the dot, then the
+    // label). Under 80rem it is a block and the dot flows inline in front of
+    // the label, so it wraps as "• IN" / "PROGRESS" instead of keeping a
+    // column of its own beside the label. The label is in a min-w-0 span so
+    // that, as a flex item, it could never keep its longest word as its
+    // minimum width and run past the badge.
     return (
-      <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full whitespace-nowrap below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:[overflow-wrap:anywhere] ${isNotStarted ? 'font-medium' : 'font-bold'} ${meta.chip.bg} ${meta.chip.text}${isInProgress ? ' flex items-center gap-1' : ''}`}>
-        {isInProgress && <span className="w-1.5 h-1.5 shrink-0 rounded-full bg-blue-500 animate-pulse" />}
-        {t(meta.labelKey)}
+      <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full whitespace-nowrap below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:break-words below-80rem:rounded-xl upto-15rem:px-1 ${isNotStarted ? 'font-medium' : 'font-bold'} ${meta.chip.bg} ${meta.chip.text}${isInProgress ? ' flex items-center gap-1 below-80rem:block' : ''}`}>
+        {isInProgress && <span className="w-1.5 h-1.5 shrink-0 rounded-full bg-blue-500 animate-pulse below-80rem:inline-block below-80rem:mr-1 below-80rem:align-middle" />}
+        {isInProgress ? <span className="min-w-0">{t(meta.labelKey)}</span> : t(meta.labelKey)}
       </span>
     );
   };
@@ -2309,10 +2327,16 @@ export const TicketItem: React.FC<Props> = ({
                               0.25rem or more of free space is unchanged (the
                               left group gives up space it did not need); one
                               with less truncates its name 0.25rem earlier,
-                              and wraps 0.25rem earlier too. */}
+                              and wraps 0.25rem earlier too.
+                              DFLT-00280: under 15rem the row pads 0.25rem
+                              at the sides (0.5rem above and below, as
+                              before), so with a 200% default font at
+                              320-336px, or at 16px in a 160px window, the
+                              status badge has room for "PROGRESS" and
+                              "AWAITING" on a line of their own. */}
                           <div
                             onClick={() => toggleNodeExpand(node.id)}
-                            className="flex flex-wrap items-center justify-between gap-x-1 gap-y-2 p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none below-80rem:gap-x-3 upto-15rem:p-2"
+                            className="flex flex-wrap items-center justify-between gap-x-1 gap-y-2 p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none below-80rem:gap-x-3 upto-15rem:px-1 upto-15rem:py-2"
                           >
                             {/* From 80rem up, flex-1 min-w-0 lets node.name
                                 (below) shrink and truncate first --
