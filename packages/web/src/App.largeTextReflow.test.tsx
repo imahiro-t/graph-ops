@@ -77,6 +77,15 @@ async function renderApp() {
   return user;
 }
 
+// The header's switcher: the only header button with aria-haspopup="dialog".
+function switcherButton(): HTMLElement {
+  const found = within(screen.getByRole('banner'))
+    .getAllByRole('button')
+    .filter(b => b.getAttribute('aria-haspopup') === 'dialog');
+  expect(found).toHaveLength(1);
+  return found[0];
+}
+
 afterEach(async () => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -357,16 +366,27 @@ describe.each(['ja', 'en'] as const)('summary card with a root font size set on 
 // Where the button already fitted (the default font at 320-1440px) the
 // header measures the same as before: the wrapper's size contribution is
 // still capped at 14rem.
+//
+// DFLT-00277 then gave the button a tooltip (the name on the first line, the
+// local path or "not set" on the second; see the describe below), but its
+// accessible name is still the button's text, the project name alone. The
+// test here checks that too -- the button it finds by that name is the
+// header's switcher, and the name is exactly "Alpha" while the title is set
+// -- so the button's name and layout are checked in this one place.
 describe.each(['ja', 'en'] as const)('project switcher in a narrow header (%s)', lng => {
   beforeEach(async () => {
     seed();
     await i18n.changeLanguage(lng);
   });
 
-  it('caps the wrapper at 14rem and lets the button shrink with it, truncating the name', async () => {
+  it('caps the wrapper at 14rem and lets the button shrink with it, truncating the name and keeping the accessible name', async () => {
     await renderApp();
     const button = within(screen.getByRole('banner')).getByRole('button', { name: /Alpha/ });
+    expect(button).toBe(switcherButton());
     expect(button).toHaveAttribute('aria-haspopup', 'dialog');
+    // The tooltip is set, yet the accessible name is the project name alone.
+    expect(button).toHaveAttribute('title');
+    expect(button).toHaveAccessibleName('Alpha');
     expect(button).toHaveClass('max-w-full');
     expect(button).not.toHaveClass('max-w-56');
     const wrapper = button.parentElement as HTMLElement;
@@ -380,7 +400,9 @@ describe.each(['ja', 'en'] as const)('project switcher in a narrow header (%s)',
 // the button's tooltip -- the name on the first line, the local path (or
 // "not set") on the second -- and in the popup, whose items now wrap the
 // name instead of truncating it. The prefix and the pending-approval badge
-// stay in the group on the item's right. The accessible name is unchanged.
+// stay in the group on the item's right. The accessible name is unchanged
+// (checked with the button's layout in "project switcher in a narrow header"
+// above).
 // jsdom computes no layout, so the wrapping itself, the unchanged look at
 // the default font and the absence of sideways scroll at 320px / 32px were
 // measured in a real browser (see the ticket's implementation notes).
@@ -414,15 +436,6 @@ describe.each(['ja', 'en'] as const)('full project name in the switcher\'s toolt
     render(<App />);
     await screen.findByText(`${current.prefix}-00001`);
     return user;
-  }
-
-  // The header's switcher: the only header button with aria-haspopup="dialog".
-  function switcherButton(): HTMLElement {
-    const found = within(screen.getByRole('banner'))
-      .getAllByRole('button')
-      .filter(b => b.getAttribute('aria-haspopup') === 'dialog');
-    expect(found).toHaveLength(1);
-    return found[0];
   }
 
   async function openPopup(user: ReturnType<typeof userEvent.setup>) {
@@ -463,15 +476,6 @@ describe.each(['ja', 'en'] as const)('full project name in the switcher\'s toolt
     const button = switcherButton();
     expect(button).toHaveTextContent(i18n.t('projectSwitcher.noProject'));
     expect(button).not.toHaveAttribute('title');
-  });
-
-  it('keeps the accessible name and the truncated name in the button', async () => {
-    await renderWith(alpha.id);
-    const button = within(screen.getByRole('banner')).getByRole('button', { name: /Alpha/ });
-    expect(button).toBe(switcherButton());
-    expect(button).toHaveClass('max-w-full');
-    expect(within(button).getByText('Alpha')).toHaveClass('truncate');
-    expect(button.parentElement).toHaveClass('min-w-0', 'max-w-56');
   });
 
   it('wraps every item\'s name in the popup instead of truncating it', async () => {
