@@ -1321,7 +1321,7 @@ export const TicketItem: React.FC<Props> = ({
   const hiddenLabelCount = ticketLabels.length - headerLabels.length;
 
   return (
-    <div ref={rootRef} id={`ticket-${ticket.id}`} tabIndex={-1} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xs transition-all overflow-clip mb-4">
+    <div ref={rootRef} id={`ticket-${ticket.id}`} tabIndex={-1} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl transition-all overflow-clip mb-4">
       {/* Reject prompt closing (DFLT-00172). Always mounted -- outside the
           header row and the expandable panel, which each keep their own
           region -- so it exists before its text changes. */}
@@ -1641,7 +1641,7 @@ export const TicketItem: React.FC<Props> = ({
                     <div
                       key={n.id}
                       title={isPendingApproval ? `${n.name} (${t('ticketItem.approvalGate.pendingStatus')})` : `${n.name} (${t(getStatusMeta(displayStatus).labelKey)})`}
-                      className={`w-2.5 h-3.5 rounded-xs ${
+                      className={`w-2.5 h-3.5 ${
                         isPendingApproval
                           ? 'bg-amber-400 animate-pulse'
                           : displayStatus === 'DONE'
@@ -1837,7 +1837,7 @@ export const TicketItem: React.FC<Props> = ({
               padding is p-3 instead of p-4 -- the same pair as the detail
               panel and the artifact card -- so at 200% text on a 320px
               screen the header row and the body get 16px more width. */}
-          <div className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 [@media(max-width:15rem)]:p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+          <div className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 [@media(max-width:15rem)]:p-3 rounded-xl border border-slate-200 dark:border-slate-800">
             {/* DFLT-00239: the header row and its right-hand group wrap on a
                 narrow line (200% text size on a 320px screen) instead of
                 squeezing or pushing the refined time and the expand button
@@ -2093,7 +2093,7 @@ export const TicketItem: React.FC<Props> = ({
                 within that height (flex-1 min-h-0 overflow-y-auto below);
                 only the graph on the left must never scroll. */}
             <div
-              className="lg:col-span-8 flex flex-col bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-2xs lg:sticky lg:top-20 min-h-128"
+              className="lg:col-span-8 flex flex-col bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden lg:sticky lg:top-20 min-h-128"
               style={nodeListCardHeight ? { height: nodeListCardHeight } : undefined}
             >
               {/* Tab Navigation.
@@ -2591,7 +2591,7 @@ export const TicketItem: React.FC<Props> = ({
                       <div className="text-slate-500 dark:text-slate-400 text-center py-8 text-xs">{t('ticketItem.noHtmlYet')}</div>
                     ) : (
                       htmlArtifacts.map(h => (
-                        <div key={h.id} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 bg-white dark:bg-slate-800 shadow-2xs">
+                        <div key={h.id} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 bg-white dark:bg-slate-800">
                           <div className="flex items-center justify-between mb-2">
                             <span className="font-bold text-xs text-cyan-700 dark:text-cyan-400">{h.name}</span>
                             {/* Served from the DB via
@@ -2689,7 +2689,7 @@ export const TicketItem: React.FC<Props> = ({
               below sm whatever the text size (DFLT-00252). */}
           <div
             data-testid="ticket-action-footer"
-            className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 [@media(max-width:15rem)]:p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs"
+            className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 [@media(max-width:15rem)]:p-3 rounded-xl border border-slate-200 dark:border-slate-800"
           >
             {/* The action row (DFLT-00181): the regular actions (refine, then
                 run) on the left, and at its right end, set apart from them,
@@ -2714,7 +2714,7 @@ export const TicketItem: React.FC<Props> = ({
                       onClick={() => handleRunClaude(t('claudePrompts.refineTicket', { ticketId: ticket.id }), ticket.id)}
                       disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
                       {...submittingProps(isRunning)}
-                      className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 shadow-2xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
+                      className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
                     >
                       {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-600" />}
                       {t('ticketItem.actions.refine')}
@@ -2724,7 +2724,7 @@ export const TicketItem: React.FC<Props> = ({
                       onClick={() => handleRunClaude(t('claudePrompts.processTicket', { ticketId: ticket.id }), ticket.id)}
                       disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
                       {...submittingProps(isRunning)}
-                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 shadow-2xs transition"
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition"
                     >
                       {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />}
                       {t('ticketItem.actions.run')}
@@ -2770,7 +2770,7 @@ export const TicketItem: React.FC<Props> = ({
                 onClick={handleSendPrompt}
                 disabled={isRunning || !promptText.trim()}
                 {...submittingProps(isRunning)}
-                className="px-4 max-sm:px-3 max-sm:py-2 max-sm:ml-auto max-w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center justify-center gap-1.5 shadow-2xs transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
+                className="px-4 max-sm:px-3 max-sm:py-2 max-sm:ml-auto max-w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center justify-center gap-1.5 transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
               >
                 {isRunning ? <Loader2 aria-hidden="true" className="w-4 h-4 shrink-0 animate-spin" /> : <Send aria-hidden="true" className="w-4 h-4 shrink-0" />}
                 {t('ticketItem.send')}

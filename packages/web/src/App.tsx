@@ -1126,7 +1126,7 @@ export const App: React.FC = () => {
           focusable elements; `relative` and z-30 stay either way. */}
       <header
         ref={headerRef}
-        className={`bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 lg:px-6 py-3.5 relative${headerFitsSticky ? ' lg:sticky lg:top-0' : ''} z-30 shadow-2xs`}
+        className={`bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 lg:px-6 py-3.5 relative${headerFitsSticky ? ' lg:sticky lg:top-0' : ''} z-30`}
       >
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
@@ -1162,7 +1162,7 @@ export const App: React.FC = () => {
                 aria-expanded={isProjectMenuOpen}
                 aria-haspopup="dialog"
                 aria-controls={isProjectMenuOpen ? PROJECT_MENU_ID : undefined}
-                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 shadow-2xs transition max-w-56"
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 transition max-w-56"
                 title={currentProject ? currentProject.local_path || t('settings.appSettings.projects.notSet') : undefined}
               >
                 <FolderOpen aria-hidden="true" className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
@@ -1249,7 +1249,7 @@ export const App: React.FC = () => {
 
             <button
               onClick={() => setIsClaudeGlobalOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-700 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 shadow-2xs transition"
+              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-700 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 transition"
             >
               <Terminal aria-hidden="true" className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
               {t('header.launchClaude')}
@@ -1263,7 +1263,7 @@ export const App: React.FC = () => {
             <IconButton
               onClick={() => i18n.changeLanguage(currentLanguage === 'ja' ? 'en' : 'ja')}
               label={t('header.language.toggleTitle', { lang: t(`header.language.${currentLanguage}`) })}
-              className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-2xs transition flex items-center gap-1.5"
+              className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 transition flex items-center gap-1.5"
             >
               <Languages aria-hidden="true" className="w-4 h-4" />
               <span className="text-xs font-semibold">{t(`header.language.${currentLanguage}`)}</span>
@@ -1272,7 +1272,7 @@ export const App: React.FC = () => {
             <IconButton
               onClick={() => setThemePreference(NEXT_THEME[themePreference])}
               label={t('header.theme.toggleTitle', { mode: t(`header.theme.${themePreference}`) })}
-              className="p-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-2xs transition"
+              className="p-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 transition"
             >
               <ThemeIcon aria-hidden="true" className="w-4 h-4" />
             </IconButton>
@@ -1280,7 +1280,7 @@ export const App: React.FC = () => {
             <IconButton
               onClick={() => setIsSettingsOpen(true)}
               label={t('header.settings')}
-              className="p-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-2xs transition"
+              className="p-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 transition"
             >
               <SettingsIcon aria-hidden="true" className="w-4 h-4" />
             </IconButton>
@@ -1298,7 +1298,7 @@ export const App: React.FC = () => {
               }}
               disabled={!currentProject}
               title={currentProject ? undefined : t('projectSwitcher.selectFirst')}
-              className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition"
+              className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 transition"
             >
               <Plus aria-hidden="true" className="w-4 h-4" />
               {t('header.newTicket')}
@@ -1436,7 +1436,7 @@ export const App: React.FC = () => {
             ("99997/", about 158px at 36px text) fit the item at 320px with
             a 32px root; six or more could run past it, which no real
             ticket list reaches. */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-2xs flex flex-wrap items-center justify-between gap-4 @container">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4 @container">
           {/* DFLT-00251: in English at 160px the title and its note kept
               their min-content width ("Overview", "artifacts)") and ran 5px
               past the window. Under 15rem the two may now wrap onto lines
@@ -1547,7 +1547,7 @@ export const App: React.FC = () => {
                   setProjectSetupDirectory('');
                   setIsCreateProjectOpen(true);
                 }}
-                className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-2xs transition"
+                className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition"
               >
                 <Plus aria-hidden="true" className="w-4 h-4" />
                 {t('projectSwitcher.createNew')}

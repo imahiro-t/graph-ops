@@ -8,13 +8,14 @@
    <html>, like v3's darkMode: 'class' (which matched `.dark *`). */
 @custom-variant dark (&:is(.dark *));
 
-/* v3 palette and breakpoints, pinned. v4 redefines the default colors in OKLCH, and they
-   differ slightly from v3's hex values. The contrast ratios quoted in
-   comments and asserted in tests across src/ (WCAG 1.4.3 / 1.4.11, e.g. the
-   dialog placeholder's 4.55:1 on slate-50) were all measured against v3's
-   hex values, so the color families the app uses are set back to exactly
-   those values. Moving to v4's OKLCH palette later means re-checking every
-   one of those ratios first. white / black are unchanged between v3 and v4. */
+/* v3 values, pinned: breakpoints, text line heights and the color palette.
+   v4 redefines the default colors in OKLCH, and they differ slightly from
+   v3's hex values. The contrast ratios quoted in comments and asserted in
+   tests across src/ (WCAG 1.4.3 / 1.4.11, e.g. the dialog placeholder's
+   4.55:1 on slate-50) were all measured against v3's hex values, so the
+   color families the app uses are set back to exactly those values. Moving
+   to v4's OKLCH palette later means re-checking every one of those ratios
+   first. white / black are unchanged between v3 and v4. */
 @theme {
   /* v3's breakpoints were in px; v4's are in rem (40rem, 48rem, ...). They
      only agree at a 16px default font, and several layouts here are tuned
@@ -25,6 +26,21 @@
   --breakpoint-xl: 1280px;
   --breakpoint-2xl: 1536px;
 
+  /* v3's text-* line heights were fixed lengths (text-xs: 1rem); v4's are
+     ratios (calc(1 / 0.75)). A ratio is inherited as a ratio, so a child
+     with a font size of its own (text-[0.6875rem] under text-xs, say) would
+     get a shorter line than on v3. The v3 lengths are kept; text-5xl and
+     up used 1 on both. */
+  --text-xs--line-height: 1rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl--line-height: 2rem;
+  --text-3xl--line-height: 2.25rem;
+  --text-4xl--line-height: 2.5rem;
+
+  /* v3 palette (see above). */
   --color-slate-50: #f8fafc;
   --color-slate-100: #f1f5f9;
   --color-slate-200: #e2e8f0;
@@ -266,6 +282,86 @@
   }
   .dark [role="dialog"] *::placeholder {
     color: var(--color-slate-400);
+  }
+}
+
+/* v3's space-y-* and divide-* put the gap / border on every child but the
+   first (`> :not([hidden]) ~ :not([hidden])`, specificity 0,3,0); v4 puts
+   it on every child but the last, with zero specificity. That moves a
+   border by a pixel, and lets a child's own mt-* add to the gap instead of
+   being overridden by it. The rules below restore v3's behaviour for the
+   values this app uses: the zero-specificity resets come after v4's own
+   rules and cancel them, and the v3 rules follow. A space-y / divide value
+   not listed here gets v4's behaviour -- add it here when you use one. */
+@layer utilities {
+  :where(.space-y-0\.5, .space-y-1, .space-y-1\.5, .space-y-2, .space-y-3, .space-y-4, .space-y-6) > * {
+    margin-block-end: 0;
+  }
+
+  .space-y-0\.5 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: calc(var(--spacing) * 0.5);
+  }
+
+  .space-y-1 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: calc(var(--spacing) * 1);
+  }
+
+  .space-y-1\.5 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: calc(var(--spacing) * 1.5);
+  }
+
+  .space-y-2 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: calc(var(--spacing) * 2);
+  }
+
+  .space-y-3 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: calc(var(--spacing) * 3);
+  }
+
+  .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: calc(var(--spacing) * 4);
+  }
+
+  .space-y-6 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: calc(var(--spacing) * 6);
+  }
+
+  :where(.divide-x, .sm\:divide-x) > * {
+    border-inline-end-width: 0;
+  }
+
+  :where(.divide-y) > * {
+    border-bottom-width: 0;
+  }
+
+  .divide-x > :not([hidden]) ~ :not([hidden]) {
+    border-left-width: 1px;
+  }
+
+  @media (width >= 640px) {
+    .sm\:divide-x > :not([hidden]) ~ :not([hidden]) {
+      border-left-width: 1px;
+    }
+  }
+
+  .divide-y > :not([hidden]) ~ :not([hidden]) {
+    border-top-width: 1px;
+  }
+
+  .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
+    border-color: var(--color-slate-100);
+  }
+
+  .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+    border-color: var(--color-slate-200);
+  }
+
+  .dark .dark\:divide-slate-700 > :not([hidden]) ~ :not([hidden]) {
+    border-color: var(--color-slate-700);
+  }
+
+  .dark .dark\:divide-slate-800 > :not([hidden]) ~ :not([hidden]) {
+    border-color: var(--color-slate-800);
   }
 }
 

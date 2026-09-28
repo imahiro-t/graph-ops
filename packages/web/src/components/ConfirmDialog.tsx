@@ -129,7 +129,7 @@ export const ConfirmDialog: React.FC<Props> = ({
             type="button"
             data-testid={`${testIdPrefix}-confirm`}
             onClick={onConfirm}
-            className={`max-w-full wrap-break-word px-4 py-2 rounded-lg text-xs font-semibold text-white shadow-2xs transition ${
+            className={`max-w-full wrap-break-word px-4 py-2 rounded-lg text-xs font-semibold text-white transition ${
               tone === 'danger' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
             }`}
           >
