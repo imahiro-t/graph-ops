@@ -1882,14 +1882,23 @@ export const TicketItem: React.FC<Props> = ({
               )}
               <LabelSelect ticketId={ticket.id} labels={ticketLabels} projectLabels={projectLabels} onSaved={onRefresh} />
             </div>
-            {/* DFLT-00276: min-w-0 wrap-anywhere as for the date above; a
-                closed reason with one long word (e.g. "superseded-by-DFLT-00002")
-                reached R251 (ja) / R296.9 (en) at 160px / 200%, and R304.9 at
-                320px / 200% in English, past the card's clip. */}
+            {/* DFLT-00276: a closed reason with one long word (e.g.
+                "superseded-by-DFLT-00002") reached R251 (ja) / R296.9 (en) at
+                160px / 200%, and R304.9 at 320px / 200% in English, past the
+                card's clip. min-w-0 lets this item shrink, and only the
+                reason span gets wrap-anywhere: put on the whole item it was
+                inherited by the "Closed reason:" text too, whose share of
+                the one-line flex row then broke it mid-word ("Close / d /
+                reaso / n:" at 320px). flex-wrap moves the reason onto its
+                own line when it does not fit beside the label (on one line
+                with the label it was left about 0px at 160px), the label
+                text keeps min-width: auto so it breaks between words only,
+                and the icon is shrink-0 so it is not squeezed to a dot. When
+                everything fits on one line nothing changes. */}
             {ticket.closed_reason && (
-              <div className="flex items-center gap-1 min-w-0 wrap-anywhere text-slate-700 dark:text-slate-300">
-                <Archive aria-hidden="true" className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-                {t('ticketItem.close.reasonLabel')}: <span className="font-medium">{ticket.closed_reason}</span>
+              <div className="flex flex-wrap items-center gap-1 min-w-0 text-slate-700 dark:text-slate-300">
+                <Archive aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-slate-500 dark:text-slate-400" />
+                {t('ticketItem.close.reasonLabel')}: <span className="font-medium min-w-0 wrap-anywhere">{ticket.closed_reason}</span>
               </div>
             )}
           </div>

@@ -9,8 +9,12 @@
 // Measuring the rest of the bar at 160px / 200% found two more items past
 // the card: the labels item (the "Edit labels" button's longest word, R139.5
 // in English; a long label chip, whose max-w-40 is 320px at a 32px root) and
-// the closed reason (one long word, up to R296.9). They get the same
-// min-w-0 wrap-anywhere, and each chip min-w-0 so a long name truncates.
+// the closed reason (one long word, up to R296.9). The labels item gets the
+// same min-w-0 wrap-anywhere, and each chip min-w-0 so a long name truncates.
+// The closed reason item gets min-w-0 and flex-wrap, with wrap-anywhere on the
+// reason span only: on the whole item it was inherited by the "Closed reason:"
+// text, which the one-line row then broke mid-word even at 320px / 200%
+// ("Close / d / reaso / n:"). Its icon is shrink-0 so it is not squeezed.
 // jsdom does no layout, so this checks the classes; the widths themselves
 // were measured in a real browser (see the ticket's implementation notes).
 import { render, screen, within } from '@testing-library/react';
@@ -82,7 +86,7 @@ describe.each(['ja', 'en'])('TicketItem metadata bar creation date (%s)', lng =>
     expect(dateSpan).toHaveClass('font-mono');
   });
 
-  it('lets the labels item and its chips shrink, and wraps the closed reason (DFLT-00276)', async () => {
+  it('lets the labels item and its chips shrink, and breaks only the closed reason itself inside a word (DFLT-00276)', async () => {
     await i18n.changeLanguage(lng);
     renderTicket({ status: 'CLOSED', closed_reason: 'superseded-by-DFLT-00002', labels: [LABEL] });
 
@@ -95,8 +99,16 @@ describe.each(['ja', 'en'])('TicketItem metadata bar creation date (%s)', lng =>
 
     const reason = within(details).getByText('superseded-by-DFLT-00002');
     const reasonItem = reason.parentElement as HTMLElement;
-    expect(reasonItem.textContent).toContain(i18n.t('ticketItem.close.reasonLabel'));
-    expect(reasonItem).toHaveClass('flex', 'min-w-0', 'wrap-anywhere');
-    expect(reason).toHaveClass('font-medium');
+    expect(reasonItem.textContent).toBe(`${i18n.t('ticketItem.close.reasonLabel')}: superseded-by-DFLT-00002`);
+    // The reason moves onto its own line when it does not fit beside the label.
+    expect(reasonItem).toHaveClass('flex', 'flex-wrap', 'min-w-0');
+    // Not on the item: inherited, it broke the "Closed reason:" label mid-word.
+    expect(reasonItem).not.toHaveClass('wrap-anywhere');
+    // Only the reason itself breaks inside a word, and only when it cannot fit.
+    expect(reason).toHaveClass('font-medium', 'min-w-0', 'wrap-anywhere');
+    // The icon keeps its size instead of shrinking to a dot.
+    const icon = reasonItem.querySelector('svg') as SVGElement;
+    expect(icon).toHaveAttribute('aria-hidden', 'true');
+    expect(icon).toHaveClass('shrink-0', 'w-3.5', 'h-3.5');
   });
 });
