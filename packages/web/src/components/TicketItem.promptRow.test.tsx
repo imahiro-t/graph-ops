@@ -165,6 +165,21 @@ describe.each(['ja', 'en'] as const)('TicketItem prompt row layout (%s)', lng =>
     );
   });
 
+  // DFLT-00259: in dark mode dark:border-slate-700 won over
+  // focus:border-indigo-500, so the border stayed slate-700 on focus. With
+  // dark:focus:border-indigo-500 the focused border is indigo-500
+  // (rgb(99, 102, 241)) in both themes, on a click and on Tab, and goes back
+  // to slate-700 (dark) / slate-300 (light) on blur -- measured in a real
+  // browser, since jsdom resolves neither variants nor the cascade.
+  it('turns the textarea border indigo on focus in dark mode as in light mode', () => {
+    renderTicket();
+    const textarea = promptBox();
+    expect(textarea).toHaveClass('focus:border-indigo-500', 'dark:focus:border-indigo-500');
+    // The resting borders and the focus-visible ring stay as they were.
+    expect(textarea).toHaveClass('border-slate-300', 'dark:border-slate-700');
+    expect(textarea).toHaveClass('focus-visible:ring-2', 'focus-visible:ring-blue-500', 'dark:focus-visible:ring-blue-400');
+  });
+
   it('keeps the Send button disabled until text is typed', () => {
     renderTicket();
     expect(sendButton()).toBeDisabled();

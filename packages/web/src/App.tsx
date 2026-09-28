@@ -1123,10 +1123,31 @@ export const App: React.FC = () => {
           behaves as before (same padding, one line, sticky). DFLT-00258:
           not sticky while it is taller than a quarter of the window (see
           headerFitsSticky), so a header grown by large text never covers
-          focusable elements; `relative` and z-30 stay either way. */}
+          focusable elements; `relative` and z-30 stay either way.
+          DFLT-00259: in a 160px window at a 200% text size the page was
+          283px wide: the "GraphOps" name, the subtitle, the project
+          switcher, the Launch Claude, language and New Ticket buttons and
+          the "updated" time each kept the width of their longest word. Each
+          is now min-w-0 / no wider than its row, and its text may break
+          inside a word ([overflow-wrap:anywhere], a last resort that only
+          applies when the word does not fit), so nothing needs a media
+          query: wherever the header fitted before, it looks the same. The
+          button labels are spans of their own so the icons keep their size
+          (shrink-0); the text is still the buttons' accessible name. In a
+          window of 200 CSS px or less the header pads with px-2, the Launch
+          Claude, language and New Ticket buttons may put the label on a
+          line of its own under the icon, and the project switcher and those
+          buttons pad less, so a label breaks between words rather than
+          letter by letter and the switcher's arrow stays inside its frame (a
+          px query: the 15rem one also matches 320-336px with a 32px default
+          font, where the header must not change). The
+          "updated" row does not wrap: its time shrinks and wraps inside
+          itself next to the refresh button, as it already did in English
+          at 320-328px with a 32px root (letting the row wrap moved the time
+          under the button there). */}
       <header
         ref={headerRef}
-        className={`bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 lg:px-6 py-3.5 relative${headerFitsSticky ? ' lg:sticky lg:top-0' : ''} z-30 shadow-xs`}
+        className={`bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 [@media(max-width:200px)]:px-2 lg:px-6 py-3.5 relative${headerFitsSticky ? ' lg:sticky lg:top-0' : ''} z-30 shadow-xs`}
       >
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
@@ -1134,15 +1155,15 @@ export const App: React.FC = () => {
                 background, so it stays visible on both light and dark headers without `dark:` variants.
                 Decorative: the adjacent "GraphOps" text already names the app. */}
             <img src="/favicon.svg" alt="" aria-hidden="true" className="w-6 h-6 shrink-0" />
-            <span className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-slate-100">
+            <span className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-slate-100 min-w-0 [overflow-wrap:anywhere]">
               GraphOps
             </span>
-            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">{t('header.subtitle')}</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium min-w-0 [overflow-wrap:anywhere]">{t('header.subtitle')}</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 min-w-0">
             <div
-              className="relative min-w-0"
+              className="relative min-w-0 max-w-full"
               onKeyDown={handleProjectSwitcherKeyDown}
               onPointerDown={handleProjectSwitcherPointerDown}
               onBlur={handleProjectSwitcherBlur}
@@ -1162,7 +1183,7 @@ export const App: React.FC = () => {
                 aria-expanded={isProjectMenuOpen}
                 aria-haspopup="dialog"
                 aria-controls={isProjectMenuOpen ? PROJECT_MENU_ID : undefined}
-                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 shadow-xs transition max-w-[14rem]"
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 [@media(max-width:200px)]:gap-1 [@media(max-width:200px)]:px-2 shadow-xs transition min-w-0 max-w-[min(14rem,100%)]"
                 title={currentProject ? currentProject.local_path || t('settings.appSettings.projects.notSet') : undefined}
               >
                 <FolderOpen aria-hidden="true" className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
@@ -1249,10 +1270,10 @@ export const App: React.FC = () => {
 
             <button
               onClick={() => setIsClaudeGlobalOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-700 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 shadow-xs transition"
+              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-700 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 [@media(max-width:200px)]:flex-wrap [@media(max-width:200px)]:justify-center [@media(max-width:200px)]:px-2 shadow-xs transition min-w-0 max-w-full"
             >
-              <Terminal aria-hidden="true" className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-              {t('header.launchClaude')}
+              <Terminal aria-hidden="true" className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+              <span className="min-w-0 [overflow-wrap:anywhere]">{t('header.launchClaude')}</span>
             </button>
 
             {/* The language, theme and settings buttons name themselves
@@ -1263,10 +1284,11 @@ export const App: React.FC = () => {
             <IconButton
               onClick={() => i18n.changeLanguage(currentLanguage === 'ja' ? 'en' : 'ja')}
               label={t('header.language.toggleTitle', { lang: t(`header.language.${currentLanguage}`) })}
-              className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs transition flex items-center gap-1.5"
+              wrapperClassName="min-w-0 max-w-full"
+              className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs transition flex items-center gap-1.5 [@media(max-width:200px)]:flex-wrap [@media(max-width:200px)]:justify-center min-w-0 max-w-full"
             >
-              <Languages aria-hidden="true" className="w-4 h-4" />
-              <span className="text-xs font-semibold">{t(`header.language.${currentLanguage}`)}</span>
+              <Languages aria-hidden="true" className="w-4 h-4 shrink-0" />
+              <span className="text-xs font-semibold min-w-0 [overflow-wrap:anywhere]">{t(`header.language.${currentLanguage}`)}</span>
             </IconButton>
 
             <IconButton
@@ -1298,10 +1320,10 @@ export const App: React.FC = () => {
               }}
               disabled={!currentProject}
               title={currentProject ? undefined : t('projectSwitcher.selectFirst')}
-              className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition"
+              className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 [@media(max-width:200px)]:flex-wrap [@media(max-width:200px)]:justify-center [@media(max-width:200px)]:px-2 shadow-xs transition min-w-0 max-w-full"
             >
-              <Plus aria-hidden="true" className="w-4 h-4" />
-              {t('header.newTicket')}
+              <Plus aria-hidden="true" className="w-4 h-4 shrink-0" />
+              <span className="min-w-0 [overflow-wrap:anywhere]">{t('header.newTicket')}</span>
             </button>
           </div>
         </div>
@@ -1388,7 +1410,7 @@ export const App: React.FC = () => {
             <LabelFilter labels={projectLabels} selectedIds={filterLabelIds} onChange={changeFilterLabelIds} />
           </div>
 
-          <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400 text-xs">
+          <div className="flex items-center gap-3 min-w-0 max-w-full text-slate-500 dark:text-slate-400 text-xs">
             <IconButton
               onClick={refreshTickets}
               disabled={loading}
@@ -1397,7 +1419,7 @@ export const App: React.FC = () => {
             >
               <RotateCw aria-hidden="true" className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             </IconButton>
-            <span>
+            <span className="min-w-0 [overflow-wrap:anywhere]">
               {t('toolbar.updatedAt', {
                 time: lastFetchedAt ? formatTime(lastFetchedAt, i18n.language) : t('common.justNow')
               })}
@@ -1435,7 +1457,19 @@ export const App: React.FC = () => {
             and never inside a number ("9997" / "2/"). Five digits
             ("99997/", about 158px at 36px text) fit the item at 320px with
             a 32px root; six or more could run past it, which no real
-            ticket list reaches. */}
+            ticket list reaches.
+            DFLT-00259: in a window of 200 CSS px or less (160px at a 200%
+            text size) the item has no room left for its number at all
+            (the 112px card minus p-4 and the item's px-3 leaves 0px), so a
+            four-digit side ("2394/", about 103px at 36px text) ran 25px
+            past the window and the page scrolled sideways. There each side
+            may break inside the number too, like the other counts in this
+            row already do, and the labels under the numbers may break
+            inside a word ("Progress", about 84px at 22px text, ended 5px
+            past the window in English). A px query, not the 15rem one: that one also
+            matches 320-336px with a 32px default font, where the sides
+            still fit and must not change (they would not anyway, since a
+            break inside a number is only a last resort). */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs flex flex-wrap items-center justify-between gap-4 [container-type:inline-size]">
           {/* DFLT-00251: in English at 160px the title and its note kept
               their min-content width ("Overview", "artifacts)") and ran 5px
@@ -1469,28 +1503,28 @@ export const App: React.FC = () => {
           >
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold [overflow-wrap:anywhere] text-slate-800 dark:text-slate-200">{totalCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('summary.total')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:[overflow-wrap:anywhere]">{t('summary.total')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold [overflow-wrap:anywhere] text-blue-600 dark:text-blue-400">{inProgressCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('summary.inProgress')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:[overflow-wrap:anywhere]">{t('summary.inProgress')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold [overflow-wrap:anywhere] text-purple-600 dark:text-purple-400">{inReviewCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('summary.inReview')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:[overflow-wrap:anywhere]">{t('summary.inReview')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold [overflow-wrap:anywhere] text-emerald-600 dark:text-emerald-400">{doneCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('summary.done')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:[overflow-wrap:anywhere]">{t('summary.done')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div
                 data-testid="summary-node-progress"
                 className="text-lg font-bold [overflow-wrap:anywhere] text-slate-800 dark:text-slate-200"
               >
-                <span className="whitespace-nowrap">{doneNodesCount}/</span><wbr /><span className="whitespace-nowrap">{totalNodesCount}</span>
+                <span className="whitespace-nowrap [@media(max-width:200px)]:whitespace-normal">{doneNodesCount}/</span><wbr /><span className="whitespace-nowrap [@media(max-width:200px)]:whitespace-normal">{totalNodesCount}</span>
               </div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('summary.nodeProgress')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:[overflow-wrap:anywhere]">{t('summary.nodeProgress')}</div>
             </div>
           </div>
         </div>
@@ -1597,6 +1631,14 @@ export const App: React.FC = () => {
                 // content (128px) and 5px past <main>'s. Under 15rem the
                 // gaps are now gap-1 and the row drops its px-1, which makes
                 // the group 129px in a 136px row.
+                // DFLT-00259: at a 200% text size in a 160px window the
+                // buttons are 54px and the group was 211-254px in a 112px
+                // row. Under 15rem it may now wrap (DOM and reading order
+                // kept), right-aligned like the group itself so "next"
+                // stays at the right end; it is no wider than the row, and
+                // the page number may break inside a run of digits. It only
+                // wraps once it is as wide as the row, so the DFLT-00258
+                // case (129px in 136px) stays on one line.
                 <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mt-2 px-1 [@media(max-width:15rem)]:px-0 text-xs text-slate-500 dark:text-slate-400">
                   <span className="min-w-0 [overflow-wrap:anywhere]">
                     {t('pagination.range', {
@@ -1605,7 +1647,7 @@ export const App: React.FC = () => {
                       total: filteredTickets.length
                     })}
                   </span>
-                  <div className="flex items-center gap-3 [@media(max-width:15rem)]:gap-1 shrink-0">
+                  <div className="flex items-center gap-3 [@media(max-width:15rem)]:gap-1 [@media(max-width:15rem)]:flex-wrap [@media(max-width:15rem)]:justify-end shrink-0 max-w-full min-w-0">
                     <button
                       onClick={() => setPage(p => Math.max(1, p - 1))}
                       aria-label={t('pagination.previous')}
@@ -1614,7 +1656,7 @@ export const App: React.FC = () => {
                     >
                       <ChevronLeft aria-hidden="true" className="w-3.5 h-3.5" />
                     </button>
-                    <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">
+                    <span className="font-mono font-semibold text-slate-700 dark:text-slate-300 min-w-0 [overflow-wrap:anywhere]">
                       {t('pagination.pageOf', { page: currentPage, total: totalPages })}
                     </span>
                     <button
