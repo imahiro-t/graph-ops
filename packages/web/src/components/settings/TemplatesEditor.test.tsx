@@ -375,3 +375,41 @@ describe('TemplatesEditor', () => {
     expect(screen.getByRole('button', { name: 'Review' })).toBeInTheDocument();
   });
 });
+
+// DFLT-00261: below 48rem (`narrow:`, rem-based) the template list stacks
+// above the editor at full width with a capped height and its names wrap;
+// TemplateTextEditor (plan / review / report) drops its fill-the-panel height
+// so the tab panel scrolls, and its save row wraps. The wide classes stay.
+// jsdom does no layout, so the classes are pinned.
+describe('TemplatesEditor narrow reflow (DFLT-00261)', () => {
+  beforeEach(() => {
+    for (const m of [fetchPlan, savePlan, fetchReview, saveReview, fetchReport, saveReport]) m.mockReset();
+    fetchPlan.mockResolvedValue({ tier_text: 'plan-tier', merged_text: 'plan-merged' });
+    fetchReport.mockResolvedValue({ tier_text: 'report-tier', merged_text: 'report-merged' });
+  });
+
+  it('stacks the list above the editor and wraps the editor rows below 48rem, for markdown and report templates', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<TemplatesEditor onDirtyChange={vi.fn()} />);
+    await textareaOf('settings.planTemplate');
+
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveClass('flex', 'h-full', 'min-h-0', 'gap-4', 'narrow:flex-col', 'narrow:h-auto');
+    const nav = screen.getByRole('navigation');
+    expect(nav).toHaveClass('w-56', 'shrink-0', 'overflow-y-auto', 'narrow:w-full', 'narrow:max-h-40');
+    for (const key of ['plan', 'review', 'report'] as const) {
+      expect(listButton(key).querySelector('span.truncate')).toHaveClass('narrow:whitespace-normal', 'narrow:wrap-anywhere');
+    }
+
+    const checkEditor = () => {
+      const saveRow = saveButton().parentElement as HTMLElement;
+      expect(saveRow).toHaveClass('flex', 'justify-end', 'narrow:flex-wrap');
+      const editorRoot = saveRow.parentElement as HTMLElement;
+      expect(editorRoot).toHaveClass('flex', 'flex-col', 'h-full', 'min-h-0', 'narrow:h-auto');
+    };
+    checkEditor();
+    await user.click(listButton('report'));
+    await textareaOf('settings.reportTemplate');
+    checkEditor();
+  });
+});

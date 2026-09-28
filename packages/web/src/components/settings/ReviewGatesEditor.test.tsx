@@ -1608,3 +1608,46 @@ describe('ReviewGatesEditor removal announcement', () => {
     expect(liveRegion()).toHaveTextContent('');
   });
 });
+
+// DFLT-00261: at a 200% default font on a 320px screen each gate row (ID,
+// default badge, name, enabled, delete) was one unwrapped line and the
+// enabled checkbox and delete button ran past the tab panel. Below 48rem
+// (the rem-based `narrow:` variant from index.css) the row wraps with the ID
+// and name fields on lines of their own, the editor drops its fill-the-panel
+// height and inner scroll (the tab panel scrolls instead), and the bottom
+// add / save row wraps. The wide classes stay. jsdom does no layout, so the
+// classes are pinned.
+describe('ReviewGatesEditor narrow reflow (DFLT-00261)', () => {
+  beforeEach(async () => {
+    mockedFetchCatalog.mockReset();
+    mockedFetchCatalog.mockResolvedValue(CATALOG_RESPONSE);
+    await i18n.changeLanguage('ja');
+  });
+
+  it('wraps each gate row and the add / save row below 48rem and keeps the wide classes', async () => {
+    const { container } = render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveClass('flex', 'flex-col', 'h-full', 'min-h-0', 'narrow:h-auto');
+
+    const ids = screen.getAllByLabelText(i18n.t('settings.reviewGates.idLabel'));
+    const names = screen.getAllByLabelText(i18n.t('settings.reviewGates.nameLabel'));
+    expect(ids).toHaveLength(2);
+    ids.forEach((id, i) => {
+      const idField = id.parentElement as HTMLElement;
+      expect(idField).toHaveClass('w-40', 'narrow:w-full');
+      const row = idField.parentElement as HTMLElement;
+      expect(row).toHaveClass('flex', 'items-end', 'gap-2', 'narrow:flex-wrap');
+      expect(names[i].parentElement).toHaveClass('flex-1', 'min-w-0', 'narrow:basis-full');
+    });
+
+    const list = ids[0].closest('.overflow-auto') as HTMLElement;
+    expect(list).toHaveClass('flex-1', 'min-h-0', 'overflow-auto', 'narrow:flex-none', 'narrow:overflow-visible');
+
+    const addButton = screen.getByRole('button', { name: i18n.t('settings.reviewGates.addGate') });
+    expect(addButton.parentElement).toHaveClass('flex', 'justify-between', 'items-center', 'narrow:flex-wrap', 'narrow:gap-2');
+    const saveButton = screen.getByRole('button', { name: i18n.t('settings.common.save') });
+    expect(saveButton.parentElement).toHaveClass('flex', 'items-center', 'gap-2', 'narrow:flex-wrap');
+  });
+});

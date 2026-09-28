@@ -252,3 +252,53 @@ describe('AutopilotSettingsEditor', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+// DFLT-00261: at a 200% default font on a 320px screen each setting row kept
+// its controls (shrink-0) beside the description, so the selects and reset
+// buttons ran past the tab panel. Below 48rem (the rem-based `narrow:`
+// variant from index.css) the row wraps with the description on a line of
+// its own and the controls below it, the controls may shrink (a select
+// fills the line), the save row wraps, the tab drops its own full-height
+// scroll so the tab panel scrolls instead, and the team settings path breaks
+// anywhere if it has to. The wide classes stay. jsdom does no layout, so the
+// classes are pinned.
+describe('AutopilotSettingsEditor narrow reflow (DFLT-00261)', () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('ja');
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
+  });
+
+  afterEach(async () => {
+    fetchSpy.mockRestore();
+    await i18n.changeLanguage('ja');
+  });
+
+  it('puts the controls under the description and wraps the rows below 48rem, keeping the wide classes', async () => {
+    const initial = response();
+    initial.team_file = '/shared/team/autopilot.yaml';
+    stubServer(initial);
+    const { container } = renderEditor();
+
+    const select = (await screen.findByLabelText(label('mainReflection'))) as HTMLSelectElement;
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveClass('h-full', 'min-h-0', 'overflow-y-auto', 'narrow:h-auto', 'narrow:overflow-visible');
+
+    expect(select).toHaveClass('narrow:min-w-0', 'narrow:max-w-full', 'narrow:flex-1');
+    const controls = select.parentElement as HTMLElement;
+    expect(controls).toHaveClass('flex', 'shrink-0', 'narrow:shrink', 'narrow:min-w-0', 'narrow:w-full');
+    const settingRow = controls.parentElement as HTMLElement;
+    expect(settingRow).toHaveClass('flex', 'items-start', 'gap-3', 'narrow:flex-wrap');
+    expect(settingRow.firstElementChild).toHaveClass('flex-1', 'min-w-0', 'narrow:basis-full');
+
+    const number = screen.getByLabelText(label('maxTickets'));
+    expect(number).toHaveClass('w-24', 'narrow:min-w-0', 'narrow:max-w-full');
+    expect(number).not.toHaveClass('narrow:flex-1');
+
+    const saveButton = screen.getByRole('button', { name: i18n.t('settings.common.save') });
+    expect(saveButton.parentElement).toHaveClass('flex', 'justify-end', 'narrow:flex-wrap');
+
+    const teamFile = screen.getByText(i18n.t('settings.autopilot.teamFile', { path: '/shared/team/autopilot.yaml' }));
+    expect(teamFile).toHaveClass('wrap-anywhere');
+    expect(teamFile).not.toHaveClass('wrap-break-word');
+  });
+});

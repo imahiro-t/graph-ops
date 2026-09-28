@@ -86,12 +86,12 @@ export const TemplatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const editorProps = { onDirtyChange: handleDirtyChange };
 
   return (
-    <div className="flex h-full min-h-0 gap-4">
+    <div className="flex h-full min-h-0 gap-4 narrow:flex-col narrow:h-auto">
       {confirmDialog}
       {/* Left: template list */}
       <nav
         aria-labelledby={listTitleId}
-        className="w-56 shrink-0 border border-slate-200 dark:border-slate-800 rounded-lg overflow-y-auto bg-slate-50 dark:bg-slate-800 flex flex-col"
+        className="w-56 shrink-0 border border-slate-200 dark:border-slate-800 rounded-lg overflow-y-auto bg-slate-50 dark:bg-slate-800 flex flex-col narrow:w-full narrow:max-h-40"
       >
         <div
           id={listTitleId}
@@ -118,7 +118,7 @@ export const TemplatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5 shrink-0 text-slate-400" aria-hidden="true" />
-                  <span className="truncate flex-1">{t(LIST_LABEL_KEYS[key])}</span>
+                  <span className="truncate flex-1 narrow:whitespace-normal narrow:wrap-anywhere">{t(LIST_LABEL_KEYS[key])}</span>
                 </button>
               </li>
             );

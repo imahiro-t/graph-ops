@@ -1122,3 +1122,69 @@ describe('AppSettingsEditor inline status messages use always-mounted live regio
     expect(region.textContent).toBe('');
   });
 });
+
+// DFLT-00261: at a 200% default font on a 320px screen the DB backend radios,
+// the page-size input and the "no changes to save" row ran past the tab
+// panel, and the MySQL grid, the connection-test row and the project rows
+// had no room. Below 48rem (the rem-based `narrow:` variant from index.css)
+// they wrap or drop to one column, the tab drops its own full-height scroll
+// so the tab panel scrolls instead, and the texts that carry a path (the
+// restart note, "currently in effect") break anywhere if they have to. The
+// wide classes stay. jsdom does no layout, so the classes are pinned.
+describe('AppSettingsEditor narrow reflow (DFLT-00261)', () => {
+  beforeEach(() => {
+    mockedFetchAppSettings.mockReset();
+  });
+
+  it('wraps the rows and drops the MySQL grid to one column below 48rem, keeping the wide classes', async () => {
+    mockedFetchAppSettings.mockResolvedValueOnce(
+      makeResponse({ dbBackend: 'mysql', mysqlHost: 'db.example.com', mysqlDatabase: 'graphops', mysqlUser: 'admin', mysqlPassword: REDACTED_SECRET_PLACEHOLDER })
+    );
+    const projects: Project[] = [{ id: 'p1', name: 'Alpha', prefix: 'ALP', local_path: '/a', created_at: '', updated_at: '' }];
+    const { container } = render(
+      <AppSettingsEditor
+        projects={projects}
+        onDirtyChange={vi.fn()}
+        onProjectsChanged={vi.fn()}
+        onPaginationPageSizeChanged={vi.fn()}
+        onMyNameChanged={vi.fn()}
+      />
+    );
+    await waitForAppSettingsLoaded();
+
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveClass('flex', 'flex-col', 'h-full', 'min-h-0', 'overflow-auto', 'narrow:h-auto', 'narrow:overflow-visible');
+
+    const group = screen.getByRole('radiogroup', { name: i18n.t('settings.appSettings.storage.dbBackendLabel') });
+    expect(group).toHaveClass('flex', 'gap-3', 'narrow:flex-wrap');
+
+    const hostField = screen.getByLabelText(i18n.t('settings.appSettings.storage.mysqlHostLabel')).parentElement as HTMLElement;
+    expect(hostField).toHaveClass('col-span-2', 'narrow:col-span-1');
+    expect(hostField.parentElement).toHaveClass('grid', 'grid-cols-3', 'narrow:grid-cols-1');
+
+    const testButton = screen.getByRole('button', { name: i18n.t('settings.appSettings.storage.testConnection') });
+    expect(testButton.parentElement).toHaveClass('flex', 'items-center', 'gap-2', 'narrow:flex-wrap');
+
+    expect(screen.getByLabelText(i18n.t('settings.appSettings.pagination.pageSizeLabel'))).toHaveClass('w-24', 'narrow:max-w-full');
+
+    const mainSaveRow = screen
+      .getAllByRole('button', { name: i18n.t('settings.common.save') })
+      .map(b => b.parentElement as HTMLElement)
+      .find(p => p.classList.contains('justify-end'));
+    expect(mainSaveRow).toHaveClass('flex', 'justify-end', 'items-center', 'gap-2', 'narrow:flex-wrap');
+
+    const projectRow = within(screen.getByTestId('project-row-p1'));
+    const nameInput = projectRow.getByLabelText(i18n.t('settings.appSettings.projects.nameLabel'));
+    expect(nameInput.parentElement?.parentElement).toHaveClass('flex', 'items-end', 'gap-2', 'narrow:flex-wrap');
+    const localPath = projectRow.getByLabelText(new RegExp(i18n.t('settings.appSettings.projects.localPathLabel').replace(/[()]/g, '\\$&')));
+    expect(localPath.parentElement?.parentElement).toHaveClass('flex', 'items-end', 'gap-2', 'narrow:flex-wrap');
+
+    expect(screen.getByText(i18n.t('settings.appSettings.restartNote', { path: '/home/me/.graph-ops/config.json' }))).toHaveClass('wrap-anywhere');
+    const inEffect = screen.getAllByText(text => text.startsWith(i18n.t('settings.appSettings.currentlyInEffect', { value: '' }).trim()));
+    expect(inEffect.length).toBeGreaterThan(0);
+    for (const p of inEffect) {
+      expect(p).toHaveClass('wrap-anywhere');
+      expect(p).not.toHaveClass('wrap-break-word');
+    }
+  });
+});

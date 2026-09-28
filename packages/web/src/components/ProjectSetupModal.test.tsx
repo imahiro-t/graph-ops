@@ -576,3 +576,73 @@ describe('ProjectSetupModal at large text on a narrow, short screen', () => {
     expect(button).toHaveClass('max-w-full', 'wrap-break-word');
   });
 });
+
+// DFLT-00261: the description and the message boxes used `break-all`, which
+// split ordinary English words at any letter on a narrow screen. They use
+// `wrap-anywhere` (overflow-wrap: anywhere) now: words break at word
+// boundaries and only a word too long for the line -- a path or a project
+// name without spaces -- is split, so it still wraps inside the box. Never
+// together with `wrap-break-word`, which Tailwind v4 emits later and would
+// win. The monospace path in the project list keeps `break-all` (one path,
+// so filling each line reads better). jsdom does no layout, so the classes
+// are pinned; the line breaks were checked in a real browser.
+describe('ProjectSetupModal wrapping (DFLT-00261)', () => {
+  const LONG_PATH = '/work/' + 'a-very-long-directory-name-without-spaces-'.repeat(3) + 'end';
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const expectWrapAnywhere = (el: HTMLElement) => {
+    expect(el).toHaveClass('wrap-anywhere');
+    expect(el).not.toHaveClass('break-all');
+    expect(el).not.toHaveClass('wrap-break-word');
+  };
+
+  it('wraps the description at word boundaries', () => {
+    renderModal({ directory: LONG_PATH });
+    expectWrapAnywhere(screen.getByText(i18n.t('projectSetupModal.description', { dir: LONG_PATH })));
+  });
+
+  it('wraps the overwrite warning at word boundaries and keeps break-all on the monospace path', async () => {
+    const user = userEvent.setup();
+    renderModal({ directory: LONG_PATH, projects: [project('p1', 'Alpha', '/work/alpha')] });
+
+    await user.click(existingRadio());
+    await user.click(screen.getByRole('radio', { name: 'Alpha' }));
+
+    expectWrapAnywhere(screen.getByText(i18n.t('projectSetupModal.overwriteWarning', { current: '/work/alpha', next: LONG_PATH })));
+    const path = screen.getByTestId('project-setup-local-path-p1');
+    expect(path).toHaveClass('font-mono', 'break-all');
+  });
+
+  it('wraps the partial-create error box at word boundaries', async () => {
+    const user = userEvent.setup();
+    fetchMock().mockResolvedValueOnce(
+      jsonResponse(500, { error: { code: 'PROJECT_CREATED_LOCAL_PATH_NOT_SAVED', message: 'created, local path not saved' } })
+    );
+    renderModal({ directory: '', offerExisting: false });
+
+    await user.type(screen.getByLabelText(i18n.t('createProjectModal.nameLabel')), 'ProjectNameWithoutAnySpaces');
+    await user.click(screen.getByRole('button', { name: i18n.t('createModal.submit') }));
+
+    expectWrapAnywhere(await screen.findByTestId('project-setup-partial-create'));
+  });
+
+  it('wraps the general error box at word boundaries', async () => {
+    const user = userEvent.setup();
+    fetchMock().mockResolvedValueOnce(jsonResponse(500, { error: { code: 'INTERNAL_ERROR', message: 'boom' } }));
+    renderModal({ directory: '', offerExisting: false });
+
+    await user.type(screen.getByLabelText(i18n.t('createProjectModal.nameLabel')), 'NewProj');
+    await user.click(screen.getByRole('button', { name: i18n.t('createModal.submit') }));
+
+    const alerts = await screen.findAllByRole('alert');
+    expect(alerts).toHaveLength(1);
+    expectWrapAnywhere(alerts[0]);
+  });
+});

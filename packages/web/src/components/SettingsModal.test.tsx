@@ -6,6 +6,8 @@
 // There is no scope switcher to protect any more (DFLT-00124): every tab
 // edits the one user tier, and the labels tab -- the only per-project one
 // left -- carries its own project selector.
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { useState } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -675,5 +677,31 @@ describe('SettingsModal at large text on a narrow, short screen', () => {
       expect(tab).toHaveClass('max-w-full', 'wrap-break-word');
     }
     await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
+  });
+});
+
+// DFLT-00261: below 48rem the settings editors stack and wrap instead of
+// filling the panel side by side, so the tab panel scrolls vertically there
+// (and stays overflow-hidden above it, as before). The `narrow:` variant is
+// defined in index.css with a rem media query -- unlike the pinned px
+// breakpoints (max-md: is `width < 768px`) -- so it follows the browser's
+// default font size: 1536px at a 200% default font, 768px at 16px. jsdom
+// evaluates no media queries, so the class and the variant's definition are
+// pinned; the layouts were measured in a real browser.
+describe('SettingsModal narrow reflow (DFLT-00261)', () => {
+  beforeEach(() => {
+    (fetchSettingsNodeTypes as unknown as Mock).mockResolvedValue([]);
+    (fetchSettingsNodeType as unknown as Mock).mockResolvedValue({ type: '', tier_text: '', merged_text: '' });
+  });
+
+  it('lets the tab panel scroll vertically below 48rem and keeps overflow-hidden above it', async () => {
+    renderModal();
+    const panel = await screen.findByRole('tabpanel');
+    expect(panel).toHaveClass('flex-1', 'min-h-0', 'overflow-hidden', 'narrow:overflow-y-auto', 'narrow:scroll-py-3', 'focus-visible:ring-inset');
+  });
+
+  it('defines the narrow variant as a rem media query', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8');
+    expect(css).toMatch(/^@custom-variant narrow \(@media \(width < 48rem\)\);$/m);
   });
 });
