@@ -13,7 +13,20 @@ export default mergeConfig(
   defineConfig({
     test: {
       environment: 'jsdom',
-      setupFiles: ['./src/test/setup.ts']
+      setupFiles: ['./src/test/setup.ts'],
+      // Raised from Vitest's 5 s default. Under heavy load (a load average
+      // above 200, e.g. while autopilot runs several reviews in parallel)
+      // 40-56 async UI tests (App.project, ReviewGatesEditor, settings/...)
+      // went past 5 s and failed, then passed once the load dropped
+      // (observed in DFLT-00270's reviews); CI and normal load never hit
+      // it. This only raises the ceiling, so a passing test takes exactly
+      // as long as before -- only a test that really hangs is reported up
+      // to 30 s later. hookTimeout is raised too because the beforeEach
+      // setup (building fake backends, rendering) slows down the same way.
+      // Lowering the worker count was not chosen: it would slow every run
+      // at normal load. Load beyond what 30 s absorbs is out of scope.
+      testTimeout: 30_000,
+      hookTimeout: 30_000
     }
   })
 );
