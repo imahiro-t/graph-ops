@@ -94,7 +94,7 @@ describe.each(['ja', 'en'] as const)('TicketItem description card accessibility 
 
   it('gives the expand button the same focus-visible ring as the other buttons', () => {
     renderExpanded();
-    expect(expandButton()).toHaveClass('rounded', ...FOCUS_RING);
+    expect(expandButton()).toHaveClass('rounded-sm', ...FOCUS_RING);
   });
 
   it('makes the collapsed body a named, focusable scroll region with a focus ring', () => {

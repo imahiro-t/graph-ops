@@ -213,7 +213,7 @@ describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 1
       expect(el.parentElement).toBe(heading);
       expect(el).toHaveClass(`${NARROW}min-w-0`, `${NARROW}wrap-anywhere`);
       expect(el).not.toHaveClass('wrap-anywhere');
-      expect(el).not.toHaveClass('[overflow-wrap:anywhere]');
+      expect(el).not.toHaveClass('wrap-anywhere');
     }
   });
 
@@ -312,7 +312,7 @@ describe.each(['ja', 'en'] as const)('summary card with a root font size set on 
       );
       expect(el).not.toHaveClass('min-w-0');
       expect(el).not.toHaveClass('wrap-anywhere');
-      expect(el).not.toHaveClass('[overflow-wrap:anywhere]');
+      expect(el).not.toHaveClass('wrap-anywhere');
     }
   });
 
@@ -329,7 +329,9 @@ describe.each(['ja', 'en'] as const)('summary card with a root font size set on 
   });
 
   // Each side of the slash is whitespace-nowrap, so the only break left is
-  // the <wbr> after the slash: never "9997" / "2/".
+  // the <wbr> after the slash: never "9997" / "2/". DFLT-00259: except in a
+  // window of 200 CSS px or less, where the item has no room for any number
+  // (see App.headerNarrowReflow.test.tsx).
   it('breaks the node progress only after the slash, never inside a number', async () => {
     await renderApp();
     const progress = screen.getByTestId('summary-node-progress');

@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# TypeScript incremental build cache (tsc -b); regenerated on every build.
+*.tsbuildinfo
 *.db
 *.db-shm
 *.db-wal

@@ -1790,11 +1790,16 @@ export const TicketItem: React.FC<Props> = ({
           follow) still leaves the Send button room for a one-line label at
           320/360px. The 15rem query stays for a very large default font
           (over about 267%), where it matches above 640px too. From sm up, at
-          a normal default font size, nothing changes. */}
+          a normal default font size, nothing changes. DFLT-00259: in a window
+          of 200 CSS px or less (160px at a 200% text size) the detail panel
+          and the Action Footer pad with p-2, which gives the autopilot
+          column's untrusted-folder notice room for its dismiss button (it
+          had 0px of content width, see AutopilotControls.tsx). A px query:
+          the 15rem one also matches 320-336px with a 32px default font. */}
       {isExpanded && (
         <div
           data-testid="ticket-details"
-          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 max-sm:p-3 [@media(max-width:15rem)]:p-3 space-y-6"
+          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 max-sm:p-3 [@media(max-width:15rem)]:p-3 [@media(max-width:200px)]:p-2 space-y-6"
         >
           {/* Metadata Bar */}
           <div className="flex flex-wrap items-center gap-y-2 gap-x-6 text-xs text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800 pb-3">
@@ -1880,7 +1885,7 @@ export const TicketItem: React.FC<Props> = ({
                     // the same focus ring as the other buttons (WCAG 2.4.7).
                     aria-expanded={isDescriptionExpanded}
                     aria-controls={descriptionBodyId}
-                    className="text-[0.6875rem] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold rounded focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+                    className="text-[0.6875rem] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold rounded-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
                   >
                     {isDescriptionExpanded ? t('ticketItem.description.collapse') : t('ticketItem.description.expand')}
                   </button>
@@ -1911,7 +1916,7 @@ export const TicketItem: React.FC<Props> = ({
                 tabIndex={isDescriptionExpanded ? undefined : 0}
                 role={isDescriptionExpanded ? undefined : 'region'}
                 aria-label={isDescriptionExpanded ? undefined : t('ticketItem.description.bodyRegion')}
-                className={`wrap-break-word${isDescriptionExpanded ? '' : ' max-h-56 overflow-y-auto rounded-lg focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400'}`}
+                className={`wrap-break-word ${isDescriptionExpanded ? '' : 'max-h-56 overflow-y-auto rounded-lg focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400'}`}
               >
                 <MarkdownViewer content={description} />
               </div>
@@ -2709,10 +2714,14 @@ export const TicketItem: React.FC<Props> = ({
 
           {/* Action Footer: Claude Execution Panel. p-3 with large text on
               a narrow screen, like the details around it (DFLT-00227), and
-              below sm whatever the text size (DFLT-00252). */}
+              below sm whatever the text size (DFLT-00252). p-2 in a window
+              of 200 CSS px or less (DFLT-00259, see the detail panel). The
+              prompt box's border turns indigo on focus in dark mode as well
+              (dark:focus:border-indigo-500, DFLT-00259): without it
+              dark:border-slate-700 won over focus:border-indigo-500. */}
           <div
             data-testid="ticket-action-footer"
-            className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 [@media(max-width:15rem)]:p-3 rounded-xl border border-slate-200 dark:border-slate-800"
+            className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 [@media(max-width:15rem)]:p-3 [@media(max-width:200px)]:p-2 rounded-xl border border-slate-200 dark:border-slate-800"
           >
             {/* The action row (DFLT-00181): the regular actions (refine, then
                 run) on the left, and at its right end, set apart from them,
@@ -2787,7 +2796,7 @@ export const TicketItem: React.FC<Props> = ({
                 // DFLT-00205: a persistent accessible name (the placeholder
                 // vanishes once typing starts).
                 aria-label={t('ticketItem.promptLabel')}
-                className="flex-1 min-w-0 max-sm:basis-24 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus:bg-white dark:focus:bg-slate-800 resize-none font-sans"
+                className="flex-1 min-w-0 max-sm:basis-24 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-indigo-500 dark:focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus:bg-white dark:focus:bg-slate-800 resize-none font-sans"
               />
               <button
                 onClick={handleSendPrompt}
