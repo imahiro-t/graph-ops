@@ -30,7 +30,8 @@ import i18n from '../i18n';
 import { Artifact, TicketDetail } from '../types';
 import { TicketItem } from './TicketItem';
 
-const NARROW_LARGE_TEXT = '[@media(max-width:15rem)]:';
+// `@media (max-width: 15rem)`, a named variant in tailwind.config.js (DFLT-00260).
+const NARROW_LARGE_TEXT = 'upto-15rem:';
 // DFLT-00253: the rem forms of lg:, xl: and max-lg:.
 const FROM_64REM = '[@media(min-width:64rem)]:';
 const FROM_80REM = '[@media(min-width:80rem)]:';

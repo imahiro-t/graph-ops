@@ -237,8 +237,8 @@ describe('ClaudeRunnerModal at large text on a narrow, short screen', () => {
     const heading = screen.getByRole('heading', { level: 2, name: i18n.t('claudeRunnerModal.title') });
     const header = heading.parentElement as HTMLElement;
 
-    expect(header).toHaveClass('px-6', '[@media(max-width:15rem)]:px-3');
-    expect(heading.querySelector('svg')).toHaveClass('[@media(max-width:15rem)]:hidden');
-    expect(header.nextElementSibling).toHaveClass('p-6', '[@media(max-width:15rem)]:p-3');
+    expect(header).toHaveClass('px-6', 'upto-15rem:px-3');
+    expect(heading.querySelector('svg')).toHaveClass('upto-15rem:hidden');
+    expect(header.nextElementSibling).toHaveClass('p-6', 'upto-15rem:p-3');
   });
 });

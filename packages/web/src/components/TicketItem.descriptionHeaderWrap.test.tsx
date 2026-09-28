@@ -156,7 +156,7 @@ describe.each(['ja', 'en'] as const)('TicketItem description header wraps on a n
   it('gives the card p-4, narrowed to p-3 on a narrow screen or with a large default font', () => {
     renderExpanded();
     const { card } = descriptionHeader();
-    expect(card).toHaveClass('p-4', 'max-sm:p-3', '[@media(max-width:15rem)]:p-3', 'rounded-xl');
+    expect(card).toHaveClass('p-4', 'max-sm:p-3', 'upto-15rem:p-3', 'rounded-xl');
   });
 
   // The body's long words (paths, inline code, "autopilot" at 200% in a list

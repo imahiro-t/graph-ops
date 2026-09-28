@@ -1418,7 +1418,7 @@ export const App: React.FC = () => {
           15rem query stays: with a very large default font (over about 267%)
           it still matches above 640px. From sm up, at a normal default font
           size, nothing changes. */}
-      <main className="max-w-7xl mx-auto px-6 max-sm:px-3 [@media(max-width:15rem)]:px-3 py-6 space-y-6">
+      <main className="max-w-7xl mx-auto px-6 max-sm:px-3 upto-15rem:px-3 py-6 space-y-6">
         {/* Simple Summary Metrics. DFLT-00251: both children are min-w-0
             max-w-full so neither can be wider than the card; the numbers
             already wrap between items (flex-wrap). Each item is min-w-0
@@ -1457,10 +1457,10 @@ export const App: React.FC = () => {
               container: its width comes from <main>, not from its content. */}
           <div
             data-testid="summary-heading"
-            className="flex [@media(max-width:15rem)]:flex-wrap [@container(max-width:12rem)]:flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 max-w-full"
+            className="flex upto-15rem:flex-wrap [@container(max-width:12rem)]:flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 max-w-full"
           >
-            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm [@media(max-width:15rem)]:min-w-0 [@media(max-width:15rem)]:[overflow-wrap:anywhere] [@container(max-width:12rem)]:min-w-0 [@container(max-width:12rem)]:[overflow-wrap:anywhere]">{t('summary.title')}</span>
-            <span className="text-xs text-slate-500 dark:text-slate-400 [@media(max-width:15rem)]:min-w-0 [@media(max-width:15rem)]:[overflow-wrap:anywhere] [@container(max-width:12rem)]:min-w-0 [@container(max-width:12rem)]:[overflow-wrap:anywhere]">{t('summary.subtitle')}</span>
+            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm upto-15rem:min-w-0 upto-15rem:[overflow-wrap:anywhere] [@container(max-width:12rem)]:min-w-0 [@container(max-width:12rem)]:[overflow-wrap:anywhere]">{t('summary.title')}</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 upto-15rem:min-w-0 upto-15rem:[overflow-wrap:anywhere] [@container(max-width:12rem)]:min-w-0 [@container(max-width:12rem)]:[overflow-wrap:anywhere]">{t('summary.subtitle')}</span>
           </div>
 
           <div
@@ -1597,7 +1597,7 @@ export const App: React.FC = () => {
                 // content (128px) and 5px past <main>'s. Under 15rem the
                 // gaps are now gap-1 and the row drops its px-1, which makes
                 // the group 129px in a 136px row.
-                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mt-2 px-1 [@media(max-width:15rem)]:px-0 text-xs text-slate-500 dark:text-slate-400">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mt-2 px-1 upto-15rem:px-0 text-xs text-slate-500 dark:text-slate-400">
                   <span className="min-w-0 [overflow-wrap:anywhere]">
                     {t('pagination.range', {
                       from: (currentPage - 1) * ticketsPerPage + 1,
@@ -1605,7 +1605,7 @@ export const App: React.FC = () => {
                       total: filteredTickets.length
                     })}
                   </span>
-                  <div className="flex items-center gap-3 [@media(max-width:15rem)]:gap-1 shrink-0">
+                  <div className="flex items-center gap-3 upto-15rem:gap-1 shrink-0">
                     <button
                       onClick={() => setPage(p => Math.max(1, p - 1))}
                       aria-label={t('pagination.previous')}

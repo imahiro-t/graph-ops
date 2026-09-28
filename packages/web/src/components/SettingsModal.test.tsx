@@ -660,7 +660,7 @@ describe('SettingsModal at large text on a narrow, short screen', () => {
     const text = heading.querySelector('span');
     expect(text).toHaveTextContent(i18n.t('settings.modalTitle'));
     expect(text).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
-    expect(heading.querySelector('svg')).toHaveClass('[@media(max-width:15rem)]:hidden');
+    expect(heading.querySelector('svg')).toHaveClass('upto-15rem:hidden');
     await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
   });
 

@@ -29,10 +29,12 @@ export const NodeTypeBadge: React.FC<Props> = ({ type, theme, className, labelCl
   const Icon = meta.icon;
   const label = meta.labelKey ? t(meta.labelKey) : type;
 
+  // text-[0.625rem] (10px at the default 16px), not text-[10px]: a rem size
+  // follows the browser's default font size (WCAG 1.4.4, DFLT-00260).
   return (
     <span
       title={label}
-      className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wide ${colors.bg} ${colors.text} ${colors.border} ${className || ''}`}
+      className={`inline-flex items-center gap-1 text-[0.625rem] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wide ${colors.bg} ${colors.text} ${colors.border} ${className || ''}`}
     >
       <Icon aria-hidden="true" className="w-3 h-3 shrink-0" />
       <span className={labelClassName ? `truncate ${labelClassName}` : 'truncate'}>{label}</span>

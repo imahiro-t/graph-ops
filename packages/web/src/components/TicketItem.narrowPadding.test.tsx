@@ -22,7 +22,7 @@ import i18n from '../i18n';
 import { TicketDetail } from '../types';
 import { TicketItem } from './TicketItem';
 
-const NARROW_LARGE_TEXT_PADDING = '[@media(max-width:15rem)]:p-3';
+const NARROW_LARGE_TEXT_PADDING = 'upto-15rem:p-3';
 const BELOW_SM_PADDING = 'max-sm:p-3';
 
 const makeTicket = (): TicketDetail => ({

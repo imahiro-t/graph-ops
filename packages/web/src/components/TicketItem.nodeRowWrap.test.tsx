@@ -19,7 +19,9 @@
 // implementation notes).
 //
 // DFLT-00253 moved that boundary from lg (1024px) to 80rem, a rem media
-// query (`[@media_not_all_and_(min-width:80rem)]:`, the rem form of max-xl:).
+// query (the rem form of max-xl:). DFLT-00260 named it `below-80rem:`
+// (`@media not all and (min-width: 80rem)`, tailwind.config.js); `upto-15rem:`
+// is `@media (max-width: 15rem)`.
 // In English at 1024-1279px the one-line layout let the artifact badge run
 // over the status badge and the type badge over the approve button, and a
 // px boundary does not follow the browser's default font size, so a 20-32px
@@ -52,6 +54,24 @@
 // - Under 80rem the type badge's label wraps instead of truncating, so a
 //   200% default font on a 320px screen shows the whole label (WCAG 1.4.4;
 //   the title tooltip reaches neither keyboard nor touch users).
+//
+// DFLT-00260:
+// - From 80rem up the row keeps a 0.25rem column gap (gap-x-1), so a row
+//   whose name is truncated no longer runs its last badge right up to the
+//   status badge (they touched with 0px between them). This is the one
+//   intended change to the row from 80rem up: a row with 0.25rem or more of
+//   free space looks the same (the left group gives up space it did not
+//   need), one with less truncates its name 0.25rem earlier. Under 80rem
+//   below-80rem:gap-x-3 still overrides it.
+// - The retry, manual and artifact badges shrink and wrap under 80rem like
+//   the type badge, so in a 160px window they no longer run 3-26px past the
+//   card. From 80rem up they stay shrink-0 whitespace-nowrap.
+// - The badges' font sizes are rem (0.625rem / 0.6875rem, the same 10px /
+//   11px at the default 16px), so they follow the browser's default font
+//   size (WCAG 1.4.4). The status badge grows with it, and its one-line
+//   label ran up to 41px past the card with a 200% default font on a
+//   320-336px screen, so under 80rem it may shrink and wrap too; from 80rem
+//   up it stays one line.
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
@@ -151,10 +171,11 @@ const rowParts = (n: GraphNode) => {
 // Each class is checked on its own: `not.toHaveClass(a, b)` passes as soon as
 // one of them is missing, so it would not catch the other slipping in.
 // DFLT-00253: the wrapping layout's boundary, and the query for a large
-// default font on a narrow screen (DFLT-00227).
-const UNDER_80REM = '[@media_not_all_and_(min-width:80rem)]:';
+// default font on a narrow screen (DFLT-00227). DFLT-00260 turned both into
+// named variants (tailwind.config.js) with the same media conditions.
+const UNDER_80REM = 'below-80rem:';
 const FROM_80REM = '[@media(min-width:80rem)]:';
-const NARROW_LARGE_TEXT = '[@media(max-width:15rem)]:';
+const NARROW_LARGE_TEXT = 'upto-15rem:';
 
 const expectNoneOf = (el: Element, classes: string[]) => {
   for (const cls of classes) expect(el).not.toHaveClass(cls);
@@ -176,8 +197,10 @@ const BEFORE = {
 };
 const ADDED = {
   // flex-wrap and gap-y-2 hold at every width (DFLT-00253 round 2): a row
-  // that fits never wraps, so they only act when it does not.
-  row: ['flex-wrap', 'gap-y-2', `${UNDER_80REM}gap-x-3`, `${NARROW_LARGE_TEXT}p-2`],
+  // that fits never wraps, so they only act when it does not. gap-x-1 keeps
+  // the left and right groups 0.25rem apart from 80rem up (DFLT-00260);
+  // under 80rem gap-x-3 overrides it.
+  row: ['flex-wrap', 'gap-x-1', 'gap-y-2', `${UNDER_80REM}gap-x-3`, `${NARROW_LARGE_TEXT}p-2`],
   // Without basis-auto the left group keeps flex-1's 0% basis and the right
   // group never wraps to the next line, so this one is essential.
   // From 80rem the left group is at least as wide as its parts other than
@@ -208,7 +231,24 @@ const ADDED = {
   ],
   typeBadge: [`${UNDER_80REM}shrink`, `${UNDER_80REM}min-w-0`, `${UNDER_80REM}max-w-full`],
   // DFLT-00253 round 2: the badge's label wraps under 80rem.
-  typeBadgeLabel: [`${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}[overflow-wrap:anywhere]`]
+  typeBadgeLabel: [`${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}[overflow-wrap:anywhere]`],
+  // DFLT-00260: the retry, manual and artifact badges shrink and wrap under
+  // 80rem too, so a 160px window no longer pushes them past the card.
+  sideBadge: [
+    `${UNDER_80REM}shrink`,
+    `${UNDER_80REM}min-w-0`,
+    `${UNDER_80REM}max-w-full`,
+    `${UNDER_80REM}whitespace-normal`,
+    `${UNDER_80REM}[overflow-wrap:anywhere]`
+  ],
+  // DFLT-00260: the status badge may wrap under 80rem (it sits in the right
+  // group, whose items shrink by default).
+  statusBadge: [
+    `${UNDER_80REM}min-w-0`,
+    `${UNDER_80REM}max-w-full`,
+    `${UNDER_80REM}whitespace-normal`,
+    `${UNDER_80REM}[overflow-wrap:anywhere]`
+  ]
 };
 // A prefix is allowed for an added class only if it is one of these.
 const ALLOWED_PREFIXES = [UNDER_80REM, FROM_80REM, NARROW_LARGE_TEXT];
@@ -218,11 +258,12 @@ const PX_PREFIXES = ['max-lg:', 'max-xl:', 'lg:', 'xl:', 'max-2xl:', '2xl:'];
 const hasPxPrefix = (cls: string) => PX_PREFIXES.some(p => cls.startsWith(p));
 // The only unprefixed classes added: whitespace-nowrap (DFLT-00242; the
 // status badge and the time are one line from lg up already, so nowrap
-// changes nothing there), and the row's flex-wrap / gap-y-2 and the right
+// changes nothing there), the row's flex-wrap / gap-y-2 and the right
 // group's ml-auto (DFLT-00253 round 2), which act only on a row that does not
-// fit on one line.
+// fit on one line, and the row's gap-x-1 (DFLT-00260), the intended 0.25rem
+// between the two groups from 80rem up.
 const UNPREFIXED_ALLOWED: Record<string, Set<string>> = {
-  row: new Set(['flex-wrap', 'gap-y-2']),
+  row: new Set(['flex-wrap', 'gap-x-1', 'gap-y-2']),
   right: new Set(['ml-auto']),
   time: new Set(['whitespace-nowrap'])
 };
@@ -270,16 +311,18 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     expectNoneOf(right, ['justify-end', 'max-lg:justify-end', `${UNDER_80REM}justify-end`]);
   });
 
-  it.each(NODES.map(n => [n.id, n] as const))('%s: the id and name may wrap under 80rem; the status badge and time never break', (_id, n) => {
+  it.each(NODES.map(n => [n.id, n] as const))('%s: the id, name and status badge may wrap under 80rem; the time never breaks', (_id, n) => {
     renderTicket();
     const { id, name, status, time } = rowParts(n);
     expect(id).toHaveClass(...ADDED.id);
     expect(name).toHaveClass(...ADDED.name);
-    expect(status).toHaveClass('whitespace-nowrap');
+    // One line from 80rem up; under 80rem it may wrap (DFLT-00260).
+    expect(status).toHaveClass('whitespace-nowrap', ...ADDED.statusBadge);
+    expectNoneOf(status, ['min-w-0', 'max-w-full', 'whitespace-normal', '[overflow-wrap:anywhere]']);
     expect(time).toHaveClass('whitespace-nowrap');
   });
 
-  it.each(NODES.map(n => [n.id, n] as const))('%s: keeps every class it had before, so the row from 80rem up is unchanged', (_id, n) => {
+  it.each(NODES.map(n => [n.id, n] as const))('%s: keeps every class it had before, so from 80rem up only the 0.25rem gap is new', (_id, n) => {
     renderTicket();
     const parts = rowParts(n);
     for (const key of ['row', 'left', 'right', 'id', 'name', 'time'] as const) {
@@ -293,7 +336,7 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     }
   });
 
-  it.each(NODES.map(n => [n.id, n] as const))('%s: everything added is 80rem/15rem prefixed, apart from the allowed unprefixed classes', (_id, n) => {
+  it.each(NODES.map(n => [n.id, n] as const))('%s: everything added is 80rem/15rem prefixed, apart from the allowed unprefixed classes (gap-x-1 among them)', (_id, n) => {
     renderTicket();
     const parts = rowParts(n);
     for (const key of ['row', 'left', 'right', 'id', 'name', 'time'] as const) {
@@ -350,6 +393,54 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     expectNoneOf(name, ['w-0', '[flex-basis:content]', 'basis-0', 'grow', 'flex-1']);
     // The one-line layout's badges still never wrap or shrink.
     for (const badge of left.querySelectorAll('span.whitespace-nowrap')) expect(badge).toHaveClass('shrink-0');
+  });
+
+  // DFLT-00260: the retry, manual and artifact badges of the node that has all three.
+  const sideBadges = () => {
+    const n = NODES[0];
+    const { left } = rowParts(n);
+    const byText = (text: string) => within(left).getByText(text, { exact: false }).closest('span') as HTMLElement;
+    const retry = byText(i18n.t('ticketItem.retryCount', { count: n.iteration_count }));
+    const manual = byText(i18n.t('ticketItem.manualApproval'));
+    const artifacts = within(left).getByText(i18n.t('ticketItem.artifactsCount', { count: 2 }), { exact: false }).closest('span.rounded-full') as HTMLElement;
+    return { retry, manual, artifacts };
+  };
+
+  it.each(NODES.map(n => [n.id, n] as const))('%s: the row keeps 0.25rem between its groups from 80rem up, and gap-x-3 under 80rem', (_id, n) => {
+    renderTicket();
+    const { row } = rowParts(n);
+    expect(row).toHaveClass('gap-x-1', `${UNDER_80REM}gap-x-3`);
+    expectNoneOf(row, ['gap-x-3', 'gap-2', 'gap-3']);
+  });
+
+  it('the retry, manual and artifact badges may shrink and wrap under 80rem and stay one line from 80rem up', () => {
+    renderTicket();
+    const { retry, manual, artifacts } = sideBadges();
+    for (const badge of [retry, manual, artifacts]) {
+      expect(badge).toHaveClass('shrink-0', 'whitespace-nowrap', ...ADDED.sideBadge);
+      expectNoneOf(badge, ['shrink', 'min-w-0', 'max-w-full', 'whitespace-normal', '[overflow-wrap:anywhere]']);
+      expect(classList(badge).filter(hasPxPrefix)).toEqual([]);
+    }
+    // The artifact badge's icon keeps its size when the badge shrinks.
+    expect(artifacts.querySelector('svg')).toHaveClass('w-3', 'h-3', 'shrink-0');
+  });
+
+  it.each(NODES.map(n => [n.id, n] as const))('%s: the badges size their text in rem, following the default font size', (_id, n) => {
+    renderTicket();
+    const { left, status } = rowParts(n);
+    const typeBadge = left.querySelector('span[title]') as HTMLElement;
+    expect(typeBadge).toHaveClass('text-[0.625rem]');
+    expect(status).toHaveClass('text-[0.6875rem]');
+    for (const el of [typeBadge, status]) expectNoneOf(el, ['text-[10px]', 'text-[11px]']);
+  });
+
+  it('the retry, manual and artifact badges size their text in rem', () => {
+    renderTicket();
+    const { retry, manual, artifacts } = sideBadges();
+    expect(retry).toHaveClass('text-[0.6875rem]');
+    expect(manual).toHaveClass('text-[0.625rem]');
+    expect(artifacts).toHaveClass('text-[0.625rem]');
+    for (const el of [retry, manual, artifacts]) expectNoneOf(el, ['text-[10px]', 'text-[11px]']);
   });
 
   it('the approve/reject buttons wrap and may shrink under 80rem, and still do not toggle the row', () => {

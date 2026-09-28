@@ -86,7 +86,7 @@ const renderTicket = (ticket: TicketDetail, { myName = '', isExpanded = false } 
     />
   );
 
-const NARROW = '[@media(max-width:15rem)]:';
+const NARROW = 'upto-15rem:';
 
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('[]', { status: 200 }))));
