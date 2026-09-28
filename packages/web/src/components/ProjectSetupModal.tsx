@@ -66,7 +66,7 @@ interface Props {
   onProjectsChanged?: () => void | Promise<void>;
   // Where focus goes on close when the element focused before opening is no
   // longer in the document (or nothing was focused).
-  returnFocusRef?: React.RefObject<HTMLElement>;
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
 const inputClass =

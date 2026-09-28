@@ -59,7 +59,7 @@ interface Props {
   cancelLabel: string;
   onConfirm: () => void;
   onCancel: () => void;
-  returnFocusFallbackRef?: React.RefObject<HTMLElement>;
+  returnFocusFallbackRef?: React.RefObject<HTMLElement | null>;
   // 'danger' is for a destructive action: role="alertdialog" and a red
   // confirm button.
   tone?: 'default' | 'danger';
