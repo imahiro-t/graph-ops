@@ -82,16 +82,18 @@
 // as the min-content width, so it wraps at the spaces and breaks inside a
 // word only when that word cannot fit on a line of its own; and it is
 // rounded-xl there, a rounded rectangle when wrapped and still a pill on one
-// line (0.75rem is at least half the one-line height). The IN PROGRESS
-// badge's label sits in a min-w-0 span, since the badge is a flex box and an
-// anonymous flex item would not shrink below its longest word.
+// line (0.75rem is at least half the one-line height).
 // That alone did not fit: at 200% x 320-336px and 16px x 160px the badge
 // already took the row's whole width and still had no room for "PROGRESS"
 // (next to the dot) or "AWAITING" on a line of their own (measured: 138px
 // available for 116px + 32px padding + the dot; 66px for 62px + 16px). So
 // under 80rem the IN PROGRESS badge is a block with the dot inline in front
 // of the label ("• IN" / "PROGRESS"), and under 15rem the badge and the
-// row pad 0.25rem at the sides instead of 0.5rem. Measured in a real browser
+// row pad 0.25rem at the sides instead of 0.5rem. The label stays in a span
+// of its own, with min-w-0; that has no effect today (under 80rem the span
+// is inline in a block, and from 80rem up the badge is nowrap and does not
+// shrink) and only guards the label should the badge become a shrinking
+// flex box again. Measured in a real browser
 // (en, Chrome's default font size set to 32px / 16px): no word is broken at
 // 32px x 320/336/375px or 16px x 160px, the badges stay inside the row with
 // no horizontal scroll, one-line badges are still pills, 80rem up is

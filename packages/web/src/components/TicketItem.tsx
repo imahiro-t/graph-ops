@@ -1075,24 +1075,18 @@ export const TicketItem: React.FC<Props> = ({
     const meta = getStatusMeta(status);
     const isInProgress = status === 'IN PROGRESS';
     const isNotStarted = meta === TODO_META;
-    // Under 80rem the badge may shrink and wrap (DFLT-00260). DFLT-00280: it
-    // wraps at the spaces (break-words keeps the longest word as its
-    // min-content width; `anywhere` let the row squeeze it into
-    // "IN / PROGR / ESS") and only breaks inside a word that cannot fit on a
-    // line of its own, and it is rounded-xl there so a wrapped badge is a
-    // rounded rectangle rather than a tall oval. One line, rounded-xl
-    // (0.75rem) is still at least half the badge's height, so it looks like
-    // the same pill. From 80rem up it stays a one-line rounded-full pill.
-    // Under 15rem (a large default font on a narrow screen) it pads 0.25rem
-    // at the sides, and the row does too, so a word like "PROGRESS" or
-    // "AWAITING" still fits on a line of its own at 200% x 320px and at
-    // 16px x 160px.
-    // The IN PROGRESS badge is a flex box from 80rem up (the dot, then the
-    // label). Under 80rem it is a block and the dot flows inline in front of
-    // the label, so it wraps as "• IN" / "PROGRESS" instead of keeping a
-    // column of its own beside the label. The label is in a min-w-0 span so
-    // that, as a flex item, it could never keep its longest word as its
-    // minimum width and run past the badge.
+    // Under 80rem the badge may shrink and wrap (DFLT-00260). DFLT-00280:
+    // break-words (not `anywhere`) so it wraps at the spaces, and rounded-xl
+    // so a wrapped badge is a rounded rectangle, not a tall oval (one line it
+    // is still a pill). Under 15rem it pads 0.25rem at the sides so a long
+    // word fits on a line of its own. From 80rem up it is a one-line
+    // rounded-full pill. The IN PROGRESS badge is a flex box (dot, label)
+    // from 80rem up and a block under 80rem, where the dot flows inline in
+    // front of the label ("• IN" / "PROGRESS"). Its label is kept in a span
+    // of its own; min-w-0 on it does nothing today (under 80rem the span is
+    // inline, and from 80rem up the badge is nowrap and never shrinks), and
+    // is only a guard should the badge become a shrinking flex box again.
+    // The measurements behind this are in TicketItem.nodeRowWrap.test.tsx.
     return (
       <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full whitespace-nowrap below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:break-words below-80rem:rounded-xl upto-15rem:px-1 ${isNotStarted ? 'font-medium' : 'font-bold'} ${meta.chip.bg} ${meta.chip.text}${isInProgress ? ' flex items-center gap-1 below-80rem:block' : ''}`}>
         {isInProgress && <span className="w-1.5 h-1.5 shrink-0 rounded-full bg-blue-500 animate-pulse below-80rem:inline-block below-80rem:mr-1 below-80rem:align-middle" />}
