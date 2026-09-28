@@ -1126,7 +1126,7 @@ export const App: React.FC = () => {
           focusable elements; `relative` and z-30 stay either way. */}
       <header
         ref={headerRef}
-        className={`bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 lg:px-6 py-3.5 relative${headerFitsSticky ? ' lg:sticky lg:top-0' : ''} z-30`}
+        className={`bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 lg:px-6 py-3.5 relative ${headerFitsSticky ? 'lg:sticky lg:top-0' : ''} z-30`}
       >
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">

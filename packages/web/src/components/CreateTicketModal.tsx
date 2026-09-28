@@ -55,7 +55,7 @@ export const CreateTicketModal: React.FC<Props> = ({ onSubmit, onClose, isCreati
   // and the title and both buttons stay reachable. `min-w-0` lets it shrink
   // to the overlay's width; it stays the overlay's direct child.
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex p-4 overflow-y-auto overscroll-contain">
+    <div className="fixed inset-0 z-50 bg-black/40 flex p-4 overflow-y-auto overscroll-contain">
       <div
         ref={dialogRef}
         role="dialog"

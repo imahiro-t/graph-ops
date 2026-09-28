@@ -74,7 +74,7 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
   // child. The panel's `overflow-hidden` only clips the rounded corners: it
   // has no height cap, so nothing inside is cut off.
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex p-4 overflow-y-auto overscroll-contain">
+    <div className="fixed inset-0 z-50 bg-black/40 flex p-4 overflow-y-auto overscroll-contain">
       <div
         ref={dialogRef}
         role="dialog"

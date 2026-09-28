@@ -149,8 +149,8 @@ export const GherkinViewer: React.FC<Props> = ({ content, scrollable = false, la
       // blue-500 (#3b82f6) is 3.68:1 / 3.52:1 there and 3.98:1 / 4.85:1 on
       // dark slate-800/900 -- and it matches settings/TemplateTextEditor,
       // the other scroll region in this app.
-      className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3 font-mono text-xs overflow-x-auto inset-shadow-sm${
-        scrollable ? ' max-h-64 overflow-y-auto focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500' : ''
+      className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3 font-mono text-xs overflow-x-auto inset-shadow-sm ${
+        scrollable ? 'max-h-64 overflow-y-auto focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500' : ''
       }`}
       tabIndex={scrollable ? 0 : undefined}
       role={scrollable && label ? 'region' : undefined}

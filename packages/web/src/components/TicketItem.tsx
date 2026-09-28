@@ -1889,7 +1889,7 @@ export const TicketItem: React.FC<Props> = ({
               // min-content width is unchanged, so a wide table still
               // scrolls inside its own box; code blocks (whitespace-pre) do
               // not wrap and scroll as before.
-              <div className={`wrap-break-word${isDescriptionExpanded ? '' : ' max-h-56 overflow-y-auto'}`}>
+              <div className={`wrap-break-word ${isDescriptionExpanded ? '' : 'max-h-56 overflow-y-auto'}`}>
                 <MarkdownViewer content={description} />
               </div>
             )}
@@ -1931,7 +1931,7 @@ export const TicketItem: React.FC<Props> = ({
                 className="flex-1 flex flex-col items-center justify-center max-lg:overflow-x-auto focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
                 {...(isGraphScrollable ? { role: 'region', 'aria-labelledby': graphTitleId, tabIndex: 0 } : {})}
               >
-              <svg data-testid="ticket-graph" className={`w-full max-w-[340px] shrink-0 max-lg:h-auto max-lg:mx-auto${ticket.nodes.length > 0 ? ' max-lg:min-w-[180px]' : ''}`} height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
+              <svg data-testid="ticket-graph" className={`w-full max-w-[340px] shrink-0 max-lg:h-auto max-lg:mx-auto ${ticket.nodes.length > 0 ? 'max-lg:min-w-[180px]' : ''}`} height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
                 {/* 1. Forward edges -- straight lines between each node's actual
                     (level, column) position, so a fan-out to several nodes on
                     the same row reads as a fork instead of a straight line down. */}

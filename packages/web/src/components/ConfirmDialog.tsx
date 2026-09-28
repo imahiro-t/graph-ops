@@ -91,7 +91,7 @@ export const ConfirmDialog: React.FC<Props> = ({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex p-4 overflow-y-auto overscroll-contain"
+      className="fixed inset-0 z-50 bg-black/40 flex p-4 overflow-y-auto overscroll-contain"
       data-testid={`${testIdPrefix}-overlay`}
       onClick={e => {
         e.stopPropagation();

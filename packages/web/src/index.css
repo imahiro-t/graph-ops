@@ -40,6 +40,12 @@
   --text-3xl--line-height: 2.25rem;
   --text-4xl--line-height: 2.5rem;
 
+  /* v3's default sans stack. v4.3 starts with -apple-system,
+     BlinkMacSystemFont, "Segoe UI", Roboto, ..., which renders the same on
+     macOS but can change the Latin face and the Japanese fallback on
+     Windows and Linux. --font-mono is the same in v3 and v4. */
+  --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+
   /* v3 palette (see above). */
   --color-slate-50: #f8fafc;
   --color-slate-100: #f1f5f9;

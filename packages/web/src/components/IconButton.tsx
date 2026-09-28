@@ -257,7 +257,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
   return (
     <span
       ref={wrapperRef}
-      className={`inline-flex${wrapperClassName ? ` ${wrapperClassName}` : ''}`}
+      className={`inline-flex ${wrapperClassName ?? ''}`}
       onMouseEnter={startHover}
       onMouseLeave={scheduleHoverEnd}
       onFocus={e => {

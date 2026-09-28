@@ -201,7 +201,7 @@ export const SettingsModal: React.FC<Props> = ({
   // so only a window shorter than about 600px gets a scrolling overlay. A
   // panel taller than the window is reached by scrolling the overlay.
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex p-4 overflow-y-auto overscroll-contain">
+    <div className="fixed inset-0 z-50 bg-black/40 flex p-4 overflow-y-auto overscroll-contain">
       {confirmDialog}
       <div
         ref={dialogRef}
