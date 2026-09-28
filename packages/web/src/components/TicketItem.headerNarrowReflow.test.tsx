@@ -160,7 +160,7 @@ describe.each(['ja', 'en'] as const)('TicketItem header row in a narrow window (
 
   it('sizes the expanded description\'s expand button in rem', () => {
     renderTicket(makeTicket(), { isExpanded: true });
-    const expand = screen.getByRole('button', { name: i18n.t('ticketItem.description.expand') });
+    const expand = screen.getByRole('button', { name: i18n.t('ticketItem.description.fullText') });
     expect(expand).toHaveClass('text-[0.6875rem]');
     expect(expand).not.toHaveClass('text-[11px]');
   });

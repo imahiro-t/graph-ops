@@ -1,6 +1,6 @@
 // DFLT-00239: the header row of an expanded ticket's description card wraps
 // on a narrow line instead of squeezing its items. With a 200% default font
-// on a 320-336px screen the title, the refined time and the "Show all"
+// on a 320-336px screen the title, the refined time and the "Full text"
 // button no longer fit side by side: the refined time was crushed into a
 // narrow column and, in English, the time and the button ran past the card
 // (hidden by the panel's clip). Now the row and its right-hand group
@@ -66,7 +66,7 @@ function descriptionHeader() {
   const refinedText = screen.getByText(
     i18n.t('ticketItem.description.refinedAt', { time: formatDateTime(REFINED_AT, i18n.language) })
   );
-  const expand = screen.getByRole('button', { name: i18n.t('ticketItem.description.expand') });
+  const expand = screen.getByRole('button', { name: i18n.t('ticketItem.description.fullText') });
   const refined = refinedText.parentElement as HTMLElement;
   const group = refined.parentElement as HTMLElement;
   const row = group.parentElement as HTMLElement;
@@ -171,7 +171,7 @@ describe.each(['ja', 'en'] as const)('TicketItem description header wraps on a n
     expect(body).not.toHaveClass('wrap-anywhere');
     expect(body).not.toHaveClass('[overflow-wrap:anywhere]');
     fireEvent.click(expand);
-    expect(screen.getByRole('button', { name: i18n.t('ticketItem.description.collapse') })).toBeVisible();
+    expect(screen.getByRole('button', { name: i18n.t('ticketItem.description.fullText') })).toBeVisible();
     expect(body).toHaveClass('wrap-break-word');
     expect(body).not.toHaveClass('max-h-56');
     expect(body).not.toHaveClass('overflow-y-auto');

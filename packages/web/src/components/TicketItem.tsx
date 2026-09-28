@@ -1153,6 +1153,29 @@ export const TicketItem: React.FC<Props> = ({
 
   const description = ticket.description || '';
 
+  // DFLT-00272: the collapsed description body (max-h-56) is a named,
+  // focusable scroll region only while its text actually overflows the box,
+  // so a short description adds no extra tab stop -- the same rule as the
+  // graph's scroll box above and MarkdownViewer's scrollable. The box's own
+  // height is capped while collapsed, so a longer text does not resize it;
+  // the observer also watches its content (the MarkdownViewer root) so the
+  // check follows both the window width and the text's height.
+  const descriptionBodyRef = useRef<HTMLDivElement>(null);
+  const [isDescriptionScrollable, setIsDescriptionScrollable] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!isExpanded) return;
+    const el = descriptionBodyRef.current;
+    if (!el) return;
+    const update = () => setIsDescriptionScrollable(el.scrollHeight > el.clientHeight);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    if (el.firstElementChild) observer.observe(el.firstElementChild);
+    return () => observer.disconnect();
+  }, [isExpanded, isDescriptionExpanded, description]);
+  const isDescriptionScrollRegion = !isDescriptionExpanded && isDescriptionScrollable;
+
   const totalNodes = ticket.nodes.length;
   const doneNodes = ticket.nodes.filter(n => n.status === 'DONE').length;
   const progressPercent = totalNodes > 0 ? Math.round((doneNodes / totalNodes) * 100) : 0;
@@ -1883,11 +1906,19 @@ export const TicketItem: React.FC<Props> = ({
                     // DFLT-00262: tells assistive tech whether the body is
                     // open and which element it opens (WCAG 4.1.2), and shows
                     // the same focus ring as the other buttons (WCAG 2.4.7).
+                    // DFLT-00272: following the APG disclosure pattern, the
+                    // label stays the same ("Full text") and the state is
+                    // conveyed by aria-expanded alone; the chevron (hidden
+                    // from assistive tech) turns to show it visually.
                     aria-expanded={isDescriptionExpanded}
                     aria-controls={descriptionBodyId}
-                    className="text-[0.6875rem] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold rounded-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+                    className="inline-flex items-center gap-0.5 text-[0.6875rem] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold rounded-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
                   >
-                    {isDescriptionExpanded ? t('ticketItem.description.collapse') : t('ticketItem.description.expand')}
+                    <ChevronDown
+                      aria-hidden="true"
+                      className={`w-3 h-3 shrink-0 motion-safe:transition-transform ${isDescriptionExpanded ? 'rotate-180' : ''}`}
+                    />
+                    <span className="min-w-0 wrap-anywhere">{t('ticketItem.description.fullText')}</span>
                   </button>
                 )}
               </div>
@@ -1911,11 +1942,15 @@ export const TicketItem: React.FC<Props> = ({
               // scroll, so it is neither a tab stop nor a landmark (the same
               // rule as MarkdownViewer's scrollable). The id is always there
               // for the expand button's aria-controls.
+              // DFLT-00272: only when the collapsed text actually overflows
+              // (isDescriptionScrollRegion); a short description that fits
+              // does not scroll, so it gets no extra tab stop or landmark.
               <div
+                ref={descriptionBodyRef}
                 id={descriptionBodyId}
-                tabIndex={isDescriptionExpanded ? undefined : 0}
-                role={isDescriptionExpanded ? undefined : 'region'}
-                aria-label={isDescriptionExpanded ? undefined : t('ticketItem.description.bodyRegion')}
+                tabIndex={isDescriptionScrollRegion ? 0 : undefined}
+                role={isDescriptionScrollRegion ? 'region' : undefined}
+                aria-label={isDescriptionScrollRegion ? t('ticketItem.description.bodyRegion') : undefined}
                 className={`wrap-break-word ${isDescriptionExpanded ? '' : 'max-h-56 overflow-y-auto rounded-lg focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400'}`}
               >
                 <MarkdownViewer content={description} />
