@@ -36,6 +36,7 @@ import { PendingApprovalBadge } from './components/PendingApprovalBadge';
 import { useClaudeLaunch } from './hooks/useClaudeLaunch';
 import { useTheme, ThemePreference } from './hooks/useTheme';
 import { useFitsSticky } from './hooks/useFitsSticky';
+import { useStickyHeaderScrollPadding } from './hooks/useStickyHeaderScrollPadding';
 import { formatTime } from './i18n/formatDate';
 import { localizedApiErrorMessage } from './lib/apiError';
 import { apiFetch } from './lib/apiFetch';
@@ -942,6 +943,8 @@ export const App: React.FC = () => {
     const el = document.getElementById(`ticket-${focusTicketId}`);
     if (el) {
       const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+      // block 'start' honours <html>'s scroll-padding-top, which holds the
+      // pinned header's height (useStickyHeaderScrollPadding, DFLT-00268).
       el.scrollIntoView?.({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' });
       el.focus({ preventScroll: true });
     }
@@ -1047,8 +1050,14 @@ export const App: React.FC = () => {
   // is about 532px in a 1024x768 window (69%) and 460px in a 1280x800 one
   // (58%), and pinned it covered the ticket header rows' buttons. Then it
   // scrolls away with the page, as it does below lg.
+  // DFLT-00268: while it is pinned, <html> gets a scroll-padding-top of its
+  // real height, so the element focused with Tab and the card opened by
+  // handleOpenTicket's scrollIntoView stop below it rather than under it
+  // (WCAG 2.4.11) -- in a low window the 114px header otherwise hid them.
+  // Unpinned, the padding is 0 as before.
   const headerRef = useRef<HTMLElement>(null);
   const headerFitsSticky = useFitsSticky(headerRef, 0.25, 128);
+  useStickyHeaderScrollPadding(headerRef, headerFitsSticky);
   const newTicketButtonRef = useRef<HTMLButtonElement>(null);
   const filteredTicketsRef = useLatest(filteredTickets);
   const { message: ticketDeleteNotice, announce: announceTicketDelete } = useTransientAnnouncement();
@@ -1141,8 +1150,15 @@ export const App: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 min-w-0">
+            {/* DFLT-00268: the 14rem cap is on this wrapper, not the button.
+                On the button it was also the button's min-content width, so
+                with a large root font the button stayed 14rem wide in a
+                narrower header and widened the page (a long project name at
+                200% text in a 320px window). The wrapper may shrink
+                (min-w-0), the button follows it (max-w-full) and the name
+                truncates; where the button fits, nothing moves. */}
             <div
-              className="relative min-w-0"
+              className="relative min-w-0 max-w-56"
               onKeyDown={handleProjectSwitcherKeyDown}
               onPointerDown={handleProjectSwitcherPointerDown}
               onBlur={handleProjectSwitcherBlur}
@@ -1162,7 +1178,7 @@ export const App: React.FC = () => {
                 aria-expanded={isProjectMenuOpen}
                 aria-haspopup="dialog"
                 aria-controls={isProjectMenuOpen ? PROJECT_MENU_ID : undefined}
-                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 transition max-w-56"
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 transition max-w-full"
                 title={currentProject ? currentProject.local_path || t('settings.appSettings.projects.notSet') : undefined}
               >
                 <FolderOpen aria-hidden="true" className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />

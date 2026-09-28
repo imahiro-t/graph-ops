@@ -345,3 +345,32 @@ describe.each(['ja', 'en'] as const)('summary card with a root font size set on 
     }
   });
 });
+
+// DFLT-00268: the project switcher's button was capped at 14rem on the button
+// itself, and its min-content width was that cap: with a 32px root font the
+// button stayed 14rem (448px) wide however narrow the header got, so a long
+// project name ("Selection Manipulator") made the page 404px wide in a 320px
+// window, and "Graph Ops" made it 283px wide in a 160px one (the scrollWidth
+// DFLT-00258 recorded). The 14rem cap now sits on the wrapper, which is a
+// flex item that may shrink (min-w-0), and the button is never wider than
+// the wrapper (max-w-full), so the name truncates inside the header's width.
+// Where the button already fitted (the default font at 320-1440px) the
+// header measures the same as before: the wrapper's size contribution is
+// still capped at 14rem.
+describe.each(['ja', 'en'] as const)('project switcher in a narrow header (%s)', lng => {
+  beforeEach(async () => {
+    seed();
+    await i18n.changeLanguage(lng);
+  });
+
+  it('caps the wrapper at 14rem and lets the button shrink with it, truncating the name', async () => {
+    await renderApp();
+    const button = within(screen.getByRole('banner')).getByRole('button', { name: /Alpha/ });
+    expect(button).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(button).toHaveClass('max-w-full');
+    expect(button).not.toHaveClass('max-w-56');
+    const wrapper = button.parentElement as HTMLElement;
+    expect(wrapper).toHaveClass('relative', 'min-w-0', 'max-w-56');
+    expect(within(button).getByText('Alpha')).toHaveClass('truncate');
+  });
+});
