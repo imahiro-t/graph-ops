@@ -1,20 +1,385 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+/* DFLT-00270: Tailwind CSS v4 migration. The rules below keep the UI looking
+   the way it did on Tailwind v3 (tailwind.config.js / postcss.config.js are
+   gone; v4 is configured here and through @tailwindcss/vite). */
+
+/* `dark:` follows the `dark` class that index.html and useTheme.ts put on
+   <html>, like v3's darkMode: 'class' (which matched `.dark *`). */
+@custom-variant dark (&:is(.dark *));
+
+/* v3 values, pinned: breakpoints, text line heights and the color palette.
+   v4 redefines the default colors in OKLCH, and they differ slightly from
+   v3's hex values. The contrast ratios quoted in comments and asserted in
+   tests across src/ (WCAG 1.4.3 / 1.4.11, e.g. the dialog placeholder's
+   4.55:1 on slate-50) were all measured against v3's hex values, so the
+   color families the app uses are set back to exactly those values. Moving
+   to v4's OKLCH palette later means re-checking every one of those ratios
+   first. white / black are unchanged between v3 and v4. */
+@theme {
+  /* v3's breakpoints were in px; v4's are in rem (40rem, 48rem, ...). They
+     only agree at a 16px default font, and several layouts here are tuned
+     for a large default font size, so the v3 px values are kept. */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+
+  /* v3's text-* line heights were fixed lengths (text-xs: 1rem); v4's are
+     ratios (calc(1 / 0.75)). A ratio is inherited as a ratio, so a child
+     with a font size of its own (text-[0.6875rem] under text-xs, say) would
+     get a shorter line than on v3. The v3 lengths are kept; text-5xl and
+     up used 1 on both. */
+  --text-xs--line-height: 1rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl--line-height: 2rem;
+  --text-3xl--line-height: 2.25rem;
+  --text-4xl--line-height: 2.5rem;
+
+  /* v3's default sans stack. v4.3 starts with -apple-system,
+     BlinkMacSystemFont, "Segoe UI", Roboto, ..., which renders the same on
+     macOS but can change the Latin face and the Japanese fallback on
+     Windows and Linux. --font-mono is the same in v3 and v4. */
+  --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+
+  /* v3 palette (see above). */
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+  --color-slate-950: #020617;
+  --color-blue-50: #eff6ff;
+  --color-blue-100: #dbeafe;
+  --color-blue-200: #bfdbfe;
+  --color-blue-300: #93c5fd;
+  --color-blue-400: #60a5fa;
+  --color-blue-500: #3b82f6;
+  --color-blue-600: #2563eb;
+  --color-blue-700: #1d4ed8;
+  --color-blue-800: #1e40af;
+  --color-blue-900: #1e3a8a;
+  --color-blue-950: #172554;
+  --color-red-50: #fef2f2;
+  --color-red-100: #fee2e2;
+  --color-red-200: #fecaca;
+  --color-red-300: #fca5a5;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
+  --color-red-700: #b91c1c;
+  --color-red-800: #991b1b;
+  --color-red-900: #7f1d1d;
+  --color-red-950: #450a0a;
+  --color-amber-50: #fffbeb;
+  --color-amber-100: #fef3c7;
+  --color-amber-200: #fde68a;
+  --color-amber-300: #fcd34d;
+  --color-amber-400: #fbbf24;
+  --color-amber-500: #f59e0b;
+  --color-amber-600: #d97706;
+  --color-amber-700: #b45309;
+  --color-amber-800: #92400e;
+  --color-amber-900: #78350f;
+  --color-amber-950: #451a03;
+  --color-indigo-50: #eef2ff;
+  --color-indigo-100: #e0e7ff;
+  --color-indigo-200: #c7d2fe;
+  --color-indigo-300: #a5b4fc;
+  --color-indigo-400: #818cf8;
+  --color-indigo-500: #6366f1;
+  --color-indigo-600: #4f46e5;
+  --color-indigo-700: #4338ca;
+  --color-indigo-800: #3730a3;
+  --color-indigo-900: #312e81;
+  --color-indigo-950: #1e1b4b;
+  --color-emerald-50: #ecfdf5;
+  --color-emerald-100: #d1fae5;
+  --color-emerald-200: #a7f3d0;
+  --color-emerald-300: #6ee7b7;
+  --color-emerald-400: #34d399;
+  --color-emerald-500: #10b981;
+  --color-emerald-600: #059669;
+  --color-emerald-700: #047857;
+  --color-emerald-800: #065f46;
+  --color-emerald-900: #064e3b;
+  --color-emerald-950: #022c22;
+  --color-violet-50: #f5f3ff;
+  --color-violet-100: #ede9fe;
+  --color-violet-200: #ddd6fe;
+  --color-violet-300: #c4b5fd;
+  --color-violet-400: #a78bfa;
+  --color-violet-500: #8b5cf6;
+  --color-violet-600: #7c3aed;
+  --color-violet-700: #6d28d9;
+  --color-violet-800: #5b21b6;
+  --color-violet-900: #4c1d95;
+  --color-violet-950: #2e1065;
+  --color-purple-50: #faf5ff;
+  --color-purple-100: #f3e8ff;
+  --color-purple-200: #e9d5ff;
+  --color-purple-300: #d8b4fe;
+  --color-purple-400: #c084fc;
+  --color-purple-500: #a855f7;
+  --color-purple-600: #9333ea;
+  --color-purple-700: #7e22ce;
+  --color-purple-800: #6b21a8;
+  --color-purple-900: #581c87;
+  --color-purple-950: #3b0764;
+  --color-pink-50: #fdf2f8;
+  --color-pink-100: #fce7f3;
+  --color-pink-200: #fbcfe8;
+  --color-pink-300: #f9a8d4;
+  --color-pink-400: #f472b6;
+  --color-pink-500: #ec4899;
+  --color-pink-600: #db2777;
+  --color-pink-700: #be185d;
+  --color-pink-800: #9d174d;
+  --color-pink-900: #831843;
+  --color-pink-950: #500724;
+  --color-orange-50: #fff7ed;
+  --color-orange-100: #ffedd5;
+  --color-orange-200: #fed7aa;
+  --color-orange-300: #fdba74;
+  --color-orange-400: #fb923c;
+  --color-orange-500: #f97316;
+  --color-orange-600: #ea580c;
+  --color-orange-700: #c2410c;
+  --color-orange-800: #9a3412;
+  --color-orange-900: #7c2d12;
+  --color-orange-950: #431407;
+  --color-teal-50: #f0fdfa;
+  --color-teal-100: #ccfbf1;
+  --color-teal-200: #99f6e4;
+  --color-teal-300: #5eead4;
+  --color-teal-400: #2dd4bf;
+  --color-teal-500: #14b8a6;
+  --color-teal-600: #0d9488;
+  --color-teal-700: #0f766e;
+  --color-teal-800: #115e59;
+  --color-teal-900: #134e4a;
+  --color-teal-950: #042f2e;
+  --color-sky-50: #f0f9ff;
+  --color-sky-100: #e0f2fe;
+  --color-sky-200: #bae6fd;
+  --color-sky-300: #7dd3fc;
+  --color-sky-400: #38bdf8;
+  --color-sky-500: #0ea5e9;
+  --color-sky-600: #0284c7;
+  --color-sky-700: #0369a1;
+  --color-sky-800: #075985;
+  --color-sky-900: #0c4a6e;
+  --color-sky-950: #082f49;
+  --color-cyan-50: #ecfeff;
+  --color-cyan-100: #cffafe;
+  --color-cyan-200: #a5f3fc;
+  --color-cyan-300: #67e8f9;
+  --color-cyan-400: #22d3ee;
+  --color-cyan-500: #06b6d4;
+  --color-cyan-600: #0891b2;
+  --color-cyan-700: #0e7490;
+  --color-cyan-800: #155e75;
+  --color-cyan-900: #164e63;
+  --color-cyan-950: #083344;
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f3f4f6;
+  --color-gray-200: #e5e7eb;
+  --color-gray-300: #d1d5db;
+  --color-gray-400: #9ca3af;
+  --color-gray-500: #6b7280;
+  --color-gray-600: #4b5563;
+  --color-gray-700: #374151;
+  --color-gray-800: #1f2937;
+  --color-gray-900: #111827;
+  --color-gray-950: #030712;
+  --color-green-50: #f0fdf4;
+  --color-green-100: #dcfce7;
+  --color-green-200: #bbf7d0;
+  --color-green-300: #86efac;
+  --color-green-400: #4ade80;
+  --color-green-500: #22c55e;
+  --color-green-600: #16a34a;
+  --color-green-700: #15803d;
+  --color-green-800: #166534;
+  --color-green-900: #14532d;
+  --color-green-950: #052e16;
+  --color-rose-50: #fff1f2;
+  --color-rose-100: #ffe4e6;
+  --color-rose-200: #fecdd3;
+  --color-rose-300: #fda4af;
+  --color-rose-400: #fb7185;
+  --color-rose-500: #f43f5e;
+  --color-rose-600: #e11d48;
+  --color-rose-700: #be123c;
+  --color-rose-800: #9f1239;
+  --color-rose-900: #881337;
+  --color-rose-950: #4c0519;
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
+
+/* More v3 preflight defaults that v4 changed:
+   - placeholders: v4 uses the text color at 50%; v3 used gray-400.
+   - buttons: v4 leaves the cursor at `default`; v3 used a pointer (and the
+     default cursor again while disabled).
+   - form fields: v4 makes inputs, selects and textareas transparent with
+     square corners; v3 left both to the browser. Fields without a bg-* or
+     rounded-* utility of their own get the browser's again (utilities still
+     win, being in a later layer). */
+@layer base {
+  input:where(:not([type="button"], [type="reset"], [type="submit"])),
+  select,
+  optgroup,
+  textarea {
+    background-color: revert;
+    border-radius: revert;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-gray-400);
+  }
+
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+
+  :disabled {
+    cursor: default;
+  }
+}
 
 /* DFLT-00074: placeholder text inside modal dialogs. Preflight's default
    (gray-400) is only about 2.4:1 on the light inputs; slate-500 gives 4.55:1
    on slate-50 and 4.76:1 on white (WCAG 1.4.3 AA). These selectors
-   ([role="dialog"] *::placeholder, 0,1,1) beat preflight's
-   input::placeholder (0,0,2). Scoped to dialogs so other screens are
+   ([role="dialog"] *::placeholder, 0,1,1) beat the base placeholder rule
+   above (input::placeholder, 0,0,2). Scoped to dialogs so other screens are
    unchanged. If an input background inside a dialog gets darker than
    slate-50, recheck the ratio -- the light-theme margin is small. */
 @layer base {
   [role="dialog"] *::placeholder {
-    color: theme('colors.slate.500');
+    color: var(--color-slate-500);
   }
   .dark [role="dialog"] *::placeholder {
-    color: theme('colors.slate.400');
+    color: var(--color-slate-400);
+  }
+}
+
+/* v3's space-y-* and divide-* put the gap / border on every child but the
+   first (`> :not([hidden]) ~ :not([hidden])`, specificity 0,3,0); v4 puts
+   it on every child but the last, with zero specificity. That moves a
+   border by a pixel, and lets a child's own mt-* add to the gap instead of
+   being overridden by it. The rules below restore v3's behaviour for the
+   values this app uses: the zero-specificity resets come after v4's own
+   rules and cancel them, and the v3 rules follow.
+   Only the values listed here are covered. A space-* / divide-* class (with
+   or without a variant) used anywhere else in src/ or index.html fails
+   src/tailwindV3Compat.test.ts until it has both its reset and its v3 rule
+   here, so a new value cannot silently fall back to v4's behaviour.
+   divide colors: v4 colors every child but the last, the first included;
+   v3 left the first child's border color alone (the base rule's gray-200
+   unless a utility of its own set one). The color reset puts gray-200 back
+   on every child at zero specificity, so a child's own border-* color
+   utility still wins, as on v3. */
+@layer utilities {
+  :where(.space-y-0\.5, .space-y-1, .space-y-1\.5, .space-y-2, .space-y-3, .space-y-4, .space-y-6) > * {
+    margin-block-end: 0;
+  }
+
+  .space-y-0\.5 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: calc(var(--spacing) * 0.5);
+  }
+
+  .space-y-1 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: calc(var(--spacing) * 1);
+  }
+
+  .space-y-1\.5 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: calc(var(--spacing) * 1.5);
+  }
+
+  .space-y-2 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: calc(var(--spacing) * 2);
+  }
+
+  .space-y-3 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: calc(var(--spacing) * 3);
+  }
+
+  .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: calc(var(--spacing) * 4);
+  }
+
+  .space-y-6 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: calc(var(--spacing) * 6);
+  }
+
+  :where(.divide-x, .sm\:divide-x) > * {
+    border-inline-end-width: 0;
+  }
+
+  :where(.divide-y) > * {
+    border-bottom-width: 0;
+  }
+
+  .divide-x > :not([hidden]) ~ :not([hidden]) {
+    border-left-width: 1px;
+  }
+
+  .sm\:divide-x > :not([hidden]) ~ :not([hidden]) {
+    @variant sm {
+      border-left-width: 1px;
+    }
+  }
+
+  .divide-y > :not([hidden]) ~ :not([hidden]) {
+    border-top-width: 1px;
+  }
+
+  :where(.divide-slate-100, .divide-slate-200, .dark\:divide-slate-700:is(.dark *), .dark\:divide-slate-800:is(.dark *)) > * {
+    border-color: var(--color-gray-200);
+  }
+
+  .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
+    border-color: var(--color-slate-100);
+  }
+
+  .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+    border-color: var(--color-slate-200);
+  }
+
+  .dark .dark\:divide-slate-700 > :not([hidden]) ~ :not([hidden]) {
+    border-color: var(--color-slate-700);
+  }
+
+  .dark .dark\:divide-slate-800 > :not([hidden]) ~ :not([hidden]) {
+    border-color: var(--color-slate-800);
   }
 }
 

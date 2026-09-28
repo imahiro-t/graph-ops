@@ -639,7 +639,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
               value={form.dbPath}
               onChange={e => setForm(f => ({ ...f, dbPath: e.target.value }))}
               placeholder={effective?.dbPath}
-              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
             />
             {effective && <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{t('settings.appSettings.currentlyInEffect', { value: effective.dbPath })}</p>}
           </div>
@@ -654,7 +654,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                   onChange={e => { setForm(f => ({ ...f, mysqlHost: e.target.value })); setConnectionTestResult(null); }}
                   aria-invalid={mysqlHostInvalid}
                   aria-describedby={mysqlHostInvalid ? 'mysql-required-fields-hint' : undefined}
-                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
                 />
               </div>
               <div>
@@ -664,7 +664,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                   type="number"
                   value={form.mysqlPort}
                   onChange={e => { setForm(f => ({ ...f, mysqlPort: Number(e.target.value) })); setConnectionTestResult(null); }}
-                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
                 />
               </div>
             </div>
@@ -676,7 +676,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 onChange={e => { setForm(f => ({ ...f, mysqlDatabase: e.target.value })); setConnectionTestResult(null); }}
                 aria-invalid={mysqlDatabaseInvalid}
                 aria-describedby={mysqlDatabaseInvalid ? 'mysql-required-fields-hint' : undefined}
-                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
               />
             </div>
             <div>
@@ -687,7 +687,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 onChange={e => { setForm(f => ({ ...f, mysqlUser: e.target.value })); setConnectionTestResult(null); }}
                 aria-invalid={mysqlUserInvalid}
                 aria-describedby={mysqlUserInvalid ? 'mysql-required-fields-hint' : undefined}
-                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
               />
             </div>
             <div>
@@ -706,7 +706,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 onChange={e => { setForm(f => ({ ...f, mysqlPassword: e.target.value })); setConnectionTestResult(null); }}
                 aria-invalid={mysqlPasswordRetypeRequired}
                 aria-describedby={mysqlPasswordRetypeRequired ? 'mysql-password-retype-hint' : undefined}
-                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
               />
               <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                 {mysqlPasswordState === 'redacted'
@@ -773,7 +773,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                   onChange={e => { setForm(f => ({ ...f, mysqlTlsCa: e.target.value })); setConnectionTestResult(null); }}
                   aria-invalid={mysqlTlsCaInvalid}
                   aria-describedby={mysqlTlsCaInvalid ? 'mysql-tls-ca-required-hint' : undefined}
-                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+                  className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
                 />
                 <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{t('settings.appSettings.storage.mysqlTlsCaHint')}</p>
                 {/* 読み上げは Storage セクション末尾の常時マウントの live region（SC 4.1.3）。 */}
@@ -843,7 +843,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 placeholder="https://example.com/graphops"
                 aria-invalid={httpProblem !== null && httpProblem !== 'tokenRequired'}
                 aria-describedby={`${fieldId}-http-url-hint${httpProblem && httpProblem !== 'tokenRequired' ? ` ${fieldId}-http-problem` : ''}`}
-                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
               />
               <p id={`${fieldId}-http-url-hint`} className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                 {t('settings.appSettings.storage.httpUrlHint')}
@@ -872,7 +872,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 onChange={e => setForm(f => ({ ...f, httpDataSourceToken: e.target.value }))}
                 aria-invalid={httpProblem === 'tokenRequired'}
                 aria-describedby={`${fieldId}-http-token-hint${httpTokenRetypeNeeded ? ` ${fieldId}-http-token-retype` : ''}${httpProblem === 'tokenRequired' ? ` ${fieldId}-http-problem` : ''}`}
-                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
               />
               <p id={`${fieldId}-http-token-hint`} className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                 {httpTokenState === 'redacted'
@@ -918,7 +918,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
             value={form.artifactsDir}
             onChange={e => setForm(f => ({ ...f, artifactsDir: e.target.value }))}
             placeholder={effective?.artifactsDir}
-            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
           />
           {effective && <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{t('settings.appSettings.currentlyInEffect', { value: effective.artifactsDir })}</p>}
         </div>
@@ -937,7 +937,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
             value={form.myName}
             onChange={e => setForm(f => ({ ...f, myName: e.target.value }))}
             placeholder={t('settings.appSettings.myProfile.namePlaceholder')}
-            className="w-full max-w-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100"
+            className="w-full max-w-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs text-slate-900 dark:text-slate-100"
           />
         </div>
       </div>
@@ -953,7 +953,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
             min={1}
             value={form.paginationPageSize}
             onChange={e => setForm(f => ({ ...f, paginationPageSize: Number(e.target.value) }))}
-            className="w-24 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs text-slate-900 dark:text-slate-100"
+            className="w-24 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs text-slate-900 dark:text-slate-100"
           />
           {pageSizeInvalid && <p className="text-[10px] text-red-600 dark:text-red-400 mt-0.5">{t('settings.appSettings.pagination.invalidPageSize')}</p>}
         </div>
@@ -973,7 +973,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
           value={form.teamExtensionsDir}
           onChange={e => setForm(f => ({ ...f, teamExtensionsDir: e.target.value }))}
           placeholder={t('settings.appSettings.teamExtensionsDir.placeholder')}
-          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
         />
         {/* 読み上げと aria-describedby の参照先は常時マウントの live region が
             担当する（SC 4.1.3）。見た目側は aria-hidden。 */}
@@ -1057,7 +1057,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                     keeps the prefix badge and buttons aligned with the
                     inputs. */}
                 <div className="flex items-end gap-2">
-                  <span className="mb-1 font-mono text-[10px] px-1.5 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded shrink-0">
+                  <span className="mb-1 font-mono text-[10px] px-1.5 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-sm shrink-0">
                     {p.prefix}
                   </span>
                   <div className="flex-1 min-w-0 flex flex-col">
@@ -1069,7 +1069,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                       value={nameValue(p)}
                       onChange={e => setNameDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
                       placeholder={t('settings.appSettings.projects.nameLabel')}
-                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-semibold text-slate-800 dark:text-slate-200"
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-semibold text-slate-800 dark:text-slate-200"
                     />
                   </div>
                   <IconButton
@@ -1090,7 +1090,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                     <label htmlFor={`${fieldId}-project-${p.id}-local-path`} className="flex items-center gap-2 text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
                       {t('settings.appSettings.projects.localPathLabel')}
                       {!localPathValue(p) && (
-                        <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-medium">
+                        <span className="px-1.5 py-0.5 rounded-sm bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-medium">
                           {t('settings.appSettings.projects.notSet')}
                         </span>
                       )}
@@ -1100,14 +1100,14 @@ export const AppSettingsEditor: React.FC<Props> = ({
                       value={localPathValue(p)}
                       onChange={e => setLocalPathDrafts(prev => ({ ...prev, [p.id]: e.target.value }))}
                       placeholder={t('settings.appSettings.projects.notSet')}
-                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
                     />
                   </div>
                   <button
                     onClick={() => handleSaveProject(p)}
                     disabled={!isProjectDirty(p) || isProjectInvalid(p) || projectSavingId === p.id}
                     {...submittingProps(projectSavingId === p.id)}
-                    className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 rounded text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1 shrink-0 transition"
+                    className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 rounded-sm text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1 shrink-0 transition"
                   >
                     {projectSavingId === p.id ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <Save aria-hidden="true" className="w-3 h-3" />}
                     {t('settings.common.save')}

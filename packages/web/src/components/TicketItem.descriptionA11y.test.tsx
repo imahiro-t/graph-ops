@@ -51,7 +51,7 @@ const renderExpanded = (description?: string) =>
     />
   );
 
-const FOCUS_RING = ['focus:outline-none', 'focus-visible:ring-2', 'focus-visible:ring-blue-500', 'dark:focus-visible:ring-blue-400'];
+const FOCUS_RING = ['focus:outline-hidden', 'focus-visible:ring-2', 'focus-visible:ring-blue-500', 'dark:focus-visible:ring-blue-400'];
 
 const expandButton = () => screen.getByRole('button', { name: i18n.t('ticketItem.description.expand') });
 const collapseButton = () => screen.getByRole('button', { name: i18n.t('ticketItem.description.collapse') });
@@ -103,7 +103,7 @@ describe.each(['ja', 'en'] as const)('TicketItem description card accessibility 
     expect(region).toBe(controlledBody(expandButton()));
     expect(region).toHaveAttribute('tabindex', '0');
     expect(region.tabIndex).toBe(0);
-    expect(region).toHaveClass('break-words', 'max-h-56', 'overflow-y-auto', 'rounded-lg', ...FOCUS_RING);
+    expect(region).toHaveClass('wrap-break-word', 'max-h-56', 'overflow-y-auto', 'rounded-lg', ...FOCUS_RING);
   });
 
   it('lets the keyboard reach the collapsed body as the tab stop right after the expand button', async () => {
@@ -130,7 +130,7 @@ describe.each(['ja', 'en'] as const)('TicketItem description card accessibility 
     expect(body).not.toHaveAttribute('role');
     expect(body).not.toHaveAttribute('aria-label');
     expect(screen.queryByRole('region', { name: bodyRegionName() })).toBeNull();
-    expect(body).toHaveClass('break-words');
+    expect(body).toHaveClass('wrap-break-word');
     expect(body).not.toHaveClass('max-h-56');
     expect(body).not.toHaveClass('overflow-y-auto');
     expect(body).not.toHaveClass('focus-visible:ring-2');

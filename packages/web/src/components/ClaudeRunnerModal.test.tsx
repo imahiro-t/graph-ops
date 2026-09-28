@@ -229,7 +229,7 @@ describe('ClaudeRunnerModal at large text on a narrow, short screen', () => {
     expect(bareText).toHaveLength(0);
     const text = heading.querySelector('span');
     expect(text).toHaveTextContent(i18n.t('claudeRunnerModal.title'));
-    expect(text).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
+    expect(text).toHaveClass('min-w-0', 'wrap-anywhere');
   });
 
   it('narrows the padding and drops the decorative icon under 15rem', () => {

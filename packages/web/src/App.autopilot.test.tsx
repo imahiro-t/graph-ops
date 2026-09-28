@@ -166,10 +166,10 @@ describe('autopilot in the Web UI', () => {
     // the row wraps only when those floors do not fit, and the button is
     // never squeezed or drawn over the regular actions; the free space goes
     // to the regular actions first, up to their one-line width.
-    expect(row).toHaveClass('flex-wrap', '[container-type:inline-size]');
+    expect(row).toHaveClass('flex-wrap', '@container');
     expect(row).not.toHaveClass('sm:flex-nowrap');
     const actions = within(row).getByTestId('autopilot-row-actions');
-    expect(actions).toHaveClass('sm:basis-0', 'sm:min-w-min', 'sm:grow-[999]', 'sm:max-w-max');
+    expect(actions).toHaveClass('sm:basis-0', 'sm:min-w-min', 'sm:grow-999', 'sm:max-w-max');
     expect(actions).toContainElement(refine);
     expect(actions).toContainElement(runButton);
     expect(slot).toHaveClass('sm:basis-0', 'sm:min-w-min', 'sm:grow', 'sm:max-w-xs');
@@ -188,10 +188,10 @@ describe('autopilot in the Web UI', () => {
     const user = await renderApp();
     const controls = await expand(user, X);
     for (const button of [...regularActions(controls), startButton(controls)]) {
-      expect(button).toHaveClass('flex', 'max-sm:flex-wrap', 'max-sm:[overflow-wrap:anywhere]');
+      expect(button).toHaveClass('flex', 'max-sm:flex-wrap', 'max-sm:wrap-anywhere');
       // One class per assertion: a negated multi-class toHaveClass passes as
       // soon as any one of the classes is missing, so it would check nothing.
-      for (const cls of ['flex-wrap', '[overflow-wrap:anywhere]', 'break-words', 'sm:flex-wrap']) {
+      for (const cls of ['flex-wrap', 'wrap-anywhere', '[overflow-wrap:anywhere]', 'wrap-break-word', 'break-words', 'sm:flex-wrap']) {
         expect(button).not.toHaveClass(cls);
       }
       // The icon keeps its size when the label wraps.
@@ -598,7 +598,7 @@ describe('autopilot in the Web UI', () => {
     expect(untrusted).not.toHaveClass('max-sm:flex-wrap');
     expect(untrusted.querySelector('p')).toHaveClass('flex-1', 'basis-24', 'min-w-0');
     expect(untrusted.querySelector('p')).not.toHaveClass('max-sm:basis-24');
-    expect(dismiss).toHaveClass('shrink-0', 'max-w-full', 'max-sm:[overflow-wrap:anywhere]');
+    expect(dismiss).toHaveClass('shrink-0', 'max-w-full', 'max-sm:wrap-anywhere');
 
     await user.click(dismiss);
     expect(within(controls).queryByTestId('autopilot-untrusted')).not.toBeInTheDocument();

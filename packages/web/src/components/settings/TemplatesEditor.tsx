@@ -111,7 +111,7 @@ export const TemplatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   type="button"
                   onClick={() => void select(key)}
                   aria-current={isSelected ? 'true' : undefined}
-                  className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${
+                  className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${
                     isSelected
                       ? 'bg-white dark:bg-slate-900 font-semibold text-slate-900 dark:text-slate-100'
                       : 'text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-900'
