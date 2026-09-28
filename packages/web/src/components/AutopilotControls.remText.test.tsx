@@ -9,7 +9,7 @@
 // for the generated rule (see the ticket's implementation notes).
 // At 22px (a 200% default) a run ID such as "(run-20260927-012345-" is wider
 // than the row at 320px and has no break opportunity Chrome takes, so the
-// lines also break anywhere (break-words [overflow-wrap:anywhere]).
+// lines also break anywhere (wrap-break-word wrap-anywhere).
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

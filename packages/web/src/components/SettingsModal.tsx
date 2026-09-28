@@ -209,7 +209,7 @@ export const SettingsModal: React.FC<Props> = ({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-5xl h-[85vh] min-h-128 m-auto min-w-0 shadow-2xl overflow-hidden flex flex-col focus:outline-hidden"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-5xl h-[85vh] min-h-[32rem] m-auto min-w-0 shadow-2xl overflow-hidden flex flex-col focus:outline-hidden"
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-2 px-6 [@media(max-width:15rem)]:px-3 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 shrink-0">

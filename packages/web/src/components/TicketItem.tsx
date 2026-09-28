@@ -99,7 +99,7 @@ const MAX_HEADER_LABELS = 3;
 // 2048px at 32px), so large text gets the wrapping layout instead of a
 // single line that ran up to 480px past the panel (see the tab row below).
 const artifactTabClass = (active: boolean) =>
-  `not-[@media_all_and_(min-width:64rem)]:min-w-0 py-3 px-3 [@media(min-width:64rem)]:px-4 [@media(max-width:15rem)]:px-2 [@media(max-width:15rem)]:py-2 text-xs font-bold border-b-2 flex [@media(max-width:15rem)]:flex-wrap items-center gap-x-2 gap-y-1 transition ${
+  `[@media_not_all_and_(min-width:64rem)]:min-w-0 py-3 px-3 [@media(min-width:64rem)]:px-4 [@media(max-width:15rem)]:px-2 [@media(max-width:15rem)]:py-2 text-xs font-bold border-b-2 flex [@media(max-width:15rem)]:flex-wrap items-center gap-x-2 gap-y-1 transition ${
     active
       ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
       : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
@@ -1889,7 +1889,7 @@ export const TicketItem: React.FC<Props> = ({
               // min-content width is unchanged, so a wide table still
               // scrolls inside its own box; code blocks (whitespace-pre) do
               // not wrap and scroll as before.
-              <div className={`break-words${isDescriptionExpanded ? '' : ' max-h-56 overflow-y-auto'}`}>
+              <div className={`wrap-break-word${isDescriptionExpanded ? '' : ' max-h-56 overflow-y-auto'}`}>
                 <MarkdownViewer content={description} />
               </div>
             )}
@@ -2139,7 +2139,7 @@ export const TicketItem: React.FC<Props> = ({
               <div
                 role="tablist"
                 aria-label={t('ticketItem.tabListLabel')}
-                className="flex flex-wrap [@media(min-width:64rem)]:flex-nowrap not-[@media_all_and_(min-width:64rem)]:min-w-0"
+                className="flex flex-wrap [@media(min-width:64rem)]:flex-nowrap [@media_not_all_and_(min-width:64rem)]:min-w-0"
               >
                 {ARTIFACT_TABS.map((tab) => {
                   const selected = activeTab === tab;
@@ -2180,7 +2180,7 @@ export const TicketItem: React.FC<Props> = ({
                       className={artifactTabClass(selected)}
                     >
                       {icon}
-                      <span className="not-[@media_all_and_(min-width:64rem)]:min-w-0 wrap-break-word">{t(`ticketItem.tabs.${tab}`, { count })}</span>
+                      <span className="[@media_not_all_and_(min-width:64rem)]:min-w-0 wrap-break-word">{t(`ticketItem.tabs.${tab}`, { count })}</span>
                     </button>
                   );
                 })}
@@ -2274,7 +2274,7 @@ export const TicketItem: React.FC<Props> = ({
                               row-gap change nothing. */}
                           <div
                             onClick={() => toggleNodeExpand(node.id)}
-                            className="flex flex-wrap items-center justify-between gap-y-2 p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none not-[@media_all_and_(min-width:80rem)]:gap-x-3 [@media(max-width:15rem)]:p-2"
+                            className="flex flex-wrap items-center justify-between gap-y-2 p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none [@media_not_all_and_(min-width:80rem)]:gap-x-3 [@media(max-width:15rem)]:p-2"
                           >
                             {/* From 80rem up, flex-1 min-w-0 lets node.name
                                 (below) shrink and truncate first --
@@ -2298,7 +2298,7 @@ export const TicketItem: React.FC<Props> = ({
                                 but its min-content contribution is 0, so the
                                 left group's min-w-min counts only the other
                                 parts (the id and the badges). */}
-                            <div className="flex items-center gap-2.5 flex-1 min-w-0 [@media(min-width:80rem)]:min-w-min not-[@media_all_and_(min-width:80rem)]:basis-auto not-[@media_all_and_(min-width:80rem)]:flex-wrap not-[@media_all_and_(min-width:80rem)]:gap-y-1.5">
+                            <div className="flex items-center gap-2.5 flex-1 min-w-0 [@media(min-width:80rem)]:min-w-min [@media_not_all_and_(min-width:80rem)]:basis-auto [@media_not_all_and_(min-width:80rem)]:flex-wrap [@media_not_all_and_(min-width:80rem)]:gap-y-1.5">
                               {/* Named toggle for the node row (DFLT-00152).
                                   No onClick of its own: its click bubbles to
                                   the row's toggleNodeExpand, so it toggles
@@ -2332,16 +2332,16 @@ export const TicketItem: React.FC<Props> = ({
                                   id uses the same pair for the same reason
                                   (DFLT-00164). */}
                               <span className="font-mono text-slate-600 dark:text-slate-300 w-4 shrink-0">{index + 1}</span>
-                              <span className="font-mono font-bold text-slate-600 dark:text-slate-300 shrink-0 whitespace-nowrap not-[@media_all_and_(min-width:80rem)]:shrink not-[@media_all_and_(min-width:80rem)]:min-w-0 not-[@media_all_and_(min-width:80rem)]:whitespace-normal not-[@media_all_and_(min-width:80rem)]:wrap-anywhere">
+                              <span className="font-mono font-bold text-slate-600 dark:text-slate-300 shrink-0 whitespace-nowrap [@media_not_all_and_(min-width:80rem)]:shrink [@media_not_all_and_(min-width:80rem)]:min-w-0 [@media_not_all_and_(min-width:80rem)]:whitespace-normal [@media_not_all_and_(min-width:80rem)]:wrap-anywhere">
                                 {node.id}
                               </span>
                               <NodeTypeBadge
                                 type={node.type}
                                 theme="light"
-                                className="shrink-0 not-[@media_all_and_(min-width:80rem)]:shrink not-[@media_all_and_(min-width:80rem)]:min-w-0 not-[@media_all_and_(min-width:80rem)]:max-w-full"
-                                labelClassName="not-[@media_all_and_(min-width:80rem)]:whitespace-normal not-[@media_all_and_(min-width:80rem)]:wrap-anywhere"
+                                className="shrink-0 [@media_not_all_and_(min-width:80rem)]:shrink [@media_not_all_and_(min-width:80rem)]:min-w-0 [@media_not_all_and_(min-width:80rem)]:max-w-full"
+                                labelClassName="[@media_not_all_and_(min-width:80rem)]:whitespace-normal [@media_not_all_and_(min-width:80rem)]:wrap-anywhere"
                               />
-                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate min-w-0 [@media(min-width:80rem)]:w-0 [@media(min-width:80rem)]:basis-[content] not-[@media_all_and_(min-width:80rem)]:whitespace-normal not-[@media_all_and_(min-width:80rem)]:wrap-anywhere">
+                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate min-w-0 [@media(min-width:80rem)]:w-0 [@media(min-width:80rem)]:basis-[content] [@media_not_all_and_(min-width:80rem)]:whitespace-normal [@media_not_all_and_(min-width:80rem)]:wrap-anywhere">
                                 {node.name}
                               </span>
                               {node.iteration_count > 0 && (
@@ -2367,7 +2367,7 @@ export const TicketItem: React.FC<Props> = ({
                               )}
                             </div>
 
-                            <div className="flex items-center gap-3 shrink-0 ml-auto not-[@media_all_and_(min-width:80rem)]:shrink not-[@media_all_and_(min-width:80rem)]:min-w-0 not-[@media_all_and_(min-width:80rem)]:flex-wrap not-[@media_all_and_(min-width:80rem)]:gap-y-1.5 not-[@media_all_and_(min-width:80rem)]:justify-end-safe">
+                            <div className="flex items-center gap-3 shrink-0 ml-auto [@media_not_all_and_(min-width:80rem)]:shrink [@media_not_all_and_(min-width:80rem)]:min-w-0 [@media_not_all_and_(min-width:80rem)]:flex-wrap [@media_not_all_and_(min-width:80rem)]:gap-y-1.5 [@media_not_all_and_(min-width:80rem)]:justify-end-safe">
                               {/* Approve/Reject show up for whichever
                                   approval_gate the ticket is actually
                                   stuck on (pendingApprovalNodeIds), even
@@ -2386,7 +2386,7 @@ export const TicketItem: React.FC<Props> = ({
                                   the safe keyword drops the declaration and
                                   aligns left, which still does not clip. */}
                               {pendingApprovalNodeIds.has(node.id) && rejectingNodeId !== node.id && (
-                                <div className="flex items-center gap-1.5 not-[@media_all_and_(min-width:80rem)]:flex-wrap not-[@media_all_and_(min-width:80rem)]:min-w-0 not-[@media_all_and_(min-width:80rem)]:max-w-full" onClick={e => e.stopPropagation()}>
+                                <div className="flex items-center gap-1.5 [@media_not_all_and_(min-width:80rem)]:flex-wrap [@media_not_all_and_(min-width:80rem)]:min-w-0 [@media_not_all_and_(min-width:80rem)]:max-w-full" onClick={e => e.stopPropagation()}>
                                   {/* DFLT-00207: aria-disabled, not disabled,
                                       while the decision is sent: the pressed
                                       button keeps focus (a disabled one drops
@@ -2401,7 +2401,7 @@ export const TicketItem: React.FC<Props> = ({
                                     aria-disabled={isApprovalSubmitting || undefined}
                                     {...submittingProps(isApprovalSubmitting)}
                                     data-testid={`node-approve-${node.id}`}
-                                    className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded-sm text-[11px] font-bold flex items-center gap-1 transition not-[@media_all_and_(min-width:80rem)]:min-w-0 not-[@media_all_and_(min-width:80rem)]:max-w-full not-[@media_all_and_(min-width:80rem)]:flex-wrap not-[@media_all_and_(min-width:80rem)]:wrap-anywhere [@media(max-width:15rem)]:px-1"
+                                    className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded-sm text-[11px] font-bold flex items-center gap-1 transition [@media_not_all_and_(min-width:80rem)]:min-w-0 [@media_not_all_and_(min-width:80rem)]:max-w-full [@media_not_all_and_(min-width:80rem)]:flex-wrap [@media_not_all_and_(min-width:80rem)]:wrap-anywhere [@media(max-width:15rem)]:px-1"
                                   >
                                     {isApprovalSubmitting ? (
                                       <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
@@ -2420,7 +2420,7 @@ export const TicketItem: React.FC<Props> = ({
                                     aria-disabled={isApprovalSubmitting || undefined}
                                     {...submittingProps(isApprovalSubmitting)}
                                     data-testid={`node-reject-${node.id}`}
-                                    className="px-2 py-1 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800 rounded-sm text-[11px] font-bold flex items-center gap-1 transition not-[@media_all_and_(min-width:80rem)]:min-w-0 not-[@media_all_and_(min-width:80rem)]:max-w-full not-[@media_all_and_(min-width:80rem)]:flex-wrap not-[@media_all_and_(min-width:80rem)]:wrap-anywhere [@media(max-width:15rem)]:px-1"
+                                    className="px-2 py-1 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800 rounded-sm text-[11px] font-bold flex items-center gap-1 transition [@media_not_all_and_(min-width:80rem)]:min-w-0 [@media_not_all_and_(min-width:80rem)]:max-w-full [@media_not_all_and_(min-width:80rem)]:flex-wrap [@media_not_all_and_(min-width:80rem)]:wrap-anywhere [@media(max-width:15rem)]:px-1"
                                   >
                                     <X aria-hidden="true" className="w-3 h-3" />
                                     {t('ticketItem.approvalGate.reject')}

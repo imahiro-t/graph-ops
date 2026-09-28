@@ -8,7 +8,7 @@
    <html>, like v3's darkMode: 'class' (which matched `.dark *`). */
 @custom-variant dark (&:is(.dark *));
 
-/* v3 palette, pinned. v4 redefines the default colors in OKLCH, and they
+/* v3 palette and breakpoints, pinned. v4 redefines the default colors in OKLCH, and they
    differ slightly from v3's hex values. The contrast ratios quoted in
    comments and asserted in tests across src/ (WCAG 1.4.3 / 1.4.11, e.g. the
    dialog placeholder's 4.55:1 on slate-50) were all measured against v3's
@@ -16,6 +16,15 @@
    those values. Moving to v4's OKLCH palette later means re-checking every
    one of those ratios first. white / black are unchanged between v3 and v4. */
 @theme {
+  /* v3's breakpoints were in px; v4's are in rem (40rem, 48rem, ...). They
+     only agree at a 16px default font, and several layouts here are tuned
+     for a large default font size, so the v3 px values are kept. */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+
   --color-slate-50: #f8fafc;
   --color-slate-100: #f1f5f9;
   --color-slate-200: #e2e8f0;
@@ -215,8 +224,20 @@
 /* More v3 preflight defaults that v4 changed:
    - placeholders: v4 uses the text color at 50%; v3 used gray-400.
    - buttons: v4 leaves the cursor at `default`; v3 used a pointer (and the
-     default cursor again while disabled). */
+     default cursor again while disabled).
+   - form fields: v4 makes inputs, selects and textareas transparent with
+     square corners; v3 left both to the browser. Fields without a bg-* or
+     rounded-* utility of their own get the browser's again (utilities still
+     win, being in a later layer). */
 @layer base {
+  input:where(:not([type="button"], [type="reset"], [type="submit"])),
+  select,
+  optgroup,
+  textarea {
+    background-color: revert;
+    border-radius: revert;
+  }
+
   input::placeholder,
   textarea::placeholder {
     color: var(--color-gray-400);

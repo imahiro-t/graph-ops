@@ -112,7 +112,7 @@ const DIALOG_MODES: AutopilotMode[] = ['tree', 'ticket'];
 // row can be narrower than a button's icon, label and padding side by side
 // (DFLT-00224). The buttons -- the regular actions (see TicketItem) and the
 // autopilot -- then put the icon on a line of its own and break the label
-// anywhere (max-sm:flex-wrap, max-sm:[overflow-wrap:anywhere]), so they stay
+// anywhere (max-sm:flex-wrap, max-sm:wrap-anywhere), so they stay
 // inside the row instead of running past the card; the untrusted-folder
 // notice moves its dismiss button under the text the same way (at any
 // width since DFLT-00225, see below). Nothing
@@ -128,7 +128,7 @@ const DIALOG_MODES: AutopilotMode[] = ['tree', 'ticket'];
 // The lines under the button (and the mode reasons in the dialog) are sized
 // in rem too (text-[0.6875rem], 11px at the default 16px), so they grow with
 // the browser's default font size like the rest of the row (DFLT-00225).
-// They break anywhere (break-words [overflow-wrap:anywhere]), as the notice
+// They break anywhere (wrap-break-word wrap-anywhere), as the notice
 // already did: a run ID such as "(run-20260927-012345-" has no break
 // opportunity Chrome takes, and at 22px it is wider than the 124px row at
 // 320px with a 200% default font size. overflow-wrap:anywhere also shrinks
