@@ -44,12 +44,14 @@
 //     a plain `const` -- a parameter (destructured ones included), a `let` /
 //     `var`, a destructuring `const`, a function / class / enum declaration,
 //     a loop or catch variable -- it shadows any outer constant and nothing
-//     is resolved. A property access with a static key (`M.bg`, `M['bg']`,
+//     is resolved. A property access with a static key (`M.bg`, or a string
+//     / numeric literal such as `M['bg']` or `M[0]`; also
 //     `stepKeywordColor.Given`) follows only that property's value through
-//     object literals; a dynamic key (`STYLE[b]`) takes in the whole object
-//     (AutopilotBadges' `STYLE` map), as does a static key the object
-//     literal does not plainly list (a spread, say). The key itself is never
-//     collected.
+//     object literals; a dynamic key (`STYLE[b]` -- an identifier or any
+//     other non-literal) takes in the whole object (AutopilotBadges' `STYLE`
+//     map), as does a static key the object literal does not plainly list
+//     (a spread or a dynamic computed key such as `[k]`, say). The key
+//     itself is never collected.
 // Conditions (a ternary's test, a comparison, `!x`, the left side of `&&`)
 // only choose between class lists and are skipped. Function calls are
 // opaque: their arguments (an i18n key built for t(), the callback of
@@ -258,23 +260,34 @@ const unwrap = (node: ts.Expression): ts.Expression => {
   return current;
 };
 
-// The text of a name that is statically known (an identifier, a private
-// name, a string or numeric literal, a computed name holding a literal).
+// The text of a key expression that is statically known: a string or
+// numeric literal (a no-substitution template included). An identifier or
+// any other expression (`STYLE[b]`, `{ [k]: ... }`) is dynamic.
+const literalKey = (expression: ts.Expression): string | undefined => {
+  const key = unwrap(expression);
+  return ts.isStringLiteralLike(key) || ts.isNumericLiteral(key) ? key.text : undefined;
+};
+
+// The text of a declared name that is statically known (an identifier, a
+// private name, a string or numeric literal, a computed name holding a
+// literal).
 const staticName = (name: ts.Node): string | undefined => {
   if (ts.isIdentifier(name) || ts.isPrivateIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)) {
     return name.text;
   }
-  if (ts.isComputedPropertyName(name)) return staticName(name.expression);
+  if (ts.isComputedPropertyName(name)) return literalKey(name.expression);
   return undefined;
 };
 
 // The value an object literal gives `key`, or undefined when that is not
-// plainly known (the key is missing, or a spread or method may supply it).
-// Later properties win, as at run time.
+// plainly known (the key is missing, or a spread, a dynamic computed key or
+// a method may supply it). Later properties win, as at run time.
 const propertyValue = (object: ts.ObjectLiteralExpression, key: string): ts.Expression | undefined => {
   for (const property of [...object.properties].reverse()) {
     if (ts.isSpreadAssignment(property)) return undefined;
-    if (staticName(property.name) !== key) continue;
+    const name = staticName(property.name);
+    if (name === undefined) return undefined;
+    if (name !== key) continue;
     if (ts.isPropertyAssignment(property)) return property.initializer;
     if (ts.isShorthandPropertyAssignment(property)) return property.name;
     return undefined;
@@ -339,15 +352,16 @@ const collectClassParts = (root: ts.Node) => {
       return;
     }
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
-      // Gather the static keys of an access chain (`M.a['b']`); a dynamic
-      // key (`STYLE[b]`) stops the chain and takes in its whole object.
+      // Gather the static keys of an access chain (`M.a['b']`, `M[0]`); a
+      // dynamic key (`STYLE[b]`, any non-literal) stops the chain and takes
+      // in its whole object.
       const keys: string[] = [];
       let base: ts.Expression = node;
       for (;;) {
         if (ts.isPropertyAccessExpression(base)) {
           keys.unshift(base.name.text);
-        } else if (ts.isElementAccessExpression(base) && staticName(unwrap(base.argumentExpression)) !== undefined) {
-          keys.unshift(staticName(unwrap(base.argumentExpression))!);
+        } else if (ts.isElementAccessExpression(base) && literalKey(base.argumentExpression) !== undefined) {
+          keys.unshift(literalKey(base.argumentExpression)!);
         } else {
           break;
         }
@@ -561,6 +575,11 @@ describe('Tailwind v4 scanner: class names glued to ${', () => {
       'mb-1${'
     ],
     [
+      'whole object through an identifier key, even one named like a listed key',
+      "const M = { k: 'p-1', a: `bg-red-100${x}` }; const E = () => <div className={M[k]} />;",
+      'bg-red-100${'
+    ],
+    [
       'inner constant shadowing an outer one',
       "const x = 'p-1'; function F() { const x = `pr-2${y}`; return <div className={`p-2 ${x}`} />; }",
       'pr-2${'
@@ -686,6 +705,14 @@ describe('overflow-wrap classes', () => {
     [
       'a property read through a static key',
       "const S = { a: 'wrap-anywhere', b: 'p-1' }; const E = () => <div className={`wrap-break-word ${S.a}`} />;"
+    ],
+    [
+      'the whole object through an identifier key named like a listed key',
+      "const S = { a: 'wrap-anywhere', k: 'p-1' }; const E = () => <div className={`wrap-break-word ${S[k]}`} />;"
+    ],
+    [
+      'an object literal with a dynamic computed key',
+      "const S = { b: 'p-1', [k]: 'wrap-anywhere' }; const E = () => <div className={`wrap-break-word ${S.b}`} />;"
     ],
     ['exclusive ternary branches (reported conservatively)', "const E = () => <div className={c ? 'wrap-anywhere' : 'wrap-break-word'} />;"]
   ])('reports wrap-break-word combined with wrap-anywhere across %s', (_label, source) => {
