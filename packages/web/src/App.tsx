@@ -1039,14 +1039,16 @@ export const App: React.FC = () => {
   } | null>(null);
   const ticketListRef = useRef<HTMLDivElement>(null);
   // DFLT-00258: the header is pinned (from lg up) only while it takes at
-  // most a quarter of the window's height. With the default font it is one
-  // or two rows (about 64-114px, under 15% of a 768px window) and stays
-  // pinned as before; with a 200% root font it is about 532px in a 1024x768
-  // window (69%) and 460px in a 1280x800 one (58%), and pinned it covered
-  // the ticket header rows' buttons. Then it scrolls away with the page, as
-  // it does below lg.
+  // most a quarter of the window's height, or is at most 128px tall. With the
+  // default font it is 114px from lg up (measured at 1024-2560px, ja and
+  // en), so the 128px floor keeps it pinned as before in any window height
+  // -- a quarter alone would unpin it below a 456px-tall window, such as a
+  // laptop with the developer tools docked below. With a 200% root font it
+  // is about 532px in a 1024x768 window (69%) and 460px in a 1280x800 one
+  // (58%), and pinned it covered the ticket header rows' buttons. Then it
+  // scrolls away with the page, as it does below lg.
   const headerRef = useRef<HTMLElement>(null);
-  const headerFitsSticky = useFitsSticky(headerRef, 0.25);
+  const headerFitsSticky = useFitsSticky(headerRef, 0.25, 128);
   const newTicketButtonRef = useRef<HTMLButtonElement>(null);
   const filteredTicketsRef = useLatest(filteredTickets);
   const { message: ticketDeleteNotice, announce: announceTicketDelete } = useTransientAnnouncement();

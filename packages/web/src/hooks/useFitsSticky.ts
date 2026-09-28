@@ -9,21 +9,28 @@ import { RefObject, useLayoutEffect, useState } from 'react';
 // looks at the element's real height instead.
 //
 // `maxShare` is the largest share of the window's height the element may
-// take and still be pinned. The header's height does not depend on whether
-// it is pinned, so switching never feeds back into the measurement.
+// take and still be pinned. `alwaysFitsPx` is a height up to which the
+// element is pinned however short the window is, so a header that is short
+// in absolute terms keeps the old behaviour in low windows (a laptop with the
+// developer tools docked below the page) instead of unpinning there too.
+// The header's height does not depend on whether it is pinned, so switching
+// never feeds back into the measurement.
 //
 // Starts at true and stays true where there is nothing to measure (jsdom
 // reports offsetHeight 0), so the first paint and tests behave as before.
 // Recomputed when the element resizes (ResizeObserver, when there is one)
 // and when the window resizes. Only observe() and disconnect() are called,
 // so the empty ResizeObserver stubs other tests install are enough.
-export function useFitsSticky(ref: RefObject<HTMLElement | null>, maxShare: number) {
+export function useFitsSticky(ref: RefObject<HTMLElement | null>, maxShare: number, alwaysFitsPx = 0) {
   const [fits, setFits] = useState(true);
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const update = () => setFits(el.offsetHeight <= window.innerHeight * maxShare);
+    const update = () => {
+      const height = el.offsetHeight;
+      setFits(height <= alwaysFitsPx || height <= window.innerHeight * maxShare);
+    };
     update();
     window.addEventListener('resize', update);
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
@@ -32,7 +39,7 @@ export function useFitsSticky(ref: RefObject<HTMLElement | null>, maxShare: numb
       window.removeEventListener('resize', update);
       observer?.disconnect();
     };
-  }, [ref, maxShare]);
+  }, [ref, maxShare, alwaysFitsPx]);
 
   return fits;
 }
