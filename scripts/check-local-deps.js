@@ -2,7 +2,8 @@
 // Fails fast when packages/web's tools are not installed inside this checkout
 // (DFLT-00267).
 //
-// Run as the web package's prelint / pretest / prebuild. A fresh git worktree
+// Run as the web package's prelint / pretest / prebuild / predev /
+// pretest:watch (DFLT-00289 added the last two). A fresh git worktree
 // (.claude/worktrees/<id>) has no node_modules until `npm ci` is run in it,
 // and npm puts every ancestor's node_modules/.bin on PATH -- so `npm run lint`
 // there quietly started the PARENT repository's eslint, which then failed
@@ -25,7 +26,8 @@ const { checkNodeVersion } = require('./check-node-version.js');
 
 const repoRoot = path.resolve(__dirname, '..');
 
-// devDependencies of packages/web that its lint / test / build start.
+// devDependencies of packages/web that its lint / test / build / dev /
+// test:watch start.
 const REQUIRED_PACKAGES = ['eslint', '@eslint/js', 'vitest', 'vite', 'typescript'];
 
 // Where Node's resolution from `fromDir` would find `pkg`: the first

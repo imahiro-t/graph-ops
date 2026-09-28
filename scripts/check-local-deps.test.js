@@ -163,3 +163,31 @@ test('the CLI exits 0 in this checkout on the running Node.js', () => {
   assert.strictEqual(result.status, 0, result.stderr);
   assert.strictEqual(result.stderr, '');
 });
+
+// packages/web's pre scripts (DFLT-00289): every script there that starts
+// eslint, vitest, vite or tsc has a pre<name> running this check, so none of
+// them starts on an unsupported Node.js or without this checkout's own
+// dependencies. `preview` (vite preview) is left out on purpose: it only
+// serves the dist that `build` produced, and prebuild already checked that.
+// npm runs pre<name> for any script name, including one with a colon, so
+// `test:watch` is covered by `pretest:watch` (not by `pretest`).
+const CHECKED_WEB_SCRIPTS = ['lint', 'test', 'build', 'dev', 'test:watch'];
+const CHECK_COMMAND = 'node ../../scripts/check-local-deps.js';
+
+test("packages/web's lint / test / build / dev / test:watch each run this check first", () => {
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', 'packages', 'web', 'package.json'), 'utf8')
+  );
+  const scripts = pkg.scripts || {};
+  for (const name of CHECKED_WEB_SCRIPTS) {
+    assert.ok(
+      typeof scripts[name] === 'string',
+      `packages/web/package.json has no "${name}" script; update CHECKED_WEB_SCRIPTS if it was renamed`
+    );
+    assert.strictEqual(
+      scripts[`pre${name}`],
+      CHECK_COMMAND,
+      `packages/web/package.json's "pre${name}" should be "${CHECK_COMMAND}"`
+    );
+  }
+});
