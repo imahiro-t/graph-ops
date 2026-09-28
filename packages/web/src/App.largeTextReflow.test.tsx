@@ -487,10 +487,10 @@ describe.each(['ja', 'en'] as const)('full project name in the switcher\'s toolt
     }
   });
 
-  it('caps the popup at the window\'s width less 2rem, keeping w-64', async () => {
+  it('caps the popup at the window\'s width less 2rem, but never below 8rem, keeping w-64', async () => {
     const user = await renderWith(alpha.id);
     const popup = await openPopup(user);
-    expect(popup).toHaveClass('absolute', 'left-0', 'w-64', 'max-w-[calc(100vw-2rem)]');
+    expect(popup).toHaveClass('absolute', 'left-0', 'w-64', 'max-w-[max(calc(100vw-2rem),8rem)]');
   });
 
   it('keeps the prefix and the pending-approval badge in the group on the item\'s right', async () => {

@@ -1216,13 +1216,22 @@ export const App: React.FC = () => {
                       544). It is now never wider than the window less 2rem
                       (the header's padding on both sides); with the default
                       font at 320px and up the cap is wider than w-64 and
-                      nothing changes. */}
+                      nothing changes. The cap never goes below 8rem, though:
+                      below that (160-200px windows at a 24-32px root) the
+                      name column shrank to 0px and the names ran under the
+                      badge and prefix, which spilled out of the popup. 8rem
+                      is what the cap gives at 320px with a 32px root, where
+                      every item fits, and it scales with the font, so the
+                      item keeps that layout at any text size. Only windows
+                      narrower than 320px (outside WCAG 1.4.10's reflow
+                      width) can then scroll sideways while the popup is
+                      open. */}
                   <div
                     ref={projectMenuRef}
                     id={PROJECT_MENU_ID}
                     role="dialog"
                     aria-label={t('projectSwitcher.menuLabel')}
-                    className="absolute left-0 mt-1.5 w-64 max-w-[calc(100vw-2rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-sm"
+                    className="absolute left-0 mt-1.5 w-64 max-w-[max(calc(100vw-2rem),8rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-sm"
                   >
                     {projects.length === 0 && (
                       <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">{t('projectSwitcher.empty')}</div>
