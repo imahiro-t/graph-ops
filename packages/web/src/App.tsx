@@ -1170,7 +1170,14 @@ export const App: React.FC = () => {
                   which this popup does not implement. Like one, though, it
                   closes when keyboard focus leaves the button and the popup
                   (DFLT-00159). aria-controls only while open: the popup is
-                  not rendered while closed. */}
+                  not rendered while closed.
+                  DFLT-00277: the tooltip gives the full project name on its
+                  first line and the local path (or "not set") on the second.
+                  The name in the button truncates, and in a 160px window
+                  with a 32px root font it is not shown at all, so sighted
+                  users need somewhere to read it in full; the popup's items
+                  show it wrapped as well. The accessible name stays the
+                  button's text. */}
               <button
                 ref={projectMenuButtonRef}
                 type="button"
@@ -1179,7 +1186,11 @@ export const App: React.FC = () => {
                 aria-haspopup="dialog"
                 aria-controls={isProjectMenuOpen ? PROJECT_MENU_ID : undefined}
                 className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 transition max-w-full"
-                title={currentProject ? currentProject.local_path || t('settings.appSettings.projects.notSet') : undefined}
+                title={
+                  currentProject
+                    ? `${currentProject.name}\n${currentProject.local_path || t('settings.appSettings.projects.notSet')}`
+                    : undefined
+                }
               >
                 <FolderOpen aria-hidden="true" className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
                 <span className="truncate">
@@ -1200,12 +1211,18 @@ export const App: React.FC = () => {
                     data-testid="project-switcher-overlay"
                     onClick={() => setIsProjectMenuOpen(false)}
                   />
+                  {/* DFLT-00277: w-64 is 512px with a 32px root font, so
+                      the open popup ran past a 320px window (scrollWidth
+                      544). It is now never wider than the window less 2rem
+                      (the header's padding on both sides); with the default
+                      font at 320px and up the cap is wider than w-64 and
+                      nothing changes. */}
                   <div
                     ref={projectMenuRef}
                     id={PROJECT_MENU_ID}
                     role="dialog"
                     aria-label={t('projectSwitcher.menuLabel')}
-                    className="absolute left-0 mt-1.5 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-sm"
+                    className="absolute left-0 mt-1.5 w-64 max-w-[calc(100vw-2rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-sm"
                   >
                     {projects.length === 0 && (
                       <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">{t('projectSwitcher.empty')}</div>
@@ -1231,7 +1248,11 @@ export const App: React.FC = () => {
                             aria-hidden="true"
                             className={`w-3.5 h-3.5 shrink-0 ${isCurrent ? 'text-blue-600 dark:text-blue-400' : 'text-transparent'}`}
                           />
-                          <span className="truncate">{p.name}</span>
+                          {/* DFLT-00277: the name wraps (breaking anywhere, so a
+                              name with no spaces cannot widen the item) instead
+                              of truncating, so the popup always shows it in
+                              full. A one-line name looks as before. */}
+                          <span className="min-w-0 wrap-anywhere">{p.name}</span>
                           <span className="ml-auto flex items-center gap-2 shrink-0">
                             {pendingApprovalCounts[p.id] > 0 && (
                               <PendingApprovalBadge count={pendingApprovalCounts[p.id]} />
