@@ -415,6 +415,9 @@ export const TicketItem: React.FC<Props> = ({
   };
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
+  // DFLT-00262: the description body's id, so the expand button can point at
+  // it with aria-controls. useId keeps it unique with several tickets open.
+  const descriptionBodyId = useId();
   const { isLaunching: isRunning, lastMessage: statusMessage, launch: handleRunClaude } = useClaudeLaunch(onRefresh);
 
   // The execution graph panel must never scroll -- it always renders in
@@ -1857,8 +1860,11 @@ export const TicketItem: React.FC<Props> = ({
                 <span className="min-w-0 [overflow-wrap:anywhere]">{t('ticketItem.description.title')}</span>
               </span>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
+                {/* DFLT-00262: text-[0.625rem] rather than text-[10px] -- the
+                    same 10px at a 16px root, but it follows the browser's
+                    default font size (WCAG 1.4.4). */}
                 {ticket.refined_at && (
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1 min-w-0">
+                  <span className="text-[0.625rem] text-slate-500 dark:text-slate-400 flex items-center gap-1 min-w-0">
                     <History aria-hidden="true" className="w-3 h-3 shrink-0" />
                     <span className="min-w-0 [overflow-wrap:anywhere]">
                       {t('ticketItem.description.refinedAt', { time: formatDateTime(ticket.refined_at, i18n.language) })}
@@ -1869,7 +1875,12 @@ export const TicketItem: React.FC<Props> = ({
                   <button
                     type="button"
                     onClick={() => setIsDescriptionExpanded(v => !v)}
-                    className="text-[0.6875rem] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold"
+                    // DFLT-00262: tells assistive tech whether the body is
+                    // open and which element it opens (WCAG 4.1.2), and shows
+                    // the same focus ring as the other buttons (WCAG 2.4.7).
+                    aria-expanded={isDescriptionExpanded}
+                    aria-controls={descriptionBodyId}
+                    className="text-[0.6875rem] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
                   >
                     {isDescriptionExpanded ? t('ticketItem.description.collapse') : t('ticketItem.description.expand')}
                   </button>
@@ -1889,7 +1900,19 @@ export const TicketItem: React.FC<Props> = ({
               // min-content width is unchanged, so a wide table still
               // scrolls inside its own box; code blocks (whitespace-pre) do
               // not wrap and scroll as before.
-              <div className={`break-words${isDescriptionExpanded ? '' : ' max-h-56 overflow-y-auto'}`}>
+              // DFLT-00262: while collapsed the body is a scroll box, so it is
+              // a named, focusable region with a focus ring -- keyboard users
+              // can reach it and scroll it (WCAG 2.1.1). Expanded, it does not
+              // scroll, so it is neither a tab stop nor a landmark (the same
+              // rule as MarkdownViewer's scrollable). The id is always there
+              // for the expand button's aria-controls.
+              <div
+                id={descriptionBodyId}
+                tabIndex={isDescriptionExpanded ? undefined : 0}
+                role={isDescriptionExpanded ? undefined : 'region'}
+                aria-label={isDescriptionExpanded ? undefined : t('ticketItem.description.bodyRegion')}
+                className={`break-words${isDescriptionExpanded ? '' : ' max-h-56 overflow-y-auto rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400'}`}
+              >
                 <MarkdownViewer content={description} />
               </div>
             )}
