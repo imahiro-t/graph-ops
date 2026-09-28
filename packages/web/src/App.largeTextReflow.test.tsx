@@ -77,6 +77,15 @@ async function renderApp() {
   return user;
 }
 
+// The header's switcher: the only header button with aria-haspopup="dialog".
+function switcherButton(): HTMLElement {
+  const found = within(screen.getByRole('banner'))
+    .getAllByRole('button')
+    .filter(b => b.getAttribute('aria-haspopup') === 'dialog');
+  expect(found).toHaveLength(1);
+  return found[0];
+}
+
 afterEach(async () => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -344,6 +353,172 @@ describe.each(['ja', 'en'] as const)('summary card with a root font size set on 
       const number = item.firstElementChild as HTMLElement;
       expect(number).toHaveClass('wrap-anywhere');
       expect(number.querySelector('.whitespace-nowrap')).toBeNull();
+    }
+  });
+});
+
+// DFLT-00268: the project switcher's button was capped at 14rem on the button
+// itself, and its min-content width was that cap: with a 32px root font the
+// button stayed 14rem (448px) wide however narrow the header got, so a long
+// project name ("Selection Manipulator") made the page 404px wide in a 320px
+// window, and "Graph Ops" made it 283px wide in a 160px one (the scrollWidth
+// DFLT-00258 recorded). The 14rem cap now sits on the wrapper, which is a
+// flex item that may shrink (min-w-0), and the button is never wider than
+// the wrapper (max-w-full), so the name truncates inside the header's width.
+// Where the button already fitted (the default font at 320-1440px) the
+// header measures the same as before: the wrapper's size contribution is
+// still capped at 14rem.
+//
+// DFLT-00277 then gave the button a tooltip (the name on the first line, the
+// local path or "not set" on the second; see the describe below), but its
+// accessible name is still the button's text, the project name alone. The
+// test here checks that too -- the button it finds by that name is the
+// header's switcher, and the name is exactly "Alpha" while the title is set
+// -- so the button's name and layout are checked in this one place.
+describe.each(['ja', 'en'] as const)('project switcher in a narrow header (%s)', lng => {
+  beforeEach(async () => {
+    seed();
+    await i18n.changeLanguage(lng);
+  });
+
+  it('caps the wrapper at 14rem and lets the button shrink with it, truncating the name and keeping the accessible name', async () => {
+    await renderApp();
+    const button = within(screen.getByRole('banner')).getByRole('button', { name: /Alpha/ });
+    expect(button).toBe(switcherButton());
+    expect(button).toHaveAttribute('aria-haspopup', 'dialog');
+    // The tooltip is set, yet the accessible name is the project name alone.
+    expect(button).toHaveAttribute('title');
+    expect(button).toHaveAccessibleName('Alpha');
+    expect(button).toHaveClass('max-w-full');
+    expect(button).not.toHaveClass('max-w-56');
+    const wrapper = button.parentElement as HTMLElement;
+    expect(wrapper).toHaveClass('relative', 'min-w-0', 'max-w-56');
+    expect(within(button).getByText('Alpha')).toHaveClass('truncate');
+  });
+});
+
+// DFLT-00277: with the name truncated in the button (or not shown at all in a
+// 160px window with a 32px root font), sighted users read the full name in
+// the button's tooltip -- the name on the first line, the local path (or
+// "not set") on the second -- and in the popup, whose items now wrap the
+// name instead of truncating it. The prefix and the pending-approval badge
+// stay in the group on the item's right. The accessible name is unchanged
+// (checked with the button's layout in "project switcher in a narrow header"
+// above).
+// jsdom computes no layout, so the wrapping itself, the unchanged look at
+// the default font and the absence of sideways scroll at 320px / 32px were
+// measured in a real browser (see the ticket's implementation notes).
+describe.each(['ja', 'en'] as const)('full project name in the switcher\'s tooltip and popup (%s)', lng => {
+  const LONG = 'Long project name for checking that the full name wraps inside the popup item';
+  const NO_SPACE = 'A'.repeat(80);
+  const beta: Project = { id: 'p-beta', name: 'Beta', prefix: 'BETA', local_path: '', created_at: '', updated_at: '' };
+  const long: Project = { id: 'p-long', name: LONG, prefix: 'LONG', local_path: '/work/long', created_at: '', updated_at: '' };
+  const noSpace: Project = { id: 'p-nospace', name: NO_SPACE, prefix: 'NOSP', local_path: '/work/nospace', created_at: '', updated_at: '' };
+
+  function seedProjects(currentProjectId: string) {
+    const projects = [alpha, beta, long, noSpace];
+    const current = projects.find(p => p.id === currentProjectId) as Project;
+    installFakeBackend(
+      createFakeBackend({
+        projects,
+        currentProjectId,
+        labels: [],
+        tickets: [
+          { id: `${current.prefix}-00001`, project_id: current.id, title: 'チケット', status: 'TODO', priority: 'MEDIUM', labelIds: [] }
+        ],
+        pendingApprovals: () => ({ status: 200, body: { counts: { [beta.id]: 2, [long.id]: 1 } } })
+      })
+    );
+    return current;
+  }
+
+  async function renderWith(currentProjectId: string) {
+    const current = seedProjects(currentProjectId);
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText(`${current.prefix}-00001`);
+    return user;
+  }
+
+  async function openPopup(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(switcherButton());
+    return screen.getByRole('dialog', { name: i18n.t('projectSwitcher.menuLabel') });
+  }
+
+  // An item's name span: the text node's own element, found by exact text.
+  function itemName(popup: HTMLElement, name: string): HTMLElement {
+    return within(popup).getByText(name, { exact: true });
+  }
+
+  beforeEach(async () => {
+    await i18n.changeLanguage(lng);
+  });
+
+  it('puts the name on the tooltip\'s first line and the local path on the second', async () => {
+    await renderWith(alpha.id);
+    expect(switcherButton()).toHaveAttribute('title', 'Alpha\n/work/alpha');
+  });
+
+  it('writes "not set" on the second line when the project has no local path', async () => {
+    await renderWith(beta.id);
+    expect(switcherButton()).toHaveAttribute('title', `Beta\n${i18n.t('settings.appSettings.projects.notSet')}`);
+  });
+
+  it('puts a long name in the tooltip in full', async () => {
+    await renderWith(long.id);
+    const [first, second] = (switcherButton().getAttribute('title') as string).split('\n');
+    expect(first).toBe(LONG);
+    expect(second).toBe('/work/long');
+  });
+
+  it('gives the button no tooltip when there is no project', async () => {
+    installFakeBackend(createFakeBackend({ projects: [], currentProjectId: '', labels: [], tickets: [] }));
+    render(<App />);
+    await screen.findByText(i18n.t('projectSwitcher.noProjectYet'));
+    const button = switcherButton();
+    expect(button).toHaveTextContent(i18n.t('projectSwitcher.noProject'));
+    expect(button).not.toHaveAttribute('title');
+  });
+
+  it('wraps every item\'s name in the popup instead of truncating it', async () => {
+    const user = await renderWith(alpha.id);
+    const popup = await openPopup(user);
+    for (const p of [alpha, beta, long, noSpace]) {
+      const name = itemName(popup, p.name);
+      expect(name).not.toHaveClass('truncate');
+      expect(name).toHaveClass('min-w-0', 'wrap-anywhere');
+      // The whole name is the text: nothing cut off.
+      expect(name.textContent).toBe(p.name);
+      expect(name.closest('button')?.parentElement).toBe(popup);
+    }
+  });
+
+  it('caps the popup at the window\'s width less 2rem, but never below 8rem, keeping w-64', async () => {
+    const user = await renderWith(alpha.id);
+    const popup = await openPopup(user);
+    expect(popup).toHaveClass('absolute', 'left-0', 'w-64', 'max-w-[max(calc(100vw-2rem),8rem)]');
+  });
+
+  it('keeps the prefix and the pending-approval badge in the group on the item\'s right', async () => {
+    const user = await renderWith(alpha.id);
+    const popup = await openPopup(user);
+    const cases: Array<[Project, number | null]> = [
+      [alpha, null],
+      [beta, 2],
+      [long, 1],
+      [noSpace, null]
+    ];
+    for (const [p, count] of cases) {
+      const name = itemName(popup, p.name);
+      const right = name.nextElementSibling as HTMLElement;
+      expect(right).toHaveClass('ml-auto', 'shrink-0');
+      expect(within(right).getByText(p.prefix)).toBeInTheDocument();
+      if (count === null) {
+        expect(right.children).toHaveLength(1);
+      } else {
+        expect(right.children).toHaveLength(2);
+        expect(right.firstElementChild).toHaveTextContent(String(count));
+      }
     }
   });
 });

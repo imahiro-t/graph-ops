@@ -36,6 +36,7 @@ import { PendingApprovalBadge } from './components/PendingApprovalBadge';
 import { useClaudeLaunch } from './hooks/useClaudeLaunch';
 import { useTheme, ThemePreference } from './hooks/useTheme';
 import { useFitsSticky } from './hooks/useFitsSticky';
+import { useStickyHeaderScrollPadding } from './hooks/useStickyHeaderScrollPadding';
 import { formatTime } from './i18n/formatDate';
 import { localizedApiErrorMessage } from './lib/apiError';
 import { apiFetch } from './lib/apiFetch';
@@ -942,6 +943,8 @@ export const App: React.FC = () => {
     const el = document.getElementById(`ticket-${focusTicketId}`);
     if (el) {
       const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+      // block 'start' honours <html>'s scroll-padding-top, which holds the
+      // pinned header's height (useStickyHeaderScrollPadding, DFLT-00268).
       el.scrollIntoView?.({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' });
       el.focus({ preventScroll: true });
     }
@@ -1047,8 +1050,14 @@ export const App: React.FC = () => {
   // is about 532px in a 1024x768 window (69%) and 460px in a 1280x800 one
   // (58%), and pinned it covered the ticket header rows' buttons. Then it
   // scrolls away with the page, as it does below lg.
+  // DFLT-00268: while it is pinned, <html> gets a scroll-padding-top of its
+  // real height, so the element focused with Tab and the card opened by
+  // handleOpenTicket's scrollIntoView stop below it rather than under it
+  // (WCAG 2.4.11) -- in a low window the 114px header otherwise hid them.
+  // Unpinned, the padding is 0 as before.
   const headerRef = useRef<HTMLElement>(null);
   const headerFitsSticky = useFitsSticky(headerRef, 0.25, 128);
+  useStickyHeaderScrollPadding(headerRef, headerFitsSticky);
   const newTicketButtonRef = useRef<HTMLButtonElement>(null);
   const filteredTicketsRef = useLatest(filteredTickets);
   const { message: ticketDeleteNotice, announce: announceTicketDelete } = useTransientAnnouncement();
@@ -1164,8 +1173,15 @@ export const App: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 min-w-0">
+            {/* DFLT-00268: the 14rem cap is on this wrapper, not the button.
+                On the button it was also the button's min-content width, so
+                with a large root font the button stayed 14rem wide in a
+                narrower header and widened the page (a long project name at
+                200% text in a 320px window). The wrapper may shrink
+                (min-w-0), the button follows it (max-w-full) and the name
+                truncates; where the button fits, nothing moves. */}
             <div
-              className="relative min-w-0 max-w-full"
+              className="relative min-w-0 max-w-56"
               onKeyDown={handleProjectSwitcherKeyDown}
               onPointerDown={handleProjectSwitcherPointerDown}
               onBlur={handleProjectSwitcherBlur}
@@ -1177,7 +1193,14 @@ export const App: React.FC = () => {
                   which this popup does not implement. Like one, though, it
                   closes when keyboard focus leaves the button and the popup
                   (DFLT-00159). aria-controls only while open: the popup is
-                  not rendered while closed. */}
+                  not rendered while closed.
+                  DFLT-00277: the tooltip gives the full project name on its
+                  first line and the local path (or "not set") on the second.
+                  The name in the button truncates, and in a 160px window
+                  with a 32px root font it is not shown at all, so sighted
+                  users need somewhere to read it in full; the popup's items
+                  show it wrapped as well. The accessible name stays the
+                  button's text. */}
               <button
                 ref={projectMenuButtonRef}
                 type="button"
@@ -1185,8 +1208,12 @@ export const App: React.FC = () => {
                 aria-expanded={isProjectMenuOpen}
                 aria-haspopup="dialog"
                 aria-controls={isProjectMenuOpen ? PROJECT_MENU_ID : undefined}
-                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 [@media(max-width:200px)]:gap-1 [@media(max-width:200px)]:px-2 transition min-w-0 max-w-[min(14rem,100%)]"
-                title={currentProject ? currentProject.local_path || t('settings.appSettings.projects.notSet') : undefined}
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 [@media(max-width:200px)]:gap-1 [@media(max-width:200px)]:px-2 transition min-w-0 max-w-full"
+                title={
+                  currentProject
+                    ? `${currentProject.name}\n${currentProject.local_path || t('settings.appSettings.projects.notSet')}`
+                    : undefined
+                }
               >
                 <FolderOpen aria-hidden="true" className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
                 <span className="truncate">
@@ -1207,12 +1234,27 @@ export const App: React.FC = () => {
                     data-testid="project-switcher-overlay"
                     onClick={() => setIsProjectMenuOpen(false)}
                   />
+                  {/* DFLT-00277: w-64 is 512px with a 32px root font, so
+                      the open popup ran past a 320px window (scrollWidth
+                      544). It is now never wider than the window less 2rem
+                      (the header's padding on both sides); with the default
+                      font at 320px and up the cap is wider than w-64 and
+                      nothing changes. The cap never goes below 8rem, though:
+                      below that (160-200px windows at a 24-32px root) the
+                      name column shrank to 0px and the names ran under the
+                      badge and prefix, which spilled out of the popup. 8rem
+                      is what the cap gives at 320px with a 32px root, where
+                      every item fits, and it scales with the font, so the
+                      item keeps that layout at any text size. Only windows
+                      narrower than 320px (outside WCAG 1.4.10's reflow
+                      width) can then scroll sideways while the popup is
+                      open. */}
                   <div
                     ref={projectMenuRef}
                     id={PROJECT_MENU_ID}
                     role="dialog"
                     aria-label={t('projectSwitcher.menuLabel')}
-                    className="absolute left-0 mt-1.5 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-sm"
+                    className="absolute left-0 mt-1.5 w-64 max-w-[max(calc(100vw-2rem),8rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-sm"
                   >
                     {projects.length === 0 && (
                       <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">{t('projectSwitcher.empty')}</div>
@@ -1238,7 +1280,11 @@ export const App: React.FC = () => {
                             aria-hidden="true"
                             className={`w-3.5 h-3.5 shrink-0 ${isCurrent ? 'text-blue-600 dark:text-blue-400' : 'text-transparent'}`}
                           />
-                          <span className="truncate">{p.name}</span>
+                          {/* DFLT-00277: the name wraps (breaking anywhere, so a
+                              name with no spaces cannot widen the item) instead
+                              of truncating, so the popup always shows it in
+                              full. A one-line name looks as before. */}
+                          <span className="min-w-0 wrap-anywhere">{p.name}</span>
                           <span className="ml-auto flex items-center gap-2 shrink-0">
                             {pendingApprovalCounts[p.id] > 0 && (
                               <PendingApprovalBadge count={pendingApprovalCounts[p.id]} />

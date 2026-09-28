@@ -119,10 +119,11 @@ describe.each(['ja', 'en'] as const)('top header in a 160px window at 200%% (%s)
     const header = screen.getByRole('banner');
     const switcher = within(header).getByRole('button', { name: /Alpha/ });
     expect(switcher).toHaveAttribute('aria-haspopup', 'dialog');
-    expect(switcher).toHaveClass('min-w-0', 'max-w-[min(14rem,100%)]');
+    // DFLT-00268: the 14rem cap sits on the wrapper; the button follows it.
+    expect(switcher).toHaveClass('min-w-0', 'max-w-full');
     expect(switcher).not.toHaveClass('max-w-[14rem]');
     expect(switcher).toHaveClass('gap-1.5', `${TINY}gap-1`, 'px-3', `${TINY}px-2`);
-    expect(switcher.parentElement).toHaveClass('relative', 'min-w-0', 'max-w-full');
+    expect(switcher.parentElement).toHaveClass('relative', 'min-w-0', 'max-w-56');
     expect(within(switcher).getByText('Alpha')).toHaveClass('truncate');
   });
 
