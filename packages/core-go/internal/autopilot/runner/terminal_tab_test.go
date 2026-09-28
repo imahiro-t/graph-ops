@@ -159,7 +159,7 @@ func TestLaunch_LaterLaunchesSkipTheTabOnceDisabled(t *testing.T) {
 	// R's own launch fails in a way that repeats.
 	h.launchOutcome = func(c launchCall) terminal.LaunchOutcome {
 		if c.Ticket == r && c.Role == autopilot.RoleWork {
-			return terminal.LaunchOutcome{TabError: "osascript did not finish within 10s", DisableTab: true}
+			return terminal.LaunchOutcome{TabError: "osascript did not finish within 15s", DisableTab: true}
 		}
 		return terminal.LaunchOutcome{}
 	}
