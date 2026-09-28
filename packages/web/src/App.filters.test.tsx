@@ -467,6 +467,39 @@ describe('App toolbar filters', () => {
     });
   });
 
+  // DFLT-00267: the select-all and clear buttons announce their result in
+  // the filter's own polite live region, in every one of the four filters.
+  describe('result announcements', () => {
+    const OPTION_COUNTS: Record<FilterName, number> = { status: 7, assignee: 4, priority: 3, label: 2 };
+    // The filter's root holds both its trigger and its always-mounted region.
+    const liveRegion = (f: FilterName) => within(trigger(f).parentElement!).getByRole('status');
+
+    it.each(FILTER_NAMES)('announces "select all" and "clear" in the %s filter', async f => {
+      const user = await renderApp();
+      expect(liveRegion(f)).toHaveTextContent('');
+
+      await open(user, f);
+      await user.click(selectAllButton(f));
+      const selectAllText = `${OPTION_COUNTS[f]} 件すべてを選択しました`;
+      expect(liveRegion(f)).toHaveTextContent(selectAllText);
+      expect(screen.getAllByRole('status').some(r => r.textContent === selectAllText)).toBe(true);
+
+      await user.click(clearButton(f));
+      expect(liveRegion(f)).toHaveTextContent('選択を解除しました');
+      expect(screen.getAllByRole('status').some(r => r.textContent === '選択を解除しました')).toBe(true);
+    });
+
+    it('announces in English', async () => {
+      await i18n.changeLanguage('en');
+      const user = await renderApp();
+      await open(user, 'priority');
+      await user.click(within(panel('priority')).getByRole('button', { name: 'Select all' }));
+      expect(liveRegion('priority')).toHaveTextContent('All options selected (3)');
+      await user.click(within(panel('priority')).getByRole('button', { name: 'Clear selection' }));
+      expect(liveRegion('priority')).toHaveTextContent('Selection cleared');
+    });
+  });
+
   describe('OR within a filter', () => {
     it('matches several statuses', async () => {
       const user = await renderApp();
