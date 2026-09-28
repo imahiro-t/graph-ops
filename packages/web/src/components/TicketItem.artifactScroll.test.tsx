@@ -175,17 +175,36 @@ describe('DFLT-00085 inline artifact previews scroll inside a 16rem box', () => 
 
     // Nothing is expanded yet, so the only markdown on screen is the
     // description -- it must not have picked up the artifact cap.
-    // DFLT-00262: the collapsed description body's outer div is now a
-    // scrollable region of its own, so the only region on screen is that
-    // one, wrapping the (uncapped, non-region) MarkdownViewer.
+    // DFLT-00262 / DFLT-00272: the collapsed description body's outer div
+    // becomes a scrollable region of its own only when its text overflows.
+    // jsdom lays nothing out (scrollHeight = clientHeight = 0), so by default
+    // there is no region on screen at all.
     const description = screen.getByTestId('markdown-viewer');
     expect(description.className).not.toContain('max-h-64');
     expect(description).not.toHaveAttribute('tabindex');
     expect(description).not.toHaveAttribute('role');
-    const regions = screen.getAllByRole('region');
-    expect(regions).toHaveLength(1);
-    expect(regions[0]).toHaveAccessibleName(i18n.t('ticketItem.description.bodyRegion'));
-    expect(regions[0]).toContainElement(description);
+    expect(screen.queryAllByRole('region')).toHaveLength(0);
+  });
+
+  it('makes the overflowing description the only region, wrapping the uncapped MarkdownViewer', () => {
+    // DFLT-00272: with an overflowing body the outer div is the only region
+    // on screen, wrapping the (uncapped, non-region) MarkdownViewer.
+    const scrollHeight = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(600);
+    const clientHeight = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(224);
+    try {
+      renderExpanded();
+      const description = screen.getByTestId('markdown-viewer');
+      expect(description.className).not.toContain('max-h-64');
+      expect(description).not.toHaveAttribute('tabindex');
+      expect(description).not.toHaveAttribute('role');
+      const regions = screen.getAllByRole('region');
+      expect(regions).toHaveLength(1);
+      expect(regions[0]).toHaveAccessibleName(i18n.t('ticketItem.description.bodyRegion'));
+      expect(regions[0]).toContainElement(description);
+    } finally {
+      scrollHeight.mockRestore();
+      clientHeight.mockRestore();
+    }
   });
 
   it('renders both viewers uncapped by default (the new-tab preview page)', () => {

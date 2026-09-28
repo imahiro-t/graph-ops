@@ -192,8 +192,7 @@
       "title": "説明",
       "empty": "説明はまだありません",
       "refinedAt": "{{time}} にリファイン",
-      "expand": "すべて表示",
-      "collapse": "折りたたむ",
+      "fullText": "全文",
       "bodyRegion": "説明の本文（スクロールできる）"
     },
     "graphTitle": "実行グラフ (DAG / ループ)",
