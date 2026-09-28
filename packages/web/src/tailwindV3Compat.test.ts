@@ -31,25 +31,34 @@
 //
 // A class expression is:
 // (a) a className / class / *ClassName JSX attribute;
-// (b) the initializer of a variable, property or parameter default (a
-//     destructured one included) whose name ends in class / classes /
+// (b) the initializer of a variable, property (object or class) or parameter
+//     default (a destructured one included), or the body of a function
+//     declaration, method or getter, whose name ends in class / classes /
 //     classname / classnames, any case (inputClass, ERROR_BOX_CLASS,
-//     PENDING_APPROVAL_BADGE_CLASSES, symbolClass);
+//     PENDING_APPROVAL_BADGE_CLASSES, symbolClass, artifactTabClass whether
+//     it is a const arrow function or `function artifactTabClass()`);
 // (c) the initializer of any same-file `const` a class expression refers to
 //     by name, whatever it is called (LabelsEditor's `dim`, GherkinViewer's
-//     block-scoped `color`), followed transitively. The object of a property
-//     or element access is resolved too (`STYLE[b]` takes in AutopilotBadges'
-//     `STYLE` map, `stepKeywordColor.Given` GherkinViewer's), the accessed
-//     key is not.
+//     block-scoped `color`), followed transitively. A name is looked up in
+//     the innermost enclosing scope that binds it; when that binding is not
+//     a plain `const` -- a parameter (destructured ones included), a `let` /
+//     `var`, a destructuring `const`, a function / class / enum declaration,
+//     a loop or catch variable -- it shadows any outer constant and nothing
+//     is resolved. A property access with a static key (`M.bg`, `M['bg']`,
+//     `stepKeywordColor.Given`) follows only that property's value through
+//     object literals; a dynamic key (`STYLE[b]`) takes in the whole object
+//     (AutopilotBadges' `STYLE` map), as does a static key the object
+//     literal does not plainly list (a spread, say). The key itself is never
+//     collected.
 // Conditions (a ternary's test, a comparison, `!x`, the left side of `&&`)
 // only choose between class lists and are skipped. Function calls are
-// opaque: their arguments (an i18n key built for t(), say) are neither
-// collected nor resolved, and a called function's body is not followed -- a
-// function whose own name ends in class (artifactTabClass) is a class
-// expression by (b) instead. Imports, `let` variables and parameters are not
-// followed either, so a class string that only arrives through them
-// (statusMeta.chip.bg and the other *Meta files, which list complete class
-// names statically) is outside these checks.
+// opaque: their arguments (an i18n key built for t(), the callback of
+// `useMemo(() => ...)`) are neither collected nor resolved, and a called
+// function's body is not followed -- a function whose own name ends in class
+// is a class expression by (b) instead. Imports, `let` variables and
+// parameters are not followed either, so a class string that only arrives
+// through them (statusMeta.chip.bg and the other *Meta files, which list
+// complete class names statically) is outside these checks.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import ts from 'typescript';
@@ -73,10 +82,21 @@ const stripComments = (text: string) =>
     .replace(/\/\*[\s\S]*?\*\//g, m => m.replace(/[^\n]/g, ' '))
     .replace(/(^|[^:'"`])\/\/[^\n]*/g, (m, lead: string) => lead + ' '.repeat(m.length - lead.length));
 
-const SOURCES = [
-  ...sourceFiles(SRC).map(path => ({ path, text: stripComments(readFileSync(path, 'utf8')) })),
-  { path: join(WEB_ROOT, 'index.html'), text: readFileSync(join(WEB_ROOT, 'index.html'), 'utf8') }
-];
+// Every non-test source under src/ plus index.html, read once. `file` is
+// relative to packages/web; `text` is the original text (the syntax-tree
+// checks below parse it, and comments are not in the tree).
+const RAW_SOURCES = [...sourceFiles(SRC), join(WEB_ROOT, 'index.html')].map(path => ({
+  path,
+  file: relative(WEB_ROOT, path),
+  text: readFileSync(path, 'utf8')
+}));
+
+// The same sources with comments blanked out of the TypeScript files, for the
+// regular-expression scans.
+const SOURCES = RAW_SOURCES.map(({ path, text }) => ({
+  path,
+  text: path.endsWith('.html') ? text : stripComments(text)
+}));
 
 // space-x-*, space-y-*, divide-* (widths, colors, styles, reverse), with any
 // variants in front and an optional negative sign.
@@ -164,40 +184,109 @@ const parseSource = (fileName: string, text: string) =>
 const lineOf = (sourceFile: ts.SourceFile, node: ts.Node) =>
   sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
 
-const isFunctionLike = (node: ts.Node): node is ts.SignatureDeclaration & { parameters: ts.NodeArray<ts.ParameterDeclaration> } =>
-  ts.isFunctionDeclaration(node) ||
-  ts.isFunctionExpression(node) ||
-  ts.isArrowFunction(node) ||
-  ts.isMethodDeclaration(node);
+// Whether a binding name (a plain identifier or a destructuring pattern,
+// nested to any depth) binds `name`.
+const bindsName = (binding: ts.BindingName, name: string): boolean =>
+  ts.isIdentifier(binding)
+    ? binding.text === name
+    : binding.elements.some(element => !ts.isOmittedExpression(element) && bindsName(element.name, name));
 
-// The same-file `const` an identifier refers to: the innermost block (or the
-// file) that declares it directly, walking outwards from the identifier. A
-// function parameter of the same name on the way shadows it (not resolved).
-// TDZ and other finer scoping rules are not modelled.
-const resolveConst = (id: ts.Identifier): ts.VariableDeclaration | undefined => {
-  for (let scope: ts.Node | undefined = id.parent; scope; scope = scope.parent) {
-    if (isFunctionLike(scope) && scope.parameters.some(p => ts.isIdentifier(p.name) && p.name.text === id.text)) {
-      return undefined;
-    }
-    if (ts.isBlock(scope) || ts.isSourceFile(scope) || ts.isModuleBlock(scope)) {
-      for (const statement of scope.statements) {
-        if (!ts.isVariableStatement(statement)) continue;
-        if (!(statement.declarationList.flags & ts.NodeFlags.Const)) continue;
-        for (const declaration of statement.declarationList.declarations) {
-          if (ts.isIdentifier(declaration.name) && declaration.name.text === id.text) return declaration;
-        }
+const SHADOWED = 'shadowed';
+
+// What `scope` itself binds under `name`: a plain `const` declaration (which
+// can be resolved), SHADOWED for any other kind of binding (a parameter, a
+// `let` / `var`, a destructuring `const`, a function / class / enum
+// declaration, a loop or catch variable), or undefined when it binds nothing
+// by that name.
+const bindingIn = (scope: ts.Node, name: string): ts.VariableDeclaration | typeof SHADOWED | undefined => {
+  if (ts.isFunctionLike(scope) && scope.parameters.some(p => bindsName(p.name, name))) return SHADOWED;
+  if (ts.isCatchClause(scope) && scope.variableDeclaration && bindsName(scope.variableDeclaration.name, name)) {
+    return SHADOWED;
+  }
+  if (
+    (ts.isForStatement(scope) || ts.isForOfStatement(scope) || ts.isForInStatement(scope)) &&
+    scope.initializer &&
+    ts.isVariableDeclarationList(scope.initializer) &&
+    scope.initializer.declarations.some(d => bindsName(d.name, name))
+  ) {
+    return SHADOWED;
+  }
+  if (!(ts.isBlock(scope) || ts.isSourceFile(scope) || ts.isModuleBlock(scope))) return undefined;
+  for (const statement of scope.statements) {
+    if (ts.isVariableStatement(statement)) {
+      const isConst = (statement.declarationList.flags & ts.NodeFlags.Const) !== 0;
+      for (const declaration of statement.declarationList.declarations) {
+        if (!bindsName(declaration.name, name)) continue;
+        return isConst && ts.isIdentifier(declaration.name) ? declaration : SHADOWED;
       }
+    } else if (
+      (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement) || ts.isEnumDeclaration(statement)) &&
+      statement.name?.text === name
+    ) {
+      return SHADOWED;
     }
   }
   return undefined;
 };
 
+// The same-file `const` an identifier refers to: the innermost enclosing
+// scope that binds the name, walking outwards from the identifier. When that
+// binding is anything but a plain `const`, it shadows outer constants and
+// nothing is resolved. TDZ, `var` hoisting out of nested blocks and other
+// finer scoping rules are not modelled.
+const resolveConst = (id: ts.Identifier): ts.VariableDeclaration | undefined => {
+  for (let scope: ts.Node | undefined = id.parent; scope; scope = scope.parent) {
+    const binding = bindingIn(scope, id.text);
+    if (binding === SHADOWED) return undefined;
+    if (binding) return binding;
+  }
+  return undefined;
+};
+
+// Strips parentheses and type-only wrappers (`as const`, `satisfies`, `!`).
+const unwrap = (node: ts.Expression): ts.Expression => {
+  let current = node;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isNonNullExpression(current) ||
+    ts.isTypeAssertionExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+};
+
+// The text of a name that is statically known (an identifier, a private
+// name, a string or numeric literal, a computed name holding a literal).
+const staticName = (name: ts.Node): string | undefined => {
+  if (ts.isIdentifier(name) || ts.isPrivateIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)) {
+    return name.text;
+  }
+  if (ts.isComputedPropertyName(name)) return staticName(name.expression);
+  return undefined;
+};
+
+// The value an object literal gives `key`, or undefined when that is not
+// plainly known (the key is missing, or a spread or method may supply it).
+// Later properties win, as at run time.
+const propertyValue = (object: ts.ObjectLiteralExpression, key: string): ts.Expression | undefined => {
+  for (const property of [...object.properties].reverse()) {
+    if (ts.isSpreadAssignment(property)) return undefined;
+    if (staticName(property.name) !== key) continue;
+    if (ts.isPropertyAssignment(property)) return property.initializer;
+    if (ts.isShorthandPropertyAssignment(property)) return property.name;
+    return undefined;
+  }
+  return undefined;
+};
+
 // Whether an identifier stands for a value that could be resolved, as
-// opposed to a name being declared or a key being accessed.
+// opposed to a name being declared. (Accessed keys never get here: property
+// and element accesses are handled as a whole.)
 const isValueReference = (id: ts.Identifier) => {
   const parent = id.parent;
-  if (ts.isPropertyAccessExpression(parent) && parent.name === id) return false;
-  if (ts.isElementAccessExpression(parent) && parent.argumentExpression === id) return false;
   if (ts.isPropertyAssignment(parent) && parent.name === id) return false;
   if (
     (ts.isVariableDeclaration(parent) || ts.isParameter(parent) || ts.isBindingElement(parent) || ts.isFunctionDeclaration(parent)) &&
@@ -209,12 +298,38 @@ const isValueReference = (id: ts.Identifier) => {
 };
 
 // Collects the string pieces and templates under a class expression,
-// following same-file constants (each declaration at most once).
+// following same-file constants (each value reached through them at most
+// once).
 const collectClassParts = (root: ts.Node) => {
   const pieces: string[] = [];
   const templates: ts.TemplateExpression[] = [];
   const resolved: string[] = [];
   const seen = new Set<ts.Node>();
+  // Follows `expression` down the static property `keys` (outermost first),
+  // resolving constants on the way, and walks what it reaches. Where the
+  // keys cannot be followed (the value is not an object literal, or does not
+  // plainly list the key), the whole value there is walked instead.
+  const follow = (expression: ts.Expression, keys: string[], via = new Set<ts.Node>()): void => {
+    const value = unwrap(expression);
+    if (ts.isIdentifier(value)) {
+      const declaration = resolveConst(value);
+      if (!declaration?.initializer || via.has(declaration)) return;
+      via.add(declaration);
+      resolved.push(value.text);
+      follow(declaration.initializer, keys, via);
+      return;
+    }
+    if (keys.length > 0 && ts.isObjectLiteralExpression(value)) {
+      const property = propertyValue(value, keys[0]);
+      if (property) {
+        follow(property, keys.slice(1), via);
+        return;
+      }
+    }
+    if (seen.has(value)) return;
+    seen.add(value);
+    walk(value);
+  };
   const walk = (node: ts.Node): void => {
     if (ts.isTypeNode(node)) return;
     if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
@@ -223,8 +338,26 @@ const collectClassParts = (root: ts.Node) => {
       if (ts.isPropertyAccessExpression(node.expression)) walk(node.expression.expression);
       return;
     }
-    if (ts.isElementAccessExpression(node)) {
-      walk(node.expression);
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      // Gather the static keys of an access chain (`M.a['b']`); a dynamic
+      // key (`STYLE[b]`) stops the chain and takes in its whole object.
+      const keys: string[] = [];
+      let base: ts.Expression = node;
+      for (;;) {
+        if (ts.isPropertyAccessExpression(base)) {
+          keys.unshift(base.name.text);
+        } else if (ts.isElementAccessExpression(base) && staticName(unwrap(base.argumentExpression)) !== undefined) {
+          keys.unshift(staticName(unwrap(base.argumentExpression))!);
+        } else {
+          break;
+        }
+        base = unwrap(base.expression);
+      }
+      if (ts.isElementAccessExpression(base)) {
+        follow(base.expression, []);
+        return;
+      }
+      follow(base, keys);
       return;
     }
     // Conditions only choose between class lists: a ternary's test, a
@@ -261,17 +394,12 @@ const collectClassParts = (root: ts.Node) => {
       return;
     }
     if (ts.isIdentifier(node)) {
-      if (!isValueReference(node)) return;
-      const declaration = resolveConst(node);
-      if (declaration?.initializer && !seen.has(declaration)) {
-        seen.add(declaration);
-        resolved.push(node.text);
-        walk(declaration.initializer);
-      }
+      if (isValueReference(node)) follow(node, []);
       return;
     }
     ts.forEachChild(node, walk);
   };
+  seen.add(root);
   walk(root);
   return { pieces, templates, resolved };
 };
@@ -288,13 +416,22 @@ const collectClassExpressions = (fileName: string, text: string): ClassExpressio
     } else if (
       (ts.isVariableDeclaration(node) ||
         ts.isPropertyAssignment(node) ||
+        ts.isPropertyDeclaration(node) ||
         ts.isParameter(node) ||
         ts.isBindingElement(node)) &&
-      node.initializer &&
-      (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
-      CLASS_NAMED.test(node.name.text)
+      node.initializer
     ) {
-      add(node.name.text, node.initializer);
+      const name = staticName(node.name);
+      if (name !== undefined && CLASS_NAMED.test(name)) add(name, node.initializer);
+    } else if (
+      (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isGetAccessorDeclaration(node)) &&
+      node.name &&
+      node.body
+    ) {
+      // A class-named function declaration, method or getter: its body
+      // (every string it returns, or builds on the way) is the class list.
+      const name = staticName(node.name);
+      if (name !== undefined && CLASS_NAMED.test(name)) add(name, node.body);
     }
     ts.forEachChild(node, visit);
   };
@@ -361,19 +498,13 @@ const findWrapConflicts = (fileName: string, text: string): string[] => {
     .map(({ file, line, origin }) => `${file}:${line} (${origin})`);
 };
 
-// The real sources, parsed from the original text (comments are not in the
-// syntax tree, so stripComments is not needed), with paths relative to
-// packages/web.
-const RAW_SOURCES = [...sourceFiles(SRC), join(WEB_ROOT, 'index.html')].map(path => ({
-  file: relative(WEB_ROOT, path),
-  text: readFileSync(path, 'utf8')
-}));
-
 const REAL_CLASS_EXPRESSIONS = RAW_SOURCES.filter(({ file }) => !file.endsWith('.html')).flatMap(({ file, text }) =>
   collectClassExpressions(file, text)
 );
 
-const INDEX_HTML_CLASSES = collectHtmlClassExpressions('index.html', readFileSync(join(WEB_ROOT, 'index.html'), 'utf8'));
+const INDEX_HTML_CLASSES = RAW_SOURCES.filter(({ file }) => file.endsWith('.html')).flatMap(({ file, text }) =>
+  collectHtmlClassExpressions(file, text)
+);
 
 // The class expressions of one real file whose tokens include all of `tokens`.
 const realExpressionsWith = (file: string, tokens: string[]) =>
@@ -405,7 +536,35 @@ describe('Tailwind v4 scanner: class names glued to ${', () => {
     ['nested template', "const E = () => <div className={`a ${c ? `b-1${d}` : ''}`} />;", 'b-1${'],
     ['arbitrary variant ending in ]', 'const E = () => <div className={`[@media(max-width:15rem)]:px-2 m-[3px]${x}`} />;', 'm-[3px]${'],
     ['property of a class-named key', "const meta = { symbolClass: `font-bold${x}` };", 'font-bold${'],
-    ['class-named parameter default', 'function F({ className = `p-1${x}` }) { return className; }', 'p-1${']
+    ['class-named parameter default', 'function F({ className = `p-1${x}` }) { return className; }', 'p-1${'],
+    [
+      'class-named function declaration',
+      'function tabClass(a: boolean) { return `px-3${a ? " x" : ""}`; } const E = () => <div className={tabClass(true)} />;',
+      'px-3${'
+    ],
+    ['class-named method', 'class K { rowClass() { return `p-2${x}`; } }', 'p-2${'],
+    ['class-named getter', 'const o = { get chipClass() { return `ml-1${x}`; } };', 'ml-1${'],
+    ['class-named class property', 'class K { cellClass = `pl-4${x}`; }', 'pl-4${'],
+    [
+      'property followed through a static key',
+      "const M = { label: 'Step', bg: `bg-red-100${x}` }; const E = () => <div className={M.bg} />;",
+      'bg-red-100${'
+    ],
+    [
+      'nested properties followed through static keys',
+      "const M = { a: { bg: `mt-1${x}` } as const }; const E = () => <div className={`p-2 ${M.a['bg']}`} />;",
+      'mt-1${'
+    ],
+    [
+      'whole object when the static key is not plainly listed (a spread)',
+      "const M = { ...B, label: `mb-1${x}` }; const E = () => <div className={M.bg} />;",
+      'mb-1${'
+    ],
+    [
+      'inner constant shadowing an outer one',
+      "const x = 'p-1'; function F() { const x = `pr-2${y}`; return <div className={`p-2 ${x}`} />; }",
+      'pr-2${'
+    ]
   ])('reports a class name glued to ${ (%s)', (_label, source, snippet) => {
     const offenders = findGluedTemplateClasses('sample.tsx', source);
     expect(offenders).toHaveLength(1);
@@ -432,7 +591,35 @@ describe('Tailwind v4 scanner: class names glued to ${', () => {
     ['element-access key inside a class expression', 'const K = `k${m}`; const E = () => <div className={`p-2 ${STYLE[K]}`} />;'],
     ['class names separated from ${ by spaces', "const E = () => <header className={`relative ${c ? 'lg:sticky' : ''} z-30`} />;"],
     ['condition choosing between class lists', "const E = () => <div className={mode === `m${x}` ? 'p-1' : 'p-2'} />;"],
-    ['parameter shadowing a constant', 'const x = `a-${b}`; const E = (x: string) => <div className={`p-2 ${x}`} />;']
+    ['parameter shadowing a constant', 'const x = `a-${b}`; const E = (x: string) => <div className={`p-2 ${x}`} />;'],
+    ['destructured parameter shadowing a constant', 'const x = `a-${b}`; const E = ({ x }: any) => <div className={`p-2 ${x}`} />;'],
+    [
+      'nested destructured parameter shadowing a constant',
+      'const x = `a-${b}`; const E = ({ p: [, { x }] }: any) => <div className={`p-2 ${x}`} />;'
+    ],
+    ['inner let shadowing a constant', 'const x = `a-${b}`; function F() { let x = "q"; return <div className={`p-2 ${x}`} />; }'],
+    ['inner var shadowing a constant', 'const x = `a-${b}`; function F() { var x = "q"; return <div className={`p-2 ${x}`} />; }'],
+    [
+      'destructuring const shadowing a constant',
+      'const x = `a-${b}`; function F(o: any) { const { x } = o; return <div className={`p-2 ${x}`} />; }'
+    ],
+    [
+      'inner function declaration shadowing a constant',
+      'const x = `a-${b}`; function F() { function x() { return "q"; } return <div className={`p-2 ${x}`} />; }'
+    ],
+    ['loop variable shadowing a constant', 'const x = `a-${b}`; for (const x of xs) out.push(<div className={`p-2 ${x}`} />);'],
+    [
+      'catch variable shadowing a constant',
+      'const x = `a-${b}`; try { f(); } catch (x) { out.push(<div className={`p-2 ${x}`} />); }'
+    ],
+    [
+      'other properties of an object accessed by a static key',
+      'const M = { label: `Step${n}`, bg: "bg-red-100" }; const E = () => <div className={`${M.bg}`} />;'
+    ],
+    [
+      'other properties of an object accessed by a static element key',
+      "const M = { label: `Step${n}`, bg: 'bg-red-100' }; const E = () => <div className={M['bg']} />;"
+    ]
   ])('does not report non-class template strings (%s)', (_label, source) => {
     expect(findGluedTemplateClasses('sample.tsx', source)).toEqual([]);
   });
@@ -496,6 +683,10 @@ describe('overflow-wrap classes', () => {
     ['a class-named constant', "const BASE_CLASS = 'wrap-break-word'; const E = () => <div className={`${BASE_CLASS} wrap-anywhere`} />;"],
     ['a constant of any name', "const w = 'wrap-anywhere'; const E = () => <div className={`wrap-break-word ${w}`} />;"],
     ['the object of an element access', "const S = { a: 'wrap-anywhere' }; const E = () => <div className={`wrap-break-word ${S[k]}`} />;"],
+    [
+      'a property read through a static key',
+      "const S = { a: 'wrap-anywhere', b: 'p-1' }; const E = () => <div className={`wrap-break-word ${S.a}`} />;"
+    ],
     ['exclusive ternary branches (reported conservatively)', "const E = () => <div className={c ? 'wrap-anywhere' : 'wrap-break-word'} />;"]
   ])('reports wrap-break-word combined with wrap-anywhere across %s', (_label, source) => {
     expect(findWrapConflicts('sample.tsx', source)).toHaveLength(1);
@@ -507,7 +698,11 @@ describe('overflow-wrap classes', () => {
 
   it.each([
     ['a variant on one of them', "const E = () => <div className={`wrap-break-word ${c ? 'max-sm:wrap-anywhere' : ''}`} />;"],
-    ['separate elements', "const E = () => <><div className=\"wrap-break-word\" /><div className=\"wrap-anywhere\" /></>;"]
+    ['separate elements', "const E = () => <><div className=\"wrap-break-word\" /><div className=\"wrap-anywhere\" /></>;"],
+    [
+      'another property of an object read through a static key',
+      "const S = { a: 'wrap-anywhere', b: 'p-1' }; const E = () => <div className={`wrap-break-word ${S.b}`} />;"
+    ]
   ])('does not report %s', (_label, source) => {
     expect(findWrapConflicts('sample.tsx', source)).toEqual([]);
   });
