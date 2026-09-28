@@ -365,6 +365,33 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 	if strings.Count(script, "keystroke") != 1 {
 		t.Error("keystroke must appear exactly once")
 	}
+	// Timing (DFLT-00269): 0.2 seconds between the front check and Cmd+T,
+	// the new tab polled every 0.2 seconds for 30 rounds (about 6 seconds),
+	// while the front loop and the bounds check keep polling every 0.1
+	// seconds.
+	between := func(from, to string) string {
+		i := strings.Index(script, from)
+		if i < 0 {
+			t.Fatalf("the script lacks %q", from)
+		}
+		j := strings.Index(script[i:], to)
+		if j < 0 {
+			t.Fatalf("the script lacks %q after %q", to, from)
+		}
+		return script[i : i+j]
+	}
+	if !strings.Contains(between("number 9103", `keystroke "t"`), "delay 0.2") {
+		t.Error("Cmd+T must be sent 0.2 seconds after Terminal is seen in front (delay 0.2 before the keystroke)")
+	}
+	if front := between("repeat 20 times", `keystroke "t"`); !strings.Contains(front, "delay 0.1") {
+		t.Error("the front loop must keep polling every 0.1 seconds")
+	}
+	if tabWait := between("repeat 30 times", "number 9102"); !strings.Contains(tabWait, "delay 0.2") || strings.Contains(tabWait, "delay 0.1") {
+		t.Errorf("the new tab must be polled every 0.2 seconds, 30 times; the loop is %q", tabWait)
+	}
+	if bounds := between("repeat 10 times", "if not sameWindow then error"); !strings.Contains(bounds, "delay 0.1") || strings.Contains(bounds, "delay 0.2") {
+		t.Error("the bounds check must keep polling every 0.1 seconds")
+	}
 	lines := strings.Split(strings.TrimSpace(script), "\n")
 	if len(lines) < 2 || strings.TrimSpace(lines[len(lines)-1]) != "end run" ||
 		!strings.Contains(lines[len(lines)-2], "do script") {

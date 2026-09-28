@@ -145,8 +145,14 @@ const (
 //
 //   - A keystroke goes to whatever app is frontmost, not to the process the
 //     tell names. So Cmd+T is sent only after Terminal is seen frontmost with
-//     the target window in front (polled for up to about 2 seconds);
-//     otherwise the script sends no key at all and fails with 9103 -- or,
+//     the target window in front (polled for up to about 2 seconds), and
+//     then only after a further 0.2 seconds, which gives Terminal time to
+//     be ready to open the tab. If the user switches to another app within
+//     those 0.2 seconds, Cmd+T can reach that app instead; no new tab then
+//     appears in the target window, the script fails with 9102 and the
+//     session falls back to a new window, and an empty tab may be left
+//     wherever the keystroke landed. When Terminal is not seen in front,
+//     the script sends no key at all and fails with 9103 -- or,
 //     when Terminal's state could not be read even once while polling, with
 //     the last read error's own number, so that classifyTabFailure disables
 //     the tab instead of retrying it on every launch. (The permission errors
@@ -156,9 +162,9 @@ const (
 //     another run's launch in the same window) can change at any moment.
 //     The ttys of every tab of every Terminal window are recorded before
 //     Cmd+T, and the command goes to the one tab whose tty is new. No new
-//     tab within about 3 seconds is 9102; more than one (someone else
-//     opened a tab at the same time) is 9104, and the command is run in
-//     none of them.
+//     tab within about 6 seconds (polled every 0.2 seconds) is 9102; more
+//     than one (someone else opened a tab at the same time) is 9104, and
+//     the command is run in none of them.
 //
 // Terminal.app on current macOS reports every tab of a window to
 // AppleScript as a window of its own with a single tab (DFLT-00183: the
@@ -243,6 +249,7 @@ on run argv
 		if not pollOK and lastErrNum is not missing value then error "graph-ops: Terminal's state could not be read while waiting for it to come to the front: " & lastErrMsg number lastErrNum
 		error "graph-ops: Terminal did not come to the front with the window of " & targetTTY & ", so no key was sent" number 9103
 	end if
+	delay 0.2
 	tell application "System Events" to tell process "Terminal" to keystroke "t" using command down
 	set newTTY to missing value
 	repeat 30 times
@@ -266,7 +273,7 @@ on run argv
 			set newTTY to item 1 of freshTTYs
 			exit repeat
 		end if
-		delay 0.1
+		delay 0.2
 	end repeat
 	if newTTY is missing value then error "graph-ops: no new tab appeared in the Terminal window of " & targetTTY number 9102
 	set newTab to missing value
@@ -307,12 +314,16 @@ end run`
 // defaultTabScriptTimeout is tabScriptTimeout's initial value (tests may
 // shorten the variable); tabLockWait is derived from it, so changing it here
 // moves both.
-const defaultTabScriptTimeout = 10 * time.Second
+const defaultTabScriptTimeout = 15 * time.Second
 
 // tabScriptTimeout bounds the osascript run. The script itself gives up
-// after about 2 seconds of waiting for Terminal to come to the front and 3
-// seconds of waiting for the tab; what takes longer is almost always a
-// permission prompt nobody answers. A variable so tests can shorten it.
+// after about 2 seconds of waiting for Terminal to come to the front, 0.2
+// seconds before Cmd+T, about 6 seconds of waiting for the tab and about 1
+// second of checking that it opened in the target window -- about 9.2
+// seconds at worst. The 15 seconds add room for starting osascript and
+// walking Terminal's windows on top of that; what takes longer is almost
+// always a permission prompt nobody answers. A variable so tests can
+// shorten it.
 var tabScriptTimeout = defaultTabScriptTimeout
 
 // maxTabErrorLen caps LaunchOutcome.TabError, which the runner keeps in the
@@ -381,12 +392,12 @@ const tabLockMargin = 5 * time.Second
 // free often enough, though with no queue nothing guarantees a given waiter
 // gets it in time. The wait runs out when the holders' runs add up past it:
 // one running close to tabScriptTimeout (a permission prompt left
-// unanswered, say), several passing failures of a few seconds each
+// unanswered, say), several passing failures of several seconds each
 // (9102/9103), or an unusual number of waiters. Most of these mean something
 // is wrong with Terminal, and then the waiter's own tab would most likely
 // fail the same way; either way it still opens a new window. And a wait
 // that grew with the number of waiters would stretch a launch's worst case
-// (about 35 seconds) in proportion, where a bounded wait keeps it fixed. See
+// (about 45 seconds) in proportion, where a bounded wait keeps it fixed. See
 // the lock in docs/autopilot.md.
 var tabLockWait = defaultTabScriptTimeout + tabLockMargin
 
