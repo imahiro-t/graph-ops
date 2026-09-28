@@ -1885,7 +1885,7 @@ export const TicketItem: React.FC<Props> = ({
                     // the same focus ring as the other buttons (WCAG 2.4.7).
                     aria-expanded={isDescriptionExpanded}
                     aria-controls={descriptionBodyId}
-                    className="text-[0.6875rem] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold rounded focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+                    className="text-[0.6875rem] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold rounded-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
                   >
                     {isDescriptionExpanded ? t('ticketItem.description.collapse') : t('ticketItem.description.expand')}
                   </button>
@@ -1916,7 +1916,7 @@ export const TicketItem: React.FC<Props> = ({
                 tabIndex={isDescriptionExpanded ? undefined : 0}
                 role={isDescriptionExpanded ? undefined : 'region'}
                 aria-label={isDescriptionExpanded ? undefined : t('ticketItem.description.bodyRegion')}
-                className={`wrap-break-word${isDescriptionExpanded ? '' : ' max-h-56 overflow-y-auto rounded-lg focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400'}`}
+                className={`wrap-break-word ${isDescriptionExpanded ? '' : 'max-h-56 overflow-y-auto rounded-lg focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400'}`}
               >
                 <MarkdownViewer content={description} />
               </div>
