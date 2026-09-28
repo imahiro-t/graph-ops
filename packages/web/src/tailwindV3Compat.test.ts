@@ -89,10 +89,18 @@
 //     call (`const buttonClass = useMemo(() => clsx(...))`,
 //     `className={items.map(i => cn(...))}`, `className={foo(cn(...))}`),
 //     whose arguments that expression does not walk. A helper call a class
-//     expression does take in (`className={cn(...)}`, or a constant it
-//     refers to) is part of it and is not checked again. Its arguments are class lists wherever the call is (in a
-//     className, a constant, ...): strings, templates, arrays, the branches
-//     of ternaries / `&&` / `||` / `??`, and for an object argument
+//     expression of (a) - (c) does take in (`className={cn(...)}`, or a
+//     constant it refers to) is part of it and is not a class expression of
+//     its own. A helper call that a (d) helper call takes in through a
+//     constant can still be one, if it comes earlier in the file: in
+//     `const w = clsx(...); clsx(w, 'a');` both calls are class expressions,
+//     and `clsx(...)` is checked on its own and again as part of
+//     `clsx(w, 'a')`.
+//     This raises no false report -- a template is reported once, and wrap
+//     classes applied together are judged within each class expression. Its
+//     arguments are class lists wherever the call is (in a className, a
+//     constant, ...): strings, templates, arrays, the branches of ternaries /
+//     `&&` / `||` / `??`, and for an object argument
 //     (`{ 'p-2': c, [`m-${x}`]: d }`) the keys -- a dynamic computed key is
 //     walked as an expression, a spread is walked as another argument -- but
 //     not the values, which are conditions.
