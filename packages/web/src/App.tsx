@@ -1396,7 +1396,9 @@ export const App: React.FC = () => {
                 // (WCAG 2.4.7). blue-500 is 3.52:1 on the slate-50 input and 3.68:1 on the white
                 // toolbar; blue-400 is 5.75:1 on the slate-800 input and 7.02:1 on the slate-900
                 // toolbar (WCAG 1.4.11). Text fields match :focus-visible on a click as well.
-                className="pl-8 pr-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs focus:outline-hidden focus:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 w-56 max-w-full text-slate-900 dark:text-slate-100"
+                // DFLT-00276: dark:focus:border-blue-400, or dark:border-slate-700 kept the
+                // border slate-700 on focus; blue-400 matches the dark ring and the other inputs.
+                className="pl-8 pr-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs focus:outline-hidden focus:border-blue-500 dark:focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 w-56 max-w-full text-slate-900 dark:text-slate-100"
               />
             </div>
 

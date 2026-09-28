@@ -1853,21 +1853,41 @@ export const TicketItem: React.FC<Props> = ({
                 {t('ticketItem.loopEdges', { count: loopEdges.length })}
               </div>
             )}
-            <div>
+            {/* DFLT-00276: at 160px wide with a 200% font the mono date's
+                longest word ("2026/9/28", "9/28/2026,") alone is wider than
+                the card, so this flex item (min-width: auto) ran out to
+                R171 (ja) / R185.5 (en) and was cut by the card's R136
+                overflow-x clip. min-w-0 lets it shrink and wrap-anywhere
+                (inherited by the span) breaks inside a word only when the
+                word cannot fit on a line; at any usable width nothing
+                changes. */}
+            <div className="min-w-0 wrap-anywhere">
               {t('ticketItem.createdAt')}: <span className="font-mono text-slate-700 dark:text-slate-300">{formatDateTime(ticket.created_at, i18n.language)}</span>
             </div>
-            {/* Labels (DFLT-00084): every label, plus the picker. */}
-            <div className="flex flex-wrap items-center gap-1.5" data-testid="ticket-detail-labels">
+            {/* Labels (DFLT-00084): every label, plus the picker.
+                DFLT-00276: min-w-0 wrap-anywhere for the same reason as the
+                date above -- at 160px / 200% in English the "Edit labels"
+                button's longest word held this item at R139.5, 3.5px past
+                the card's R136 clip. The picker's panel has a fixed width
+                (w-56) and its rows are whitespace-nowrap, so it is unaffected. */}
+            <div className="flex flex-wrap items-center gap-1.5 min-w-0 wrap-anywhere" data-testid="ticket-detail-labels">
               <span>{t('ticket.labels.title')}:</span>
               {ticketLabels.length === 0 ? (
                 <span className="text-slate-500 dark:text-slate-400">{t('ticket.labels.none')}</span>
               ) : (
-                ticketLabels.map(l => <LabelChip key={l.id} name={l.name} color={l.color} />)
+                // DFLT-00276: min-w-0 lets a chip shrink below its max-w-40
+                // (320px at a 32px root) so a long name truncates inside the
+                // card instead of running past it at 160-320px / 200%.
+                ticketLabels.map(l => <LabelChip key={l.id} name={l.name} color={l.color} className="min-w-0" />)
               )}
               <LabelSelect ticketId={ticket.id} labels={ticketLabels} projectLabels={projectLabels} onSaved={onRefresh} />
             </div>
+            {/* DFLT-00276: min-w-0 wrap-anywhere as for the date above; a
+                closed reason with one long word (e.g. "superseded-by-DFLT-00002")
+                reached R251 (ja) / R296.9 (en) at 160px / 200%, and R304.9 at
+                320px / 200% in English, past the card's clip. */}
             {ticket.closed_reason && (
-              <div className="flex items-center gap-1 text-slate-700 dark:text-slate-300">
+              <div className="flex items-center gap-1 min-w-0 wrap-anywhere text-slate-700 dark:text-slate-300">
                 <Archive aria-hidden="true" className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
                 {t('ticketItem.close.reasonLabel')}: <span className="font-medium">{ticket.closed_reason}</span>
               </div>

@@ -7,6 +7,9 @@
 // toggles' colours, instead of showing focus only by its border colour
 // (WCAG 2.4.7 / 1.4.11).
 //
+// DFLT-00276: in the dark theme its border also turns blue on focus
+// (dark:focus:border-blue-400); before, dark:border-slate-700 kept it slate-700.
+//
 // fetch is served by test/fakeBackend.ts, like App.iconA11y.test.tsx.
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -98,5 +101,18 @@ describe('App toolbar search box name', () => {
     // No ring comes from plain :focus classes. (A text field matches
     // :focus-visible on a click too, so this does not hide the ring then.)
     expect(tokens.filter(c => c.startsWith('focus:ring') || c.startsWith('dark:focus:ring'))).toEqual([]);
+  });
+
+  it('turns the border blue on focus in the dark theme too, leaving the light theme as it was (DFLT-00276)', async () => {
+    await renderApp();
+
+    const tokens = screen.getByRole('textbox', { name: i18n.t('toolbar.searchLabel') }).className.split(/\s+/);
+    // blue-400, like the dark focus-visible ring and the other inputs' dark focus borders.
+    expect(tokens).toContain('dark:focus:border-blue-400');
+    for (const cls of ['focus:border-blue-500', 'border-slate-300', 'dark:border-slate-700']) {
+      expect(tokens).toContain(cls);
+    }
+    // Exactly one dark focus border colour.
+    expect(tokens.filter(c => c.startsWith('dark:focus:border-'))).toEqual(['dark:focus:border-blue-400']);
   });
 });
