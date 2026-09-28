@@ -111,7 +111,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
   };
 
   return (
-    <div className="flex flex-col gap-3 h-full min-h-0">
+    <div className="flex flex-col gap-3 h-full min-h-0 narrow:h-auto">
       <p className="text-[11px] text-slate-500 dark:text-slate-400">{t(`${i18nPrefix}.intro`)}</p>
       {error && (
         <ErrorBox role="alert" className="p-2.5 text-[11px] whitespace-pre-wrap">
@@ -154,7 +154,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
             />
             <p id={hintId} className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">{t(`${i18nPrefix}.emptyOverrideHint`)}</p>
           </div>
-          <div className="flex justify-end items-center gap-2">
+          <div className="flex justify-end items-center gap-2 narrow:flex-wrap">
             {savedFlash && (
               <span role="status" className="text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-1">
                 <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}

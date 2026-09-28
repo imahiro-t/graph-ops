@@ -804,3 +804,47 @@ describe('NodeTypesEditor merged preview region', () => {
     expect(region()).toHaveTextContent('implementation-merged-text');
   });
 });
+
+// DFLT-00261: at a 200% default font on a 320px screen the fixed-width (w-56)
+// list pushed its buttons about 103px past the tab panel. Below 48rem (the
+// rem-based `narrow:` variant from index.css) the list stacks above the body
+// at full width with a capped height, item names wrap instead of truncating,
+// and the save row wraps. The wide classes stay, so a wide window with the
+// default font looks as before. jsdom does no layout or media queries, so
+// this pins the classes; the widths were measured in a real browser (see the
+// ticket's implementation notes).
+describe('NodeTypesEditor narrow reflow (DFLT-00261)', () => {
+  beforeEach(() => {
+    mockedFetchTypes.mockReset();
+    mockedFetchType.mockReset();
+    mockedFetchTypes.mockResolvedValue(TYPES);
+    stubFetchType();
+  });
+
+  it('stacks the list above the body below 48rem and keeps the side-by-side classes', async () => {
+    const { container } = render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveClass('flex', 'h-full', 'min-h-0', 'gap-4', 'narrow:flex-col', 'narrow:h-auto');
+    const list = root.querySelector('.w-56') as HTMLElement;
+    expect(list).toHaveClass('w-56', 'shrink-0', 'overflow-y-auto', 'narrow:w-full', 'narrow:max-h-40');
+    for (const name of list.querySelectorAll('span.truncate')) {
+      expect(name).toHaveClass('narrow:whitespace-normal', 'narrow:wrap-anywhere');
+    }
+    const saveRow = screen.getByRole('button', { name: i18n.t('settings.common.save') }).parentElement as HTMLElement;
+    expect(saveRow).toHaveClass('flex', 'justify-end', 'narrow:flex-wrap');
+  });
+
+  // A-1: below 48rem the list is a max-h-40 scroll box under a sticky
+  // heading, so an item focus scrolls into view must stop below the heading.
+  it('keeps a focused list item from scrolling under the sticky heading', async () => {
+    const { container } = render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    const list = (container.firstElementChild as HTMLElement).querySelector('.w-56') as HTMLElement;
+    expect(list).toHaveClass('overflow-y-auto', 'scroll-pt-12');
+    expect(list.firstElementChild).toHaveTextContent(i18n.t('settings.nodeTypes.listTitle'));
+    expect(list.firstElementChild).toHaveClass('sticky', 'top-0', 'z-10');
+  });
+});

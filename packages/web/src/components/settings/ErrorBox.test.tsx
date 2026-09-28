@@ -35,6 +35,16 @@ describe('ErrorBox', () => {
     expect(ERROR_BOX_CLASS).not.toMatch(/(^|\s)(p-|text-\[|text-xs|whitespace-|flex)/);
   });
 
+  // DFLT-00261: an error can carry a path, URL or ID with no spaces, so every
+  // box breaks such a word anywhere (overflow-wrap: anywhere) rather than
+  // running past the box on a narrow screen. Never with wrap-break-word,
+  // which Tailwind v4 emits later and would win.
+  it('wraps a long unbroken word inside the box', () => {
+    expect(ERROR_BOX_CLASS.split(' ')).toContain('wrap-anywhere');
+    expect(ERROR_BOX_CLASS.split(' ')).not.toContain('wrap-break-word');
+    expect(ERROR_BOX_CLASS.split(' ')).not.toContain('break-all');
+  });
+
   it('adds the given className after the shared classes', () => {
     render(<ErrorBox className="p-2.5 text-[11px] whitespace-pre-wrap">Something failed</ErrorBox>);
     const box = screen.getByText('Something failed');

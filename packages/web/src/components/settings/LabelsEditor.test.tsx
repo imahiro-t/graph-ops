@@ -1834,3 +1834,43 @@ describe('LabelsEditor keeping row alerts as the same DOM nodes when the list is
     expectHeldUnchanged(held);
   });
 });
+
+// DFLT-00261: at a 200% default font on a 320px screen the fixed widths here
+// (w-56 new-name input, min-w-40 name column, w-44 rename input) are wider
+// than the tab panel, and the project and colour rows and each row's
+// Rename / Delete group did not wrap. Below 48rem (the rem-based `narrow:`
+// variant from index.css) those rows wrap, the fixed widths give way to the
+// available width, and the tab drops its own full-height scroll so the tab
+// panel scrolls instead. The wide classes stay. jsdom does no layout, so the
+// classes are pinned.
+describe('LabelsEditor narrow reflow (DFLT-00261)', () => {
+  beforeEach(() => {
+    mockedFetch.mockReset();
+    mockedFetch.mockResolvedValue([label('label-bug', 'バグ', 'red', 2), label('label-feat', '機能追加', 'blue', 0)]);
+  });
+
+  it('lets the rows wrap and the fixed widths shrink below 48rem, keeping the wide classes', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await screen.findByTestId('label-row-label-bug');
+
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveClass('h-full', 'overflow-y-auto', 'narrow:h-auto', 'narrow:overflow-visible');
+
+    const projectSelect = screen.getByLabelText(i18n.t('settings.labels.projectLabel'));
+    expect(projectSelect).toHaveClass('narrow:min-w-0', 'narrow:max-w-full');
+    expect(projectSelect.parentElement).toHaveClass('flex', 'items-center', 'gap-2', 'narrow:flex-wrap');
+
+    const nameInput = createForm().getByRole('textbox');
+    expect(nameInput).toHaveClass('w-56', 'narrow:w-full', 'narrow:min-w-0');
+    const colorLabel = createForm().getByText(i18n.t('settings.labels.color'));
+    expect(colorLabel.parentElement).toHaveClass('flex', 'items-center', 'gap-2', 'narrow:flex-wrap');
+
+    const chip = within(row('label-bug')).getByTestId('label-chip');
+    expect(chip.parentElement).toHaveClass('min-w-40', 'narrow:min-w-0', 'narrow:max-w-full');
+    expect(renameButton('label-bug', 'バグ').parentElement).toHaveClass('ml-auto', 'flex', 'items-center', 'gap-2', 'narrow:flex-wrap');
+
+    await user.click(renameButton('label-bug', 'バグ'));
+    expect(within(row('label-bug')).getByRole('textbox')).toHaveClass('w-44', 'narrow:w-full', 'narrow:min-w-0');
+  });
+});

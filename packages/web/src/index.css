@@ -8,6 +8,16 @@
    <html>, like v3's darkMode: 'class' (which matched `.dark *`). */
 @custom-variant dark (&:is(.dark *));
 
+/* DFLT-00261: `narrow:` applies below 48rem. It is in rem, unlike the
+   pinned px breakpoints below (max-md: is `width < 768px`), so it follows the
+   browser's default font size: 768px at 16px, 1536px at a 200% (32px)
+   default font. The settings editors use it to stack their two-column
+   layouts and wrap their rows when the text is large for the window, and
+   stay side by side at 1280px with the default font. (Media queries resolve
+   rem against the initial font size, i.e. the browser setting, not the
+   page's html font-size.) */
+@custom-variant narrow (@media (width < 48rem));
+
 /* v3 values, pinned: breakpoints, text line heights and the color palette.
    v4 redefines the default colors in OKLCH, and they differ slightly from
    v3's hex values. The contrast ratios quoted in comments and asserted in

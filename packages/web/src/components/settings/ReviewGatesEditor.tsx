@@ -408,7 +408,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   }
 
   return (
-    <div ref={containerRef} className="flex flex-col gap-3 h-full min-h-0">
+    <div ref={containerRef} className="flex flex-col gap-3 h-full min-h-0 narrow:h-auto">
       <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.intro')}</p>
       {error && <ErrorBox id={errorId} role="alert" className="p-2.5 text-[11px] whitespace-pre-wrap">{error}</ErrorBox>}
 
@@ -454,7 +454,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         </p>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-auto space-y-3">
+      <div className="flex-1 min-h-0 overflow-auto space-y-3 narrow:flex-none narrow:overflow-visible">
         {gates.length === 0 && (
           <div className="text-center text-slate-500 dark:text-slate-400 text-xs py-8 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
             {t('settings.reviewGates.tableEmpty')}
@@ -485,8 +485,8 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
             {/* Each text field has a small visible label above it (the
                 placeholders stay as a supplementary hint); items-end keeps
                 the checkbox and delete button aligned with the inputs. */}
-            <div className="flex items-end gap-2">
-              <div className="w-40 flex flex-col">
+            <div className="flex items-end gap-2 narrow:flex-wrap">
+              <div className="w-40 flex flex-col narrow:w-full">
                 <label htmlFor={`${idPrefix}-${g.rowKey}-id`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.idLabel')}</label>
                 <input
                   id={`${idPrefix}-${g.rowKey}-id`}
@@ -511,7 +511,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   {t('settings.reviewGates.defaultBadge')}
                 </span>
               )}
-              <div className="flex-1 min-w-0 flex flex-col">
+              <div className="flex-1 min-w-0 flex flex-col narrow:basis-full">
                 <label htmlFor={`${idPrefix}-${g.rowKey}-name`} className={SMALL_LABEL_CLASS}>{t('settings.reviewGates.nameLabel')}</label>
                 <input
                   id={`${idPrefix}-${g.rowKey}-name`}
@@ -650,7 +650,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         })}
       </div>
 
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center narrow:flex-wrap narrow:gap-2">
         <button
           onClick={addGate}
           data-focus-key={ADD_GATE_FOCUS_KEY}
@@ -658,7 +658,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         >
           <Plus aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.reviewGates.addGate')}
         </button>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 narrow:flex-wrap">
           {savedFlash && (
             <span className="text-emerald-600 text-xs flex items-center gap-1">
               <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}

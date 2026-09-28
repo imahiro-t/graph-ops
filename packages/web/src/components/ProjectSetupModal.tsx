@@ -232,8 +232,16 @@ export const ProjectSetupModal: React.FC<Props> = ({
     </label>
   );
 
+  // The message boxes and the description can carry a path or a project
+  // name with no spaces. They used `break-all`, which also split ordinary
+  // English words at any letter on a narrow screen. `wrap-anywhere`
+  // (overflow-wrap: anywhere, DFLT-00261) breaks at word boundaries and
+  // splits only a word too long for the line, so a long path still wraps
+  // inside the box. (Not together with `wrap-break-word`, which Tailwind v4
+  // emits later and would win.) The monospace path in the project list below
+  // keeps `break-all`: it is one path, so filling each line reads better.
   const errorBox = error && (
-    <div role="alert" className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900">
+    <div role="alert" className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900 wrap-anywhere">
       {error}
     </div>
   );
@@ -244,7 +252,7 @@ export const ProjectSetupModal: React.FC<Props> = ({
     <div
       role="alert"
       data-testid="project-setup-partial-create"
-      className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900 break-all"
+      className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900 wrap-anywhere"
     >
       {offerExisting
         ? t('projectSetupModal.createdButLocalPathNotSavedChooseExisting', { name: partialCreate.name })
@@ -297,7 +305,7 @@ export const ProjectSetupModal: React.FC<Props> = ({
         <h2 id="project-setup-title" className="min-w-0 wrap-break-word text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">
           {offerExisting ? t('projectSetupModal.title') : t('createProjectModal.title')}
         </h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 break-all">
+        <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 wrap-anywhere">
           {offerExisting ? t('projectSetupModal.description', { dir: directory }) : t('createProjectModal.description')}
         </p>
 
@@ -425,7 +433,7 @@ export const ProjectSetupModal: React.FC<Props> = ({
                 text often is not). */}
             <div role="status" data-testid="project-setup-overwrite-status">
               {willOverwrite && selected && (
-                <div className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[11px] rounded-lg border border-amber-200 dark:border-amber-800 break-all">
+                <div className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[11px] rounded-lg border border-amber-200 dark:border-amber-800 wrap-anywhere">
                   {t('projectSetupModal.overwriteWarning', { current: selected.local_path, next: directory })}
                 </div>
               )}
