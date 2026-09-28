@@ -288,19 +288,19 @@ export const SettingsModal: React.FC<Props> = ({
             the ring shows only on keyboard focus and is inset so the
             panel's overflow does not clip it.
 
-            Below 48rem (the `narrow:` variant in index.css, DFLT-00261)
-            the editors drop their fill-the-panel layout (two-column editors
+            Below 48rem (the `narrow:` variant in index.css, DFLT-00261) the
+            editors drop their fill-the-panel layout (two-column editors
             stack their list above the body, rows wrap, and each editor's own
-            `h-full` + inner-scroll becomes `h-auto`), so the panel itself scrolls
-            vertically instead of hiding what does not fit (its scroll
-            position goes back to the top on every tab change -- panelRef
-            above). Its scroll padding keeps a control that Tab scrolls into view off the
-            panel's top and bottom edges, so the control's focus ring is not
-            cut off there. The query is in
-            rem, so it follows the default font size: at 16px it is 768px,
-            at a 200% (32px) default font it is 1536px. At 1280px with the
-            default font the panel keeps overflow-hidden and the editors
-            their side-by-side layout. */}
+            `h-full` + inner-scroll becomes `h-auto`), so the panel itself
+            scrolls vertically instead of hiding what does not fit (its
+            scroll position goes back to the top on every tab change --
+            panelRef above). Its scroll padding keeps a control that Tab
+            scrolls into view off the panel's top and bottom edges, so the
+            control's focus ring is not cut off there. The query is in rem,
+            so it follows the default font size: at 16px it is 768px, at a
+            200% (32px) default font it is 1536px. At 1280px with the default
+            font the panel keeps overflow-hidden and the editors their
+            side-by-side layout. */}
         <div
           ref={panelRef}
           role="tabpanel"
