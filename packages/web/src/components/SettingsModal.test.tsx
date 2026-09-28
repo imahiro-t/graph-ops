@@ -659,7 +659,7 @@ describe('SettingsModal at large text on a narrow, short screen', () => {
     expect(bareText).toHaveLength(0);
     const text = heading.querySelector('span');
     expect(text).toHaveTextContent(i18n.t('settings.modalTitle'));
-    expect(text).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
+    expect(text).toHaveClass('min-w-0', 'wrap-anywhere');
     expect(heading.querySelector('svg')).toHaveClass('[@media(max-width:15rem)]:hidden');
     await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
   });
@@ -672,7 +672,7 @@ describe('SettingsModal at large text on a narrow, short screen', () => {
     const tabs = screen.getAllByRole('tab');
     expect(tabs).toHaveLength(7);
     for (const tab of tabs) {
-      expect(tab).toHaveClass('max-w-full', 'break-words');
+      expect(tab).toHaveClass('max-w-full', 'wrap-break-word');
     }
     await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
   });

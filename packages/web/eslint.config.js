@@ -4,9 +4,9 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
 
 // Scope is deliberately narrow (see the `lint` script in package.json,
-// which passes explicit paths rather than `.`): this repo's
-// tailwind.config.js / postcss.config.js run in a Node/CommonJS context
-// that these browser-oriented languageOptions.globals don't match, so
+// which passes explicit paths rather than `.`): other
+// build-tool files in this package (eslint.config.js itself) run in a Node
+// context that these browser-oriented languageOptions.globals don't match, so
 // linting them here would report every Node global as undefined -- noise
 // about the build tooling's environment rather than about the app code
 // these rules (react-hooks/exhaustive-deps and no-unused-vars) exist to

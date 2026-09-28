@@ -66,8 +66,8 @@ export interface UseModalDialogOptions {
   // Defaults to true for modals that are mounted only while open.
   isOpen?: boolean;
   onEscape: () => void;
-  initialFocusRef?: RefObject<HTMLElement>;
-  returnFocusFallbackRef?: RefObject<HTMLElement>;
+  initialFocusRef?: RefObject<HTMLElement | null>;
+  returnFocusFallbackRef?: RefObject<HTMLElement | null>;
 }
 
 const FOCUSABLE_SELECTOR = 'a[href], button, input, select, textarea, [tabindex]';
@@ -135,7 +135,7 @@ const openDialogStack: object[] = [];
 // Reads ref.current at call time on purpose: the fallback element is looked
 // up when the dialog closes, not when it opened, since the one that exists at
 // close time is the one that can take focus.
-function focusRefTarget(ref: RefObject<HTMLElement> | undefined) {
+function focusRefTarget(ref: RefObject<HTMLElement | null> | undefined) {
   ref?.current?.focus();
 }
 
@@ -144,7 +144,7 @@ export function useModalDialog<T extends HTMLElement = HTMLDivElement>({
   onEscape,
   initialFocusRef,
   returnFocusFallbackRef
-}: UseModalDialogOptions): RefObject<T> {
+}: UseModalDialogOptions): RefObject<T | null> {
   const containerRef = useRef<T>(null);
   // Read through a ref so a parent re-creating onEscape on every render (for
   // example SettingsModal's handleClose, which closes over `dirty`) neither

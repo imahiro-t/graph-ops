@@ -116,13 +116,15 @@ describe.each(['ja', 'en'] as const)('TicketItem prompt row layout (%s)', lng =>
       'max-sm:py-2',
       'max-sm:ml-auto',
       'max-sm:flex-wrap',
-      'max-sm:[overflow-wrap:anywhere]'
+      'max-sm:wrap-anywhere'
     );
     // Each unconditional form is checked on its own, so one slipping in is
     // caught even if the others are absent.
     expect(button).not.toHaveClass('flex-wrap');
     expect(button).not.toHaveClass('sm:flex-wrap');
+    expect(button).not.toHaveClass('wrap-anywhere');
     expect(button).not.toHaveClass('[overflow-wrap:anywhere]');
+    expect(button).not.toHaveClass('wrap-break-word');
     expect(button).not.toHaveClass('break-words');
     expect(button).not.toHaveClass('break-all');
     expect(button).not.toHaveClass('ml-auto');
@@ -143,7 +145,7 @@ describe.each(['ja', 'en'] as const)('TicketItem prompt row layout (%s)', lng =>
   it('shows a focus-visible ring on the Send button', () => {
     renderTicket();
     expect(sendButton()).toHaveClass(
-      'focus:outline-none',
+      'focus:outline-hidden',
       'focus-visible:ring-2',
       'focus-visible:ring-blue-500',
       'dark:focus-visible:ring-blue-400',
@@ -157,7 +159,7 @@ describe.each(['ja', 'en'] as const)('TicketItem prompt row layout (%s)', lng =>
   it('shows a focus-visible ring on the textarea besides its border colour', () => {
     renderTicket();
     expect(promptBox()).toHaveClass(
-      'focus:outline-none',
+      'focus:outline-hidden',
       'focus:border-indigo-500',
       'focus-visible:ring-2',
       'focus-visible:ring-blue-500',

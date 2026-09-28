@@ -17,7 +17,7 @@ export const LabelChip: React.FC<Props> = ({ name, color, className = '' }) => {
       title={name}
       data-testid="label-chip"
       data-label-color={normalizeLabelColor(color)}
-      className={`inline-flex items-center max-w-[10rem] px-2 py-0.5 rounded-full border text-[11px] font-semibold leading-4 whitespace-nowrap ${meta.chip.bg} ${meta.chip.text} ${meta.chip.border} ${className}`}
+      className={`inline-flex items-center max-w-40 px-2 py-0.5 rounded-full border text-[11px] font-semibold leading-4 whitespace-nowrap ${meta.chip.bg} ${meta.chip.text} ${meta.chip.border} ${className}`}
     >
       <span className="truncate">{name}</span>
     </span>

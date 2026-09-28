@@ -146,7 +146,7 @@ describe.each(['ja', 'en'] as const)('TicketItem header row wraps instead of ove
   it('lets the rejected approval badge shrink and truncate its name instead of running past the card', () => {
     renderRow();
     const name = screen.getByText(i18n.t('ticketItem.approvalGate.rejectedBadgeOne', { name: 'Release approval' }));
-    expect(name).toHaveClass('truncate', 'max-w-[12rem]');
+    expect(name).toHaveClass('truncate', 'max-w-48');
     const badge = name.parentElement as HTMLElement;
     expect(badge).toHaveClass('min-w-0', 'max-w-full');
     expect(badge).not.toHaveClass('shrink-0');

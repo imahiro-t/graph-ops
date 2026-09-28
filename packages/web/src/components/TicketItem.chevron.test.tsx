@@ -177,8 +177,8 @@ describe('TicketItem header chevron', () => {
       const { unmount } = renderItem(isExpanded);
       const tokens = headerChevron().className.split(/\s+/);
       for (const cls of [
-        'rounded',
-        'focus:outline-none',
+        'rounded-sm',
+        'focus:outline-hidden',
         'focus-visible:ring-2',
         'focus-visible:ring-blue-500',
         'dark:focus-visible:ring-blue-400',
@@ -252,8 +252,8 @@ describe('TicketItem node-row chevron', () => {
     for (const node of [NODE_1, NODE_2]) {
       const tokens = nodeChevron(node.id).className.split(/\s+/);
       for (const cls of [
-        'rounded',
-        'focus:outline-none',
+        'rounded-sm',
+        'focus:outline-hidden',
         'focus-visible:ring-2',
         'focus-visible:ring-blue-500',
         'dark:focus-visible:ring-blue-400',

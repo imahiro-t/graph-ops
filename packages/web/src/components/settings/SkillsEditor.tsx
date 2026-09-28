@@ -176,7 +176,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 role="region"
                 aria-labelledby={mergedPreviewLabelId}
                 tabIndex={0}
-                className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 max-h-40 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 max-h-40 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
               >
                 {mergedText || t('settings.skills.emptyMergedHint')}
               </pre>
@@ -188,7 +188,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 value={tierText}
                 onChange={e => setTierText(e.target.value)}
                 placeholder={t('settings.skills.tierTextPlaceholder')}
-                className="flex-1 min-h-[10rem] w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
+                className="flex-1 min-h-40 w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
               />
               <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">{t('settings.skills.emptyOverrideHint')}</p>
             </div>
