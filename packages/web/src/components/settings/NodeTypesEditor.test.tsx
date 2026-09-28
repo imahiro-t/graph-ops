@@ -772,7 +772,7 @@ describe('NodeTypesEditor merged preview region', () => {
     const preview = region();
     expect(preview).toHaveAttribute('tabindex', '0');
     // jsdom computes no styles, so the focus ring classes are pinned.
-    expect(preview).toHaveClass('focus:outline-none', 'focus-visible:ring-2', 'focus-visible:ring-blue-500', 'max-h-40');
+    expect(preview).toHaveClass('focus:outline-hidden', 'focus-visible:ring-2', 'focus-visible:ring-blue-500', 'max-h-40');
 
     // The preview sits right before the tier text textarea in tab order.
     const textarea = screen.getByLabelText(i18n.t('settings.nodeTypes.tierTextLabel'));

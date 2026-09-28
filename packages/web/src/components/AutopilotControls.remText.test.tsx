@@ -9,7 +9,9 @@
 // for the generated rule (see the ticket's implementation notes).
 // At 22px (a 200% default) a run ID such as "(run-20260927-012345-" is wider
 // than the row at 320px and has no break opportunity Chrome takes, so the
-// lines also break anywhere (break-words [overflow-wrap:anywhere]).
+// lines also break anywhere (wrap-anywhere). Not together with
+// wrap-break-word: on Tailwind v4 that one is emitted after wrap-anywhere
+// and would win, bringing back the overflow (DFLT-00270).
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,7 +28,8 @@ const expectRemText = (el: HTMLElement) => {
 };
 
 const expectBreaksAnywhere = (el: HTMLElement) => {
-  expect(el).toHaveClass('break-words', '[overflow-wrap:anywhere]');
+  expect(el).toHaveClass('wrap-anywhere');
+  expect(el).not.toHaveClass('wrap-break-word');
 };
 
 afterEach(async () => {
@@ -122,13 +125,13 @@ describe.each(['ja', 'en'] as const)('AutopilotControls sizes its small lines in
     expect(dismiss).toHaveClass('min-h-6', 'min-w-[min(1.5rem,100%)]', 'inline-flex', 'items-center', 'justify-center');
     expect(dismiss).not.toHaveClass('min-w-6');
     expect(dismiss).toHaveClass(
-      'focus:outline-none',
+      'focus:outline-hidden',
       'focus-visible:ring-2',
       'focus-visible:ring-violet-500',
       'dark:focus-visible:ring-violet-400'
     );
     // The existing wrapping stays (DFLT-00224 / DFLT-00225).
-    expect(dismiss).toHaveClass('shrink-0', 'max-w-full', 'max-sm:[overflow-wrap:anywhere]');
+    expect(dismiss).toHaveClass('shrink-0', 'max-w-full', 'max-sm:wrap-anywhere');
     await user.click(dismiss);
     expect(screen.queryByTestId('autopilot-untrusted')).not.toBeInTheDocument();
   });

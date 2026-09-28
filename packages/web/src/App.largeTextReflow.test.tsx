@@ -102,7 +102,7 @@ describe.each(['ja', 'en'] as const)('toolbar filter triggers with large text (%
       // The text sits in its own span that may break anywhere as a last
       // resort; the arrow stays full size and hidden from assistive tech.
       const text = button.querySelector('span') as HTMLElement;
-      expect(text).toHaveClass('min-w-0', '[overflow-wrap:anywhere]', 'break-keep');
+      expect(text).toHaveClass('min-w-0', 'wrap-anywhere', 'break-keep');
       expect(text).toHaveTextContent(i18n.t(`toolbar.${name}All`));
       const arrow = button.querySelector('svg') as SVGElement;
       expect(arrow).toHaveClass('shrink-0');
@@ -202,8 +202,9 @@ describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 1
     const note = screen.getByText(i18n.t('summary.subtitle'));
     for (const el of [title, note]) {
       expect(el.parentElement).toBe(heading);
-      expect(el).toHaveClass(`${NARROW}min-w-0`, `${NARROW}[overflow-wrap:anywhere]`);
-      expect(el).not.toHaveClass('[overflow-wrap:anywhere]');
+      expect(el).toHaveClass(`${NARROW}min-w-0`, `${NARROW}wrap-anywhere`);
+      expect(el).not.toHaveClass('wrap-anywhere');
+      expect(el).not.toHaveClass('wrap-anywhere');
     }
   });
 
@@ -220,7 +221,7 @@ describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 1
     expect(row).toHaveClass('px-1', `${NARROW}px-0`);
     expect(row).not.toHaveClass('px-0');
     const range = screen.getByText(i18n.t('pagination.range', { from: 1, to: PAGE_SIZE, total: TICKET_COUNT }));
-    expect(range).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
+    expect(range).toHaveClass('min-w-0', 'wrap-anywhere');
   });
 });
 
@@ -246,7 +247,7 @@ describe.each(['ja', 'en'] as const)('summary card numbers with large text (%s)'
     for (const item of items) {
       expect(item).toHaveClass('text-center', 'px-3', 'min-w-0', 'max-w-full');
       const number = item.firstElementChild as HTMLElement;
-      expect(number).toHaveClass('text-lg', 'font-bold', '[overflow-wrap:anywhere]');
+      expect(number).toHaveClass('text-lg', 'font-bold', 'wrap-anywhere');
     }
     expect(items[4]).toHaveTextContent(i18n.t('summary.nodeProgress'));
   });
@@ -283,7 +284,7 @@ describe.each(['ja', 'en'] as const)('summary card with a root font size set on 
     await renderApp();
     const heading = screen.getByTestId('summary-heading');
     const card = heading.parentElement as HTMLElement;
-    expect(card).toHaveClass('[container-type:inline-size]');
+    expect(card).toHaveClass('@container');
     expect(card).toBe(screen.getByTestId('summary-metrics').parentElement);
     // The heading's width comes from its content, so it is not a container.
     expect(heading.className).not.toMatch(/container-type/);
@@ -296,12 +297,13 @@ describe.each(['ja', 'en'] as const)('summary card with a root font size set on 
     for (const el of spans) {
       expect(el).toHaveClass(
         `${NARROW}min-w-0`,
-        `${NARROW}[overflow-wrap:anywhere]`,
+        `${NARROW}wrap-anywhere`,
         `${CARD_NARROW}min-w-0`,
-        `${CARD_NARROW}[overflow-wrap:anywhere]`
+        `${CARD_NARROW}wrap-anywhere`
       );
       expect(el).not.toHaveClass('min-w-0');
-      expect(el).not.toHaveClass('[overflow-wrap:anywhere]');
+      expect(el).not.toHaveClass('wrap-anywhere');
+      expect(el).not.toHaveClass('wrap-anywhere');
     }
   });
 
@@ -340,7 +342,7 @@ describe.each(['ja', 'en'] as const)('summary card with a root font size set on 
     const items = Array.from(screen.getByTestId('summary-metrics').children) as HTMLElement[];
     for (const item of items.slice(0, 4)) {
       const number = item.firstElementChild as HTMLElement;
-      expect(number).toHaveClass('[overflow-wrap:anywhere]');
+      expect(number).toHaveClass('wrap-anywhere');
       expect(number.querySelector('.whitespace-nowrap')).toBeNull();
     }
   });

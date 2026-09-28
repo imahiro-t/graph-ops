@@ -207,7 +207,7 @@ describe('MultiSelectFilter', () => {
 
       expect(clearButton().parentElement).toHaveClass('flex', 'flex-wrap');
       for (const button of [selectAllButton(), clearButton()]) {
-        expect(button).toHaveClass('flex-auto', 'break-keep', '[overflow-wrap:anywhere]');
+        expect(button).toHaveClass('flex-auto', 'break-keep', 'wrap-anywhere');
         expect(button).not.toHaveClass('w-full');
         expect(button).not.toHaveClass('flex-1');
         expect(button).not.toHaveClass('min-w-0');
@@ -344,6 +344,71 @@ describe('MultiSelectFilter', () => {
       expect(onChange).toHaveBeenLastCalledWith([]);
       expect(trigger()).toHaveTextContent(i18n.t('toolbar.statusAll'));
       expect(document.activeElement).toBe(trigger());
+    });
+  });
+
+  // DFLT-00267: both footer buttons announce their result through a polite
+  // live region, since focus alone (first checkbox / trigger) does not say
+  // what happened.
+  describe('result announcements', () => {
+    const selectAllButton = () => screen.getByRole('button', { name: i18n.t('toolbar.filterSelectAll') });
+    const liveRegion = () => screen.getByRole('status');
+
+    afterEach(async () => {
+      if (i18n.language !== 'ja') await i18n.changeLanguage('ja');
+    });
+
+    it('keeps an empty polite live region mounted while the panel is closed', () => {
+      render(<Harness />);
+      expect(trigger()).toHaveAttribute('aria-expanded', 'false');
+      expect(liveRegion()).toHaveAttribute('aria-live', 'polite');
+      expect(liveRegion()).toHaveTextContent('');
+    });
+
+    it('announces "select all" with the number of options', async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await user.click(trigger());
+      await user.click(selectAllButton());
+      expect(liveRegion()).toHaveTextContent('3 件すべてを選択しました');
+    });
+
+    it('announces "clear"', async () => {
+      const user = userEvent.setup();
+      render(<Harness initialSelected={['a']} />);
+      await user.click(trigger());
+      await user.click(clearButton());
+      expect(liveRegion()).toHaveTextContent('選択を解除しました');
+    });
+
+    it('announces in English too', async () => {
+      await i18n.changeLanguage('en');
+      const user = userEvent.setup();
+      render(<Harness />);
+      // The trigger() helper matches the Japanese name.
+      await user.click(screen.getByTestId(`${KEYS.panelId}-trigger`));
+      await user.click(screen.getByRole('button', { name: 'Select all' }));
+      expect(liveRegion()).toHaveTextContent('All options selected (3)');
+      await user.click(screen.getByRole('button', { name: 'Clear selection' }));
+      expect(liveRegion()).toHaveTextContent('Selection cleared');
+    });
+
+    it('counts the options, not selected values that are no longer among them', async () => {
+      const user = userEvent.setup();
+      render(<Harness initialSelected={['gone', 'b']} />);
+      await user.click(trigger());
+      await user.click(selectAllButton());
+      expect(liveRegion()).toHaveTextContent('3 件すべてを選択しました');
+    });
+
+    it('keeps the announcement when the panel is closed right after pressing', async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await user.click(trigger());
+      await user.click(selectAllButton());
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('group')).not.toBeInTheDocument();
+      expect(liveRegion()).toHaveTextContent('3 件すべてを選択しました');
     });
   });
 

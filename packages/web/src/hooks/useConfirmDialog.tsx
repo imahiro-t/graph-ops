@@ -36,7 +36,7 @@ export interface ConfirmOptions {
   cancelLabel?: string;
   tone?: 'default' | 'danger';
   testIdPrefix?: string;
-  returnFocusFallbackRef?: React.RefObject<HTMLElement>;
+  returnFocusFallbackRef?: React.RefObject<HTMLElement | null>;
 }
 
 interface Pending {

@@ -314,7 +314,7 @@ describe('CreateTicketModal at large text on a narrow, short screen', () => {
   it('lets the title wrap instead of widening the panel', () => {
     renderModal();
 
-    expect(screen.getByRole('heading', { level: 2 })).toHaveClass('min-w-0', 'break-words');
+    expect(screen.getByRole('heading', { level: 2 })).toHaveClass('min-w-0', 'wrap-break-word');
   });
 
   it('wraps the button row, each button at most as wide as the panel', () => {
@@ -325,7 +325,7 @@ describe('CreateTicketModal at large text on a narrow, short screen', () => {
     const buttons = Array.from(row.querySelectorAll('button'));
     expect(buttons).toHaveLength(2);
     for (const button of buttons) {
-      expect(button).toHaveClass('max-w-full', 'break-words');
+      expect(button).toHaveClass('max-w-full', 'wrap-break-word');
     }
   });
 
@@ -336,6 +336,6 @@ describe('CreateTicketModal at large text on a narrow, short screen', () => {
 
     expect(spinner).not.toBeNull();
     expect(spinner).toHaveClass('shrink-0');
-    expect(button).toHaveClass('max-w-full', 'break-words');
+    expect(button).toHaveClass('max-w-full', 'wrap-break-word');
   });
 });

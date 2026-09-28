@@ -175,10 +175,17 @@ describe('DFLT-00085 inline artifact previews scroll inside a 16rem box', () => 
 
     // Nothing is expanded yet, so the only markdown on screen is the
     // description -- it must not have picked up the artifact cap.
+    // DFLT-00262: the collapsed description body's outer div is now a
+    // scrollable region of its own, so the only region on screen is that
+    // one, wrapping the (uncapped, non-region) MarkdownViewer.
     const description = screen.getByTestId('markdown-viewer');
     expect(description.className).not.toContain('max-h-64');
     expect(description).not.toHaveAttribute('tabindex');
-    expect(screen.queryByRole('region')).toBeNull();
+    expect(description).not.toHaveAttribute('role');
+    const regions = screen.getAllByRole('region');
+    expect(regions).toHaveLength(1);
+    expect(regions[0]).toHaveAccessibleName(i18n.t('ticketItem.description.bodyRegion'));
+    expect(regions[0]).toContainElement(description);
   });
 
   it('renders both viewers uncapped by default (the new-tab preview page)', () => {
@@ -195,7 +202,7 @@ describe('DFLT-00085 inline artifact previews scroll inside a 16rem box', () => 
     expect(gk).not.toHaveAttribute('tabindex');
   });
 
-  // outline-none makes the ring the only focus indicator, so its color has to
+  // outline-hidden makes the ring the only focus indicator, so its color has to
   // clear WCAG 1.4.11 / 2.4.11's 3:1 against the light theme's white and
   // slate-50. indigo-400 did not (2.85-2.98:1); blue-500 does. Contrast is a
   // property of the color, not of the DOM, so what is pinned here is the

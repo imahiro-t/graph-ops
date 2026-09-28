@@ -41,7 +41,7 @@ export const AutopilotDecisions: React.FC<Props> = ({ artifacts, nodes }) => {
     <section
       data-testid="autopilot-decisions"
       aria-labelledby={headingId}
-      className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs text-xs"
+      className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-xs"
     >
       <h3
         id={headingId}

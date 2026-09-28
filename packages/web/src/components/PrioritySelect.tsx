@@ -32,7 +32,7 @@ export const PrioritySelect: React.FC<Props> = ({ ticketId, priority, disabled =
     <span
       title={label}
       data-priority={value}
-      className={`relative inline-flex items-center justify-center min-w-[1.75rem] px-2 py-0.5 rounded-full text-xs leading-4 whitespace-nowrap focus-within:ring-2 focus-within:ring-blue-500 ${disabled ? 'opacity-50' : ''} ${meta.chip.bg} ${meta.chip.text}`}
+      className={`relative inline-flex items-center justify-center min-w-7 px-2 py-0.5 rounded-full text-xs leading-4 whitespace-nowrap focus-within:ring-2 focus-within:ring-blue-500 ${disabled ? 'opacity-50' : ''} ${meta.chip.bg} ${meta.chip.text}`}
     >
       <span aria-hidden="true" data-testid="priority-symbol" className={meta.symbolClass}>
         {meta.symbol}

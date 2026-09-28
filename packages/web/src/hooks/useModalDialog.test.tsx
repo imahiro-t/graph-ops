@@ -9,7 +9,7 @@ import { getFocusableElements, useModalDialog } from './useModalDialog';
 interface DialogProps {
   onEscape: () => void;
   useInitialFocus?: boolean;
-  fallbackRef?: React.RefObject<HTMLElement>;
+  fallbackRef?: React.RefObject<HTMLElement | null>;
   children?: React.ReactNode;
 }
 
@@ -78,7 +78,7 @@ describe('getFocusableElements', () => {
         <div hidden>
           <button type="button">in-hidden</button>
         </div>
-        <div {...{ inert: '' }}>
+        <div inert>
           <button type="button">in-inert</button>
         </div>
         <a href="#x">link</a>

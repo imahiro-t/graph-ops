@@ -119,7 +119,7 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
                     checked={selectedIds.includes(l.id)}
                     aria-disabled={saving}
                     onChange={() => toggle(l.id)}
-                    className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0 aria-disabled:opacity-50"
+                    className="rounded-sm border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0 aria-disabled:opacity-50"
                   />
                   <span className="truncate">{l.name}</span>
                 </label>

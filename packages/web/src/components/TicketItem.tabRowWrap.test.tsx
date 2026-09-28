@@ -171,7 +171,7 @@ describe.each(['ja', 'en'] as const)('TicketItem artifact tab row on a narrow sc
       expect(icon).toHaveClass('w-4', 'h-4', 'shrink-0');
       expect(icon).not.toHaveClass('max-lg:shrink-0');
       const label = tab.querySelector('span')!;
-      expect(label).toHaveClass(`${UNDER_64REM}min-w-0`, 'break-words');
+      expect(label).toHaveClass(`${UNDER_64REM}min-w-0`, 'wrap-break-word');
       expectNoneOf(label, ['whitespace-nowrap', 'max-lg:min-w-0']);
     }
   });
@@ -183,7 +183,7 @@ describe.each(['ja', 'en'] as const)('TicketItem artifact tab row on a narrow sc
     expectNoneOf(link, ['shrink-0', 'whitespace-nowrap', 'flex-wrap', 'lg:shrink-0']);
     const label = link.querySelector('span')!;
     expect(label).toHaveTextContent(i18n.t('ticketItem.downloadAllArtifacts'));
-    expect(label).toHaveClass('min-w-0', 'break-words');
+    expect(label).toHaveClass('min-w-0', 'wrap-break-word');
   });
 
   it('keeps no px breakpoint on the row, the tab group, the tabs or the link (DFLT-00253)', () => {

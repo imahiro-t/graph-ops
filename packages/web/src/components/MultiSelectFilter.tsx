@@ -1,6 +1,8 @@
 import { ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown } from 'lucide-react';
+import { StatusLiveRegion } from './StatusLiveRegion';
+import { useTransientAnnouncement } from '../hooks/useTransientAnnouncement';
 
 // The one filter control the toolbar's four filters (status / assignee /
 // priority / label) are all built from (DFLT-00086). Before this, the label
@@ -39,6 +41,17 @@ import { ChevronDown } from 'lucide-react';
 // assignee showing up later is not in the selection (and "select all"
 // becomes pressable again). The trigger keeps saying "N selected" so it
 // never claims more than the selection really does.
+//
+// Both footer buttons also announce what they did through a polite live
+// region (DFLT-00267): "select all" moves focus to the first checkbox and
+// "clear" to the trigger, so all a screen reader user heard before was that
+// one control, not that the whole selection had changed. The region is the
+// shared StatusLiveRegion driven by useTransientAnnouncement, like the app's
+// other one-off status messages, and it is mounted permanently at the root,
+// outside the `isOpen` branch: a live region has to exist before its text
+// changes to be read reliably, and closing the panel right after pressing a
+// button (Escape, an outside click) must not unmount it mid-announcement.
+// It is sr-only, so it takes no room in the toolbar.
 //
 // Class names are written out literally (no `w-${size}` style composition):
 // Tailwind only generates classes it can find verbatim in the source.
@@ -93,7 +106,7 @@ const HANG_LEFT: PanelPlacement = { edge: 'left' };
 // a line of its own -- where flex-auto's grow stretches it full width. Do not
 // use flex-1 or min-w-0 here: flex-1's basis is 0, so the row never wraps and
 // each button is squeezed into half the width, breaking its text.
-// break-keep [overflow-wrap:anywhere] is the trigger's policy (DFLT-00239):
+// break-keep wrap-anywhere is the trigger's policy (DFLT-00239):
 // keep-all leaves no break point inside "すべて選択" / "選択を解除" (they
 // contain no spaces), so a button that does not fit moves to the next line
 // whole; only if a single button is still wider than the panel (200% text on
@@ -102,7 +115,7 @@ const HANG_LEFT: PanelPlacement = { edge: 'left' };
 // `anywhere` also lowers the min-content width, the default min-width: auto
 // lets the button shrink to the line.
 const FOOTER_BUTTON_CLASS =
-  'flex-auto break-keep [overflow-wrap:anywhere] text-left px-2 py-1.5 rounded hover:bg-slate-50 dark:hover:bg-slate-800 text-blue-700 dark:text-blue-400 font-medium disabled:opacity-50 disabled:hover:bg-transparent';
+  'flex-auto break-keep wrap-anywhere text-left px-2 py-1.5 rounded-sm hover:bg-slate-50 dark:hover:bg-slate-800 text-blue-700 dark:text-blue-400 font-medium disabled:opacity-50 disabled:hover:bg-transparent';
 
 // The gap a shifted panel keeps from the window's right edge: the same 1rem
 // per side that max-w-[calc(100vw-2rem)] leaves, so a panel capped by that
@@ -143,6 +156,8 @@ export function MultiSelectFilter<T extends string>({
 }: Props<T>) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
+  // The footer buttons' result announcements (DFLT-00267, see the top).
+  const { message: announcement, announce } = useTransientAnnouncement();
   // Where the panel sits relative to its trigger (DFLT-00220). Hung from the
   // trigger's left edge by default; from its right edge when a left-hung
   // panel would run past the right edge of the window; and, when neither
@@ -218,6 +233,12 @@ export function MultiSelectFilter<T extends string>({
     // Every option in the panel's display order, then `outsideOptions` --
     // the same ordering rule as `toggle`.
     onChange([...optionValues, ...outsideOptions]);
+    // Focus lands on the first checkbox (below), which is all a screen reader
+    // would read, so the result is announced too (DFLT-00267). The count is
+    // the panel's options -- what "all N" refers to -- not selected values
+    // that are no longer in the panel. The button is disabled with no
+    // options, so it is always at least 1.
+    announce(t('toolbar.filterSelectAllDone', { count: optionValues.length }));
     // The panel stays open (no setIsOpen): the point is to go on and
     // uncheck the unwanted values. Pressing it always disables it (every
     // option is now checked), and a disabled button drops focus to <body>,
@@ -276,7 +297,7 @@ export function MultiSelectFilter<T extends string>({
             "ステータス:" / "1件選択" rather than "ステータス: 1" / "件選択".
             overflow-wrap:anywhere then breaks inside a word only when a
             single word is still too wide for the line. */}
-        <span className="min-w-0 break-keep [overflow-wrap:anywhere] text-left">
+        <span className="min-w-0 break-keep wrap-anywhere text-left">
           {selected.length === 0 ? t(allKey) : t(selectedKey, { count: selected.length })}
         </span>
         {/* DFLT-00163: WCAG 1.4.11 (3:1). The arrow shows the button opens a list. slate-500 is
@@ -316,7 +337,7 @@ export function MultiSelectFilter<T extends string>({
                   checked={selected.includes(o.value)}
                   onChange={() => toggle(o.value)}
                   aria-label={o.optionLabel}
-                  className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0"
+                  className="rounded-sm border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0"
                 />
                 {o.label}
               </label>
@@ -348,12 +369,17 @@ export function MultiSelectFilter<T extends string>({
                   early return was the alternative; it was not taken because it
                   would keep an inert button in the tab order and break the
                   existing "the clear button is disabled while empty" contract
-                  (Gherkin + toBeDisabled() tests). */}
+                  (Gherkin + toBeDisabled() tests).
+
+                  Like "select all", it also announces its result through the
+                  live region (DFLT-00267): the trigger's "<filter>: All" says
+                  where focus is, the announcement says what just happened. */}
               <button
                 type="button"
                 onClick={() => {
                   onChange([]);
                   buttonRef.current?.focus();
+                  announce(t('toolbar.filterClearDone'));
                 }}
                 disabled={selected.length === 0}
                 className={FOOTER_BUTTON_CLASS}
@@ -364,6 +390,9 @@ export function MultiSelectFilter<T extends string>({
           </div>
         </>
       )}
+
+      {/* Always mounted, outside the isOpen branch (DFLT-00267, see the top). */}
+      <StatusLiveRegion message={announcement} />
     </div>
   );
 }
