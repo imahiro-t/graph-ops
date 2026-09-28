@@ -45,7 +45,9 @@
     "labelGroupLabel": "Filter by label",
     "labelEmpty": "This project has no labels",
     "filterSelectAll": "Select all",
-    "filterClear": "Clear selection"
+    "filterClear": "Clear selection",
+    "filterSelectAllDone": "All options selected ({{count}})",
+    "filterClearDone": "Selection cleared"
   },
   "summary": {
     "title": "All Tickets Overview",
@@ -192,7 +194,8 @@
       "empty": "No description yet",
       "refinedAt": "Refined {{time}}",
       "expand": "Show all",
-      "collapse": "Collapse"
+      "collapse": "Collapse",
+      "bodyRegion": "Description body (scrollable)"
     },
     "graphTitle": "Execution Graph (DAG / Loops)",
     "progress": "Progress {{percent}}%",

@@ -45,7 +45,9 @@
     "labelGroupLabel": "ラベルで絞り込む",
     "labelEmpty": "このプロジェクトにはラベルがありません",
     "filterSelectAll": "すべて選択",
-    "filterClear": "選択を解除"
+    "filterClear": "選択を解除",
+    "filterSelectAllDone": "{{count}} 件すべてを選択しました",
+    "filterClearDone": "選択を解除しました"
   },
   "summary": {
     "title": "全チケット概要",
@@ -191,7 +193,8 @@
       "empty": "説明はまだありません",
       "refinedAt": "{{time}} にリファイン",
       "expand": "すべて表示",
-      "collapse": "折りたたむ"
+      "collapse": "折りたたむ",
+      "bodyRegion": "説明の本文（スクロールできる）"
     },
     "graphTitle": "実行グラフ (DAG / ループ)",
     "progress": "進捗 {{percent}}%",

@@ -40,6 +40,17 @@ describe('toolbar filter translations', () => {
     }
   });
 
+  it('defines the select-all / clear result announcements in both languages (DFLT-00267)', () => {
+    for (const key of ['filterSelectAllDone', 'filterClearDone']) {
+      expect(jaToolbar[key], `ja ${key}`).toBeTruthy();
+      expect(enToolbar[key], `en ${key}`).toBeTruthy();
+      expect(jaToolbar[key], key).not.toBe(enToolbar[key]);
+    }
+    for (const table of [jaToolbar, enToolbar]) {
+      expect(table.filterSelectAllDone).toContain('{{count}}');
+    }
+  });
+
   it('names the search box with a label of its own, distinct from its placeholder', () => {
     // DFLT-00170: the placeholder disappears once the user types, so the
     // search box's accessible name comes from toolbar.searchLabel instead.
