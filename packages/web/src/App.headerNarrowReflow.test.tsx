@@ -12,12 +12,14 @@
 // Now:
 // - each header item is min-w-0 and no wider than its row, and its text may
 //   break inside a word ([overflow-wrap:anywhere], a last resort that only
-//   applies when the word does not fit), so no media query is needed and the
-//   header looks the same wherever it fitted before. The button labels are
+//   applies when the word does not fit). That alone removes the sideways
+//   scroll without a media query and changes nothing wherever the header
+//   fitted before. The button labels are
 //   spans of their own so the icons keep their size; the "updated" row does
 //   not wrap, so its time keeps shrinking next to the refresh button as it
 //   already did in English at 320-328px with a 32px root;
-// - in a window of 200 CSS px or less the header pads with px-2, the Launch
+// - on top of that, only for looks, in a window of 200 CSS px or less (at any
+//   text size, so the header also changes there at 100%) it pads with px-2, the Launch
 //   Claude, language and New Ticket buttons may put their label on a line
 //   under the icon (flex-wrap, centred), and the project switcher and those
 //   buttons pad less, so a label breaks between words instead of letter by
@@ -190,7 +192,6 @@ describe.each(['ja', 'en'] as const)('pagination in a 160px window at 200%% (%s)
       `${NARROW}flex-wrap`,
       `${NARROW}justify-end`,
       'max-w-full',
-      'min-w-0',
       // Kept from DFLT-00251 / DFLT-00258.
       `${NARROW}gap-1`,
       'shrink-0'

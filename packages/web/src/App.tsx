@@ -1130,11 +1130,13 @@ export const App: React.FC = () => {
           the "updated" time each kept the width of their longest word. Each
           is now min-w-0 / no wider than its row, and its text may break
           inside a word ([overflow-wrap:anywhere], a last resort that only
-          applies when the word does not fit), so nothing needs a media
-          query: wherever the header fitted before, it looks the same. The
+          applies when the word does not fit). That alone removes the
+          sideways scroll without a media query and changes nothing wherever
+          the header fitted before. The
           button labels are spans of their own so the icons keep their size
-          (shrink-0); the text is still the buttons' accessible name. In a
-          window of 200 CSS px or less the header pads with px-2, the Launch
+          (shrink-0); the text is still the buttons' accessible name. On top
+          of that, only for looks, in a window of 200 CSS px or less (at any
+          text size, so also at 100% there) the header pads with px-2, the Launch
           Claude, language and New Ticket buttons may put the label on a
           line of its own under the icon, and the project switcher and those
           buttons pad less, so a label breaks between words rather than
@@ -1647,7 +1649,7 @@ export const App: React.FC = () => {
                       total: filteredTickets.length
                     })}
                   </span>
-                  <div className="flex items-center gap-3 [@media(max-width:15rem)]:gap-1 [@media(max-width:15rem)]:flex-wrap [@media(max-width:15rem)]:justify-end shrink-0 max-w-full min-w-0">
+                  <div className="flex items-center gap-3 [@media(max-width:15rem)]:gap-1 [@media(max-width:15rem)]:flex-wrap [@media(max-width:15rem)]:justify-end shrink-0 max-w-full">
                     <button
                       onClick={() => setPage(p => Math.max(1, p - 1))}
                       aria-label={t('pagination.previous')}
