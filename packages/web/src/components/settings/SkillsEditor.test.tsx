@@ -307,4 +307,16 @@ describe('SkillsEditor narrow reflow (DFLT-00261)', () => {
     const saveRow = screen.getByRole('button', { name: i18n.t('settings.common.save') }).parentElement as HTMLElement;
     expect(saveRow).toHaveClass('flex', 'justify-end', 'narrow:flex-wrap');
   });
+
+  // A-1: below 48rem the list is a max-h-40 scroll box under a sticky
+  // heading, so an item focus scrolls into view must stop below the heading.
+  it('keeps a focused list item from scrolling under the sticky heading', async () => {
+    const { container } = render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('create-ticket-tier-text');
+
+    const list = (container.firstElementChild as HTMLElement).querySelector('.w-56') as HTMLElement;
+    expect(list).toHaveClass('overflow-y-auto', 'scroll-pt-12');
+    expect(list.firstElementChild).toHaveTextContent(i18n.t('settings.skills.listTitle'));
+    expect(list.firstElementChild).toHaveClass('sticky', 'top-0', 'z-10');
+  });
 });

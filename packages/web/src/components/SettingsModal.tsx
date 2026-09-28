@@ -14,7 +14,7 @@
 // since it is shared state curated outside the app. Labels are the
 // exception, and the reason the modal still takes the project list: they are
 // per-project DB rows, so that tab carries a project selector of its own.
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Settings, X } from 'lucide-react';
 import { Project } from '../types';
@@ -88,6 +88,19 @@ export const SettingsModal: React.FC<Props> = ({
     if (!focusTabAfterChangeRef.current) return;
     focusTabAfterChangeRef.current = false;
     tabRefs.current[tab]?.focus();
+  }, [tab]);
+
+  // Below 48rem the tab panel itself is the scroll container (see the
+  // comment on it below), and it is one element shared by every tab: the
+  // editors inside are swapped, the panel is not. Without this, a tab opened
+  // after scrolling down another one would start at the old scroll offset
+  // (clamped to its own height) -- partway down, with its list and first
+  // fields out of view (DFLT-00261 QA). A layout effect resets it before
+  // the new tab is painted. Above 48rem the panel does not scroll and its
+  // scrollTop is always 0, so this changes nothing there.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (panelRef.current) panelRef.current.scrollTop = 0;
   }, [tab]);
 
   // The unsaved-changes question is the in-app ConfirmDialog (DFLT-00148),
@@ -279,8 +292,9 @@ export const SettingsModal: React.FC<Props> = ({
             the editors drop their fill-the-panel layout (two-column editors
             stack their list above the body, rows wrap, and each editor's own
             `h-full` + inner-scroll becomes `h-auto`), so the panel itself scrolls
-            vertically instead of hiding what does not fit. Its scroll
-            padding keeps a control that Tab scrolls into view off the
+            vertically instead of hiding what does not fit (its scroll
+            position goes back to the top on every tab change -- panelRef
+            above). Its scroll padding keeps a control that Tab scrolls into view off the
             panel's top and bottom edges, so the control's focus ring is not
             cut off there. The query is in
             rem, so it follows the default font size: at 16px it is 768px,
@@ -288,6 +302,7 @@ export const SettingsModal: React.FC<Props> = ({
             default font the panel keeps overflow-hidden and the editors
             their side-by-side layout. */}
         <div
+          ref={panelRef}
           role="tabpanel"
           id={panelId}
           aria-labelledby={tabId(tab)}

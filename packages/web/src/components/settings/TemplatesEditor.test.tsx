@@ -412,4 +412,16 @@ describe('TemplatesEditor narrow reflow (DFLT-00261)', () => {
     await textareaOf('settings.reportTemplate');
     checkEditor();
   });
+
+  // A-1: below 48rem the list is a max-h-40 scroll box under a sticky
+  // heading, so an item focus scrolls into view must stop below the heading.
+  it('keeps a focused list item from scrolling under the sticky heading', async () => {
+    render(<TemplatesEditor onDirtyChange={vi.fn()} />);
+    await textareaOf('settings.planTemplate');
+
+    const nav = screen.getByRole('navigation');
+    expect(nav).toHaveClass('overflow-y-auto', 'scroll-pt-12');
+    expect(nav.firstElementChild).toHaveTextContent(i18n.t('settings.templates.listTitle'));
+    expect(nav.firstElementChild).toHaveClass('sticky', 'top-0', 'z-10');
+  });
 });

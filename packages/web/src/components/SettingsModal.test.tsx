@@ -692,12 +692,52 @@ describe('SettingsModal narrow reflow (DFLT-00261)', () => {
   beforeEach(() => {
     (fetchSettingsNodeTypes as unknown as Mock).mockResolvedValue([]);
     (fetchSettingsNodeType as unknown as Mock).mockResolvedValue({ type: '', tier_text: '', merged_text: '' });
+    (fetchSettingsSkills as unknown as Mock).mockResolvedValue([]);
+    (fetchSettingsSkill as unknown as Mock).mockResolvedValue({ name: '', tier_text: '', merged_text: '' });
+    (fetchSettingsPlanTemplate as unknown as Mock).mockResolvedValue({ tier_text: 'plan-tier', merged_text: 'plan-merged' });
+    (fetchSettingsReviewTemplate as unknown as Mock).mockResolvedValue({ tier_text: 'review-tier', merged_text: 'review-merged' });
+    (fetchSettingsReportTemplate as unknown as Mock).mockResolvedValue({ tier_text: '', merged_text: '' });
   });
 
   it('lets the tab panel scroll vertically below 48rem and keeps overflow-hidden above it', async () => {
     renderModal();
     const panel = await screen.findByRole('tabpanel');
     expect(panel).toHaveClass('flex-1', 'min-h-0', 'overflow-hidden', 'narrow:overflow-y-auto', 'narrow:scroll-py-3', 'focus-visible:ring-inset');
+  });
+
+  // QA round 1: the panel is the scroll container below 48rem and is shared
+  // by every tab, so each tab change must bring it back to the top rather
+  // than open the new tab at the old tab's scroll offset.
+  it('shows a newly selected tab from the top of the panel', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    const panel = await screen.findByRole('tabpanel');
+
+    panel.scrollTop = 800;
+    await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.skills') }));
+    await waitFor(() => expect(fetchSettingsSkills).toHaveBeenCalled());
+    expect(screen.getByRole('tabpanel')).toBe(panel);
+    expect(panel.scrollTop).toBe(0);
+
+    // Arrow-key tab changes go through the same path.
+    panel.scrollTop = 500;
+    screen.getByRole('tab', { name: i18n.t('settings.tabs.skills') }).focus();
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { selected: true })).not.toHaveAccessibleName(i18n.t('settings.tabs.skills'));
+    expect(panel.scrollTop).toBe(0);
+  });
+
+  it('keeps the scroll position while the tab stays the same', async () => {
+    renderModal();
+    const panel = await screen.findByRole('tabpanel');
+    panel.scrollTop = 300;
+    await act(async () => {
+      await i18n.changeLanguage('en');
+    });
+    expect(panel.scrollTop).toBe(300);
+    await act(async () => {
+      await i18n.changeLanguage('ja');
+    });
   });
 
   it('defines the narrow variant as a rem media query', () => {
