@@ -66,12 +66,11 @@ function compareVersions(a, b) {
   return a.major - b.major || a.minor - b.minor || a.patch - b.patch;
 }
 
-// How to get a Node.js that satisfies `range`. asdf comes first with
+// How to get a Node.js whose major version is at least `major`. asdf comes first with
 // ASDF_NODEJS_VERSION, because reading .nvmrc needs legacy_version_file in
 // ~/.asdfrc, and how a bare "24" there resolves depends on asdf-nodejs'
 // settings (it may pick a version that is not installed).
-function switchHints(minimum) {
-  const major = minimum ? minimum.major : '<major>';
+function switchHints(major) {
   return [
     'Switch to a newer Node.js for this repository, for example:',
     `  - asdf: prefix the command with ASDF_NODEJS_VERSION=<an installed ${major}.x>`,
@@ -116,7 +115,7 @@ function checkNodeVersion(options) {
     lines.push(`(The version "${current}" could not be parsed.)`, '');
   }
   lines.push(
-    ...switchHints(minimum),
+    ...switchHints(minimum.major),
     '',
     'The requirement is declared as engines.node in package.json and in .nvmrc; CI uses the same',
     `Node.js ${minimum.major}. On an older Node.js, vitest 4 and eslint 10 fail in confusing ways (e.g. tests`,
