@@ -740,6 +740,7 @@
       "title": "ラベル",
       "none": "ラベルなし",
       "edit": "ラベルを編集",
+      "editVisible": "ラベルを<wbr/>編集",
       "groupLabel": "チケット {{id}} のラベル",
       "noRegistered": "設定画面でラベルを登録してください。",
       "saveError": "ラベルを保存できませんでした: {{message}}",

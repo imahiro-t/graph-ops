@@ -741,6 +741,7 @@
       "title": "Labels",
       "none": "No labels",
       "edit": "Edit labels",
+      "editVisible": "Edit labels",
       "groupLabel": "Labels of ticket {{id}}",
       "noRegistered": "Register labels in Settings first.",
       "saveError": "Could not save labels: {{message}}",

@@ -362,6 +362,28 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
   );
 };
 
+// A metadata bar item's label with its colon ("作成日時:", "Closed reason:")
+// (DFLT-00292). Labels break between words only: break-keep (word-break:
+// keep-all) keeps a CJK label such as "クローズ理由" together as one word,
+// and the last character and the colon sit in a whitespace-nowrap span, so
+// the line never breaks just before the colon ("クローズ理由 / :"). Only when
+// one word is wider than the line itself (e.g. "作成日時:" is about 104px
+// against the card's 78px at 160px / 200%) does wrap-break-word break it at
+// the line's end rather than letting it run past the card's clip. Unlike
+// wrap-anywhere, break-word leaves the min-content width alone, so a flex row
+// cannot squeeze the label into mid-word breaks (DFLT-00276's "Close / d /
+// reaso / n:"). Never put wrap-anywhere on a label or its ancestors.
+const MetaLabel: React.FC<{ text: string }> = ({ text }) => {
+  const chars = Array.from(text);
+  const last = chars.pop() ?? '';
+  return (
+    <span className="min-w-0 break-keep wrap-break-word">
+      {chars.join('')}
+      <span className="whitespace-nowrap">{last}:</span>
+    </span>
+  );
+};
+
 export const TicketItem: React.FC<Props> = ({
   ticket,
   isExpanded,
@@ -1857,28 +1879,41 @@ export const TicketItem: React.FC<Props> = ({
                 longest word ("2026/9/28", "9/28/2026,") alone is wider than
                 the card, so this flex item (min-width: auto) ran out to
                 R171 (ja) / R185.5 (en) and was cut by the card's R136
-                overflow-x clip. min-w-0 lets it shrink and wrap-anywhere
-                (inherited by the span) breaks inside a word only when the
-                word cannot fit on a line; at any usable width nothing
-                changes. */}
-            <div className="min-w-0 wrap-anywhere">
-              {t('ticketItem.createdAt')}: <span className="font-mono text-slate-700 dark:text-slate-300">{formatDateTime(ticket.created_at, i18n.language)}</span>
+                overflow-x clip. min-w-0 lets it shrink.
+                DFLT-00292: wrap-anywhere is on the date span only -- on the
+                whole item it was inherited by the label too, which then broke
+                mid-word ("Create / d:"). The date breaks inside a word only
+                when the word cannot fit on a line; the label (MetaLabel)
+                breaks between words, and never before its colon. At any
+                usable width nothing changes. */}
+            <div className="min-w-0">
+              <MetaLabel text={t('ticketItem.createdAt')} />{' '}
+              <span className="font-mono text-slate-700 dark:text-slate-300 wrap-anywhere">{formatDateTime(ticket.created_at, i18n.language)}</span>
             </div>
             {/* Labels (DFLT-00084): every label, plus the picker.
                 DFLT-00276: min-w-0 wrap-anywhere for the same reason as the
                 date above -- at 160px / 200% in English the "Edit labels"
                 button's longest word held this item at R139.5, 3.5px past
                 the card's R136 clip. The picker's panel has a fixed width
-                (w-56) and its rows are whitespace-nowrap, so it is unaffected. */}
-            <div className="flex flex-wrap items-center gap-1.5 min-w-0 wrap-anywhere" data-testid="ticket-detail-labels">
-              <span>{t('ticket.labels.title')}:</span>
+                (w-56) and its rows are whitespace-nowrap, so it is unaffected.
+                DFLT-00292: wrap-anywhere is no longer on this item: inherited,
+                it broke the "Edit labels" button mid-word ("Edit / labe /
+                ls"). Each value element carries its own protection instead --
+                the chips here, and inside LabelSelect the button
+                (wrap-break-word: between words, mid-word only when one word is
+                wider than the line) and the save error (wrap-anywhere). */}
+            <div className="flex flex-wrap items-center gap-1.5 min-w-0" data-testid="ticket-detail-labels">
+              <MetaLabel text={t('ticket.labels.title')} />
               {ticketLabels.length === 0 ? (
                 <span className="text-slate-500 dark:text-slate-400">{t('ticket.labels.none')}</span>
               ) : (
                 // DFLT-00276: min-w-0 lets a chip shrink below its max-w-40
                 // (320px at a 32px root) so a long name truncates inside the
                 // card instead of running past it at 160-320px / 200%.
-                ticketLabels.map(l => <LabelChip key={l.id} name={l.name} color={l.color} className="min-w-0" />)
+                // DFLT-00292: wrap-anywhere belongs to the values, so it sits on
+                // the chips themselves (they are whitespace-nowrap / truncate,
+                // so it changes nothing drawn) rather than on the whole item.
+                ticketLabels.map(l => <LabelChip key={l.id} name={l.name} color={l.color} className="min-w-0 wrap-anywhere" />)
               )}
               <LabelSelect ticketId={ticket.id} labels={ticketLabels} projectLabels={projectLabels} onSaved={onRefresh} />
             </div>
@@ -1894,11 +1929,18 @@ export const TicketItem: React.FC<Props> = ({
                 with the label it was left about 0px at 160px), the label
                 text keeps min-width: auto so it breaks between words only,
                 and the icon is shrink-0 so it is not squeezed to a dot. When
-                everything fits on one line nothing changes. */}
+                everything fits on one line nothing changes.
+                DFLT-00292: the label is a flex item of its own (MetaLabel), so
+                when the icon and the label do not fit on one line the label
+                moves to the next line whole instead of breaking ("クローズ理 /
+                由:"), and it never breaks before its colon ("クローズ理由 /
+                :"). The space is not drawn between flex items (gap-1 keeps the
+                spacing) but keeps the item's text "Closed reason: <reason>". */}
             {ticket.closed_reason && (
               <div className="flex flex-wrap items-center gap-1 min-w-0 text-slate-700 dark:text-slate-300">
                 <Archive aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-slate-500 dark:text-slate-400" />
-                {t('ticketItem.close.reasonLabel')}: <span className="font-medium min-w-0 wrap-anywhere">{ticket.closed_reason}</span>
+                <MetaLabel text={t('ticketItem.close.reasonLabel')} />{' '}
+                <span className="font-medium min-w-0 wrap-anywhere">{ticket.closed_reason}</span>
               </div>
             )}
           </div>
