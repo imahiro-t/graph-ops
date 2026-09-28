@@ -12,8 +12,9 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
-const { checkLocalDeps, shellQuote, REQUIRED_PACKAGES } = require('./check-local-deps.js');
+const { checkLocalDeps, main, shellQuote, REQUIRED_PACKAGES } = require('./check-local-deps.js');
 
 function makeBase(rootName = 'repo') {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'check-local-deps-test-'));
@@ -117,4 +118,48 @@ test('the real checkout passes once npm ci has been run in it', () => {
   // Runs under the root `npm test`, which needs installed dependencies anyway.
   const result = checkLocalDeps();
   assert.strictEqual(result.ok, true, result.message);
+});
+
+// main() (DFLT-00273): the Node.js version is checked before the dependencies.
+function runMain({ node, deps }) {
+  const calls = [];
+  const written = [];
+  const exits = [];
+  main({
+    checkNode: () => { calls.push('node'); return node; },
+    checkDeps: () => { calls.push('deps'); return deps; },
+    stderr: { write: (text) => written.push(text) },
+    exit: (code) => exits.push(code)
+  });
+  return { calls, stderr: written.join(''), exits };
+}
+
+test('main stops on an unsupported Node.js without running the dependency check', () => {
+  const run = runMain({
+    node: { ok: false, message: 'Node.js >=24 is required ..., but this is Node.js v20.10.0:' },
+    deps: { ok: false, message: 'Dependencies are not installed' }
+  });
+  assert.deepStrictEqual(run.calls, ['node']);
+  assert.deepStrictEqual(run.exits, [1]);
+  assert.strictEqual(run.stderr, 'Node.js >=24 is required ..., but this is Node.js v20.10.0:\n');
+});
+
+test('main runs the dependency check once the Node.js version is fine, and fails on it', () => {
+  const run = runMain({ node: { ok: true }, deps: { ok: false, message: 'Dependencies are not installed' } });
+  assert.deepStrictEqual(run.calls, ['node', 'deps']);
+  assert.deepStrictEqual(run.exits, [1]);
+  assert.strictEqual(run.stderr, 'Dependencies are not installed\n');
+});
+
+test('main writes nothing and does not exit when both checks pass', () => {
+  const run = runMain({ node: { ok: true }, deps: { ok: true } });
+  assert.deepStrictEqual(run.calls, ['node', 'deps']);
+  assert.deepStrictEqual(run.exits, []);
+  assert.strictEqual(run.stderr, '');
+});
+
+test('the CLI exits 0 in this checkout on the running Node.js', () => {
+  const result = spawnSync(process.execPath, [path.join(__dirname, 'check-local-deps.js')], { encoding: 'utf8' });
+  assert.strictEqual(result.status, 0, result.stderr);
+  assert.strictEqual(result.stderr, '');
 });

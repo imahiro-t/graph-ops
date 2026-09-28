@@ -11,11 +11,17 @@
 // stops with "run npm ci in <root>" when it is missing or only found outside
 // the checkout.
 //
+// Before that it checks the Node.js version (check-node-version.js,
+// DFLT-00273): on a Node older than the one declared for development the
+// tools fail in confusing ways even when they are installed, so the Node
+// message comes first and the dependency check is not run at all.
+//
 // Node built-ins only: it has to run precisely when nothing is installed.
 // Run directly or required as a module by tests.
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { checkNodeVersion } = require('./check-node-version.js');
 
 const repoRoot = path.resolve(__dirname, '..');
 
@@ -82,12 +88,25 @@ function checkLocalDeps(root = repoRoot, packages = REQUIRED_PACKAGES) {
   return { ok: false, message: lines.join('\n') };
 }
 
-if (require.main === module) {
-  const result = checkLocalDeps();
-  if (!result.ok) {
-    process.stderr.write(`${result.message}\n`);
-    process.exit(1);
+// The CLI: the Node.js version first, then the dependencies; the first
+// failure is written to stderr and exits 1. The checks and process hooks are
+// injectable so the tests can drive the order without another Node binary.
+function main({
+  checkNode = checkNodeVersion,
+  checkDeps = checkLocalDeps,
+  stderr = process.stderr,
+  exit = process.exit
+} = {}) {
+  for (const check of [checkNode, checkDeps]) {
+    const result = check();
+    if (!result.ok) {
+      stderr.write(`${result.message}\n`);
+      exit(1);
+      return;
+    }
   }
 }
 
-module.exports = { checkLocalDeps, findPackageDir, isInside, shellQuote, REQUIRED_PACKAGES };
+if (require.main === module) main();
+
+module.exports = { checkLocalDeps, findPackageDir, isInside, main, shellQuote, REQUIRED_PACKAGES };
