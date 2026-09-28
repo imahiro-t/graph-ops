@@ -170,9 +170,9 @@ describe.each(['ja', 'en'] as const)('AutopilotControls sizes its small lines in
     const dismiss = await screen.findByTestId('autopilot-untrusted-dismiss');
     const notice = screen.getByTestId('autopilot-untrusted');
     expect(notice).toHaveClass('p-2', '[@media(max-width:200px)]:p-1');
-    expect(notice).not.toHaveClass('[@media(max-width:15rem)]:p-1');
+    expect(notice).not.toHaveClass('upto-15rem:p-1');
     expect(dismiss).toHaveClass('px-2', '[@media(max-width:200px)]:px-0.5');
-    expect(dismiss).not.toHaveClass('[@media(max-width:15rem)]:px-0.5');
+    expect(dismiss).not.toHaveClass('upto-15rem:px-0.5');
     expect(dismiss).toHaveClass('min-h-6', 'max-w-full', 'shrink-0');
     expect(dismiss).toHaveClass('focus-visible:ring-2', 'focus-visible:ring-violet-500', 'dark:focus-visible:ring-violet-400');
     expect(dismiss).toHaveAccessibleName(i18n.t('autopilot.untrustedDismiss'));

@@ -31,7 +31,7 @@ import i18n from '../i18n';
 import { TicketDetail } from '../types';
 import { TicketItem } from './TicketItem';
 
-const NARROW_LARGE_TEXT_PADDING = '[@media(max-width:15rem)]:p-3';
+const NARROW_LARGE_TEXT_PADDING = 'upto-15rem:p-3';
 const BELOW_SM_PADDING = 'max-sm:p-3';
 const TINY_WINDOW_PADDING = '[@media(max-width:200px)]:p-2';
 
@@ -102,13 +102,13 @@ describe.each(['ja', 'en'] as const)('TicketItem padding with large text on a na
     const details = screen.getByTestId('ticket-details');
     expect(details).toHaveClass('p-6', BELOW_SM_PADDING, NARROW_LARGE_TEXT_PADDING, TINY_WINDOW_PADDING);
     // Unconditional or sm+ forms would change the look from sm up.
-    expectNoneOf(details, ['p-3', 'p-2', 'p-4', 'sm:p-6', 'sm:p-3', 'max-sm:p-2', '[@media(max-width:15rem)]:p-2']);
+    expectNoneOf(details, ['p-3', 'p-2', 'p-4', 'sm:p-6', 'sm:p-3', 'max-sm:p-2', 'upto-15rem:p-2']);
   });
 
   it('pads the Action Footer less only below sm or with large text on a narrow screen', () => {
     renderTicket();
     const footer = screen.getByTestId('ticket-action-footer');
     expect(footer).toHaveClass('p-4', BELOW_SM_PADDING, NARROW_LARGE_TEXT_PADDING, TINY_WINDOW_PADDING);
-    expectNoneOf(footer, ['p-3', 'p-2', 'p-6', 'sm:p-4', 'sm:p-3', 'max-sm:p-2', '[@media(max-width:15rem)]:p-2']);
+    expectNoneOf(footer, ['p-3', 'p-2', 'p-6', 'sm:p-4', 'sm:p-3', 'max-sm:p-2', 'upto-15rem:p-2']);
   });
 });

@@ -225,14 +225,14 @@ export const SettingsModal: React.FC<Props> = ({
         className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-5xl h-[85vh] min-h-[32rem] m-auto min-w-0 shadow-2xl overflow-hidden flex flex-col focus:outline-hidden"
       >
         {/* Header */}
-        <div className="flex items-center justify-between gap-2 px-6 [@media(max-width:15rem)]:px-3 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 shrink-0">
+        <div className="flex items-center justify-between gap-2 px-6 upto-15rem:px-3 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 shrink-0">
           {/* The title text sits in its own span: as a bare text node it would
               be an anonymous flex item that cannot shrink below its longest
               word, so at a 200% font on a 320px screen it ran under the
               shrink-0 close button (DFLT-00254). `min-w-0` plus
               `overflow-wrap:anywhere` let it wrap inside the h2 instead. */}
           <h2 id={titleId} className="flex items-center gap-2 min-w-0 font-bold text-base text-slate-800 dark:text-slate-200">
-            <Settings className="w-5 h-5 shrink-0 [@media(max-width:15rem)]:hidden text-slate-600 dark:text-slate-400" aria-hidden="true" />
+            <Settings className="w-5 h-5 shrink-0 upto-15rem:hidden text-slate-600 dark:text-slate-400" aria-hidden="true" />
             <span className="min-w-0 wrap-anywhere">{t('settings.modalTitle')}</span>
           </h2>
           <button
@@ -252,7 +252,7 @@ export const SettingsModal: React.FC<Props> = ({
         <div
           role="tablist"
           aria-label={t('settings.tabListLabel')}
-          className="flex flex-wrap items-center gap-1 px-6 [@media(max-width:15rem)]:px-3 pt-3 border-b border-slate-200 dark:border-slate-800 shrink-0"
+          className="flex flex-wrap items-center gap-1 px-6 upto-15rem:px-3 pt-3 border-b border-slate-200 dark:border-slate-800 shrink-0"
         >
           {SETTINGS_TABS.map(key => {
             const selected = tab === key;
@@ -307,7 +307,7 @@ export const SettingsModal: React.FC<Props> = ({
           id={panelId}
           aria-labelledby={tabId(tab)}
           tabIndex={0}
-          className="flex-1 min-h-0 overflow-hidden narrow:overflow-y-auto narrow:scroll-py-3 p-6 [@media(max-width:15rem)]:p-3 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+          className="flex-1 min-h-0 overflow-hidden narrow:overflow-y-auto narrow:scroll-py-3 p-6 upto-15rem:p-3 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
         >
           {tab === 'nodeTypes' && <NodeTypesEditor onDirtyChange={setDirty} />}
           {tab === 'reviewGates' && <ReviewGatesEditor onDirtyChange={setDirty} />}

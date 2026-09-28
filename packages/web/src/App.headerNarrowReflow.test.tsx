@@ -57,7 +57,7 @@ import { createFakeBackend, installFakeBackend } from './test/fakeBackend';
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 
 const BREAKS_ANYWHERE = 'wrap-anywhere';
-const NARROW = '[@media(max-width:15rem)]:';
+const NARROW = 'upto-15rem:';
 const TINY = '[@media(max-width:200px)]:';
 
 // Six tickets on pages of five, so the pagination row is drawn.

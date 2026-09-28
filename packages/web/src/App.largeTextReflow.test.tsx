@@ -168,7 +168,7 @@ describe.each(['ja', 'en'] as const)('pagination row with large text (%s)', lng 
 });
 
 describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 160px window (%s)', lng => {
-  const NARROW = '[@media(max-width:15rem)]:';
+  const NARROW = 'upto-15rem:';
 
   beforeEach(async () => {
     seed();
@@ -277,7 +277,7 @@ describe.each(['ja', 'en'] as const)('summary card numbers with large text (%s)'
 
 // DFLT-00258: the rest of DFLT-00251's backlog on the summary card.
 describe.each(['ja', 'en'] as const)('summary card with a root font size set on the page (%s)', lng => {
-  const NARROW = '[@media(max-width:15rem)]:';
+  const NARROW = 'upto-15rem:';
   const CARD_NARROW = '[@container(max-width:12rem)]:';
 
   beforeEach(async () => {

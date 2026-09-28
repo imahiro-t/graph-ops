@@ -111,7 +111,7 @@ describe.each(['ja', 'en'] as const)('TicketItem header row wraps instead of ove
     renderRow();
     const row = screen.getByTestId('ticket-header-row');
     expect(row).toHaveClass('flex', 'flex-wrap', 'justify-between', 'gap-4', 'gap-y-2');
-    expect(row).toHaveClass('p-4', '[@media(max-width:15rem)]:p-3');
+    expect(row).toHaveClass('p-4', 'upto-15rem:p-3');
     // Unconditional or px-based forms would change the default size or sm+.
     expectNoneOf(row, ['p-3', 'max-sm:p-3', 'sm:p-4', 'flex-nowrap']);
   });

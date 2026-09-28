@@ -18,6 +18,21 @@
    page's html font-size.) */
 @custom-variant narrow (@media (width < 48rem));
 
+/* DFLT-00260: named rem media-query variants. They replace the arbitrary
+   [@media_not_all_and_(min-width:80rem)]: and [@media(max-width:15rem)]:
+   prefixes with the same media conditions. rem, not px, so the breakpoints
+   follow the browser's default font size (DFLT-00253).
+   Ordering caveat: when two variants set the same property on one element
+   the one emitted later in the CSS wins. These come out after the core
+   screen variants (sm:, max-sm:, max-lg:, ...), below-80rem before
+   upto-15rem, and before @container variants -- the same places the
+   arbitrary prefixes had. So `below-80rem:gap-x-3 upto-15rem:gap-x-1` gives
+   gap-x-1 at 15rem and below, and `max-sm:p-3 upto-15rem:p-2` gives p-2
+   there, but an [@container(...)]: variant on the same property wins over
+   both. tailwindVariants.test.ts pins this order down. */
+@custom-variant below-80rem (@media not all and (min-width: 80rem));
+@custom-variant upto-15rem (@media (max-width: 15rem));
+
 /* v3 values, pinned: breakpoints, text line heights and the color palette.
    v4 redefines the default colors in OKLCH, and they differ slightly from
    v3's hex values. The contrast ratios quoted in comments and asserted in
