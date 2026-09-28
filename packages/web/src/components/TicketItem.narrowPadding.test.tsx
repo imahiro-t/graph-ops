@@ -16,6 +16,15 @@
 // lines. The 15rem query stays, since with a very large default font (over
 // about 267%) it matches above 640px too. From sm up at a normal default font
 // size neither query matches, so sm+ keeps p-6 / p-4.
+//
+// DFLT-00259: in a window of 200 CSS px or less (160px at a 200% text size)
+// both pad with p-2, which gives the untrusted-folder notice in the autopilot
+// column room for its dismiss button (it had 0px of content width and the
+// button ran 31px past it; see AutopilotControls.remText.test.tsx). A px
+// query, not the 15rem one, which with a 32px default font also matches
+// 320-336px; there, and at 100% from 320px up, the padding measured the same
+// as before. In a real browser p-2 wins over max-sm:p-3 and the 15rem p-3
+// (computed padding 16px at a 32px root).
 import { render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
@@ -24,6 +33,7 @@ import { TicketItem } from './TicketItem';
 
 const NARROW_LARGE_TEXT_PADDING = 'upto-15rem:p-3';
 const BELOW_SM_PADDING = 'max-sm:p-3';
+const TINY_WINDOW_PADDING = '[@media(max-width:200px)]:p-2';
 
 const makeTicket = (): TicketDetail => ({
   id: 'TEST-00227',
@@ -90,15 +100,15 @@ describe.each(['ja', 'en'] as const)('TicketItem padding with large text on a na
   it('pads the expanded details less only below sm or with large text on a narrow screen', () => {
     renderTicket();
     const details = screen.getByTestId('ticket-details');
-    expect(details).toHaveClass('p-6', BELOW_SM_PADDING, NARROW_LARGE_TEXT_PADDING);
+    expect(details).toHaveClass('p-6', BELOW_SM_PADDING, NARROW_LARGE_TEXT_PADDING, TINY_WINDOW_PADDING);
     // Unconditional or sm+ forms would change the look from sm up.
-    expectNoneOf(details, ['p-3', 'p-2', 'p-4', 'sm:p-6', 'sm:p-3', 'max-sm:p-2']);
+    expectNoneOf(details, ['p-3', 'p-2', 'p-4', 'sm:p-6', 'sm:p-3', 'max-sm:p-2', 'upto-15rem:p-2']);
   });
 
   it('pads the Action Footer less only below sm or with large text on a narrow screen', () => {
     renderTicket();
     const footer = screen.getByTestId('ticket-action-footer');
-    expect(footer).toHaveClass('p-4', BELOW_SM_PADDING, NARROW_LARGE_TEXT_PADDING);
-    expectNoneOf(footer, ['p-3', 'p-2', 'p-6', 'sm:p-4', 'sm:p-3', 'max-sm:p-2']);
+    expect(footer).toHaveClass('p-4', BELOW_SM_PADDING, NARROW_LARGE_TEXT_PADDING, TINY_WINDOW_PADDING);
+    expectNoneOf(footer, ['p-3', 'p-2', 'p-6', 'sm:p-4', 'sm:p-3', 'max-sm:p-2', 'upto-15rem:p-2']);
   });
 });

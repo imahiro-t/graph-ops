@@ -86,16 +86,23 @@ export const TemplatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const editorProps = { onDirtyChange: handleDirtyChange };
 
   return (
-    <div className="flex h-full min-h-0 gap-4">
+    <div className="flex h-full min-h-0 gap-4 narrow:flex-col narrow:h-auto">
       {confirmDialog}
-      {/* Left: template list */}
+      {/* Left: template list. Its heading is sticky, so the list's scroll
+          padding (3rem, taller than the heading's 1rem padding + one 11px
+          line at any default font size) keeps an item that keyboard focus
+          scrolls into view -- e.g. by Shift+Tab -- below the heading instead
+          of under it, and z-10 keeps scrolled rows painted beneath the
+          heading. It matters most below 48rem, where the list is capped at
+          max-h-40 and scrolls (DFLT-00261 A-1); the padding only affects
+          scroll-into-view, not the layout. */}
       <nav
         aria-labelledby={listTitleId}
-        className="w-56 shrink-0 border border-slate-200 dark:border-slate-800 rounded-lg overflow-y-auto bg-slate-50 dark:bg-slate-800 flex flex-col"
+        className="w-56 shrink-0 border border-slate-200 dark:border-slate-800 rounded-lg overflow-y-auto scroll-pt-12 bg-slate-50 dark:bg-slate-800 flex flex-col narrow:w-full narrow:max-h-40"
       >
         <div
           id={listTitleId}
-          className="px-3 py-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-slate-50 dark:bg-slate-800"
+          className="px-3 py-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10 bg-slate-50 dark:bg-slate-800"
         >
           {t('settings.templates.listTitle')}
         </div>
@@ -111,14 +118,14 @@ export const TemplatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   type="button"
                   onClick={() => void select(key)}
                   aria-current={isSelected ? 'true' : undefined}
-                  className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${
+                  className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${
                     isSelected
                       ? 'bg-white dark:bg-slate-900 font-semibold text-slate-900 dark:text-slate-100'
                       : 'text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-900'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5 shrink-0 text-slate-400" aria-hidden="true" />
-                  <span className="truncate flex-1">{t(LIST_LABEL_KEYS[key])}</span>
+                  <span className="truncate flex-1 narrow:whitespace-normal narrow:wrap-anywhere">{t(LIST_LABEL_KEYS[key])}</span>
                 </button>
               </li>
             );

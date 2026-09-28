@@ -19,8 +19,8 @@ function readStoredPreference(): ThemePreference {
 }
 
 // Manages the app's light/dark/system theme preference: persists the choice
-// to localStorage and toggles Tailwind's `dark` class (darkMode: 'class' in
-// tailwind.config.js) on <html>. index.html runs the same resolution
+// to localStorage and toggles Tailwind's `dark` class (the `dark` custom
+// variant in src/index.css) on <html>. index.html runs the same resolution
 // synchronously (inline script) before React mounts, so there's no flash of
 // the wrong theme on first paint -- this hook keeps the class in sync after
 // that and reacts live to OS-level changes while "system" is selected.

@@ -141,7 +141,7 @@ describe.each([
     expectNoneOf(box, ['overflow-x-auto', 'overflow-auto', 'overflow-hidden', 'overflow-x-hidden', 'lg:overflow-x-auto']);
     // The panel keeps its lg+ layout and floor, may shrink below its content's
     // width inside the grid, and never clips or scrolls itself.
-    expect(panel).toHaveClass('lg:col-span-4', 'p-4', 'flex', 'flex-col', 'min-h-[32rem]', 'min-w-0');
+    expect(panel).toHaveClass('lg:col-span-4', 'p-4', 'flex', 'flex-col', 'min-h-128', 'min-w-0');
     expectNoneOf(panel, ['overflow-hidden', 'overflow-x-auto', 'overflow-auto', 'overflow-x-hidden']);
   });
 
@@ -149,11 +149,11 @@ describe.each([
     const { panel } = renderGraph(graph.nodes, graph.edges);
     const heading = panel.firstElementChild!;
     expect(heading).toHaveTextContent(i18n.t('ticketItem.graphTitle'));
-    expect(heading).toHaveClass('flex', 'justify-between', 'max-lg:flex-wrap', 'max-lg:[overflow-wrap:anywhere]');
+    expect(heading).toHaveClass('flex', 'justify-between', 'max-lg:flex-wrap', 'max-lg:wrap-anywhere');
     expectNoneOf(heading, ['flex-wrap', 'whitespace-nowrap']);
     const legend = panel.lastElementChild!;
     expect(legend).toHaveTextContent(i18n.t('ticketItem.legend.done'));
-    expect(legend).toHaveClass('flex-wrap', 'max-lg:[overflow-wrap:anywhere]');
+    expect(legend).toHaveClass('flex-wrap', 'max-lg:wrap-anywhere');
   });
 
   it('draws every node and edge inside the viewBox', () => {

@@ -109,9 +109,10 @@ describe.each(['ja', 'en'] as const)('TicketItem header row in a narrow window (
     const id = screen.getByTestId('ticket-header-id');
     expect(id).toHaveTextContent('TEST-00251');
     expect(id).toHaveClass('shrink-0', 'whitespace-nowrap', 'select-text', 'min-w-0', 'max-w-full');
-    expect(id).toHaveClass(`${NARROW}whitespace-normal`, `${NARROW}[overflow-wrap:anywhere]`);
+    expect(id).toHaveClass(`${NARROW}whitespace-normal`, `${NARROW}wrap-anywhere`);
     // Unconditional forms would change the one-line ID at every width.
     expect(id).not.toHaveClass('whitespace-normal');
+    expect(id).not.toHaveClass('wrap-anywhere');
     expect(id).not.toHaveClass('[overflow-wrap:anywhere]');
     // The copy button still follows the ID directly.
     expect(id.nextElementSibling).toContainElement(screen.getByTestId('ticket-copy-id'));
@@ -121,7 +122,7 @@ describe.each(['ja', 'en'] as const)('TicketItem header row in a narrow window (
     renderTicket(makeTicket());
     const status = screen.getByTestId('ticket-header-status');
     expect(status).toHaveTextContent(i18n.t(getStatusMeta('REFINED').labelKey));
-    expect(status).toHaveClass('shrink-0', 'max-w-full', '[overflow-wrap:anywhere]', 'rounded-full');
+    expect(status).toHaveClass('shrink-0', 'max-w-full', 'wrap-anywhere', 'rounded-full');
     expect(status).not.toHaveClass('whitespace-nowrap');
   });
 
@@ -131,14 +132,14 @@ describe.each(['ja', 'en'] as const)('TicketItem header row in a narrow window (
     const group = screen.getByTestId('ticket-header-assignee');
     expect(group).toHaveClass('flex', 'flex-wrap', 'min-w-0', 'max-w-full');
     const chip = within(group).getByText(name);
-    expect(chip).toHaveClass('min-w-0', 'max-w-full', '[overflow-wrap:anywhere]', 'text-[0.6875rem]');
+    expect(chip).toHaveClass('min-w-0', 'max-w-full', 'wrap-anywhere', 'text-[0.6875rem]');
     expect(chip).not.toHaveClass('text-[11px]');
   });
 
   it('sizes the viewer\'s own chip in rem and lets it wrap', () => {
     renderTicket(makeTicket({ assignee: 'Me' }), { myName: 'Me' });
     const chip = within(screen.getByTestId('ticket-header-assignee')).getByText('Me');
-    expect(chip).toHaveClass('min-w-0', 'max-w-full', '[overflow-wrap:anywhere]', 'text-[0.6875rem]');
+    expect(chip).toHaveClass('min-w-0', 'max-w-full', 'wrap-anywhere', 'text-[0.6875rem]');
     expect(chip).not.toHaveClass('text-[11px]');
     expect(within(chip).getByRole('button', { name: i18n.t('ticketItem.selfAssign.unassign') })).toBeInTheDocument();
   });
@@ -146,7 +147,7 @@ describe.each(['ja', 'en'] as const)('TicketItem header row in a narrow window (
   it('sizes the "assign to me" button in rem and lets it wrap', () => {
     renderTicket(makeTicket({ assignee: undefined }), { myName: 'Me' });
     const button = screen.getByRole('button', { name: i18n.t('ticketItem.selfAssign.assign') });
-    expect(button).toHaveClass('min-w-0', 'max-w-full', '[overflow-wrap:anywhere]', 'text-[0.6875rem]');
+    expect(button).toHaveClass('min-w-0', 'max-w-full', 'wrap-anywhere', 'text-[0.6875rem]');
     expect(button).not.toHaveClass('text-[11px]');
   });
 
@@ -193,7 +194,7 @@ describe.each([
     // The shown text is unchanged, and whole in the DOM: truncate only clips
     // what is painted.
     const name = screen.getByText(shownOne);
-    expect(name).toHaveClass('truncate', 'max-w-[12rem]');
+    expect(name).toHaveClass('truncate', 'max-w-48');
     expect(badge).toContainElement(name);
     expect(badge).toHaveTextContent(one);
     expect(badge.title).toBe(`${shownOne}\n${hint()}`);
@@ -205,7 +206,7 @@ describe.each([
   it('puts every gate\'s full name in the title and in sr-only text inside the relative badge', () => {
     renderTicket(makeTicket({ nodes: [gate('g1', many[0]), gate('g2', many[1])] }));
     const badge = screen.getByTestId('ticket-header-rejected-badge');
-    expect(within(badge).getByText(shownMany)).toHaveClass('truncate', 'max-w-[12rem]');
+    expect(within(badge).getByText(shownMany)).toHaveClass('truncate', 'max-w-48');
     for (const n of many) expect(badge.title).toContain(n);
     expect(badge.title).toContain(hint());
     expect(badge.title.split('\n')[0]).toBe(

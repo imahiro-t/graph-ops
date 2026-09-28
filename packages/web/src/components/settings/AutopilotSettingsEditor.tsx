@@ -183,7 +183,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
       'aria-describedby': describedBy
     };
     const inputClass =
-      'bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800';
+      'bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800 narrow:min-w-0 narrow:max-w-full';
     const set = (v: string | boolean) => setDraft(d => ({ ...d, [it.key]: v }));
     if (control.kind === 'boolean') {
       return (
@@ -198,7 +198,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
     }
     if (control.kind === 'select') {
       return (
-        <select {...common} value={String(shown)} onChange={e => set(e.target.value)} className={inputClass}>
+        <select {...common} value={String(shown)} onChange={e => set(e.target.value)} className={`${inputClass} narrow:flex-1`}>
           {control.options.map(o => (
             <option key={o} value={o}>
               {valueLabel(it.key, o)}
@@ -228,14 +228,14 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
   })();
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto flex flex-col gap-3">
+    <div className="h-full min-h-0 overflow-y-auto flex flex-col gap-3 narrow:h-auto narrow:overflow-visible">
       <div>
         <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
           {t('settings.autopilot.title', { project: projectName || projectId })}
         </h3>
         <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">{t('settings.autopilot.description')}</p>
         {data?.team_file && (
-          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 wrap-anywhere">
             {t('settings.autopilot.teamFile', { path: data.team_file })}
           </p>
         )}
@@ -268,8 +268,8 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
               const sourceId = `${inputId}-source`;
               const canClear = !it.locked && (draft[it.key] ?? null) !== null;
               return (
-                <div key={it.key} className="flex items-start gap-3 px-3 py-2.5">
-                  <div className="flex-1 min-w-0">
+                <div key={it.key} className="flex items-start gap-3 px-3 py-2.5 narrow:flex-wrap">
+                  <div className="flex-1 min-w-0 narrow:basis-full">
                     <label htmlFor={inputId} className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                       {t(`settings.autopilot.keys.${it.key}.label`)}
                     </label>
@@ -289,7 +289,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
                       {sourceText(it)}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0 narrow:shrink narrow:min-w-0 narrow:w-full">
                     {renderControl(it, inputId, `${hintId} ${sourceId}`)}
                     {!it.locked && (
                       <IconButton
@@ -297,7 +297,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
                         disabled={!canClear || saving}
                         label={t('settings.autopilot.clearLocalFor', { key: t(`settings.autopilot.keys.${it.key}.label`) })}
                         tooltip={t('settings.autopilot.clearLocal')}
-                        className="p-1 rounded text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30"
+                        className="p-1 rounded-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30"
                       >
                         <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
                       </IconButton>
@@ -315,7 +315,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
             </ErrorBox>
           )}
 
-          <div className="flex justify-end items-center gap-2">
+          <div className="flex justify-end items-center gap-2 narrow:flex-wrap">
             {/* The flash disappears after 2 seconds; the always-mounted live
                 region is what announces it (SC 4.1.3), like
                 AppSettingsEditor's. */}

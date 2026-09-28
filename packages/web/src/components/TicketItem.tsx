@@ -324,7 +324,7 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
         aria-required="true"
         aria-invalid={errorId ? true : undefined}
         aria-describedby={errorId}
-        className="grow basis-32 min-w-0 text-[11px] border border-red-300 dark:border-red-800 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-red-400"
+        className="grow basis-32 min-w-0 text-[11px] border border-red-300 dark:border-red-800 rounded-sm px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-hidden focus:ring-1 focus:ring-red-400"
       />
       {/* DFLT-00207: while submitting the confirm button is aria-disabled, not
           disabled, so the focus the user put on it stays there (a disabled
@@ -339,7 +339,7 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
         disabled={!isSubmitting && draft.trim() === ''}
         aria-disabled={isSubmitting || undefined}
         {...submittingProps(isSubmitting)}
-        className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition shrink-0 max-w-full [overflow-wrap:anywhere]"
+        className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded-sm text-[11px] font-bold flex items-center gap-1 transition shrink-0 max-w-full wrap-anywhere"
       >
         {isSubmitting ? (
           <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
@@ -354,7 +354,7 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
         type="button"
         onClick={onCancel}
         disabled={isSubmitting}
-        className="px-2 py-1 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-50 text-[11px] font-semibold shrink-0 max-w-full [overflow-wrap:anywhere]"
+        className="px-2 py-1 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-50 text-[11px] font-semibold shrink-0 max-w-full wrap-anywhere"
       >
         {t('ticketItem.approvalGate.cancelReject')}
       </button>
@@ -422,7 +422,7 @@ export const TicketItem: React.FC<Props> = ({
 
   // The execution graph panel must never scroll -- it always renders in
   // full, growing past the default height when the graph has many nodes
-  // (see graphPanelRef's min-h-[32rem] below). The node/artifact panel on
+  // (see graphPanelRef's min-h-128 below). The node/artifact panel on
   // the right is allowed to scroll internally, but its *card* height should
   // track the graph panel's rendered height once that exceeds the default,
   // rather than the two drifting apart or the page having to reconcile two
@@ -1076,19 +1076,20 @@ export const TicketItem: React.FC<Props> = ({
     const isInProgress = status === 'IN PROGRESS';
     const isNotStarted = meta === TODO_META;
     // Under 80rem the badge may shrink and wrap (DFLT-00260). DFLT-00280:
-    // break-words (not `anywhere`) so it wraps at the spaces, and rounded-xl
-    // so a wrapped badge is a rounded rectangle, not a tall oval (one line it
-    // is still a pill). Under 15rem it pads 0.25rem at the sides so a long
-    // word fits on a line of its own. From 80rem up it is a one-line
-    // rounded-full pill. The IN PROGRESS badge is a flex box (dot, label)
-    // from 80rem up and a block under 80rem, where the dot flows inline in
-    // front of the label ("• IN" / "PROGRESS"). Its label is kept in a span
-    // of its own; min-w-0 on it does nothing today (under 80rem the span is
-    // inline, and from 80rem up the badge is nowrap and never shrinks), and
-    // is only a guard should the badge become a shrinking flex box again.
-    // The measurements behind this are in TicketItem.nodeRowWrap.test.tsx.
+    // wrap-break-word (not `anywhere`) so it wraps at the spaces, and
+    // rounded-xl so a wrapped badge is a rounded rectangle, not a tall oval
+    // (one line it is still a pill). Under 15rem it pads 0.25rem at the sides
+    // so a long word fits on a line of its own. From 80rem up it is a
+    // one-line rounded-full pill. The IN PROGRESS badge is a flex box (dot,
+    // label) from 80rem up and a block under 80rem, where the dot flows
+    // inline in front of the label ("• IN" / "PROGRESS"). Its label is kept
+    // in a span of its own; min-w-0 on it does nothing today (under 80rem the
+    // span is inline, and from 80rem up the badge is nowrap and never
+    // shrinks), and is only a guard should the badge become a shrinking flex
+    // box again. The measurements behind this are in
+    // TicketItem.nodeRowWrap.test.tsx.
     return (
-      <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full whitespace-nowrap below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:break-words below-80rem:rounded-xl upto-15rem:px-1 ${isNotStarted ? 'font-medium' : 'font-bold'} ${meta.chip.bg} ${meta.chip.text}${isInProgress ? ' flex items-center gap-1 below-80rem:block' : ''}`}>
+      <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full whitespace-nowrap below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:wrap-break-word below-80rem:rounded-xl upto-15rem:px-1 ${isNotStarted ? 'font-medium' : 'font-bold'} ${meta.chip.bg} ${meta.chip.text}${isInProgress ? ' flex items-center gap-1 below-80rem:block' : ''}`}>
         {isInProgress && <span className="w-1.5 h-1.5 shrink-0 rounded-full bg-blue-500 animate-pulse below-80rem:inline-block below-80rem:mr-1 below-80rem:align-middle" />}
         {isInProgress ? <span className="min-w-0">{t(meta.labelKey)}</span> : t(meta.labelKey)}
       </span>
@@ -1342,7 +1343,7 @@ export const TicketItem: React.FC<Props> = ({
   const hiddenLabelCount = ticketLabels.length - headerLabels.length;
 
   return (
-    <div ref={rootRef} id={`ticket-${ticket.id}`} tabIndex={-1} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xs transition-all overflow-clip mb-4">
+    <div ref={rootRef} id={`ticket-${ticket.id}`} tabIndex={-1} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl transition-all overflow-clip mb-4">
       {/* Reject prompt closing (DFLT-00172). Always mounted -- outside the
           header row and the expandable panel, which each keep their own
           region -- so it exists before its text changes. */}
@@ -1401,7 +1402,7 @@ export const TicketItem: React.FC<Props> = ({
             aria-expanded={isExpanded}
             aria-label={t('ticketItem.toggleTicket', { id: ticket.id })}
             data-testid="ticket-toggle-expand"
-            className="text-slate-500 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 shrink-0 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+            className="text-slate-500 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 shrink-0 rounded-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
           >
             {isExpanded
               ? <ChevronDown className="w-5 h-5" aria-hidden="true" />
@@ -1420,7 +1421,7 @@ export const TicketItem: React.FC<Props> = ({
               never wider than the row (max-w-full). */}
           <span
             data-testid="ticket-header-id"
-            className="font-mono text-xs font-bold px-2 py-1 rounded bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0 whitespace-nowrap upto-15rem:whitespace-normal upto-15rem:[overflow-wrap:anywhere] min-w-0 max-w-full select-text cursor-text"
+            className="font-mono text-xs font-bold px-2 py-1 rounded-sm bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0 whitespace-nowrap upto-15rem:whitespace-normal upto-15rem:wrap-anywhere min-w-0 max-w-full select-text cursor-text"
           >
             {ticket.id}
           </span>
@@ -1467,7 +1468,7 @@ export const TicketItem: React.FC<Props> = ({
               overflowed there too. */}
           <span
             data-testid="ticket-header-status"
-            className={`text-xs px-2.5 py-0.5 rounded-full font-bold shrink-0 max-w-full [overflow-wrap:anywhere] ${ticketStatusMeta.chip.bg} ${ticketStatusMeta.chip.text}`}
+            className={`text-xs px-2.5 py-0.5 rounded-full font-bold shrink-0 max-w-full wrap-anywhere ${ticketStatusMeta.chip.bg} ${ticketStatusMeta.chip.text}`}
           >
             {t(ticketStatusMeta.labelKey)}
           </span>
@@ -1564,7 +1565,7 @@ export const TicketItem: React.FC<Props> = ({
               title={`${rejectedBadgeFullText}\n${t('ticketItem.approvalGate.rejectedHint')}`}
             >
               <X aria-hidden="true" className="w-3 h-3 shrink-0" />
-              <span className="truncate max-w-[12rem]">
+              <span className="truncate max-w-48">
                 {rejectedApprovalNodes.length === 1
                   ? t('ticketItem.approvalGate.rejectedBadgeOne', { name: rejectedApprovalNodes[0].name })
                   : t('ticketItem.approvalGate.rejectedBadgeMany', { count: rejectedApprovalNodes.length })}
@@ -1607,7 +1608,7 @@ export const TicketItem: React.FC<Props> = ({
               onClick={e => e.stopPropagation()}
             >
               {myName && isAssignedToMe ? (
-                <span className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-[0.6875rem] font-semibold min-w-0 max-w-full [overflow-wrap:anywhere]">
+                <span className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-[0.6875rem] font-semibold min-w-0 max-w-full wrap-anywhere">
                   {ticket.assignee}
                   <IconButton
                     onClick={handleToggleAssignedToMe}
@@ -1628,7 +1629,7 @@ export const TicketItem: React.FC<Props> = ({
                 // one piece of assignee UI every viewer needs to see, with
                 // or without their own name configured.
                 <span
-                  className="inline-flex items-center gap-1 pl-2 pr-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[0.6875rem] font-semibold min-w-0 max-w-full [overflow-wrap:anywhere]"
+                  className="inline-flex items-center gap-1 pl-2 pr-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[0.6875rem] font-semibold min-w-0 max-w-full wrap-anywhere"
                   title={t('ticketItem.selfAssign.assignedToOther', { name: ticket.assignee })}
                 >
                   {ticket.assignee}
@@ -1639,7 +1640,7 @@ export const TicketItem: React.FC<Props> = ({
                   onClick={handleToggleAssignedToMe}
                   disabled={assignToMeSaving}
                   {...submittingProps(assignToMeSaving)}
-                  className="px-2 py-0.5 rounded-full border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 disabled:opacity-50 text-[0.6875rem] font-semibold flex items-center gap-1 min-w-0 max-w-full [overflow-wrap:anywhere] transition"
+                  className="px-2 py-0.5 rounded-full border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 disabled:opacity-50 text-[0.6875rem] font-semibold flex items-center gap-1 min-w-0 max-w-full wrap-anywhere transition"
                 >
                   {assignToMeSaving ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <UserPlus aria-hidden="true" className="w-3 h-3" />}
                   {t('ticketItem.selfAssign.assign')}
@@ -1647,7 +1648,7 @@ export const TicketItem: React.FC<Props> = ({
                 </button>
               ) : null}
               {assignToMeError && (
-                <span className="text-red-600 dark:text-red-400 font-medium min-w-0 max-w-full [overflow-wrap:anywhere]">{assignToMeError}</span>
+                <span className="text-red-600 dark:text-red-400 font-medium min-w-0 max-w-full wrap-anywhere">{assignToMeError}</span>
               )}
             </span>
           )}
@@ -1662,7 +1663,7 @@ export const TicketItem: React.FC<Props> = ({
                     <div
                       key={n.id}
                       title={isPendingApproval ? `${n.name} (${t('ticketItem.approvalGate.pendingStatus')})` : `${n.name} (${t(getStatusMeta(displayStatus).labelKey)})`}
-                      className={`w-2.5 h-3.5 rounded-xs ${
+                      className={`w-2.5 h-3.5 ${
                         isPendingApproval
                           ? 'bg-amber-400 animate-pulse'
                           : displayStatus === 'DONE'
@@ -1707,7 +1708,7 @@ export const TicketItem: React.FC<Props> = ({
               busy={isReopeningTicket}
               label={t('ticketItem.reopen.button')}
               wrapperClassName="-m-1"
-              className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 rounded"
+              className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 rounded-sm"
             >
               {isReopeningTicket ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <RotateCcw aria-hidden="true" className="w-4 h-4" />}
             </IconButton>
@@ -1719,7 +1720,7 @@ export const TicketItem: React.FC<Props> = ({
               }}
               label={t('ticketItem.close.button')}
               wrapperClassName="-m-1"
-              className="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition p-1 rounded"
+              className="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition p-1 rounded-sm"
             >
               <Archive aria-hidden="true" className="w-4 h-4" />
             </IconButton>
@@ -1740,7 +1741,7 @@ export const TicketItem: React.FC<Props> = ({
             label={t('ticketItem.delete.ariaLabel', { id: ticket.id, title: ticket.title })}
             tooltip={t('ticketItem.delete.button')}
             wrapperClassName="-m-1"
-            className="text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 rounded"
+            className="text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 rounded-sm"
           >
             {isDeletingTicket ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <Trash2 aria-hidden="true" className="w-4 h-4" />}
           </IconButton>
@@ -1767,14 +1768,14 @@ export const TicketItem: React.FC<Props> = ({
             // DFLT-00205: a persistent accessible name (the placeholder vanishes
             // once typing starts). No aria-required: the reason is optional.
             aria-label={t('ticketItem.close.reasonInputLabel')}
-            className="flex-1 text-xs border border-slate-300 dark:border-slate-700 rounded px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            className="flex-1 text-xs border border-slate-300 dark:border-slate-700 rounded-sm px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-hidden focus:ring-1 focus:ring-indigo-400"
           />
           <button
             type="button"
             onClick={handleCloseTicket}
             disabled={isClosingTicket}
             {...submittingProps(isClosingTicket)}
-            className="px-2 py-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded text-xs font-bold flex items-center gap-1 transition shrink-0"
+            className="px-2 py-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-sm text-xs font-bold flex items-center gap-1 transition shrink-0"
           >
             {isClosingTicket ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Archive aria-hidden="true" className="w-3.5 h-3.5" />}
             {t('ticketItem.close.confirm')}
@@ -1808,11 +1809,16 @@ export const TicketItem: React.FC<Props> = ({
           follow) still leaves the Send button room for a one-line label at
           320/360px. The 15rem query stays for a very large default font
           (over about 267%), where it matches above 640px too. From sm up, at
-          a normal default font size, nothing changes. */}
+          a normal default font size, nothing changes. DFLT-00259: in a window
+          of 200 CSS px or less (160px at a 200% text size) the detail panel
+          and the Action Footer pad with p-2, which gives the autopilot
+          column's untrusted-folder notice room for its dismiss button (it
+          had 0px of content width, see AutopilotControls.tsx). A px query:
+          the 15rem one also matches 320-336px with a 32px default font. */}
       {isExpanded && (
         <div
           data-testid="ticket-details"
-          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 max-sm:p-3 upto-15rem:p-3 space-y-6"
+          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 max-sm:p-3 upto-15rem:p-3 [@media(max-width:200px)]:p-2 space-y-6"
         >
           {/* Metadata Bar */}
           <div className="flex flex-wrap items-center gap-y-2 gap-x-6 text-xs text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800 pb-3">
@@ -1858,7 +1864,7 @@ export const TicketItem: React.FC<Props> = ({
               padding is p-3 instead of p-4 -- the same pair as the detail
               panel and the artifact card -- so at 200% text on a 320px
               screen the header row and the body get 16px more width. */}
-          <div className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+          <div className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 rounded-xl border border-slate-200 dark:border-slate-800">
             {/* DFLT-00239: the header row and its right-hand group wrap on a
                 narrow line (200% text size on a 320px screen) instead of
                 squeezing or pushing the refined time and the expand button
@@ -1873,9 +1879,9 @@ export const TicketItem: React.FC<Props> = ({
                 time wrap instead of the FileText and History icons being
                 squeezed (to 0px for History at 200% on 320px). */}
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mb-2">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 min-w-0 [overflow-wrap:anywhere]">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 min-w-0 wrap-anywhere">
                 <FileText aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
-                <span className="min-w-0 [overflow-wrap:anywhere]">{t('ticketItem.description.title')}</span>
+                <span className="min-w-0 wrap-anywhere">{t('ticketItem.description.title')}</span>
               </span>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
                 {/* DFLT-00262: text-[0.625rem] rather than text-[10px] -- the
@@ -1884,7 +1890,7 @@ export const TicketItem: React.FC<Props> = ({
                 {ticket.refined_at && (
                   <span className="text-[0.625rem] text-slate-500 dark:text-slate-400 flex items-center gap-1 min-w-0">
                     <History aria-hidden="true" className="w-3 h-3 shrink-0" />
-                    <span className="min-w-0 [overflow-wrap:anywhere]">
+                    <span className="min-w-0 wrap-anywhere">
                       {t('ticketItem.description.refinedAt', { time: formatDateTime(ticket.refined_at, i18n.language) })}
                     </span>
                   </span>
@@ -1898,7 +1904,7 @@ export const TicketItem: React.FC<Props> = ({
                     // the same focus ring as the other buttons (WCAG 2.4.7).
                     aria-expanded={isDescriptionExpanded}
                     aria-controls={descriptionBodyId}
-                    className="text-[0.6875rem] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+                    className="text-[0.6875rem] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold rounded-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
                   >
                     {isDescriptionExpanded ? t('ticketItem.description.collapse') : t('ticketItem.description.expand')}
                   </button>
@@ -1909,7 +1915,7 @@ export const TicketItem: React.FC<Props> = ({
             {description.length === 0 ? (
               <div className="text-slate-500 dark:text-slate-400 italic text-xs">{t('ticketItem.description.empty')}</div>
             ) : (
-              // DFLT-00256: break-words (overflow-wrap: break-word, inherited)
+              // DFLT-00256: wrap-break-word (overflow-wrap: break-word, inherited)
               // in both states, so a word wider than the body -- a path, an
               // inline code span, "autopilot" at 200% text in a list item --
               // breaks inside the card instead of running past the
@@ -1929,7 +1935,7 @@ export const TicketItem: React.FC<Props> = ({
                 tabIndex={isDescriptionExpanded ? undefined : 0}
                 role={isDescriptionExpanded ? undefined : 'region'}
                 aria-label={isDescriptionExpanded ? undefined : t('ticketItem.description.bodyRegion')}
-                className={`break-words${isDescriptionExpanded ? '' : ' max-h-56 overflow-y-auto rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400'}`}
+                className={`wrap-break-word ${isDescriptionExpanded ? '' : 'max-h-56 overflow-y-auto rounded-lg focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400'}`}
               >
                 <MarkdownViewer content={description} />
               </div>
@@ -1944,7 +1950,7 @@ export const TicketItem: React.FC<Props> = ({
               let an unusually long node list balloon the graph panel). */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left Graph Diagram (SVG) - Return edges routed on the LEFT.
-                min-h-[32rem] is a floor (the default height reserved when
+                min-h-128 is a floor (the default height reserved when
                 there's no execution graph yet), never a cap -- this panel
                 always renders its full content with no scrollbar. When it
                 grows past that floor, nodeListCardHeight (measured via
@@ -1962,17 +1968,17 @@ export const TicketItem: React.FC<Props> = ({
                 inside the panel instead of the page. mx-auto rather than
                 the container's items-center keeps the graph's left edge
                 reachable in that case. */}
-            <div ref={graphPanelRef} className="lg:col-span-4 min-w-0 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col min-h-[32rem]">
-              <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 w-full text-left flex items-center justify-between shrink-0 max-lg:flex-wrap max-lg:gap-x-2 max-lg:[overflow-wrap:anywhere]">
+            <div ref={graphPanelRef} className="lg:col-span-4 min-w-0 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col min-h-128">
+              <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 w-full text-left flex items-center justify-between shrink-0 max-lg:flex-wrap max-lg:gap-x-2 max-lg:wrap-anywhere">
                 <span id={graphTitleId} className="max-lg:min-w-0">{t('ticketItem.graphTitle')}</span>
                 <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold">{t('ticketItem.progress', { percent: progressPercent })}</span>
               </div>
               <div
                 ref={graphScrollRef}
-                className="flex-1 flex flex-col items-center justify-center max-lg:overflow-x-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                className="flex-1 flex flex-col items-center justify-center max-lg:overflow-x-auto focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
                 {...(isGraphScrollable ? { role: 'region', 'aria-labelledby': graphTitleId, tabIndex: 0 } : {})}
               >
-              <svg data-testid="ticket-graph" className={`w-full max-w-[340px] shrink-0 max-lg:h-auto max-lg:mx-auto${ticket.nodes.length > 0 ? ' max-lg:min-w-[180px]' : ''}`} height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
+              <svg data-testid="ticket-graph" className={`w-full max-w-[340px] shrink-0 max-lg:h-auto max-lg:mx-auto ${ticket.nodes.length > 0 ? 'max-lg:min-w-[180px]' : ''}`} height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
                 {/* 1. Forward edges -- straight lines between each node's actual
                     (level, column) position, so a fan-out to several nodes on
                     the same row reads as a fork instead of a straight line down. */}
@@ -2114,7 +2120,7 @@ export const TicketItem: React.FC<Props> = ({
                 </div>
               )}
               </div>
-              <div className="w-full mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400 shrink-0 max-lg:[overflow-wrap:anywhere]">
+              <div className="w-full mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400 shrink-0 max-lg:wrap-anywhere">
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> {t('ticketItem.legend.done')}</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> {t('ticketItem.legend.inProgress')}</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500" /> {t('ticketItem.legend.review')}</span>
@@ -2129,12 +2135,12 @@ export const TicketItem: React.FC<Props> = ({
             {/* Right Node & Artifact Detail Tabs. Height is pinned to the
                 graph panel's own rendered height (nodeListCardHeight, kept
                 in sync by the ResizeObserver above) so it never exceeds a
-                default floor of min-h-[32rem] unless the graph itself is
+                default floor of min-h-128 unless the graph itself is
                 taller -- this panel's content can still scroll internally
                 within that height (flex-1 min-h-0 overflow-y-auto below);
                 only the graph on the left must never scroll. */}
             <div
-              className="lg:col-span-8 flex flex-col bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs lg:sticky lg:top-20 min-h-[32rem]"
+              className="lg:col-span-8 flex flex-col bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden lg:sticky lg:top-20 min-h-128"
               style={nodeListCardHeight ? { height: nodeListCardHeight } : undefined}
             >
               {/* Tab Navigation.
@@ -2221,7 +2227,7 @@ export const TicketItem: React.FC<Props> = ({
                       className={artifactTabClass(selected)}
                     >
                       {icon}
-                      <span className="[@media_not_all_and_(min-width:64rem)]:min-w-0 break-words">{t(`ticketItem.tabs.${tab}`, { count })}</span>
+                      <span className="[@media_not_all_and_(min-width:64rem)]:min-w-0 wrap-break-word">{t(`ticketItem.tabs.${tab}`, { count })}</span>
                     </button>
                   );
                 })}
@@ -2233,7 +2239,7 @@ export const TicketItem: React.FC<Props> = ({
                   title={t('ticketItem.downloadAllArtifacts')}
                 >
                   <Download aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />
-                  <span className="min-w-0 break-words">{t('ticketItem.downloadAllArtifacts')}</span>
+                  <span className="min-w-0 wrap-break-word">{t('ticketItem.downloadAllArtifacts')}</span>
                 </a>
               )}
               </div>
@@ -2254,7 +2260,7 @@ export const TicketItem: React.FC<Props> = ({
                 id={artifactPanelId}
                 aria-labelledby={artifactTabId(activeTab)}
                 tabIndex={0}
-                className="p-4 upto-15rem:p-3 flex-1 min-h-0 overflow-y-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+                className="p-4 upto-15rem:p-3 flex-1 min-h-0 overflow-y-auto focus:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
               >
                 {/* 1. Nodes with Expandable Artifacts */}
                 {activeTab === 'nodes' && (
@@ -2382,7 +2388,7 @@ export const TicketItem: React.FC<Props> = ({
                                 aria-expanded={isNodeExpanded}
                                 aria-label={t('ticketItem.toggleNode', { id: node.id })}
                                 data-testid={`node-toggle-expand-${node.id}`}
-                                className="text-slate-500 dark:text-slate-400 shrink-0 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+                                className="text-slate-500 dark:text-slate-400 shrink-0 rounded-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
                               >
                                 {isNodeExpanded
                                   ? <ChevronDown className="w-4 h-4" aria-hidden="true" />
@@ -2397,20 +2403,20 @@ export const TicketItem: React.FC<Props> = ({
                                   id uses the same pair for the same reason
                                   (DFLT-00164). */}
                               <span className="font-mono text-slate-600 dark:text-slate-300 w-4 shrink-0">{index + 1}</span>
-                              <span className="font-mono font-bold text-slate-600 dark:text-slate-300 shrink-0 whitespace-nowrap below-80rem:shrink below-80rem:min-w-0 below-80rem:whitespace-normal below-80rem:[overflow-wrap:anywhere]">
+                              <span className="font-mono font-bold text-slate-600 dark:text-slate-300 shrink-0 whitespace-nowrap below-80rem:shrink below-80rem:min-w-0 below-80rem:whitespace-normal below-80rem:wrap-anywhere">
                                 {node.id}
                               </span>
                               <NodeTypeBadge
                                 type={node.type}
                                 theme="light"
                                 className="shrink-0 below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full"
-                                labelClassName="below-80rem:whitespace-normal below-80rem:[overflow-wrap:anywhere]"
+                                labelClassName="below-80rem:whitespace-normal below-80rem:wrap-anywhere"
                               />
-                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate min-w-0 [@media(min-width:80rem)]:w-0 [@media(min-width:80rem)]:[flex-basis:content] below-80rem:whitespace-normal below-80rem:[overflow-wrap:anywhere]">
+                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate min-w-0 [@media(min-width:80rem)]:w-0 [@media(min-width:80rem)]:basis-[content] below-80rem:whitespace-normal below-80rem:wrap-anywhere">
                                 {node.name}
                               </span>
                               {node.iteration_count > 0 && (
-                                <span className="text-amber-600 dark:text-amber-400 font-mono text-[0.6875rem] shrink-0 whitespace-nowrap below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:[overflow-wrap:anywhere]">
+                                <span className="text-amber-600 dark:text-amber-400 font-mono text-[0.6875rem] shrink-0 whitespace-nowrap below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:wrap-anywhere">
                                   {t('ticketItem.retryCount', { count: node.iteration_count })}
                                 </span>
                               )}
@@ -2420,19 +2426,19 @@ export const TicketItem: React.FC<Props> = ({
                                   other manual node types (e.g. release) to
                                   avoid showing two overlapping badges. */}
                               {node.is_manual && node.type !== 'approval_gate' && (
-                                <span className="text-pink-600 dark:text-pink-400 font-bold text-[0.625rem] px-1.5 py-0.2 border border-pink-300 dark:border-pink-800 bg-pink-50 dark:bg-pink-950 rounded shrink-0 whitespace-nowrap below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:[overflow-wrap:anywhere]">
+                                <span className="text-pink-600 dark:text-pink-400 font-bold text-[0.625rem] px-1.5 py-0.2 border border-pink-300 dark:border-pink-800 bg-pink-50 dark:bg-pink-950 rounded-sm shrink-0 whitespace-nowrap below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:wrap-anywhere">
                                   {t('ticketItem.manualApproval')}
                                 </span>
                               )}
                               {nodeArtifacts.length > 0 && (
-                                <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold border border-indigo-200 dark:border-indigo-800 flex items-center gap-1 shrink-0 whitespace-nowrap below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:[overflow-wrap:anywhere]">
+                                <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold border border-indigo-200 dark:border-indigo-800 flex items-center gap-1 shrink-0 whitespace-nowrap below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:wrap-anywhere">
                                   <Layers aria-hidden="true" className="w-3 h-3 shrink-0" />
                                   {t('ticketItem.artifactsCount', { count: nodeArtifacts.length })}
                                 </span>
                               )}
                             </div>
 
-                            <div className="flex items-center gap-3 shrink-0 ml-auto below-80rem:shrink below-80rem:min-w-0 below-80rem:flex-wrap below-80rem:gap-y-1.5 below-80rem:[justify-content:safe_flex-end]">
+                            <div className="flex items-center gap-3 shrink-0 ml-auto below-80rem:shrink below-80rem:min-w-0 below-80rem:flex-wrap below-80rem:gap-y-1.5 below-80rem:justify-end-safe">
                               {/* Approve/Reject show up for whichever
                                   approval_gate the ticket is actually
                                   stuck on (pendingApprovalNodeIds), even
@@ -2466,7 +2472,7 @@ export const TicketItem: React.FC<Props> = ({
                                     aria-disabled={isApprovalSubmitting || undefined}
                                     {...submittingProps(isApprovalSubmitting)}
                                     data-testid={`node-approve-${node.id}`}
-                                    className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded text-[11px] font-bold flex items-center gap-1 transition below-80rem:min-w-0 below-80rem:max-w-full below-80rem:flex-wrap below-80rem:[overflow-wrap:anywhere] upto-15rem:px-1"
+                                    className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded-sm text-[11px] font-bold flex items-center gap-1 transition below-80rem:min-w-0 below-80rem:max-w-full below-80rem:flex-wrap below-80rem:wrap-anywhere upto-15rem:px-1"
                                   >
                                     {isApprovalSubmitting ? (
                                       <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
@@ -2485,7 +2491,7 @@ export const TicketItem: React.FC<Props> = ({
                                     aria-disabled={isApprovalSubmitting || undefined}
                                     {...submittingProps(isApprovalSubmitting)}
                                     data-testid={`node-reject-${node.id}`}
-                                    className="px-2 py-1 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800 rounded text-[11px] font-bold flex items-center gap-1 transition below-80rem:min-w-0 below-80rem:max-w-full below-80rem:flex-wrap below-80rem:[overflow-wrap:anywhere] upto-15rem:px-1"
+                                    className="px-2 py-1 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800 rounded-sm text-[11px] font-bold flex items-center gap-1 transition below-80rem:min-w-0 below-80rem:max-w-full below-80rem:flex-wrap below-80rem:wrap-anywhere upto-15rem:px-1"
                                   >
                                     <X aria-hidden="true" className="w-3 h-3" />
                                     {t('ticketItem.approvalGate.reject')}
@@ -2570,7 +2576,7 @@ export const TicketItem: React.FC<Props> = ({
                                       </span>
                                       <span className="flex items-center gap-2">
                                         {downloadLink(art)}
-                                        <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded">
+                                        <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-sm">
                                           {art.type}
                                         </span>
                                       </span>
@@ -2595,7 +2601,7 @@ export const TicketItem: React.FC<Props> = ({
                                           src={(art.content || art.file_path || art.has_content) ? `/api/artifacts/${art.id}/content` : undefined}
                                           title={art.name}
                                           sandbox="allow-scripts"
-                                          className="w-full h-48 bg-white rounded border border-slate-300 dark:border-slate-600"
+                                          className="w-full h-48 bg-white rounded-sm border border-slate-300 dark:border-slate-600"
                                         />
                                       </div>
                                     )}
@@ -2656,7 +2662,7 @@ export const TicketItem: React.FC<Props> = ({
                       <div className="text-slate-500 dark:text-slate-400 text-center py-8 text-xs">{t('ticketItem.noHtmlYet')}</div>
                     ) : (
                       htmlArtifacts.map(h => (
-                        <div key={h.id} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 bg-white dark:bg-slate-800 shadow-xs">
+                        <div key={h.id} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 bg-white dark:bg-slate-800">
                           <div className="flex items-center justify-between mb-2">
                             <span className="font-bold text-xs text-cyan-700 dark:text-cyan-400">{h.name}</span>
                             {/* Served from the DB via
@@ -2672,7 +2678,7 @@ export const TicketItem: React.FC<Props> = ({
                             src={(h.content || h.file_path || h.has_content) ? `/api/artifacts/${h.id}/content` : undefined}
                             title={h.name}
                             sandbox="allow-scripts"
-                            className="w-full h-64 bg-white rounded border border-slate-300 dark:border-slate-600"
+                            className="w-full h-64 bg-white rounded-sm border border-slate-300 dark:border-slate-600"
                           />
                         </div>
                       ))
@@ -2698,7 +2704,7 @@ export const TicketItem: React.FC<Props> = ({
                             </span>
                             <span className="flex items-center gap-2">
                               {downloadLink(a)}
-                              <span className="text-[10px] px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 uppercase font-mono">
+                              <span className="text-[10px] px-2 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 uppercase font-mono">
                                 {a.type}
                               </span>
                             </span>
@@ -2730,13 +2736,13 @@ export const TicketItem: React.FC<Props> = ({
                               <img
                                 src={`/api/artifacts/${a.id}/content`}
                                 alt={a.name}
-                                className="max-h-40 rounded border border-slate-200 dark:border-slate-700 mt-2"
+                                className="max-h-40 rounded-sm border border-slate-200 dark:border-slate-700 mt-2"
                               />
                             ) : null
                           ) : a.type === 'html' ? (
                             <div className="mt-2">{openInNewTabLink(a)}</div>
                           ) : a.content ? (
-                            <pre className="font-mono text-[11px] text-slate-700 dark:text-slate-300 max-h-32 overflow-y-auto whitespace-pre-wrap mt-2 p-2 bg-white dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-700">
+                            <pre className="font-mono text-[11px] text-slate-700 dark:text-slate-300 max-h-32 overflow-y-auto whitespace-pre-wrap mt-2 p-2 bg-white dark:bg-slate-900 rounded-sm border border-slate-200 dark:border-slate-700">
                               {a.content}
                             </pre>
                           ) : null}
@@ -2751,10 +2757,14 @@ export const TicketItem: React.FC<Props> = ({
 
           {/* Action Footer: Claude Execution Panel. p-3 with large text on
               a narrow screen, like the details around it (DFLT-00227), and
-              below sm whatever the text size (DFLT-00252). */}
+              below sm whatever the text size (DFLT-00252). p-2 in a window
+              of 200 CSS px or less (DFLT-00259, see the detail panel). The
+              prompt box's border turns indigo on focus in dark mode as well
+              (dark:focus:border-indigo-500, DFLT-00259): without it
+              dark:border-slate-700 won over focus:border-indigo-500. */}
           <div
             data-testid="ticket-action-footer"
-            className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs"
+            className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 [@media(max-width:200px)]:p-2 rounded-xl border border-slate-200 dark:border-slate-800"
           >
             {/* The action row (DFLT-00181): the regular actions (refine, then
                 run) on the left, and at its right end, set apart from them,
@@ -2779,7 +2789,7 @@ export const TicketItem: React.FC<Props> = ({
                       onClick={() => handleRunClaude(t('claudePrompts.refineTicket', { ticketId: ticket.id }), ticket.id)}
                       disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
                       {...submittingProps(isRunning)}
-                      className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:[overflow-wrap:anywhere] items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
+                      className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
                     >
                       {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-600" />}
                       {t('ticketItem.actions.refine')}
@@ -2789,7 +2799,7 @@ export const TicketItem: React.FC<Props> = ({
                       onClick={() => handleRunClaude(t('claudePrompts.processTicket', { ticketId: ticket.id }), ticket.id)}
                       disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
                       {...submittingProps(isRunning)}
-                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:[overflow-wrap:anywhere] items-center gap-1.5 shadow-xs transition"
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition"
                     >
                       {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />}
                       {t('ticketItem.actions.run')}
@@ -2829,13 +2839,13 @@ export const TicketItem: React.FC<Props> = ({
                 // DFLT-00205: a persistent accessible name (the placeholder
                 // vanishes once typing starts).
                 aria-label={t('ticketItem.promptLabel')}
-                className="flex-1 min-w-0 max-sm:basis-24 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus:bg-white dark:focus:bg-slate-800 resize-none font-sans"
+                className="flex-1 min-w-0 max-sm:basis-24 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-indigo-500 dark:focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus:bg-white dark:focus:bg-slate-800 resize-none font-sans"
               />
               <button
                 onClick={handleSendPrompt}
                 disabled={isRunning || !promptText.trim()}
                 {...submittingProps(isRunning)}
-                className="px-4 max-sm:px-3 max-sm:py-2 max-sm:ml-auto max-w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex max-sm:flex-wrap max-sm:[overflow-wrap:anywhere] items-center justify-center gap-1.5 shadow-xs transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
+                className="px-4 max-sm:px-3 max-sm:py-2 max-sm:ml-auto max-w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center justify-center gap-1.5 transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
               >
                 {isRunning ? <Loader2 aria-hidden="true" className="w-4 h-4 shrink-0 animate-spin" /> : <Send aria-hidden="true" className="w-4 h-4 shrink-0" />}
                 {t('ticketItem.send')}

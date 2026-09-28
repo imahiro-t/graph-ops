@@ -140,7 +140,7 @@ describe.each(['ja', 'en'] as const)('TicketItem reject reason prompt on a narro
     const { prompt, confirm, cancel } = openPrompt();
     for (const button of [confirm, cancel]) {
       expect(prompt).toContainElement(button);
-      expect(button).toHaveClass('shrink-0', 'max-w-full', '[overflow-wrap:anywhere]');
+      expect(button).toHaveClass('shrink-0', 'max-w-full', 'wrap-anywhere');
       expectNoneOf(button, ['whitespace-nowrap', 'truncate']);
     }
   });

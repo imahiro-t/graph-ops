@@ -6,6 +6,8 @@
 // There is no scope switcher to protect any more (DFLT-00124): every tab
 // edits the one user tier, and the labels tab -- the only per-project one
 // left -- carries its own project selector.
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { useState } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -659,7 +661,7 @@ describe('SettingsModal at large text on a narrow, short screen', () => {
     expect(bareText).toHaveLength(0);
     const text = heading.querySelector('span');
     expect(text).toHaveTextContent(i18n.t('settings.modalTitle'));
-    expect(text).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
+    expect(text).toHaveClass('min-w-0', 'wrap-anywhere');
     expect(heading.querySelector('svg')).toHaveClass('upto-15rem:hidden');
     await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
   });
@@ -672,8 +674,74 @@ describe('SettingsModal at large text on a narrow, short screen', () => {
     const tabs = screen.getAllByRole('tab');
     expect(tabs).toHaveLength(7);
     for (const tab of tabs) {
-      expect(tab).toHaveClass('max-w-full', 'break-words');
+      expect(tab).toHaveClass('max-w-full', 'wrap-break-word');
     }
     await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
+  });
+});
+
+// DFLT-00261: below 48rem the settings editors stack and wrap instead of
+// filling the panel side by side, so the tab panel scrolls vertically there
+// (and stays overflow-hidden above it, as before). The `narrow:` variant is
+// defined in index.css with a rem media query -- unlike the pinned px
+// breakpoints (max-md: is `width < 768px`) -- so it follows the browser's
+// default font size: 1536px at a 200% default font, 768px at 16px. jsdom
+// evaluates no media queries, so the class and the variant's definition are
+// pinned; the layouts were measured in a real browser.
+describe('SettingsModal narrow reflow (DFLT-00261)', () => {
+  beforeEach(() => {
+    (fetchSettingsNodeTypes as unknown as Mock).mockResolvedValue([]);
+    (fetchSettingsNodeType as unknown as Mock).mockResolvedValue({ type: '', tier_text: '', merged_text: '' });
+    (fetchSettingsSkills as unknown as Mock).mockResolvedValue([]);
+    (fetchSettingsSkill as unknown as Mock).mockResolvedValue({ name: '', tier_text: '', merged_text: '' });
+    (fetchSettingsPlanTemplate as unknown as Mock).mockResolvedValue({ tier_text: 'plan-tier', merged_text: 'plan-merged' });
+    (fetchSettingsReviewTemplate as unknown as Mock).mockResolvedValue({ tier_text: 'review-tier', merged_text: 'review-merged' });
+    (fetchSettingsReportTemplate as unknown as Mock).mockResolvedValue({ tier_text: '', merged_text: '' });
+  });
+
+  it('lets the tab panel scroll vertically below 48rem and keeps overflow-hidden above it', async () => {
+    renderModal();
+    const panel = await screen.findByRole('tabpanel');
+    expect(panel).toHaveClass('flex-1', 'min-h-0', 'overflow-hidden', 'narrow:overflow-y-auto', 'narrow:scroll-py-3', 'focus-visible:ring-inset');
+  });
+
+  // QA round 1: the panel is the scroll container below 48rem and is shared
+  // by every tab, so each tab change must bring it back to the top rather
+  // than open the new tab at the old tab's scroll offset.
+  it('shows a newly selected tab from the top of the panel', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    const panel = await screen.findByRole('tabpanel');
+
+    panel.scrollTop = 800;
+    await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.skills') }));
+    await waitFor(() => expect(fetchSettingsSkills).toHaveBeenCalled());
+    expect(screen.getByRole('tabpanel')).toBe(panel);
+    expect(panel.scrollTop).toBe(0);
+
+    // Arrow-key tab changes go through the same path.
+    panel.scrollTop = 500;
+    screen.getByRole('tab', { name: i18n.t('settings.tabs.skills') }).focus();
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { selected: true })).not.toHaveAccessibleName(i18n.t('settings.tabs.skills'));
+    expect(panel.scrollTop).toBe(0);
+  });
+
+  it('keeps the scroll position while the tab stays the same', async () => {
+    renderModal();
+    const panel = await screen.findByRole('tabpanel');
+    panel.scrollTop = 300;
+    await act(async () => {
+      await i18n.changeLanguage('en');
+    });
+    expect(panel.scrollTop).toBe(300);
+    await act(async () => {
+      await i18n.changeLanguage('ja');
+    });
+  });
+
+  it('defines the narrow variant as a rem media query', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8');
+    expect(css).toMatch(/^@custom-variant narrow \(@media \(width < 48rem\)\);$/m);
   });
 });

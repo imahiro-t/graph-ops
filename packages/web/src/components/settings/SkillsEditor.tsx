@@ -125,11 +125,18 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   };
 
   return (
-    <div className="flex h-full min-h-0 gap-4">
+    <div className="flex h-full min-h-0 gap-4 narrow:flex-col narrow:h-auto">
       {confirmDialog}
-      {/* Left: skill list */}
-      <div className="w-56 shrink-0 border border-slate-200 dark:border-slate-800 rounded-lg overflow-y-auto bg-slate-50 dark:bg-slate-800">
-        <div className="px-3 py-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-slate-50 dark:bg-slate-800">
+      {/* Left: skill list. Its heading is sticky, so the list's scroll
+          padding (3rem, taller than the heading's 1rem padding + one 11px
+          line at any default font size) keeps an item that keyboard focus
+          scrolls into view -- e.g. by Shift+Tab -- below the heading instead
+          of under it, and z-10 keeps scrolled rows (and their delete
+          buttons) painted beneath the heading. It matters most below 48rem,
+          where the list is capped at max-h-40 and scrolls (DFLT-00261 A-1);
+          the padding only affects scroll-into-view, not the layout. */}
+      <div className="w-56 shrink-0 border border-slate-200 dark:border-slate-800 rounded-lg overflow-y-auto scroll-pt-12 bg-slate-50 dark:bg-slate-800 narrow:w-full narrow:max-h-40">
+        <div className="px-3 py-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10 bg-slate-50 dark:bg-slate-800">
           {t('settings.skills.listTitle')}
         </div>
         {skills.map(info => {
@@ -148,7 +155,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 selected === info.name ? 'bg-white dark:bg-slate-900 font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'
               }`}
             >
-              <span className="truncate flex-1">{labelKey ? t(labelKey) : info.name}</span>
+              <span className="truncate flex-1 narrow:whitespace-normal narrow:wrap-anywhere">{labelKey ? t(labelKey) : info.name}</span>
               {hasOverride && (
                 <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-blue-500" title={t('settings.skills.overrideBadge')} />
               )}
@@ -176,7 +183,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 role="region"
                 aria-labelledby={mergedPreviewLabelId}
                 tabIndex={0}
-                className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 max-h-40 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 max-h-40 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
               >
                 {mergedText || t('settings.skills.emptyMergedHint')}
               </pre>
@@ -188,11 +195,11 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 value={tierText}
                 onChange={e => setTierText(e.target.value)}
                 placeholder={t('settings.skills.tierTextPlaceholder')}
-                className="flex-1 min-h-[10rem] w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
+                className="flex-1 min-h-40 w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
               />
               <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">{t('settings.skills.emptyOverrideHint')}</p>
             </div>
-            <div className="flex justify-end items-center gap-2">
+            <div className="flex justify-end items-center gap-2 narrow:flex-wrap">
               {savedFlash && (
                 <span className="text-emerald-600 text-xs flex items-center gap-1">
                   <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}

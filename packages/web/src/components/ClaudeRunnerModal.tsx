@@ -74,14 +74,14 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
   // child. The panel's `overflow-hidden` only clips the rounded corners: it
   // has no height cap, so nothing inside is cut off.
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex p-4 overflow-y-auto overscroll-contain">
+    <div className="fixed inset-0 z-50 bg-black/40 flex p-4 overflow-y-auto overscroll-contain">
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-xl m-auto min-w-0 shadow-2xl overflow-hidden focus:outline-none"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-xl m-auto min-w-0 shadow-2xl overflow-hidden focus:outline-hidden"
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-2 px-6 upto-15rem:px-3 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800">
@@ -92,7 +92,7 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
               `overflow-wrap:anywhere` let it wrap inside the h2 instead. */}
           <h2 id={titleId} className="flex items-center gap-2 min-w-0 font-bold text-base text-slate-800 dark:text-slate-200">
             <Terminal className="w-5 h-5 shrink-0 upto-15rem:hidden text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
-            <span className="min-w-0 [overflow-wrap:anywhere]">{t('claudeRunnerModal.title')}</span>
+            <span className="min-w-0 wrap-anywhere">{t('claudeRunnerModal.title')}</span>
           </h2>
           <button
             type="button"
@@ -124,7 +124,7 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
               id={promptId}
               aria-describedby={hintId}
               rows={4}
-              className="w-full resize-y font-sans bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-indigo-500 dark:focus:border-indigo-400 focus:bg-white dark:focus:bg-slate-800 transition"
+              className="w-full resize-y font-sans bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-indigo-500 dark:focus:border-indigo-400 focus:bg-white dark:focus:bg-slate-800 transition"
               placeholder={t('claudeRunnerModal.placeholder')}
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
@@ -144,7 +144,7 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
               onClick={handleLaunch}
               disabled={isLaunching || !prompt.trim()}
               {...submittingProps(isLaunching)}
-              className="self-end px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg flex items-center gap-2 shadow-sm transition max-w-full break-words"
+              className="self-end px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg flex items-center gap-2 shadow-xs transition max-w-full wrap-break-word"
             >
               {isLaunching ? <Loader2 aria-hidden="true" className="w-4 h-4 shrink-0 animate-spin" /> : <ExternalLink aria-hidden="true" className="w-4 h-4 shrink-0" />}
               {t('claudeRunnerModal.launch')}

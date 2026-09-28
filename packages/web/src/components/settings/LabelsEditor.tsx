@@ -115,7 +115,7 @@ export const LabelColorPalette: React.FC<PaletteProps> = ({ value, onChange, dis
             onClick={() => {
               if (!busy) onChange(color);
             }}
-            className={`${dim} rounded-full ${meta.swatch} disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-wait focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
+            className={`${dim} rounded-full ${meta.swatch} disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-wait focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${
               selected ? 'ring-2 ring-offset-2 ring-slate-700 dark:ring-slate-200 dark:ring-offset-slate-900' : ''
             }`}
           />
@@ -482,7 +482,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   const errorDescribesName = createFailed && createError !== '';
 
   return (
-    <div ref={containerRef} className="h-full overflow-y-auto space-y-4 text-xs">
+    <div ref={containerRef} className="h-full overflow-y-auto space-y-4 text-xs narrow:h-auto narrow:overflow-visible">
       {confirmDialog}
       <div>
         <h3 className="flex items-center gap-1.5 font-bold text-sm text-slate-800 dark:text-slate-200">
@@ -492,7 +492,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
         <p className="mt-1 text-slate-500 dark:text-slate-400">{t('settings.labels.description')}</p>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 narrow:flex-wrap">
         <label htmlFor={projectSelectId} className="font-semibold text-slate-600 dark:text-slate-400">
           {t('settings.labels.projectLabel')}
         </label>
@@ -501,7 +501,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
           value={projectId}
           onChange={e => setProjectId(e.target.value)}
           disabled={projects.length === 0}
-          className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 disabled:opacity-50"
+          className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 disabled:opacity-50 narrow:min-w-0 narrow:max-w-full"
         >
           <option value="">{t('settings.labels.projectPlaceholder')}</option>
           {projects.map(p => (
@@ -548,7 +548,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
             aria-invalid={errorDescribesName || undefined}
             aria-describedby={errorDescribesName ? errorId : undefined}
             data-focus-key={CREATE_NAME_FOCUS_KEY}
-            className="px-2.5 py-1.5 w-56 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 disabled:opacity-50"
+            className="px-2.5 py-1.5 w-56 narrow:w-full narrow:min-w-0 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 disabled:opacity-50"
           />
           <button
             type="submit"
@@ -562,7 +562,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
           </button>
           {newName.trim() !== '' && <LabelChip name={newName.trim()} color={newColor} />}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 narrow:flex-wrap">
           <span className="font-semibold text-slate-600 dark:text-slate-400">{t('settings.labels.color')}</span>
           <LabelColorPalette
             value={newColor}
@@ -615,7 +615,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                 aria-busy={busy || undefined}
                 className="p-3 flex flex-wrap items-center gap-3"
               >
-                <div className="min-w-[10rem] flex items-center gap-2">
+                <div className="min-w-40 flex items-center gap-2 narrow:min-w-0 narrow:max-w-full">
                   {renaming ? (
                     <input
                       type="text"
@@ -643,7 +643,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                       aria-invalid={renameInvalid || undefined}
                       aria-describedby={renameInvalid ? rowErrorId : undefined}
                       data-focus-key={renameInputKey(label.id)}
-                      className="px-2 py-1 w-44 rounded bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
+                      className="px-2 py-1 w-44 narrow:w-full narrow:min-w-0 rounded-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                     />
                   ) : (
                     <LabelChip name={label.name} color={label.color} />
@@ -661,7 +661,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                   groupLabel={t('settings.labels.colorGroup', { name: label.name })}
                   size="sm"
                 />
-                <div className="ml-auto flex items-center gap-2">
+                <div className="ml-auto flex items-center gap-2 narrow:flex-wrap">
                   {/* DFLT-00168: the spinner is the only direct sign that this
                       row's save is in progress, so it needs 3:1 (WCAG 1.4.11)
                       against white / slate-900: 4.76:1 / 6.96:1. */}
@@ -673,7 +673,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                         onClick={() => handleRenameSave(label)}
                         disabled={busy}
                         data-focus-key={renameSaveKey(label.id)}
-                        className="px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold"
+                        className="px-2 py-1 rounded-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold"
                       >
                         {t('settings.labels.save')}
                       </button>
@@ -681,7 +681,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                         type="button"
                         onClick={() => finishRename(label)}
                         disabled={busy}
-                        className="px-2 py-1 rounded text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 font-semibold"
+                        className="px-2 py-1 rounded-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 font-semibold"
                       >
                         {t('settings.labels.cancel')}
                       </button>
@@ -700,7 +700,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                       disabled={busy}
                       aria-label={`${t('settings.labels.rename')}: ${label.name}`}
                       data-focus-key={renameButtonKey(label.id)}
-                      className="px-2 py-1 rounded text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 font-semibold disabled:opacity-50"
+                      className="px-2 py-1 rounded-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 font-semibold disabled:opacity-50"
                     >
                       <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
                       {t('settings.labels.rename')}
@@ -712,7 +712,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                     disabled={busy}
                     aria-label={`${t('settings.labels.delete')}: ${label.name}`}
                     data-focus-key={deleteButtonKey(label.id)}
-                    className="px-2 py-1 rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 flex items-center gap-1 font-semibold disabled:opacity-50"
+                    className="px-2 py-1 rounded-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 flex items-center gap-1 font-semibold disabled:opacity-50"
                   >
                     <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                     {t('settings.labels.delete')}

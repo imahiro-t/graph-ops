@@ -248,7 +248,7 @@ describe('SkillsEditor merged preview region', () => {
     const preview = region();
     expect(preview).toHaveAttribute('tabindex', '0');
     // jsdom computes no styles, so the focus ring classes are pinned.
-    expect(preview).toHaveClass('focus:outline-none', 'focus-visible:ring-2', 'focus-visible:ring-blue-500', 'max-h-40');
+    expect(preview).toHaveClass('focus:outline-hidden', 'focus-visible:ring-2', 'focus-visible:ring-blue-500', 'max-h-40');
 
     // The preview sits right before the tier text textarea in tab order.
     const textarea = screen.getByLabelText(i18n.t('settings.skills.tierTextLabel'));
@@ -278,5 +278,45 @@ describe('SkillsEditor merged preview region', () => {
     });
 
     expect(region()).toHaveTextContent('create-ticket-merged-text');
+  });
+});
+
+// DFLT-00261: as in NodeTypesEditor, below 48rem (`narrow:`, rem-based) the
+// w-56 list stacks above the editor at full width with a capped height, the
+// names wrap and the save row wraps; the wide classes stay. jsdom does no
+// layout, so the classes are pinned.
+describe('SkillsEditor narrow reflow (DFLT-00261)', () => {
+  beforeEach(() => {
+    mockedFetchSkills.mockReset();
+    mockedFetchSkill.mockReset();
+    mockedFetchSkills.mockResolvedValue(SKILLS);
+    stubFetchSkill();
+  });
+
+  it('stacks the list above the editor below 48rem and keeps the side-by-side classes', async () => {
+    const { container } = render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('create-ticket-tier-text');
+
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveClass('flex', 'h-full', 'min-h-0', 'gap-4', 'narrow:flex-col', 'narrow:h-auto');
+    const list = root.querySelector('.w-56') as HTMLElement;
+    expect(list).toHaveClass('w-56', 'shrink-0', 'overflow-y-auto', 'narrow:w-full', 'narrow:max-h-40');
+    const names = list.querySelectorAll('span.truncate');
+    expect(names.length).toBe(SKILLS.length);
+    for (const name of names) expect(name).toHaveClass('narrow:whitespace-normal', 'narrow:wrap-anywhere');
+    const saveRow = screen.getByRole('button', { name: i18n.t('settings.common.save') }).parentElement as HTMLElement;
+    expect(saveRow).toHaveClass('flex', 'justify-end', 'narrow:flex-wrap');
+  });
+
+  // A-1: below 48rem the list is a max-h-40 scroll box under a sticky
+  // heading, so an item focus scrolls into view must stop below the heading.
+  it('keeps a focused list item from scrolling under the sticky heading', async () => {
+    const { container } = render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('create-ticket-tier-text');
+
+    const list = (container.firstElementChild as HTMLElement).querySelector('.w-56') as HTMLElement;
+    expect(list).toHaveClass('overflow-y-auto', 'scroll-pt-12');
+    expect(list.firstElementChild).toHaveTextContent(i18n.t('settings.skills.listTitle'));
+    expect(list.firstElementChild).toHaveClass('sticky', 'top-0', 'z-10');
   });
 });

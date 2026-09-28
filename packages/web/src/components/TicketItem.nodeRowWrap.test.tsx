@@ -78,7 +78,7 @@
 // / ESS", "AWAITIN / G FIX") and, still rounded-full, looked like a tall
 // oval. `anywhere` makes a single character the badge's min-content width,
 // so the shrinking right group squeezed it that narrow. Under 80rem it is
-// now break-words (overflow-wrap: break-word), which keeps the longest word
+// now wrap-break-word (overflow-wrap: break-word), which keeps the longest word
 // as the min-content width, so it wraps at the spaces and breaks inside a
 // word only when that word cannot fit on a line of its own; and it is
 // rounded-xl there, a rounded rectangle when wrapped and still a pill on one
@@ -242,12 +242,12 @@ const ADDED = {
     `${UNDER_80REM}min-w-0`,
     `${UNDER_80REM}flex-wrap`,
     `${UNDER_80REM}gap-y-1.5`,
-    `${UNDER_80REM}[justify-content:safe_flex-end]`
+    `${UNDER_80REM}justify-end-safe`
   ],
-  id: [`${UNDER_80REM}shrink`, `${UNDER_80REM}min-w-0`, `${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}[overflow-wrap:anywhere]`],
+  id: [`${UNDER_80REM}shrink`, `${UNDER_80REM}min-w-0`, `${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}wrap-anywhere`],
   // From 80rem the name adds nothing to the left group's min-content width
   // (width 0) but is still laid out at its content width (content basis).
-  name: [`${FROM_80REM}w-0`, `${FROM_80REM}[flex-basis:content]`, `${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}[overflow-wrap:anywhere]`],
+  name: [`${FROM_80REM}w-0`, `${FROM_80REM}basis-[content]`, `${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}wrap-anywhere`],
   time: ['whitespace-nowrap'],
   approvalButtons: [`${UNDER_80REM}flex-wrap`, `${UNDER_80REM}min-w-0`, `${UNDER_80REM}max-w-full`],
   // DFLT-00253: each approve/reject button and the type badge may shrink
@@ -256,12 +256,12 @@ const ADDED = {
     `${UNDER_80REM}min-w-0`,
     `${UNDER_80REM}max-w-full`,
     `${UNDER_80REM}flex-wrap`,
-    `${UNDER_80REM}[overflow-wrap:anywhere]`,
+    `${UNDER_80REM}wrap-anywhere`,
     `${NARROW_LARGE_TEXT}px-1`
   ],
   typeBadge: [`${UNDER_80REM}shrink`, `${UNDER_80REM}min-w-0`, `${UNDER_80REM}max-w-full`],
   // DFLT-00253 round 2: the badge's label wraps under 80rem.
-  typeBadgeLabel: [`${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}[overflow-wrap:anywhere]`],
+  typeBadgeLabel: [`${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}wrap-anywhere`],
   // DFLT-00260: the retry, manual and artifact badges shrink and wrap under
   // 80rem too, so a 160px window no longer pushes them past the card.
   sideBadge: [
@@ -269,17 +269,17 @@ const ADDED = {
     `${UNDER_80REM}min-w-0`,
     `${UNDER_80REM}max-w-full`,
     `${UNDER_80REM}whitespace-normal`,
-    `${UNDER_80REM}[overflow-wrap:anywhere]`
+    `${UNDER_80REM}wrap-anywhere`
   ],
   // DFLT-00260: the status badge may wrap under 80rem (it sits in the right
   // group, whose items shrink by default). DFLT-00280: at the spaces
-  // (break-words, not anywhere), and as a rounded rectangle (rounded-xl);
+  // (wrap-break-word, not anywhere), and as a rounded rectangle (rounded-xl);
   // under 15rem it pads 0.25rem at the sides.
   statusBadge: [
     `${UNDER_80REM}min-w-0`,
     `${UNDER_80REM}max-w-full`,
     `${UNDER_80REM}whitespace-normal`,
-    `${UNDER_80REM}break-words`,
+    `${UNDER_80REM}wrap-break-word`,
     `${UNDER_80REM}rounded-xl`,
     `${NARROW_LARGE_TEXT}px-1`
   ]
@@ -314,7 +314,7 @@ const FORBIDDEN_UNPREFIXED = [
   'gap-y-2',
   'gap-y-1.5',
   'max-w-full',
-  '[justify-content:safe_flex-end]'
+  'justify-end-safe'
 ];
 
 beforeEach(() => {
@@ -352,9 +352,9 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     expect(name).toHaveClass(...ADDED.name);
     // One line from 80rem up; under 80rem it may wrap (DFLT-00260).
     expect(status).toHaveClass('rounded-full', 'whitespace-nowrap', 'px-2', ...ADDED.statusBadge);
-    expectNoneOf(status, ['min-w-0', 'max-w-full', 'whitespace-normal', '[overflow-wrap:anywhere]', 'break-words', 'rounded-xl', 'px-1']);
+    expectNoneOf(status, ['min-w-0', 'max-w-full', 'whitespace-normal', 'wrap-anywhere', 'wrap-break-word', 'rounded-xl', 'px-1']);
     // DFLT-00280: `anywhere` broke "IN PROGRESS" inside its words.
-    expectNoneOf(status, [`${UNDER_80REM}[overflow-wrap:anywhere]`]);
+    expectNoneOf(status, [`${UNDER_80REM}wrap-anywhere`]);
     expect(time).toHaveClass('whitespace-nowrap');
   });
 
@@ -410,7 +410,7 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     // line as before.
     const label = badge.querySelector('span') as HTMLElement;
     expect(label).toHaveClass('truncate', ...ADDED.typeBadgeLabel);
-    expectNoneOf(label, ['whitespace-normal', '[overflow-wrap:anywhere]', 'break-words']);
+    expectNoneOf(label, ['whitespace-normal', 'wrap-anywhere', '[overflow-wrap:anywhere]', 'wrap-break-word', 'break-words']);
     expect(classList(label).filter(c => c !== 'truncate' && !c.startsWith(UNDER_80REM))).toEqual([]);
     expect(label).toHaveTextContent(badge.getAttribute('title')!);
   });
@@ -425,8 +425,8 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     // min-content width, which (the name adding nothing) is the id and badges.
     expect(left).toHaveClass('flex-1', 'min-w-0', `${FROM_80REM}min-w-min`);
     expect(left).not.toHaveClass('min-w-min');
-    expect(name).toHaveClass('truncate', 'min-w-0', `${FROM_80REM}w-0`, `${FROM_80REM}[flex-basis:content]`);
-    expectNoneOf(name, ['w-0', '[flex-basis:content]', 'basis-0', 'grow', 'flex-1']);
+    expect(name).toHaveClass('truncate', 'min-w-0', `${FROM_80REM}w-0`, `${FROM_80REM}basis-[content]`);
+    expectNoneOf(name, ['w-0', 'basis-[content]', '[flex-basis:content]', 'basis-0', 'grow', 'flex-1']);
     // The one-line layout's badges still never wrap or shrink.
     for (const badge of left.querySelectorAll('span.whitespace-nowrap')) expect(badge).toHaveClass('shrink-0');
   });
@@ -491,7 +491,7 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     const { retry, manual, artifacts } = sideBadges();
     for (const badge of [retry, manual, artifacts]) {
       expect(badge).toHaveClass('shrink-0', 'whitespace-nowrap', ...ADDED.sideBadge);
-      expectNoneOf(badge, ['shrink', 'min-w-0', 'max-w-full', 'whitespace-normal', '[overflow-wrap:anywhere]']);
+      expectNoneOf(badge, ['shrink', 'min-w-0', 'max-w-full', 'whitespace-normal', 'wrap-anywhere']);
       expect(classList(badge).filter(hasPxPrefix)).toEqual([]);
     }
     // The artifact badge's icon keeps its size when the badge shrinks.
@@ -526,7 +526,7 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     for (const button of [approve, screen.getByTestId(`node-reject-${gate.id}`)]) {
       // px-2 stays the padding from 15rem up; under 15rem it is px-1.
       expect(button).toHaveClass('px-2', 'flex', ...ADDED.approvalButton);
-      expectNoneOf(button, ['min-w-0', 'max-w-full', 'flex-wrap', 'px-1', '[overflow-wrap:anywhere]']);
+      expectNoneOf(button, ['min-w-0', 'max-w-full', 'flex-wrap', 'px-1', 'wrap-anywhere', '[overflow-wrap:anywhere]']);
       expect(classList(button).filter(hasPxPrefix)).toEqual([]);
     }
     // They stay inside the right group, which moves to its own line as a whole.

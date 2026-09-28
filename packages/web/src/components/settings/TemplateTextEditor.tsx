@@ -111,7 +111,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
   };
 
   return (
-    <div className="flex flex-col gap-3 h-full min-h-0">
+    <div className="flex flex-col gap-3 h-full min-h-0 narrow:h-auto">
       <p className="text-[11px] text-slate-500 dark:text-slate-400">{t(`${i18nPrefix}.intro`)}</p>
       {error && (
         <ErrorBox role="alert" className="p-2.5 text-[11px] whitespace-pre-wrap">
@@ -134,7 +134,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
               role="region"
               aria-labelledby={previewLabelId}
               tabIndex={0}
-              className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 max-h-56 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 max-h-56 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
             >
               {mergedText}
             </pre>
@@ -150,11 +150,11 @@ export const TemplateTextEditor: React.FC<Props> = ({
               value={tierText}
               onChange={e => setTierText(e.target.value)}
               placeholder={t(`${i18nPrefix}.tierTextPlaceholder`)}
-              className="flex-1 min-h-[12rem] w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
+              className="flex-1 min-h-48 w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
             />
             <p id={hintId} className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">{t(`${i18nPrefix}.emptyOverrideHint`)}</p>
           </div>
-          <div className="flex justify-end items-center gap-2">
+          <div className="flex justify-end items-center gap-2 narrow:flex-wrap">
             {savedFlash && (
               <span role="status" className="text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-1">
                 <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}

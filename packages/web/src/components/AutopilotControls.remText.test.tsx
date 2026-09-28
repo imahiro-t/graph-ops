@@ -9,7 +9,9 @@
 // for the generated rule (see the ticket's implementation notes).
 // At 22px (a 200% default) a run ID such as "(run-20260927-012345-" is wider
 // than the row at 320px and has no break opportunity Chrome takes, so the
-// lines also break anywhere (break-words [overflow-wrap:anywhere]).
+// lines also break anywhere (wrap-anywhere). Not together with
+// wrap-break-word: on Tailwind v4 that one is emitted after wrap-anywhere
+// and would win, bringing back the overflow (DFLT-00270).
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,7 +28,8 @@ const expectRemText = (el: HTMLElement) => {
 };
 
 const expectBreaksAnywhere = (el: HTMLElement) => {
-  expect(el).toHaveClass('break-words', '[overflow-wrap:anywhere]');
+  expect(el).toHaveClass('wrap-anywhere');
+  expect(el).not.toHaveClass('wrap-break-word');
 };
 
 afterEach(async () => {
@@ -117,17 +120,62 @@ describe.each(['ja', 'en'] as const)('AutopilotControls sizes its small lines in
     await user.click(screen.getByRole('button', { name: i18n.t('autopilot.confirm.start') }));
     const dismiss = await screen.findByTestId('autopilot-untrusted-dismiss');
     expect(dismiss).toHaveAccessibleName(i18n.t('autopilot.untrustedDismiss'));
-    expect(dismiss).toHaveClass('min-h-6', 'min-w-6', 'inline-flex', 'items-center', 'justify-center');
+    // DFLT-00259: the minimum width is capped at the notice's content width
+    // (min(1.5rem,100%)), so it is still 1.5rem wherever that fits.
+    expect(dismiss).toHaveClass('min-h-6', 'min-w-[min(1.5rem,100%)]', 'inline-flex', 'items-center', 'justify-center');
+    expect(dismiss).not.toHaveClass('min-w-6');
     expect(dismiss).toHaveClass(
-      'focus:outline-none',
+      'focus:outline-hidden',
       'focus-visible:ring-2',
       'focus-visible:ring-violet-500',
       'dark:focus-visible:ring-violet-400'
     );
     // The existing wrapping stays (DFLT-00224 / DFLT-00225).
-    expect(dismiss).toHaveClass('shrink-0', 'max-w-full', 'max-sm:[overflow-wrap:anywhere]');
+    expect(dismiss).toHaveClass('shrink-0', 'max-w-full', 'max-sm:wrap-anywhere');
     await user.click(dismiss);
     expect(screen.queryByTestId('autopilot-untrusted')).not.toBeInTheDocument();
+  });
+
+  // DFLT-00259: in a 160px window at a 200% text size the notice had 0px of
+  // content width and the dismiss button's frame ran 31px past it (17px even
+  // without min-w-6). In a window of 200 CSS px or less (a px query: the 15rem
+  // one also matches 320-336px with a 32px default font, which must not
+  // change) the notice pads with p-1 and the button with px-0.5; together
+  // with the detail panel and the Action Footer padding with p-2 there
+  // (TicketItem.narrowPadding.test.tsx) the frame ended 9px inside the notice
+  // and the label inside the frame (Japanese and English, 32px root and 32px
+  // default font), while 320-336px at 200% and 100% at 360/1024px measured
+  // the same as before. jsdom does no layout, so this checks the classes;
+  // the geometry and the computed padding (p-1 over p-2, px-0.5 over px-2)
+  // were measured in a real browser.
+  it('narrows the notice and its dismiss button only in a window of 200px or less', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          run_id: 'run-1',
+          mode: 'tree',
+          root: 'T',
+          state: 'starting',
+          created: true,
+          resumed: false,
+          untrusted_folder: '/work/t'
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+    const user = userEvent.setup();
+    render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
+    await user.click(screen.getByTestId('autopilot-start'));
+    await user.click(screen.getByRole('button', { name: i18n.t('autopilot.confirm.start') }));
+    const dismiss = await screen.findByTestId('autopilot-untrusted-dismiss');
+    const notice = screen.getByTestId('autopilot-untrusted');
+    expect(notice).toHaveClass('p-2', '[@media(max-width:200px)]:p-1');
+    expect(notice).not.toHaveClass('upto-15rem:p-1');
+    expect(dismiss).toHaveClass('px-2', '[@media(max-width:200px)]:px-0.5');
+    expect(dismiss).not.toHaveClass('upto-15rem:px-0.5');
+    expect(dismiss).toHaveClass('min-h-6', 'max-w-full', 'shrink-0');
+    expect(dismiss).toHaveClass('focus-visible:ring-2', 'focus-visible:ring-violet-500', 'dark:focus-visible:ring-violet-400');
+    expect(dismiss).toHaveAccessibleName(i18n.t('autopilot.untrustedDismiss'));
   });
 
   it('sizes the reason under a disabled mode in the dialog in rem and breaks it anywhere', async () => {
