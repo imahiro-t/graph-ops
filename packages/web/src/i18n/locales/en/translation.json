@@ -192,7 +192,8 @@
       "empty": "No description yet",
       "refinedAt": "Refined {{time}}",
       "expand": "Show all",
-      "collapse": "Collapse"
+      "collapse": "Collapse",
+      "bodyRegion": "Description body (scrollable)"
     },
     "graphTitle": "Execution Graph (DAG / Loops)",
     "progress": "Progress {{percent}}%",

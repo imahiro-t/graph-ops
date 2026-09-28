@@ -191,7 +191,8 @@
       "empty": "説明はまだありません",
       "refinedAt": "{{time}} にリファイン",
       "expand": "すべて表示",
-      "collapse": "折りたたむ"
+      "collapse": "折りたたむ",
+      "bodyRegion": "説明の本文（スクロールできる）"
     },
     "graphTitle": "実行グラフ (DAG / ループ)",
     "progress": "進捗 {{percent}}%",
