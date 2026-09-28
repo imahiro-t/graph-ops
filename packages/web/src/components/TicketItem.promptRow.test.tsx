@@ -123,7 +123,9 @@ describe.each(['ja', 'en'] as const)('TicketItem prompt row layout (%s)', lng =>
     expect(button).not.toHaveClass('flex-wrap');
     expect(button).not.toHaveClass('sm:flex-wrap');
     expect(button).not.toHaveClass('wrap-anywhere');
+    expect(button).not.toHaveClass('[overflow-wrap:anywhere]');
     expect(button).not.toHaveClass('wrap-break-word');
+    expect(button).not.toHaveClass('break-words');
     expect(button).not.toHaveClass('break-all');
     expect(button).not.toHaveClass('ml-auto');
     expect(button).not.toHaveClass('px-3');

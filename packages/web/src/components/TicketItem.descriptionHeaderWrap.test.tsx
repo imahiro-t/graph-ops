@@ -169,6 +169,7 @@ describe.each(['ja', 'en'] as const)('TicketItem description header wraps on a n
     expect(body).toHaveTextContent('説明の本文');
     expect(body).toHaveClass('wrap-break-word', 'max-h-56', 'overflow-y-auto');
     expect(body).not.toHaveClass('wrap-anywhere');
+    expect(body).not.toHaveClass('[overflow-wrap:anywhere]');
     fireEvent.click(expand);
     expect(screen.getByRole('button', { name: i18n.t('ticketItem.description.collapse') })).toBeVisible();
     expect(body).toHaveClass('wrap-break-word');

@@ -42,7 +42,7 @@ export const AutopilotBadges: React.FC<{ view: TicketAutopilotView }> = ({ view 
           key={b}
           data-testid={`autopilot-badge-${b}`}
           title={b === 'awaitingHuman' && view.awaiting ? t('autopilot.badges.awaitingTitle', { what: view.awaiting }) : undefined}
-          className={`relative flex items-center gap-1 min-w-0 px-2 py-0.5 rounded-full border text-[0.6875rem] font-bold wrap-break-word wrap-anywhere ${STYLE[b]}`}
+          className={`relative flex items-center gap-1 min-w-0 px-2 py-0.5 rounded-full border text-[0.6875rem] font-bold wrap-anywhere ${STYLE[b]}`}
         >
           {ICON[b]}
           {t(`autopilot.badges.${b}`)}

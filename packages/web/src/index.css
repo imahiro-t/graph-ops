@@ -291,8 +291,16 @@
    border by a pixel, and lets a child's own mt-* add to the gap instead of
    being overridden by it. The rules below restore v3's behaviour for the
    values this app uses: the zero-specificity resets come after v4's own
-   rules and cancel them, and the v3 rules follow. A space-y / divide value
-   not listed here gets v4's behaviour -- add it here when you use one. */
+   rules and cancel them, and the v3 rules follow.
+   Only the values listed here are covered. A space-* / divide-* class (with
+   or without a variant) used anywhere else in src/ or index.html fails
+   src/tailwindV3Compat.test.ts until it has both its reset and its v3 rule
+   here, so a new value cannot silently fall back to v4's behaviour.
+   divide colors: v4 colors every child but the last, the first included;
+   v3 left the first child's border color alone (the base rule's gray-200
+   unless a utility of its own set one). The color reset puts gray-200 back
+   on every child at zero specificity, so a child's own border-* color
+   utility still wins, as on v3. */
 @layer utilities {
   :where(.space-y-0\.5, .space-y-1, .space-y-1\.5, .space-y-2, .space-y-3, .space-y-4, .space-y-6) > * {
     margin-block-end: 0;
@@ -338,14 +346,18 @@
     border-left-width: 1px;
   }
 
-  @media (width >= 640px) {
-    .sm\:divide-x > :not([hidden]) ~ :not([hidden]) {
+  .sm\:divide-x > :not([hidden]) ~ :not([hidden]) {
+    @variant sm {
       border-left-width: 1px;
     }
   }
 
   .divide-y > :not([hidden]) ~ :not([hidden]) {
     border-top-width: 1px;
+  }
+
+  :where(.divide-slate-100, .divide-slate-200, .dark\:divide-slate-700:is(.dark *), .dark\:divide-slate-800:is(.dark *)) > * {
+    border-color: var(--color-gray-200);
   }
 
   .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {

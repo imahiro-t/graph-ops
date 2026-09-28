@@ -9,7 +9,9 @@
 // for the generated rule (see the ticket's implementation notes).
 // At 22px (a 200% default) a run ID such as "(run-20260927-012345-" is wider
 // than the row at 320px and has no break opportunity Chrome takes, so the
-// lines also break anywhere (wrap-break-word wrap-anywhere).
+// lines also break anywhere (wrap-anywhere). Not together with
+// wrap-break-word: on Tailwind v4 that one is emitted after wrap-anywhere
+// and would win, bringing back the overflow (DFLT-00270).
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,7 +28,8 @@ const expectRemText = (el: HTMLElement) => {
 };
 
 const expectBreaksAnywhere = (el: HTMLElement) => {
-  expect(el).toHaveClass('wrap-break-word', 'wrap-anywhere');
+  expect(el).toHaveClass('wrap-anywhere');
+  expect(el).not.toHaveClass('wrap-break-word');
 };
 
 afterEach(async () => {

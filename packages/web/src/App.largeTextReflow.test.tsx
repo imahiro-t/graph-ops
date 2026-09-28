@@ -204,6 +204,7 @@ describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 1
       expect(el.parentElement).toBe(heading);
       expect(el).toHaveClass(`${NARROW}min-w-0`, `${NARROW}wrap-anywhere`);
       expect(el).not.toHaveClass('wrap-anywhere');
+      expect(el).not.toHaveClass('[overflow-wrap:anywhere]');
     }
   });
 
@@ -302,6 +303,7 @@ describe.each(['ja', 'en'] as const)('summary card with a root font size set on 
       );
       expect(el).not.toHaveClass('min-w-0');
       expect(el).not.toHaveClass('wrap-anywhere');
+      expect(el).not.toHaveClass('[overflow-wrap:anywhere]');
     }
   });
 

@@ -191,7 +191,7 @@ describe('autopilot in the Web UI', () => {
       expect(button).toHaveClass('flex', 'max-sm:flex-wrap', 'max-sm:wrap-anywhere');
       // One class per assertion: a negated multi-class toHaveClass passes as
       // soon as any one of the classes is missing, so it would check nothing.
-      for (const cls of ['flex-wrap', 'wrap-anywhere', 'wrap-break-word', 'sm:flex-wrap']) {
+      for (const cls of ['flex-wrap', 'wrap-anywhere', '[overflow-wrap:anywhere]', 'wrap-break-word', 'break-words', 'sm:flex-wrap']) {
         expect(button).not.toHaveClass(cls);
       }
       // The icon keeps its size when the label wraps.

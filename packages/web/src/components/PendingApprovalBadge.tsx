@@ -6,10 +6,10 @@ import { useTranslation } from 'react-i18next';
 // contrast depends only on these two colors and not on whatever the menu
 // item behind the badge is painted (its hover background included). With
 // Tailwind v3's default palette (src/index.css pins the v3 hex values in
-// its @theme block, amber included) the text contrast is 6.37:1 in light (amber-800 #92400e on
-// amber-100 #fef3c7) and 8.15:1 in dark (amber-100 #fef3c7 on amber-900
-// #78350f), both above WCAG 1.4.3's 4.5:1. No blink here: the menu is
-// already what the user opened to look at.
+// its @theme block, amber included) the text contrast is 6.37:1 in light
+// (amber-800 #92400e on amber-100 #fef3c7) and 8.15:1 in dark (amber-100
+// #fef3c7 on amber-900 #78350f), both above WCAG 1.4.3's 4.5:1. No blink
+// here: the menu is already what the user opened to look at.
 export const PENDING_APPROVAL_BADGE_CLASSES =
   'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-100';
 

@@ -72,8 +72,10 @@ describe.each(['ja', 'en'] as const)('AutopilotBadges (%s)', lng => {
     render(<AutopilotBadges view={view(ALL_BADGES, 'release approval')} />);
     for (const b of ALL_BADGES) {
       const badge = screen.getByTestId(`autopilot-badge-${b}`);
-      expect(badge).toHaveClass('min-w-0', 'wrap-break-word', 'wrap-anywhere');
-      expectNoneOf(badge, ['whitespace-nowrap', 'truncate', 'overflow-hidden', 'shrink-0']);
+      expect(badge).toHaveClass('min-w-0', 'wrap-anywhere');
+      // wrap-break-word would win over wrap-anywhere on Tailwind v4 (it is
+      // emitted later) and undo the anywhere break (DFLT-00270).
+      expectNoneOf(badge, ['whitespace-nowrap', 'truncate', 'overflow-hidden', 'shrink-0', 'wrap-break-word']);
     }
   });
 

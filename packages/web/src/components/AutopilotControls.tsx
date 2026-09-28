@@ -128,11 +128,13 @@ const DIALOG_MODES: AutopilotMode[] = ['tree', 'ticket'];
 // The lines under the button (and the mode reasons in the dialog) are sized
 // in rem too (text-[0.6875rem], 11px at the default 16px), so they grow with
 // the browser's default font size like the rest of the row (DFLT-00225).
-// They break anywhere (wrap-break-word wrap-anywhere), as the notice
-// already did: a run ID such as "(run-20260927-012345-" has no break
-// opportunity Chrome takes, and at 22px it is wider than the 124px row at
-// 320px with a 200% default font size. overflow-wrap:anywhere also shrinks
-// their min-content, so they never widen the column the divider relies on.
+// They break anywhere (wrap-anywhere), as the notice already did: a run ID
+// such as "(run-20260927-012345-" has no break opportunity Chrome takes, and
+// at 22px it is wider than the 124px row at 320px with a 200% default font
+// size. overflow-wrap:anywhere also shrinks their min-content, so they never
+// widen the column the divider relies on. wrap-anywhere alone, without
+// wrap-break-word: Tailwind v4 emits wrap-break-word after wrap-anywhere, so
+// with both on an element break-word would win and undo this (DFLT-00270).
 // With larger text the column can then be as narrow as its button on sm+
 // as well, so the untrusted-folder notice moves its dismiss button under
 // the text at any width, not only below sm.
@@ -365,7 +367,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
           {view.awaiting && (
             // What the person is waited on for, as text a sighted keyboard user
             // can read too (the badge only carries it as a tooltip).
-            <p data-testid="autopilot-awaiting" className="self-stretch text-[0.6875rem] wrap-break-word wrap-anywhere text-amber-900 dark:text-amber-100">
+            <p data-testid="autopilot-awaiting" className="self-stretch text-[0.6875rem] wrap-anywhere text-amber-900 dark:text-amber-100">
               {t('autopilot.badges.awaitingTitle', { what: view.awaiting })}
             </p>
           )}
@@ -374,7 +376,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
               key={r}
               id={reasonIds[i]}
               data-testid="autopilot-disabled-reason"
-              className="self-stretch text-[0.6875rem] wrap-break-word wrap-anywhere text-slate-600 dark:text-slate-400"
+              className="self-stretch text-[0.6875rem] wrap-anywhere text-slate-600 dark:text-slate-400"
             >
               {r}
             </p>
@@ -384,7 +386,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
             <div
               aria-hidden="true"
               data-testid="autopilot-message"
-              className={`self-stretch p-2 rounded-lg border text-[0.6875rem] wrap-break-word wrap-anywhere ${
+              className={`self-stretch p-2 rounded-lg border text-[0.6875rem] wrap-anywhere ${
                 message.error
                   ? 'bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
                   : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
@@ -413,7 +415,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
               data-testid="autopilot-untrusted"
               className="self-stretch flex flex-wrap items-start gap-2 p-2 rounded-lg border text-[0.6875rem] bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100"
             >
-              <p aria-hidden="true" className="flex-1 basis-24 min-w-0 wrap-break-word wrap-anywhere">
+              <p aria-hidden="true" className="flex-1 basis-24 min-w-0 wrap-anywhere">
                 {t('autopilot.untrustedFolder', { path: untrustedFolder })}
               </p>
               <button
@@ -470,7 +472,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
                           <p
                             id={reasonId}
                             data-testid={`autopilot-mode-reason-${mode}`}
-                            className="ml-6 mt-0.5 text-[0.6875rem] wrap-break-word wrap-anywhere text-slate-600 dark:text-slate-400"
+                            className="ml-6 mt-0.5 text-[0.6875rem] wrap-anywhere text-slate-600 dark:text-slate-400"
                           >
                             {reason}
                           </p>

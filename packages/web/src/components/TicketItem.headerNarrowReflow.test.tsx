@@ -113,6 +113,7 @@ describe.each(['ja', 'en'] as const)('TicketItem header row in a narrow window (
     // Unconditional forms would change the one-line ID at every width.
     expect(id).not.toHaveClass('whitespace-normal');
     expect(id).not.toHaveClass('wrap-anywhere');
+    expect(id).not.toHaveClass('[overflow-wrap:anywhere]');
     // The copy button still follows the ID directly.
     expect(id.nextElementSibling).toContainElement(screen.getByTestId('ticket-copy-id'));
   });

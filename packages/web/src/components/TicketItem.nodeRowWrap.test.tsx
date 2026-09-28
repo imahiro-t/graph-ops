@@ -331,7 +331,7 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     // line as before.
     const label = badge.querySelector('span') as HTMLElement;
     expect(label).toHaveClass('truncate', ...ADDED.typeBadgeLabel);
-    expectNoneOf(label, ['whitespace-normal', 'wrap-anywhere', 'wrap-break-word']);
+    expectNoneOf(label, ['whitespace-normal', 'wrap-anywhere', '[overflow-wrap:anywhere]', 'wrap-break-word', 'break-words']);
     expect(classList(label).filter(c => c !== 'truncate' && !c.startsWith(UNDER_80REM))).toEqual([]);
     expect(label).toHaveTextContent(badge.getAttribute('title')!);
   });
@@ -347,7 +347,7 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     expect(left).toHaveClass('flex-1', 'min-w-0', `${FROM_80REM}min-w-min`);
     expect(left).not.toHaveClass('min-w-min');
     expect(name).toHaveClass('truncate', 'min-w-0', `${FROM_80REM}w-0`, `${FROM_80REM}basis-[content]`);
-    expectNoneOf(name, ['w-0', 'basis-[content]', 'basis-0', 'grow', 'flex-1']);
+    expectNoneOf(name, ['w-0', 'basis-[content]', '[flex-basis:content]', 'basis-0', 'grow', 'flex-1']);
     // The one-line layout's badges still never wrap or shrink.
     for (const badge of left.querySelectorAll('span.whitespace-nowrap')) expect(badge).toHaveClass('shrink-0');
   });
@@ -362,7 +362,7 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     for (const button of [approve, screen.getByTestId(`node-reject-${gate.id}`)]) {
       // px-2 stays the padding from 15rem up; under 15rem it is px-1.
       expect(button).toHaveClass('px-2', 'flex', ...ADDED.approvalButton);
-      expectNoneOf(button, ['min-w-0', 'max-w-full', 'flex-wrap', 'px-1', 'wrap-anywhere']);
+      expectNoneOf(button, ['min-w-0', 'max-w-full', 'flex-wrap', 'px-1', 'wrap-anywhere', '[overflow-wrap:anywhere]']);
       expect(classList(button).filter(hasPxPrefix)).toEqual([]);
     }
     // They stay inside the right group, which moves to its own line as a whole.
