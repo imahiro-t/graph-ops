@@ -35,6 +35,7 @@ import { CreateTicketModal } from './components/CreateTicketModal';
 import { PendingApprovalBadge } from './components/PendingApprovalBadge';
 import { useClaudeLaunch } from './hooks/useClaudeLaunch';
 import { useTheme, ThemePreference } from './hooks/useTheme';
+import { useFitsSticky } from './hooks/useFitsSticky';
 import { formatTime } from './i18n/formatDate';
 import { localizedApiErrorMessage } from './lib/apiError';
 import { apiFetch } from './lib/apiFetch';
@@ -1037,6 +1038,17 @@ export const App: React.FC = () => {
     before: string[];
   } | null>(null);
   const ticketListRef = useRef<HTMLDivElement>(null);
+  // DFLT-00258: the header is pinned (from lg up) only while it takes at
+  // most a quarter of the window's height, or is at most 128px tall. With the
+  // default font it is 114px from lg up (measured at 1024-2560px, ja and
+  // en), so the 128px floor keeps it pinned as before in any window height
+  // -- a quarter alone would unpin it below a 456px-tall window, such as a
+  // laptop with the developer tools docked below. With a 200% root font it
+  // is about 532px in a 1024x768 window (69%) and 460px in a 1280x800 one
+  // (58%), and pinned it covered the ticket header rows' buttons. Then it
+  // scrolls away with the page, as it does below lg.
+  const headerRef = useRef<HTMLElement>(null);
+  const headerFitsSticky = useFitsSticky(headerRef, 0.25, 128);
   const newTicketButtonRef = useRef<HTMLButtonElement>(null);
   const filteredTicketsRef = useLatest(filteredTickets);
   const { message: ticketDeleteNotice, announce: announceTicketDelete } = useTransientAnnouncement();
@@ -1108,8 +1120,14 @@ export const App: React.FC = () => {
           expanded ticket's Action Footer while scrolling. `relative` keeps
           z-30 in effect there, so the project switcher's and the filters'
           panels still open in front of <main>. At lg and up it looks and
-          behaves as before (same padding, one line, sticky). */}
-      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 lg:px-6 py-3.5 relative lg:sticky lg:top-0 z-30 shadow-xs">
+          behaves as before (same padding, one line, sticky). DFLT-00258:
+          not sticky while it is taller than a quarter of the window (see
+          headerFitsSticky), so a header grown by large text never covers
+          focusable elements; `relative` and z-30 stay either way. */}
+      <header
+        ref={headerRef}
+        className={`bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 lg:px-6 py-3.5 relative${headerFitsSticky ? ' lg:sticky lg:top-0' : ''} z-30 shadow-xs`}
+      >
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
             {/* Same file as the favicon, so the two never drift apart. It paints its own indigo
@@ -1410,8 +1428,15 @@ export const App: React.FC = () => {
             word of about 180px that ran 2px past the window. It now breaks
             after the slash first (<wbr>) and anywhere as a last resort. An
             item only narrows when it is wider than a whole line of the
-            row, so with the default font nothing moves. */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs flex flex-wrap items-center justify-between gap-4">
+            row, so with the default font nothing moves.
+            DFLT-00258: the labels are 0.6875rem (11px at the default font)
+            so they follow the text size, and each side of the node
+            progress is whitespace-nowrap, so it breaks only after the slash
+            and never inside a number ("9997" / "2/"). Five digits
+            ("99997/", about 158px at 36px text) fit the item at 320px with
+            a 32px root; six or more could run past it, which no real
+            ticket list reaches. */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs flex flex-wrap items-center justify-between gap-4 [container-type:inline-size]">
           {/* DFLT-00251: in English at 160px the title and its note kept
               their min-content width ("Overview", "artifacts)") and ran 5px
               past the window. Under 15rem the two may now wrap onto lines
@@ -1419,13 +1444,23 @@ export const App: React.FC = () => {
               at 320-414px with the default font the title and the note sit
               side by side, each wrapping its own text, and letting them
               wrap (or shrink below their longest word) there would change
-              that look. */}
+              that look.
+              DFLT-00258: the same when the card itself is narrower than
+              12rem. The 15rem media query does not follow a root font size
+              set on the page (English at 320-336px with a 32px root: the
+              note's last line ended 26px past the card), but a container
+              query's rem is the root element's actual font size. In English
+              the pair overflows below about 7.3rem of card width; 12rem
+              leaves room for that and, with the default font, only matches
+              below 192px of card width (a window under about 250px), well
+              clear of the 262px the card has at 320px. The card is the
+              container: its width comes from <main>, not from its content. */}
           <div
             data-testid="summary-heading"
-            className="flex [@media(max-width:15rem)]:flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 max-w-full"
+            className="flex [@media(max-width:15rem)]:flex-wrap [@container(max-width:12rem)]:flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 max-w-full"
           >
-            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm [@media(max-width:15rem)]:min-w-0 [@media(max-width:15rem)]:[overflow-wrap:anywhere]">{t('summary.title')}</span>
-            <span className="text-xs text-slate-500 dark:text-slate-400 [@media(max-width:15rem)]:min-w-0 [@media(max-width:15rem)]:[overflow-wrap:anywhere]">{t('summary.subtitle')}</span>
+            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm [@media(max-width:15rem)]:min-w-0 [@media(max-width:15rem)]:[overflow-wrap:anywhere] [@container(max-width:12rem)]:min-w-0 [@container(max-width:12rem)]:[overflow-wrap:anywhere]">{t('summary.title')}</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 [@media(max-width:15rem)]:min-w-0 [@media(max-width:15rem)]:[overflow-wrap:anywhere] [@container(max-width:12rem)]:min-w-0 [@container(max-width:12rem)]:[overflow-wrap:anywhere]">{t('summary.subtitle')}</span>
           </div>
 
           <div
@@ -1434,28 +1469,28 @@ export const App: React.FC = () => {
           >
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold [overflow-wrap:anywhere] text-slate-800 dark:text-slate-200">{totalCount}</div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.total')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('summary.total')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold [overflow-wrap:anywhere] text-blue-600 dark:text-blue-400">{inProgressCount}</div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.inProgress')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('summary.inProgress')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold [overflow-wrap:anywhere] text-purple-600 dark:text-purple-400">{inReviewCount}</div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.inReview')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('summary.inReview')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold [overflow-wrap:anywhere] text-emerald-600 dark:text-emerald-400">{doneCount}</div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.done')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('summary.done')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div
                 data-testid="summary-node-progress"
                 className="text-lg font-bold [overflow-wrap:anywhere] text-slate-800 dark:text-slate-200"
               >
-                {doneNodesCount}/<wbr />{totalNodesCount}
+                <span className="whitespace-nowrap">{doneNodesCount}/</span><wbr /><span className="whitespace-nowrap">{totalNodesCount}</span>
               </div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">{t('summary.nodeProgress')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('summary.nodeProgress')}</div>
             </div>
           </div>
         </div>
@@ -1557,7 +1592,12 @@ export const App: React.FC = () => {
                 // wider than the row with a two-digit page number
                 // ("10 / 23"), so under 15rem its gaps shrink to gap-2; and
                 // the count may break inside a long run of digits.
-                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mt-2 px-1 text-xs text-slate-500 dark:text-slate-400">
+                // DFLT-00258: with a three-digit page number ("100 / 123")
+                // the group was 137px wide and ended 9px past the row's
+                // content (128px) and 5px past <main>'s. Under 15rem the
+                // gaps are now gap-1 and the row drops its px-1, which makes
+                // the group 129px in a 136px row.
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mt-2 px-1 [@media(max-width:15rem)]:px-0 text-xs text-slate-500 dark:text-slate-400">
                   <span className="min-w-0 [overflow-wrap:anywhere]">
                     {t('pagination.range', {
                       from: (currentPage - 1) * ticketsPerPage + 1,
@@ -1565,7 +1605,7 @@ export const App: React.FC = () => {
                       total: filteredTickets.length
                     })}
                   </span>
-                  <div className="flex items-center gap-3 [@media(max-width:15rem)]:gap-2 shrink-0">
+                  <div className="flex items-center gap-3 [@media(max-width:15rem)]:gap-1 shrink-0">
                     <button
                       onClick={() => setPage(p => Math.max(1, p - 1))}
                       aria-label={t('pagination.previous')}

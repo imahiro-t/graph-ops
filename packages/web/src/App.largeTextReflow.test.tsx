@@ -207,11 +207,18 @@ describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 1
     }
   });
 
+  // DFLT-00258: gap-1 (was gap-2) and no side padding on the row under
+  // 15rem, so a three-digit page number ("100 / 123", a 137px group before)
+  // fits the 136px row of a 160px window. From 15rem up nothing changes.
   it('closes up the pagination buttons under 15rem and lets the count break', async () => {
     await renderApp();
     const previous = screen.getByRole('button', { name: i18n.t('pagination.previous') });
     const group = previous.parentElement as HTMLElement;
-    expect(group).toHaveClass('gap-3', `${NARROW}gap-2`, 'shrink-0');
+    expect(group).toHaveClass('gap-3', `${NARROW}gap-1`, 'shrink-0');
+    expect(group).not.toHaveClass(`${NARROW}gap-2`);
+    const row = group.parentElement as HTMLElement;
+    expect(row).toHaveClass('px-1', `${NARROW}px-0`);
+    expect(row).not.toHaveClass('px-0');
     const range = screen.getByText(i18n.t('pagination.range', { from: 1, to: PAGE_SIZE, total: TICKET_COUNT }));
     expect(range).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
   });
@@ -255,5 +262,84 @@ describe.each(['ja', 'en'] as const)('summary card numbers with large text (%s)'
     expect(wbr).not.toBeNull();
     expect(wbr?.previousSibling?.textContent).toMatch(/\/$/);
     expect(wbr?.nextSibling?.textContent).toBe('0');
+  });
+});
+
+// DFLT-00258: the rest of DFLT-00251's backlog on the summary card.
+describe.each(['ja', 'en'] as const)('summary card with a root font size set on the page (%s)', lng => {
+  const NARROW = '[@media(max-width:15rem)]:';
+  const CARD_NARROW = '[@container(max-width:12rem)]:';
+
+  beforeEach(async () => {
+    seed();
+    await i18n.changeLanguage(lng);
+  });
+
+  // The 15rem media query does not follow a root font size set on the page;
+  // a container query's rem does. In English at 320-336px with a 32px root
+  // the note ran 26px past the card; with the default font the card is
+  // 262px wide at 320px, well over 12rem (192px), so nothing changes there.
+  it('lets the heading wrap when the card is narrower than 12rem, keeping the 15rem query', async () => {
+    await renderApp();
+    const heading = screen.getByTestId('summary-heading');
+    const card = heading.parentElement as HTMLElement;
+    expect(card).toHaveClass('[container-type:inline-size]');
+    expect(card).toBe(screen.getByTestId('summary-metrics').parentElement);
+    // The heading's width comes from its content, so it is not a container.
+    expect(heading.className).not.toMatch(/container-type/);
+    expect(heading).toHaveClass(`${NARROW}flex-wrap`, `${CARD_NARROW}flex-wrap`);
+    expect(heading).not.toHaveClass('flex-wrap');
+    const spans = Array.from(heading.children) as HTMLElement[];
+    expect(spans).toHaveLength(2);
+    expect(spans[0]).toHaveTextContent(i18n.t('summary.title'));
+    expect(spans[1]).toHaveTextContent(i18n.t('summary.subtitle'));
+    for (const el of spans) {
+      expect(el).toHaveClass(
+        `${NARROW}min-w-0`,
+        `${NARROW}[overflow-wrap:anywhere]`,
+        `${CARD_NARROW}min-w-0`,
+        `${CARD_NARROW}[overflow-wrap:anywhere]`
+      );
+      expect(el).not.toHaveClass('min-w-0');
+      expect(el).not.toHaveClass('[overflow-wrap:anywhere]');
+    }
+  });
+
+  it('sizes the five figure labels in rem (11px at the default font), not px', async () => {
+    await renderApp();
+    const metrics = screen.getByTestId('summary-metrics');
+    const labels = (Array.from(metrics.children) as HTMLElement[]).map(item => item.children[1] as HTMLElement);
+    expect(labels.map(l => l.textContent)).toEqual(
+      ['total', 'inProgress', 'inReview', 'done', 'nodeProgress'].map(key => i18n.t(`summary.${key}`))
+    );
+    for (const label of labels) expect(label).toHaveClass('text-[0.6875rem]');
+    const card = metrics.parentElement as HTMLElement;
+    expect(card.querySelector('[class*="text-[11px]"]')).toBeNull();
+  });
+
+  // Each side of the slash is whitespace-nowrap, so the only break left is
+  // the <wbr> after the slash: never "9997" / "2/".
+  it('breaks the node progress only after the slash, never inside a number', async () => {
+    await renderApp();
+    const progress = screen.getByTestId('summary-node-progress');
+    expect(progress).toHaveTextContent(/^0\/0$/);
+    const wbr = progress.querySelector('wbr') as HTMLElement;
+    const before = wbr.previousSibling as HTMLElement;
+    const after = wbr.nextSibling as HTMLElement;
+    expect(before.tagName).toBe('SPAN');
+    expect(before).toHaveClass('whitespace-nowrap');
+    expect(before.textContent).toBe('0/');
+    expect(after.tagName).toBe('SPAN');
+    expect(after).toHaveClass('whitespace-nowrap');
+    expect(after.textContent).toBe('0');
+    expect(Array.from(progress.childNodes)).toEqual([before, wbr, after]);
+
+    // The other four numbers keep breaking anywhere as a last resort.
+    const items = Array.from(screen.getByTestId('summary-metrics').children) as HTMLElement[];
+    for (const item of items.slice(0, 4)) {
+      const number = item.firstElementChild as HTMLElement;
+      expect(number).toHaveClass('[overflow-wrap:anywhere]');
+      expect(number.querySelector('.whitespace-nowrap')).toBeNull();
+    }
   });
 });

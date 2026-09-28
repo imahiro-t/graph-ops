@@ -305,8 +305,9 @@ describe('collapsed cards', () => {
     // One of three nodes done, on each card...
     expect(screen.getAllByText('1/3')).toHaveLength(3);
     // ...and the dashboard's total over every ticket, which is computed from
-    // the same nodes.
-    expect(screen.getByText('3/9')).toBeInTheDocument();
+    // the same nodes. (Each side of its slash is its own span since
+    // DFLT-00258, so it is found by its test ID rather than by one text.)
+    expect(screen.getByTestId('summary-node-progress')).toHaveTextContent(/^3\/9$/);
     expect(screen.getAllByTitle(/^計画作成 \(/)).toHaveLength(3);
     expect(screen.getAllByTitle(/^実装 \(/)).toHaveLength(3);
     // The approval gate the ticket is not at yet is shown as a plain TODO

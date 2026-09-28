@@ -14,7 +14,7 @@
 // measured in a real browser (see the ticket's implementation notes).
 //
 // fetch is served by test/fakeBackend.ts, like App.iconA11y.test.tsx.
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
 import App from './App';
@@ -123,6 +123,156 @@ describe('App header layout on narrow screens', () => {
     // An unprefixed divide-x would draw a stray line at the start of a
     // wrapped row.
     expect(classes).not.toContain('divide-x');
+  });
+});
+
+// DFLT-00258: from lg up the header is sticky only while it takes at most a
+// quarter of the window's height or is at most 128px tall. With a 200% root
+// font size set on the page it was about 532px tall in a 1024x768 window and,
+// pinned, covered the ticket header rows' buttons (WCAG 2.4.11). jsdom
+// computes no layout, so offsetHeight and innerHeight are stubbed; the real
+// heights were measured in a browser (see the ticket's implementation notes).
+describe('App header stickiness follows its height', () => {
+  let headerHeight = 0;
+  let observers: { callback: ResizeObserverCallback; targets: Element[] }[] = [];
+
+  beforeEach(() => {
+    seed();
+    headerHeight = 0;
+    observers = [];
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.tagName === 'HEADER' ? headerHeight : 0;
+    });
+  });
+
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    await i18n.changeLanguage('ja');
+  });
+
+  function stubResizeObserver() {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        private entry: { callback: ResizeObserverCallback; targets: Element[] };
+        constructor(callback: ResizeObserverCallback) {
+          this.entry = { callback, targets: [] };
+          observers.push(this.entry);
+        }
+        observe(target: Element) {
+          this.entry.targets.push(target);
+        }
+        disconnect() {
+          this.entry.targets = [];
+        }
+      }
+    );
+  }
+
+  const fireHeaderResize = (header: HTMLElement) =>
+    act(() => {
+      for (const o of observers) {
+        if (o.targets.includes(header)) o.callback([], {} as ResizeObserver);
+      }
+    });
+
+  const stickyClasses = ['lg:sticky', 'lg:top-0'];
+
+  it('unpins when the header grows past a quarter of the window and pins again when the window grows', async () => {
+    stubResizeObserver();
+    vi.stubGlobal('innerHeight', 768);
+    headerHeight = 114; // one or two rows at the default font: 15%
+    const header = await renderHeader();
+    expect(classesOf(header)).toEqual(expect.arrayContaining([...stickyClasses, 'relative', 'z-30']));
+
+    headerHeight = 532; // 200% root font size in a 1024x768 window: 69%
+    fireHeaderResize(header);
+    let classes = classesOf(header);
+    expect(classes).not.toContain('lg:sticky');
+    expect(classes).not.toContain('lg:top-0');
+    expect(classes).toEqual(expect.arrayContaining(['relative', 'z-30', 'shadow-xs']));
+    expect(classes).not.toContain('sticky');
+    expect(classes).not.toContain('top-0');
+
+    // A taller window: 532px is a quarter of 2128px.
+    vi.stubGlobal('innerHeight', 2200);
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+    classes = classesOf(header);
+    expect(classes).toEqual(expect.arrayContaining([...stickyClasses, 'relative', 'z-30']));
+    expect(classes).not.toContain('sticky');
+  });
+
+  it('keeps the exact quarter pinned', async () => {
+    stubResizeObserver();
+    vi.stubGlobal('innerHeight', 800);
+    headerHeight = 200;
+    const header = await renderHeader();
+    expect(classesOf(header)).toEqual(expect.arrayContaining(stickyClasses));
+    headerHeight = 201;
+    fireHeaderResize(header);
+    expect(classesOf(header)).not.toContain('lg:sticky');
+  });
+
+  // The default-font header (114px from lg up) stays pinned in a low window,
+  // where it takes more than a quarter: a laptop with the developer tools
+  // docked below the page, say.
+  it('keeps a header of up to 128px pinned however low the window is', async () => {
+    stubResizeObserver();
+    vi.stubGlobal('innerHeight', 300);
+    headerHeight = 114; // 38% of the window
+    const header = await renderHeader();
+    expect(classesOf(header)).toEqual(expect.arrayContaining([...stickyClasses, 'relative', 'z-30']));
+
+    headerHeight = 128;
+    fireHeaderResize(header);
+    expect(classesOf(header)).toEqual(expect.arrayContaining(stickyClasses));
+
+    headerHeight = 129; // over the floor and over a quarter of 300px
+    fireHeaderResize(header);
+    expect(classesOf(header)).not.toContain('lg:sticky');
+    expect(classesOf(header)).not.toContain('lg:top-0');
+
+    // Back to the default-font height in an even lower window: pinned again.
+    vi.stubGlobal('innerHeight', 200);
+    headerHeight = 114;
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(classesOf(header)).toEqual(expect.arrayContaining([...stickyClasses, 'relative', 'z-30']));
+  });
+
+  it('unpins the 200% header in a low window too', async () => {
+    stubResizeObserver();
+    vi.stubGlobal('innerHeight', 400);
+    headerHeight = 532;
+    const header = await renderHeader();
+    expect(classesOf(header)).not.toContain('lg:sticky');
+    expect(classesOf(header)).toEqual(expect.arrayContaining(['relative', 'z-30']));
+  });
+
+  it('stays pinned without a ResizeObserver', async () => {
+    vi.stubGlobal('ResizeObserver', undefined);
+    const header = await renderHeader();
+    expect(classesOf(header)).toEqual(expect.arrayContaining([...stickyClasses, 'relative', 'z-30']));
+  });
+
+  // Several App tests stub ResizeObserver with a class that has only
+  // observe() and disconnect().
+  it('works with a ResizeObserver stub that has no unobserve()', async () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      }
+    );
+    const { unmount } = render(<App />);
+    await screen.findByText('ALP-00001');
+    expect(classesOf(screen.getByRole('banner'))).toEqual(expect.arrayContaining([...stickyClasses, 'relative', 'z-30']));
+    expect(() => unmount()).not.toThrow();
   });
 });
 
