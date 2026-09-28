@@ -10,9 +10,9 @@ The commands below that run npm or Node (`npm install --package-lock-only`,
 `npm run check:*`, builds) expect Node.js 24 or later, the version declared
 as `engines.node` in `package.json` / `packages/web/package.json` and in
 `.nvmrc`, and the one CI and the release workflow use. `packages/web`'s
-lint / test / build stop on an older Node.js, and the lockfile should be
-refreshed with the npm that ships with Node.js 24 (an older npm adds
-unrelated changes). With asdf, prefix the commands with
+lint / test / build / dev / test:watch stop on an older Node.js, and the
+lockfile should be refreshed with the npm that ships with Node.js 24 (an
+older npm adds unrelated changes). With asdf, prefix the commands with
 `ASDF_NODEJS_VERSION=<an installed 24.x>`; with nvm or fnm, run `nvm use` /
 `fnm use` in the repository root.
 
