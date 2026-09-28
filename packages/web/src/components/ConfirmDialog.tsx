@@ -45,7 +45,7 @@
 // darkened area is still a click on the overlay itself
 // (e.target === e.currentTarget) and cancels.
 // The button row wraps (`flex-wrap`) and each button is at most as wide as
-// the dialog (`max-w-full break-words`): at 200% on a 320px screen Cancel and
+// the dialog (`max-w-full wrap-break-word`): at 200% on a 320px screen Cancel and
 // Start do not fit side by side, and with `justify-end` an unwrapped row
 // would overflow to the left, where no scrolling reaches.
 import React, { useId, useRef } from 'react';
@@ -106,12 +106,12 @@ export const ConfirmDialog: React.FC<Props> = ({
         aria-describedby={messageId}
         tabIndex={-1}
         data-testid={testIdPrefix}
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md min-w-0 m-auto p-6 shadow-2xl focus:outline-none"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md min-w-0 m-auto p-6 shadow-2xl focus:outline-hidden"
       >
-        <h2 id={titleId} className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-4 break-words">
+        <h2 id={titleId} className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-4 wrap-break-word">
           {title}
         </h2>
-        <p id={messageId} className="text-sm text-slate-700 dark:text-slate-300 mb-4 whitespace-pre-wrap break-words">
+        <p id={messageId} className="text-sm text-slate-700 dark:text-slate-300 mb-4 whitespace-pre-wrap wrap-break-word">
           {message}
         </p>
         {children}
@@ -121,7 +121,7 @@ export const ConfirmDialog: React.FC<Props> = ({
             type="button"
             data-testid={`${testIdPrefix}-cancel`}
             onClick={onCancel}
-            className="max-w-full break-words px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 transition"
+            className="max-w-full wrap-break-word px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 transition"
           >
             {cancelLabel}
           </button>
@@ -129,7 +129,7 @@ export const ConfirmDialog: React.FC<Props> = ({
             type="button"
             data-testid={`${testIdPrefix}-confirm`}
             onClick={onConfirm}
-            className={`max-w-full break-words px-4 py-2 rounded-lg text-xs font-semibold text-white shadow-xs transition ${
+            className={`max-w-full wrap-break-word px-4 py-2 rounded-lg text-xs font-semibold text-white shadow-2xs transition ${
               tone === 'danger' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
             }`}
           >

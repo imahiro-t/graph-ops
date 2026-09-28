@@ -26,7 +26,7 @@ const expectRemText = (el: HTMLElement) => {
 };
 
 const expectBreaksAnywhere = (el: HTMLElement) => {
-  expect(el).toHaveClass('break-words', '[overflow-wrap:anywhere]');
+  expect(el).toHaveClass('wrap-break-word', 'wrap-anywhere');
 };
 
 afterEach(async () => {
@@ -119,13 +119,13 @@ describe.each(['ja', 'en'] as const)('AutopilotControls sizes its small lines in
     expect(dismiss).toHaveAccessibleName(i18n.t('autopilot.untrustedDismiss'));
     expect(dismiss).toHaveClass('min-h-6', 'min-w-6', 'inline-flex', 'items-center', 'justify-center');
     expect(dismiss).toHaveClass(
-      'focus:outline-none',
+      'focus:outline-hidden',
       'focus-visible:ring-2',
       'focus-visible:ring-violet-500',
       'dark:focus-visible:ring-violet-400'
     );
     // The existing wrapping stays (DFLT-00224 / DFLT-00225).
-    expect(dismiss).toHaveClass('shrink-0', 'max-w-full', 'max-sm:[overflow-wrap:anywhere]');
+    expect(dismiss).toHaveClass('shrink-0', 'max-w-full', 'max-sm:wrap-anywhere');
     await user.click(dismiss);
     expect(screen.queryByTestId('autopilot-untrusted')).not.toBeInTheDocument();
   });

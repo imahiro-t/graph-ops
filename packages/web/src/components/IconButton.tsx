@@ -285,7 +285,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
             aria-hidden="true"
             hidden={!open}
             data-icon-button-tooltip=""
-            className="fixed z-[60] max-w-xs rounded px-2 py-1 text-[11px] font-medium leading-snug shadow-sm bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 whitespace-normal break-words text-left"
+            className="fixed z-60 max-w-xs rounded-sm px-2 py-1 text-[11px] font-medium leading-snug shadow-xs bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 whitespace-normal wrap-break-word text-left"
             style={{
               left: position?.left ?? 0,
               top: position?.top ?? 0,

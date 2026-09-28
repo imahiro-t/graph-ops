@@ -73,7 +73,7 @@ export const ArtifactPreviewPage: React.FC = () => {
           : 'min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans'
       }
     >
-      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-3.5 shadow-xs shrink-0">
+      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-3.5 shadow-2xs shrink-0">
         <div className={isHtml ? 'flex items-center gap-2' : 'max-w-4xl mx-auto flex items-center gap-2'}>
           {isHtml ? (
             <Code2 aria-hidden="true" className="w-4 h-4 text-emerald-500 shrink-0" />

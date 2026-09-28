@@ -306,7 +306,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 {!hasOverride && info.has_default && (
                   <span
                     title={t('settings.nodeTypes.defaultBadgeHint')}
-                    className="shrink-0 text-[9px] font-semibold px-1 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400"
+                    className="shrink-0 text-[9px] font-semibold px-1 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400"
                   >
                     {t('settings.nodeTypes.defaultBadge')}
                   </span>
@@ -376,7 +376,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                     }
                   }}
                   placeholder={t('settings.nodeTypes.newTypePlaceholder')}
-                  className="flex-1 min-w-0 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
+                  className="flex-1 min-w-0 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-sm px-1.5 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
                 />
                 <IconButton
                   onClick={() => void confirmAddType()}
@@ -407,7 +407,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               ref={addTypeButtonRef}
               data-focus-key={ADD_TYPE_FOCUS_KEY}
               onClick={() => setIsAddingType(true)}
-              className="w-full px-2 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 rounded text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition border border-slate-200 dark:border-slate-700"
+              className="w-full px-2 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 rounded-sm text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition border border-slate-200 dark:border-slate-700"
             >
               <Plus aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.nodeTypes.addType')}
             </button>
@@ -434,7 +434,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 role="region"
                 aria-labelledby={mergedPreviewLabelId}
                 tabIndex={0}
-                className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 max-h-40 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 max-h-40 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
               >
                 {mergedText || t('settings.common.inheritedFromDefault')}
               </pre>
@@ -446,7 +446,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 value={tierText}
                 onChange={e => setTierText(e.target.value)}
                 placeholder={t('settings.nodeTypes.tierTextPlaceholder')}
-                className="flex-1 min-h-[10rem] w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
+                className="flex-1 min-h-40 w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
               />
               <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">{t('settings.nodeTypes.emptyOverrideHint')}</p>
             </div>

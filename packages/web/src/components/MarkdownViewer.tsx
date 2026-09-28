@@ -124,7 +124,7 @@ const RemoteImage: React.FC<{ src: string; alt?: string; title?: string }> = ({ 
       href={src}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex items-center gap-1.5 max-w-full text-left px-2 py-1 rounded border border-dashed border-slate-500 dark:border-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+      className="inline-flex items-center gap-1.5 max-w-full text-left px-2 py-1 rounded-sm border border-dashed border-slate-500 dark:border-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
     >
       <ImageIcon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
       {/* The host is never truncated: it is the part the reader needs in
@@ -161,7 +161,7 @@ const RemoteImage: React.FC<{ src: string; alt?: string; title?: string }> = ({ 
             setPhase('failed');
             setPendingFocus('link');
           }}
-          className="max-w-full h-auto rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="max-w-full h-auto rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
         />
       ) : phase === 'failed' || !loadable ? (
         openInNewTab
@@ -178,7 +178,7 @@ const RemoteImage: React.FC<{ src: string; alt?: string; title?: string }> = ({ 
           // pair measured 1.5:1 and 2.4:1; these measure 4.8:1 and 7.0:1. The
           // indigo label is the second signal, matching how a link reads in
           // this same viewer.
-          className="inline-flex items-center gap-1.5 max-w-full text-left px-2 py-1 rounded border border-dashed border-slate-500 dark:border-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="inline-flex items-center gap-1.5 max-w-full text-left px-2 py-1 rounded-sm border border-dashed border-slate-500 dark:border-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
         >
           <ImageIcon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
           <span className="shrink-0 text-indigo-600 dark:text-indigo-400">
@@ -192,7 +192,7 @@ const RemoteImage: React.FC<{ src: string; alt?: string; title?: string }> = ({ 
 };
 
 // Tailwind styling per element (no @tailwindcss/typography plugin in this
-// project -- see tailwind.config.js) so rendered markdown matches the app's
+// project -- see src/index.css) so rendered markdown matches the app's
 // existing slate/indigo look rather than browser defaults.
 const components: Components = {
   // Only a remote image is deferred. A data:/blob: URI or a same-origin path
@@ -209,7 +209,7 @@ const components: Components = {
     return isRemoteImageSrc(source) ? (
       <RemoteImage src={source} alt={alt} title={title} />
     ) : (
-      <img src={source} alt={alt || ''} title={title} className="max-w-full h-auto rounded" />
+      <img src={source} alt={alt || ''} title={title} className="max-w-full h-auto rounded-sm" />
     );
   },
   h1: ({ children }) => <h1 className="text-base font-bold text-slate-900 dark:text-slate-100 mt-3 mb-1.5 first:mt-0">{children}</h1>,
@@ -235,7 +235,7 @@ const components: Components = {
         {children}
       </code>
     ) : (
-      <code className="font-mono text-[11px] bg-slate-100 dark:bg-slate-800 rounded px-1 py-0.5" {...props}>
+      <code className="font-mono text-[11px] bg-slate-100 dark:bg-slate-800 rounded-sm px-1 py-0.5" {...props}>
         {children}
       </code>
     );
@@ -273,10 +273,10 @@ export const MarkdownViewer: React.FC<Props> = ({ content, scrollable = false, l
       // max-h-64 (not h-64) so a short artifact still renders at its own
       // height instead of being stretched to 16rem with dead space below.
       // blue-500 focus ring rather than indigo-400 -- see GherkinViewer for
-      // the contrast numbers; outline-none leaves the ring as the only focus
+      // the contrast numbers; outline-hidden leaves the ring as the only focus
       // indicator, so it has to clear 3:1 on the light theme too.
       className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3 text-xs overflow-x-auto shadow-inner${
-        scrollable ? ' max-h-64 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500' : ''
+        scrollable ? ' max-h-64 overflow-y-auto focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500' : ''
       }`}
       tabIndex={scrollable ? 0 : undefined}
       role={scrollable && label ? 'region' : undefined}

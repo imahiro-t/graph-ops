@@ -665,7 +665,7 @@ describe('App project scoping', () => {
 
       const tokens = screen.getByRole('button', { name: i18n.t('projectSwitcher.retry') }).className.split(/\s+/);
       for (const cls of [
-        'focus:outline-none',
+        'focus:outline-hidden',
         'focus-visible:ring-2',
         'focus-visible:ring-blue-500',
         'dark:focus-visible:ring-blue-400',

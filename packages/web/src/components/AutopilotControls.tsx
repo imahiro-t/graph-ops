@@ -311,9 +311,9 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
     // The action row: lays it out only, never takes focus (DFLT-00218).
     // On sm+ it wraps only when not even the narrowest layout fits, and is
     // the size container the divider is tied to (DFLT-00219, see above).
-    <div data-testid="autopilot-controls" className="flex flex-wrap items-start gap-2 [container-type:inline-size]">
+    <div data-testid="autopilot-controls" className="flex flex-wrap items-start gap-2 @container">
       {actions != null && (
-        <div data-testid="autopilot-row-actions" className="min-w-0 sm:min-w-min sm:basis-0 sm:grow-[999] sm:max-w-max">
+        <div data-testid="autopilot-row-actions" className="min-w-0 sm:min-w-min sm:basis-0 sm:grow-999 sm:max-w-max">
           {actions}
         </div>
       )}
@@ -336,7 +336,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
           ref={fallbackRef}
           tabIndex={-1}
           data-testid="autopilot-focus-fallback"
-          className="flex flex-col items-end gap-1.5 min-w-0 max-w-full rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
+          className="flex flex-col items-end gap-1.5 min-w-0 max-w-full rounded-lg focus:outline-hidden focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
         >
           <div
             data-testid="autopilot-group"
@@ -351,7 +351,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
               {...submittingProps(starting !== null)}
               title={distinctReasons.length > 0 ? distinctReasons.join('\n') : undefined}
               aria-describedby={reasonIds.length > 0 ? reasonIds.join(' ') : undefined}
-              className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-slate-700 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 rounded-lg text-xs font-semibold sm:whitespace-nowrap flex max-sm:flex-wrap max-sm:[overflow-wrap:anywhere] items-center gap-1.5 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
+              className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-slate-700 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 rounded-lg text-xs font-semibold sm:whitespace-nowrap flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 shadow-2xs transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
             >
               {starting !== null ? (
                 <Loader2 className="w-3.5 h-3.5 shrink-0 motion-safe:animate-spin" aria-hidden="true" />
@@ -365,7 +365,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
           {view.awaiting && (
             // What the person is waited on for, as text a sighted keyboard user
             // can read too (the badge only carries it as a tooltip).
-            <p data-testid="autopilot-awaiting" className="self-stretch text-[0.6875rem] break-words [overflow-wrap:anywhere] text-amber-900 dark:text-amber-100">
+            <p data-testid="autopilot-awaiting" className="self-stretch text-[0.6875rem] wrap-break-word wrap-anywhere text-amber-900 dark:text-amber-100">
               {t('autopilot.badges.awaitingTitle', { what: view.awaiting })}
             </p>
           )}
@@ -374,7 +374,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
               key={r}
               id={reasonIds[i]}
               data-testid="autopilot-disabled-reason"
-              className="self-stretch text-[0.6875rem] break-words [overflow-wrap:anywhere] text-slate-600 dark:text-slate-400"
+              className="self-stretch text-[0.6875rem] wrap-break-word wrap-anywhere text-slate-600 dark:text-slate-400"
             >
               {r}
             </p>
@@ -384,7 +384,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
             <div
               aria-hidden="true"
               data-testid="autopilot-message"
-              className={`self-stretch p-2 rounded-lg border text-[0.6875rem] break-words [overflow-wrap:anywhere] ${
+              className={`self-stretch p-2 rounded-lg border text-[0.6875rem] wrap-break-word wrap-anywhere ${
                 message.error
                   ? 'bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
                   : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
@@ -413,7 +413,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
               data-testid="autopilot-untrusted"
               className="self-stretch flex flex-wrap items-start gap-2 p-2 rounded-lg border text-[0.6875rem] bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100"
             >
-              <p aria-hidden="true" className="flex-1 basis-24 min-w-0 break-words [overflow-wrap:anywhere]">
+              <p aria-hidden="true" className="flex-1 basis-24 min-w-0 wrap-break-word wrap-anywhere">
                 {t('autopilot.untrustedFolder', { path: untrustedFolder })}
               </p>
               <button
@@ -421,7 +421,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
                 data-testid="autopilot-untrusted-dismiss"
                 onClick={dismissUntrusted}
                 aria-describedby={untrustedId}
-                className="shrink-0 max-w-full max-sm:[overflow-wrap:anywhere] min-h-6 min-w-6 inline-flex items-center justify-center px-2 py-0.5 rounded border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 font-semibold hover:bg-amber-100 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 dark:focus-visible:ring-violet-400"
+                className="shrink-0 max-w-full max-sm:wrap-anywhere min-h-6 min-w-6 inline-flex items-center justify-center px-2 py-0.5 rounded-sm border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 font-semibold hover:bg-amber-100 dark:hover:bg-slate-700 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-violet-500 dark:focus-visible:ring-violet-400"
               >
                 {t('autopilot.untrustedDismiss')}
               </button>
@@ -470,7 +470,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
                           <p
                             id={reasonId}
                             data-testid={`autopilot-mode-reason-${mode}`}
-                            className="ml-6 mt-0.5 text-[0.6875rem] break-words [overflow-wrap:anywhere] text-slate-600 dark:text-slate-400"
+                            className="ml-6 mt-0.5 text-[0.6875rem] wrap-break-word wrap-anywhere text-slate-600 dark:text-slate-400"
                           >
                             {reason}
                           </p>

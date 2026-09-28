@@ -207,7 +207,7 @@ describe('MultiSelectFilter', () => {
 
       expect(clearButton().parentElement).toHaveClass('flex', 'flex-wrap');
       for (const button of [selectAllButton(), clearButton()]) {
-        expect(button).toHaveClass('flex-auto', 'break-keep', '[overflow-wrap:anywhere]');
+        expect(button).toHaveClass('flex-auto', 'break-keep', 'wrap-anywhere');
         expect(button).not.toHaveClass('w-full');
         expect(button).not.toHaveClass('flex-1');
         expect(button).not.toHaveClass('min-w-0');

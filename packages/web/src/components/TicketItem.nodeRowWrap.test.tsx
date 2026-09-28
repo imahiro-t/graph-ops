@@ -189,12 +189,12 @@ const ADDED = {
     `${UNDER_80REM}min-w-0`,
     `${UNDER_80REM}flex-wrap`,
     `${UNDER_80REM}gap-y-1.5`,
-    `${UNDER_80REM}[justify-content:safe_flex-end]`
+    `${UNDER_80REM}justify-end-safe`
   ],
-  id: [`${UNDER_80REM}shrink`, `${UNDER_80REM}min-w-0`, `${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}[overflow-wrap:anywhere]`],
+  id: [`${UNDER_80REM}shrink`, `${UNDER_80REM}min-w-0`, `${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}wrap-anywhere`],
   // From 80rem the name adds nothing to the left group's min-content width
   // (width 0) but is still laid out at its content width (content basis).
-  name: [`${FROM_80REM}w-0`, `${FROM_80REM}[flex-basis:content]`, `${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}[overflow-wrap:anywhere]`],
+  name: [`${FROM_80REM}w-0`, `${FROM_80REM}basis-[content]`, `${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}wrap-anywhere`],
   time: ['whitespace-nowrap'],
   approvalButtons: [`${UNDER_80REM}flex-wrap`, `${UNDER_80REM}min-w-0`, `${UNDER_80REM}max-w-full`],
   // DFLT-00253: each approve/reject button and the type badge may shrink
@@ -203,12 +203,12 @@ const ADDED = {
     `${UNDER_80REM}min-w-0`,
     `${UNDER_80REM}max-w-full`,
     `${UNDER_80REM}flex-wrap`,
-    `${UNDER_80REM}[overflow-wrap:anywhere]`,
+    `${UNDER_80REM}wrap-anywhere`,
     `${NARROW_LARGE_TEXT}px-1`
   ],
   typeBadge: [`${UNDER_80REM}shrink`, `${UNDER_80REM}min-w-0`, `${UNDER_80REM}max-w-full`],
   // DFLT-00253 round 2: the badge's label wraps under 80rem.
-  typeBadgeLabel: [`${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}[overflow-wrap:anywhere]`]
+  typeBadgeLabel: [`${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}wrap-anywhere`]
 };
 // A prefix is allowed for an added class only if it is one of these.
 const ALLOWED_PREFIXES = [UNDER_80REM, FROM_80REM, NARROW_LARGE_TEXT];
@@ -239,7 +239,7 @@ const FORBIDDEN_UNPREFIXED = [
   'gap-y-2',
   'gap-y-1.5',
   'max-w-full',
-  '[justify-content:safe_flex-end]'
+  'justify-end-safe'
 ];
 
 beforeEach(() => {
@@ -331,7 +331,7 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     // line as before.
     const label = badge.querySelector('span') as HTMLElement;
     expect(label).toHaveClass('truncate', ...ADDED.typeBadgeLabel);
-    expectNoneOf(label, ['whitespace-normal', '[overflow-wrap:anywhere]', 'break-words']);
+    expectNoneOf(label, ['whitespace-normal', 'wrap-anywhere', 'wrap-break-word']);
     expect(classList(label).filter(c => c !== 'truncate' && !c.startsWith(UNDER_80REM))).toEqual([]);
     expect(label).toHaveTextContent(badge.getAttribute('title')!);
   });
@@ -346,8 +346,8 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     // min-content width, which (the name adding nothing) is the id and badges.
     expect(left).toHaveClass('flex-1', 'min-w-0', `${FROM_80REM}min-w-min`);
     expect(left).not.toHaveClass('min-w-min');
-    expect(name).toHaveClass('truncate', 'min-w-0', `${FROM_80REM}w-0`, `${FROM_80REM}[flex-basis:content]`);
-    expectNoneOf(name, ['w-0', '[flex-basis:content]', 'basis-0', 'grow', 'flex-1']);
+    expect(name).toHaveClass('truncate', 'min-w-0', `${FROM_80REM}w-0`, `${FROM_80REM}basis-[content]`);
+    expectNoneOf(name, ['w-0', 'basis-[content]', 'basis-0', 'grow', 'flex-1']);
     // The one-line layout's badges still never wrap or shrink.
     for (const badge of left.querySelectorAll('span.whitespace-nowrap')) expect(badge).toHaveClass('shrink-0');
   });
@@ -362,7 +362,7 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     for (const button of [approve, screen.getByTestId(`node-reject-${gate.id}`)]) {
       // px-2 stays the padding from 15rem up; under 15rem it is px-1.
       expect(button).toHaveClass('px-2', 'flex', ...ADDED.approvalButton);
-      expectNoneOf(button, ['min-w-0', 'max-w-full', 'flex-wrap', 'px-1', '[overflow-wrap:anywhere]']);
+      expectNoneOf(button, ['min-w-0', 'max-w-full', 'flex-wrap', 'px-1', 'wrap-anywhere']);
       expect(classList(button).filter(hasPxPrefix)).toEqual([]);
     }
     // They stay inside the right group, which moves to its own line as a whole.

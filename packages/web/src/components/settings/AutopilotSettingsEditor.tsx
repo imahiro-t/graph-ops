@@ -183,7 +183,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
       'aria-describedby': describedBy
     };
     const inputClass =
-      'bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800';
+      'bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800';
     const set = (v: string | boolean) => setDraft(d => ({ ...d, [it.key]: v }));
     if (control.kind === 'boolean') {
       return (
@@ -297,7 +297,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
                         disabled={!canClear || saving}
                         label={t('settings.autopilot.clearLocalFor', { key: t(`settings.autopilot.keys.${it.key}.label`) })}
                         tooltip={t('settings.autopilot.clearLocal')}
-                        className="p-1 rounded text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30"
+                        className="p-1 rounded-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30"
                       >
                         <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
                       </IconButton>

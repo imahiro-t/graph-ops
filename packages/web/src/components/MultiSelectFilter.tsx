@@ -93,7 +93,7 @@ const HANG_LEFT: PanelPlacement = { edge: 'left' };
 // a line of its own -- where flex-auto's grow stretches it full width. Do not
 // use flex-1 or min-w-0 here: flex-1's basis is 0, so the row never wraps and
 // each button is squeezed into half the width, breaking its text.
-// break-keep [overflow-wrap:anywhere] is the trigger's policy (DFLT-00239):
+// break-keep wrap-anywhere is the trigger's policy (DFLT-00239):
 // keep-all leaves no break point inside "すべて選択" / "選択を解除" (they
 // contain no spaces), so a button that does not fit moves to the next line
 // whole; only if a single button is still wider than the panel (200% text on
@@ -102,7 +102,7 @@ const HANG_LEFT: PanelPlacement = { edge: 'left' };
 // `anywhere` also lowers the min-content width, the default min-width: auto
 // lets the button shrink to the line.
 const FOOTER_BUTTON_CLASS =
-  'flex-auto break-keep [overflow-wrap:anywhere] text-left px-2 py-1.5 rounded hover:bg-slate-50 dark:hover:bg-slate-800 text-blue-700 dark:text-blue-400 font-medium disabled:opacity-50 disabled:hover:bg-transparent';
+  'flex-auto break-keep wrap-anywhere text-left px-2 py-1.5 rounded-sm hover:bg-slate-50 dark:hover:bg-slate-800 text-blue-700 dark:text-blue-400 font-medium disabled:opacity-50 disabled:hover:bg-transparent';
 
 // The gap a shifted panel keeps from the window's right edge: the same 1rem
 // per side that max-w-[calc(100vw-2rem)] leaves, so a panel capped by that
@@ -276,7 +276,7 @@ export function MultiSelectFilter<T extends string>({
             "ステータス:" / "1件選択" rather than "ステータス: 1" / "件選択".
             overflow-wrap:anywhere then breaks inside a word only when a
             single word is still too wide for the line. */}
-        <span className="min-w-0 break-keep [overflow-wrap:anywhere] text-left">
+        <span className="min-w-0 break-keep wrap-anywhere text-left">
           {selected.length === 0 ? t(allKey) : t(selectedKey, { count: selected.length })}
         </span>
         {/* DFLT-00163: WCAG 1.4.11 (3:1). The arrow shows the button opens a list. slate-500 is
@@ -316,7 +316,7 @@ export function MultiSelectFilter<T extends string>({
                   checked={selected.includes(o.value)}
                   onChange={() => toggle(o.value)}
                   aria-label={o.optionLabel}
-                  className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0"
+                  className="rounded-sm border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0"
                 />
                 {o.label}
               </label>

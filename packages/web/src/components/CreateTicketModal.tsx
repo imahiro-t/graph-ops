@@ -62,9 +62,9 @@ export const CreateTicketModal: React.FC<Props> = ({ onSubmit, onClose, isCreati
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md m-auto min-w-0 p-6 shadow-2xl focus:outline-none"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md m-auto min-w-0 p-6 shadow-2xl focus:outline-hidden"
       >
-        <h2 id={titleId} className="min-w-0 break-words text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">{t('createModal.title')}</h2>
+        <h2 id={titleId} className="min-w-0 wrap-break-word text-lg font-bold text-slate-900 dark:text-slate-100 mb-4">{t('createModal.title')}</h2>
         <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
           {t('createModal.descriptionPrefix')} <span className="font-mono">/graph-ops:create-ticket</span> {t('createModal.descriptionSuffix')}
         </p>
@@ -86,7 +86,7 @@ export const CreateTicketModal: React.FC<Props> = ({ onSubmit, onClose, isCreati
               rows={5}
               required
               disabled={isCreating}
-              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60"
+              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60"
               value={request}
               onChange={e => setRequest(e.target.value)}
               onKeyDown={e => {
@@ -121,7 +121,7 @@ export const CreateTicketModal: React.FC<Props> = ({ onSubmit, onClose, isCreati
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 transition max-w-full break-words"
+              className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 transition max-w-full wrap-break-word"
             >
               {isCreating || status ? t('createModal.close') : t('createModal.cancel')}
             </button>
@@ -129,7 +129,7 @@ export const CreateTicketModal: React.FC<Props> = ({ onSubmit, onClose, isCreati
               type="submit"
               disabled={isCreating || !request.trim()}
               {...submittingProps(isCreating)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white shadow-xs transition flex items-center gap-1.5 max-w-full break-words"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white shadow-2xs transition flex items-center gap-1.5 max-w-full wrap-break-word"
             >
               {isCreating && <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" />}
               {t('createModal.submit')}

@@ -17,7 +17,7 @@
 // MarkdownViewer's overflow-x-auto box, which hid their end. The icons are
 // now shrink-0 with the texts in spans of their own (the texts wrap, not the
 // icons), the card's padding is p-3 below sm and with a large default font,
-// and the body wrapper is break-words in both the collapsed and the
+// and the body wrapper is wrap-break-word in both the collapsed and the
 // expanded state. Measured in a real browser as above.
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -115,12 +115,12 @@ describe.each(['ja', 'en'] as const)('TicketItem description header wraps on a n
   it('lets the title shrink and break inside a long word', () => {
     renderExpanded();
     const { title, titleText } = descriptionHeader();
-    expect(title).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
+    expect(title).toHaveClass('min-w-0', 'wrap-anywhere');
     expect(title).not.toHaveClass('shrink-0');
     expect(title).not.toHaveClass('whitespace-nowrap');
     expect(titleText.tagName).toBe('SPAN');
     expect(titleText).not.toBe(title);
-    expect(titleText).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
+    expect(titleText).toHaveClass('min-w-0', 'wrap-anywhere');
     expect(titleText).not.toHaveClass('whitespace-nowrap');
   });
 
@@ -132,7 +132,7 @@ describe.each(['ja', 'en'] as const)('TicketItem description header wraps on a n
     expect(refined).toHaveClass('min-w-0');
     expect(refined).not.toHaveClass('whitespace-nowrap');
     expect(refinedText.tagName).toBe('SPAN');
-    expect(refinedText).toHaveClass('min-w-0', '[overflow-wrap:anywhere]');
+    expect(refinedText).toHaveClass('min-w-0', 'wrap-anywhere');
     expect(refinedText).not.toHaveClass('whitespace-nowrap');
   });
 
@@ -167,11 +167,11 @@ describe.each(['ja', 'en'] as const)('TicketItem description header wraps on a n
     const { card, expand } = descriptionHeader();
     const body = card.children[1] as HTMLElement;
     expect(body).toHaveTextContent('説明の本文');
-    expect(body).toHaveClass('break-words', 'max-h-56', 'overflow-y-auto');
-    expect(body).not.toHaveClass('[overflow-wrap:anywhere]');
+    expect(body).toHaveClass('wrap-break-word', 'max-h-56', 'overflow-y-auto');
+    expect(body).not.toHaveClass('wrap-anywhere');
     fireEvent.click(expand);
     expect(screen.getByRole('button', { name: i18n.t('ticketItem.description.collapse') })).toBeVisible();
-    expect(body).toHaveClass('break-words');
+    expect(body).toHaveClass('wrap-break-word');
     expect(body).not.toHaveClass('max-h-56');
     expect(body).not.toHaveClass('overflow-y-auto');
   });

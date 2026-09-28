@@ -195,7 +195,7 @@ describe('DFLT-00085 inline artifact previews scroll inside a 16rem box', () => 
     expect(gk).not.toHaveAttribute('tabindex');
   });
 
-  // outline-none makes the ring the only focus indicator, so its color has to
+  // outline-hidden makes the ring the only focus indicator, so its color has to
   // clear WCAG 1.4.11 / 2.4.11's 3:1 against the light theme's white and
   // slate-50. indigo-400 did not (2.85-2.98:1); blue-500 does. Contrast is a
   // property of the color, not of the DOM, so what is pinned here is the

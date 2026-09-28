@@ -56,7 +56,7 @@ describe('App header layout on narrow screens', () => {
   it('is sticky only from lg up, keeping its stacking order and shadow', async () => {
     const header = await renderHeader();
     const classes = classesOf(header);
-    expect(classes).toEqual(expect.arrayContaining(['lg:sticky', 'lg:top-0', 'z-30', 'shadow-xs']));
+    expect(classes).toEqual(expect.arrayContaining(['lg:sticky', 'lg:top-0', 'z-30', 'shadow-2xs']));
     // Below lg it scrolls away with the page instead of covering the
     // Action Footer. `relative` keeps z-30 in effect there, so the popups
     // inside the header still open in front of <main>.
@@ -191,7 +191,7 @@ describe('App header stickiness follows its height', () => {
     let classes = classesOf(header);
     expect(classes).not.toContain('lg:sticky');
     expect(classes).not.toContain('lg:top-0');
-    expect(classes).toEqual(expect.arrayContaining(['relative', 'z-30', 'shadow-xs']));
+    expect(classes).toEqual(expect.arrayContaining(['relative', 'z-30', 'shadow-2xs']));
     expect(classes).not.toContain('sticky');
     expect(classes).not.toContain('top-0');
 

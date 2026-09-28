@@ -72,7 +72,7 @@ describe.each(['ja', 'en'] as const)('AutopilotBadges (%s)', lng => {
     render(<AutopilotBadges view={view(ALL_BADGES, 'release approval')} />);
     for (const b of ALL_BADGES) {
       const badge = screen.getByTestId(`autopilot-badge-${b}`);
-      expect(badge).toHaveClass('min-w-0', 'break-words', '[overflow-wrap:anywhere]');
+      expect(badge).toHaveClass('min-w-0', 'wrap-break-word', 'wrap-anywhere');
       expectNoneOf(badge, ['whitespace-nowrap', 'truncate', 'overflow-hidden', 'shrink-0']);
     }
   });

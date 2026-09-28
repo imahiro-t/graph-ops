@@ -219,9 +219,9 @@ describe('TicketItem artifact tabs keyboard', () => {
     renderTicket();
     const panel = screen.getByRole('tabpanel');
     expect(panel).toHaveAttribute('tabindex', '0');
-    expect(panel).toHaveClass('focus-visible:ring-2', 'focus-visible:ring-inset', 'focus:outline-none');
+    expect(panel).toHaveClass('focus-visible:ring-2', 'focus-visible:ring-inset', 'focus:outline-hidden');
     // Each class on its own: no ring or border that shows without focus.
-    for (const cls of ['ring-2', 'ring-inset', 'border', 'outline']) expect(panel).not.toHaveClass(cls);
+    for (const cls of ['ring-2', 'ring-inset', 'border', 'outline-solid']) expect(panel).not.toHaveClass(cls);
     // The panel keeps its existing layout classes.
     expect(panel).toHaveClass('p-4', 'flex-1', 'min-h-0', 'overflow-y-auto');
   });
