@@ -245,11 +245,13 @@ describe('named variants for the last arbitrary at-rule prefixes (DFLT-00294)', 
   });
 
   it('orders them against the core screen variants, narrow:, the other named variants and one another exactly as the arbitrary prefixes did', async () => {
-    // In the app, upto-200px: shares elements with lg: (App.tsx), max-sm:
-    // (TicketItem.tsx, AutopilotControls.tsx) and upto-15rem: (TicketItem.tsx),
-    // cq-upto-12rem: shares them with upto-15rem: (App.tsx), cq-below-8rem:
-    // shares them with none of these, and cq-from-16rem: is only used as
-    // sm:cq-from-16rem: (AutopilotControls.tsx).
+    // In the app:
+    // - upto-200px: shares elements with lg: (App.tsx), max-sm:
+    //   (TicketItem.tsx, AutopilotControls.tsx) and upto-15rem: (TicketItem.tsx).
+    // - cq-upto-12rem: shares elements with upto-15rem: (App.tsx).
+    // - cq-below-8rem: shares no element with lg:, max-sm:, upto-15rem:,
+    //   upto-200px: or cq-upto-12rem:.
+    // - cq-from-16rem: is only used as sm:cq-from-16rem: (AutopilotControls.tsx).
     // The rest of the core screen variants, narrow: and the other named ones
     // are here so the order is pinned against all of them.
     const common = ['sm', 'max-sm', 'lg', 'max-lg', 'narrow', BELOW, UPTO, BELOW64, FROM64, FROM80].map(n => v(n, 'p-1'));
