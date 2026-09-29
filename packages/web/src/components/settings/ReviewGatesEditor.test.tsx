@@ -14,7 +14,7 @@ import i18n from '../../i18n';
 import { ReviewGatesEditor } from './ReviewGatesEditor';
 import { REANNOUNCE_GAP_MS, TRANSIENT_ANNOUNCEMENT_DURATION_MS } from '../../hooks/useTransientAnnouncement';
 import { SETTINGS_CATALOG_WARNINGS, SettingsCatalogResponse, SettingsCatalogWarning } from '../../types';
-import { openIconButtonTooltip, waitForHoverOpenDelay } from '../../test/iconButtonTooltip';
+import { openIconButtonTooltip, setupHoverUser, startHoverFakeTimers, waitForHoverOpenDelay } from '../../test/iconButtonTooltip';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -719,7 +719,8 @@ describe('ReviewGatesEditor delete button accessible name', () => {
   });
 
   it('shows the delete tooltip on keyboard focus, and why a default gate cannot be deleted on hover', async () => {
-    const user = userEvent.setup();
+    startHoverFakeTimers();
+    const user = setupHoverUser();
     render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
     await screen.findByDisplayValue('Code Review');
 

@@ -7,11 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IconButton, OPEN_DELAY_MS } from './IconButton';
 import i18n from '../i18n';
 import { submittingName } from '../test/submittingName';
-import { allIconButtonTooltips, openIconButtonTooltip, openIconButtonTooltips, waitForHoverOpenDelay } from '../test/iconButtonTooltip';
+import { allIconButtonTooltips, openIconButtonTooltip, openIconButtonTooltips, setupHoverUser, startHoverFakeTimers, useHoverFakeTimers, waitForHoverOpenDelay } from '../test/iconButtonTooltip';
 
 const Icon = () => <svg aria-hidden="true" data-testid="icon" />;
 
 describe('IconButton', () => {
+  useHoverFakeTimers();
+
   it('is named by label through aria-label, with no title', () => {
     render(
       <IconButton label="Settings">
@@ -36,7 +38,7 @@ describe('IconButton', () => {
   });
 
   it('shows the tooltip on keyboard focus and hides it on blur', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     render(
       <>
         <IconButton label="Settings">
@@ -59,7 +61,7 @@ describe('IconButton', () => {
   });
 
   it('shows the tooltip text when it differs from the label', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     render(
       <IconButton label="Delete ticket: T-1" tooltip="Delete">
         <Icon />
@@ -71,7 +73,7 @@ describe('IconButton', () => {
   });
 
   it('shows the tooltip on hover and hides it shortly after the pointer leaves', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     render(
       <IconButton label="Refresh">
         <Icon />
@@ -88,7 +90,7 @@ describe('IconButton', () => {
   });
 
   it('stays open while the pointer moves from the button onto the tooltip', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     render(
       <IconButton label="Refresh">
         <Icon />
@@ -107,7 +109,7 @@ describe('IconButton', () => {
   });
 
   it('shows the tooltip when a disabled button is hovered', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     render(
       <IconButton label="Delete" tooltip="Defaults cannot be deleted" disabled wrapperClassName="shrink-0">
         <Icon />
@@ -126,7 +128,7 @@ describe('IconButton', () => {
   // swallows every click -- including the ones Enter and Space turn into.
   describe('aria-disabled', () => {
     it.each([true, 'true'] as const)('takes Tab focus and shows the tooltip and description (aria-disabled=%s)', async value => {
-      const user = userEvent.setup();
+      const user = setupHoverUser();
       render(
         <IconButton label="Delete type: plan" tooltip="Defaults cannot be deleted" describeWithTooltip aria-disabled={value}>
           <Icon />
@@ -143,7 +145,7 @@ describe('IconButton', () => {
     });
 
     it.each([true, 'true'] as const)('calls onClick on neither a click nor Enter nor Space (aria-disabled=%s)', async value => {
-      const user = userEvent.setup();
+      const user = setupHoverUser();
       const onClick = vi.fn();
       const onSubmit = vi.fn((e: FormEvent) => e.preventDefault());
       render(
@@ -165,7 +167,7 @@ describe('IconButton', () => {
     });
 
     it.each([false, 'false', undefined] as const)('calls onClick as usual when aria-disabled is %s', async value => {
-      const user = userEvent.setup();
+      const user = setupHoverUser();
       const onClick = vi.fn();
       render(
         <IconButton label="Delete" aria-disabled={value} onClick={onClick}>
@@ -178,7 +180,7 @@ describe('IconButton', () => {
   });
 
   it('closes the tooltip on Escape, marking only that Escape as handled', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     const seen: boolean[] = [];
     const listener = (e: KeyboardEvent) => {
       if (e.key === 'Escape') seen.push(e.defaultPrevented);
@@ -207,7 +209,7 @@ describe('IconButton', () => {
   });
 
   it('does not stop Escape from propagating', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     const onKeyDown = vi.fn();
     render(
       <div onKeyDown={e => onKeyDown(e.key, e.defaultPrevented)}>
@@ -222,7 +224,7 @@ describe('IconButton', () => {
   });
 
   it('keeps clicks on the tooltip from reaching the ancestors of the button', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     const onClick = vi.fn();
     const onMouseDown = vi.fn();
     const onMouseUp = vi.fn();
@@ -260,7 +262,7 @@ describe('IconButton', () => {
   });
 
   it('keeps a whole click on a describeWithTooltip tooltip from the ancestors, though the press closes it', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     const onClick = vi.fn();
     const onMouseDown = vi.fn();
     const onMouseUp = vi.fn();
@@ -288,7 +290,7 @@ describe('IconButton', () => {
   });
 
   it('exposes the tooltip as the description only with describeWithTooltip, even while it is closed', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     render(
       <>
         <IconButton label="Delete type: plan" tooltip="Defaults cannot be deleted" describeWithTooltip>
@@ -331,7 +333,7 @@ describe('IconButton', () => {
   });
 
   it('follows a label change while the tooltip is open', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     const { rerender } = render(
       <IconButton label="Copy ID">
         <Icon />
@@ -400,7 +402,7 @@ describe('IconButton', () => {
 
   describe('hover and focus are tracked separately', () => {
     it('keeps a focus-opened tooltip open while the pointer passes over the button', async () => {
-      const user = userEvent.setup();
+      const user = setupHoverUser();
       render(
         <IconButton label="Settings">
           <Icon />
@@ -420,7 +422,7 @@ describe('IconButton', () => {
     });
 
     it('keeps a hover-opened tooltip open when focus leaves the button, until the pointer leaves', async () => {
-      const user = userEvent.setup();
+      const user = setupHoverUser();
       render(
         <>
           <IconButton label="Settings">
@@ -443,7 +445,7 @@ describe('IconButton', () => {
     });
 
     it('closes a tooltip open by both hover and focus on one Escape, and keeps it closed', async () => {
-      const user = userEvent.setup();
+      const user = setupHoverUser();
       render(
         <IconButton label="Settings">
           <Icon />
@@ -463,7 +465,7 @@ describe('IconButton', () => {
 
   describe('Escape with focus outside the button', () => {
     it('dismisses a hover-opened tooltip without preventDefault, so the focused element still gets the key', async () => {
-      const user = userEvent.setup();
+      const user = setupHoverUser();
       const onInputKeyDown = vi.fn();
       const seen: boolean[] = [];
       const listener = (e: KeyboardEvent) => {
@@ -496,7 +498,7 @@ describe('IconButton', () => {
     });
 
     it('dismisses the tooltip of a hovered disabled button', async () => {
-      const user = userEvent.setup();
+      const user = setupHoverUser();
       render(
         <>
           <input aria-label="field" />
@@ -515,7 +517,7 @@ describe('IconButton', () => {
     });
 
     it('dismisses the tooltip even when the focused element stops the key from propagating', async () => {
-      const user = userEvent.setup();
+      const user = setupHoverUser();
       render(
         <>
           <input aria-label="field" onKeyDown={e => e.stopPropagation()} />
@@ -532,7 +534,7 @@ describe('IconButton', () => {
     });
 
     it('stops listening once the tooltip is closed', async () => {
-      const user = userEvent.setup();
+      const user = setupHoverUser();
       const add = vi.spyOn(document, 'addEventListener');
       const remove = vi.spyOn(document, 'removeEventListener');
       try {
@@ -561,7 +563,7 @@ describe('IconButton', () => {
       ['isComposing', { key: 'Escape', isComposing: true }],
       ['keyCode 229', { key: 'Escape', keyCode: 229 }]
     ])('leaves a hover-opened tooltip open (%s), with focus elsewhere', async (_name, init) => {
-      const user = userEvent.setup();
+      const user = setupHoverUser();
       render(
         <>
           <input aria-label="field" />
@@ -582,7 +584,7 @@ describe('IconButton', () => {
       ['isComposing', { key: 'Escape', isComposing: true }],
       ['keyCode 229', { key: 'Escape', keyCode: 229 }]
     ])('leaves a focus-opened tooltip open and the key unhandled (%s)', async (_name, init) => {
-      const user = userEvent.setup();
+      const user = setupHoverUser();
       render(
         <IconButton label="Settings">
           <Icon />
@@ -622,7 +624,7 @@ describe('IconButton', () => {
 
     async function openAt(button: { left: number; top: number }, side?: 'top' | 'bottom') {
       stubLayout(button);
-      const user = userEvent.setup();
+      const user = setupHoverUser();
       render(
         <IconButton label="Delete" tooltipSide={side}>
           <Icon />
@@ -758,7 +760,7 @@ describe('IconButton', () => {
 
       it.each(['close', 'unmount'] as const)('runs a frame left pending by a resize without error after the tooltip is gone (%s)', async how => {
         const errors = vi.spyOn(console, 'error');
-        const user = userEvent.setup();
+        const user = setupHoverUser();
         stubLayout({ left: 400, top: 100 });
         const { unmount } = render(
           <IconButton label="Delete">
@@ -794,8 +796,10 @@ describe('IconButton', () => {
 // DFLT-00285: options for a button that shows its own name as text (the
 // header's project switcher).
 describe('IconButton text-named options', () => {
+  useHoverFakeTimers();
+
   it('leaves an existing call unchanged: named by aria-label, one-line tooltip', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     render(
       <IconButton label="Settings">
         <Icon />
@@ -823,7 +827,7 @@ describe('IconButton text-named options', () => {
   });
 
   it('sets no aria-label with nameFromContent even when label is given, and shows label as the tooltip', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     render(
       <IconButton nameFromContent label="Switch project">
         <Icon />
@@ -839,7 +843,7 @@ describe('IconButton text-named options', () => {
   });
 
   it('opens no tooltip with neither label nor tooltip', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     render(
       <IconButton nameFromContent>
         <span>Alpha</span>
@@ -852,7 +856,7 @@ describe('IconButton text-named options', () => {
   });
 
   it('shows a tooltip of two lines', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     render(
       <IconButton
         nameFromContent
@@ -885,7 +889,7 @@ describe('IconButton text-named options', () => {
   // the look is unchanged. jsdom computes no layout, so the classes are
   // pinned; the real-browser measurements are in the implementation notes.
   it('caps the tooltip width by the viewport and lets it break anywhere', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     const longName = 'A'.repeat(80);
     render(
       <IconButton nameFromContent tooltip={<span className="block">{longName}</span>}>
@@ -904,7 +908,7 @@ describe('IconButton text-named options', () => {
   // stay 11px). 0.6875rem is 11px at a 16px root, so the look at 100% is
   // unchanged.
   it('sizes the tooltip text in rem, not px', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     render(
       <IconButton label="Settings">
         <Icon />
@@ -918,7 +922,7 @@ describe('IconButton text-named options', () => {
   });
 
   it('gives an existing one-line tooltip the same width cap and wrapping', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     render(
       <IconButton label="Settings">
         <Icon />
@@ -930,7 +934,7 @@ describe('IconButton text-named options', () => {
   });
 
   it('opens no tooltip with tooltipDisabled, even on keyboard focus, and leaves Escape alone', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     const seen: boolean[] = [];
     const listener = (e: KeyboardEvent) => {
       if (e.key === 'Escape') seen.push(e.defaultPrevented);
@@ -958,7 +962,7 @@ describe('IconButton text-named options', () => {
   });
 
   it('opens the tooltip again once tooltipDisabled is cleared while focus stays', async () => {
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     const { rerender } = render(
       <IconButton label="Settings" tooltipDisabled>
         <Icon />
@@ -977,6 +981,8 @@ describe('IconButton text-named options', () => {
 
 // DFLT-00206: `busy` marks the button as sending the user's own action.
 describe('IconButton busy', () => {
+  useHoverFakeTimers();
+
   it('adds aria-busy and the "(submitting)" suffix to the name while busy, keeping the tooltip text', async () => {
     const { rerender } = render(
       <IconButton label="Delete ticket" tooltip="Delete" busy disabled>
@@ -987,7 +993,7 @@ describe('IconButton busy', () => {
     expect(button).toHaveAttribute('aria-busy', 'true');
     expect(button).toHaveAttribute('aria-label', `Delete ticket${i18n.t('common.submitting')}`);
     expect(button).toHaveAccessibleName(submittingName('Delete ticket'));
-    await userEvent.setup().hover(button.parentElement!);
+    await setupHoverUser().hover(button.parentElement!);
     await waitForHoverOpenDelay();
     expect(openIconButtonTooltip()).toHaveTextContent(/^Delete$/);
 
@@ -1008,7 +1014,7 @@ describe('IconButton busy', () => {
     );
     const button = screen.getByRole('button');
     expect(button).toHaveAccessibleName(submittingName('Reopen'));
-    await userEvent.setup().hover(button.parentElement!);
+    await setupHoverUser().hover(button.parentElement!);
     await waitForHoverOpenDelay();
     expect(openIconButtonTooltip()).toHaveTextContent(/^Reopen$/);
   });
@@ -1441,7 +1447,8 @@ describe('IconButton hover tooltip after touch and crossing pointers', () => {
   });
 
   it('opens no tooltip after a mouse click that leaves the button, once the delays have run out', async () => {
-    const user = userEvent.setup();
+    startHoverFakeTimers();
+    const user = setupHoverUser();
     const { button, outside } = renderButton();
     // A browser does not match :focus-visible on a mouse click's focus;
     // jsdom does, so it is stubbed as in the test above.

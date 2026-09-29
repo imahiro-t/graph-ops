@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { NodeTypesEditor } from './NodeTypesEditor';
 import { SettingsNodeTypeInfo } from '../../types';
-import { openIconButtonTooltip, waitForHoverOpenDelay } from '../../test/iconButtonTooltip';
+import { openIconButtonTooltip, setupHoverUser, startHoverFakeTimers, waitForHoverOpenDelay } from '../../test/iconButtonTooltip';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -632,7 +632,8 @@ describe('NodeTypesEditor delete button names', () => {
   // The reason is shown on hover and stays available to assistive
   // technology as the description.
   it('shows why a default type cannot be deleted on hover', async () => {
-    const user = userEvent.setup();
+    startHoverFakeTimers();
+    const user = setupHoverUser();
     render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
     await screen.findByDisplayValue('implementation-tier-text');
     const byDefault = screen.getByRole('button', {
