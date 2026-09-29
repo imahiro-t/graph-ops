@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/graph-ops/core-go/internal/autopilot"
 	"github.com/graph-ops/core-go/internal/autopilot/runner"
@@ -374,5 +377,91 @@ func TestAutopilotWaitKeepsTheHeartbeatWithinTheActiveThreshold(t *testing.T) {
 	}
 	if autopilotWaitDefaultTimeout > autopilot.ActiveThreshold {
 		t.Fatalf("wait's default timeout %s exceeds ActiveThreshold %s", autopilotWaitDefaultTimeout, autopilot.ActiveThreshold)
+	}
+}
+
+// DFLT-00339: what the CLI prints of a run record crafted with control
+// characters -- another member's record in the data source refusing a
+// start, and a run file's strings in autopilot status -- holds none of them.
+const craftedDisplay = "\x1b[31m\nError: forged line\r\u009b\u202e\u200b"
+
+func hasUnsafeDisplayRune(s string) bool {
+	for _, r := range s {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAutopilotCLI_CraftedSharedRunRefusesAStartCleanly(t *testing.T) {
+	repo, rc, projectID, _, _ := autopilotCLISetup(t)
+	eng := engine.New(repo)
+	root, _ := eng.CreateTicket(projectID, "Root", "")
+	rs, ok := repo.(store.AutopilotRunStore)
+	if !ok {
+		t.Skip("the test repository does not share autopilot runs")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	snap, _ := json.Marshal(map[string]any{"stop_detail": craftedDisplay, "tickets": map[string]any{}})
+	// Another machine's active run of the same root: its ID, mode, state
+	// and starter are crafted (the root is the real one, so it overlaps).
+	if err := rs.SaveAutopilotRun(domain.AutopilotRunRecord{ID: "run-c" + craftedDisplay, ProjectID: projectID,
+		RootTicketID: root.ID, Mode: craftedDisplay, State: craftedDisplay, Heartbeat: now, CreatedAt: now, UpdatedAt: now,
+		StartedByName: craftedDisplay, MachineID: "machine-crafted", Revision: 1, Snapshot: snap}); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	stderr := captureStderr(t, func() { _, err = runAutopilot(t, repo, rc, "", "start", root.ID, "--mode", "tree") })
+	assertAPIErrorCode(t, err, autopilot.ErrCodeAlreadyRunning)
+	if hasUnsafeDisplayRune(err.Error()) || hasUnsafeDisplayRune(stderr) || !strings.Contains(err.Error(), "(invalid id)") {
+		t.Fatalf("error %q, stderr %q", err, stderr)
+	}
+	var apiErr *domain.APIError
+	if errors.As(err, &apiErr) {
+		for k, v := range apiErr.Details {
+			if s, ok := v.(string); ok && hasUnsafeDisplayRune(s) {
+				t.Fatalf("details[%s] = %q", k, s)
+			}
+		}
+	}
+}
+
+func TestAutopilotCLI_StatusShowsACraftedRunFileCleanly(t *testing.T) {
+	repo, rc, projectID, _, _ := autopilotCLISetup(t)
+	now := time.Now()
+	tid := "DFLT-1" + craftedDisplay
+	run := &autopilot.Run{ID: autopilot.NewRunID(now), ProjectID: projectID, Mode: craftedDisplay, RootTicketID: "R" + craftedDisplay,
+		State: craftedDisplay, CreatedAt: now, Heartbeat: now, StopReason: craftedDisplay, Order: []string{tid},
+		Tickets: map[string]*autopilot.TicketState{tid: {ID: tid, Status: craftedDisplay, Role: craftedDisplay,
+			AwaitingHuman: craftedDisplay + strings.Repeat("長", 600)}}}
+	g := &autopilot.Registry{Root: runner.RegistryRoot(rc.HomeDir)}
+	if err := g.WithLock(projectID, func(tx *autopilot.Tx) error { return tx.Save(run) }); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runAutopilot(t, repo, rc, "", "status", "--project", projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Runs []runner.RunStatus `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil || len(got.Runs) != 1 {
+		t.Fatalf("status: %v\n%s", err, out)
+	}
+	rs := got.Runs[0]
+	for _, s := range []string{rs.RunID, rs.ProjectID, rs.Mode, rs.Root, rs.State, rs.Current, rs.CurrentRole, rs.AwaitingHuman, rs.StopReason} {
+		if hasUnsafeDisplayRune(s) {
+			t.Fatalf("status shows %q:\n%s", s, out)
+		}
+	}
+	for id, st := range rs.Tickets {
+		if hasUnsafeDisplayRune(id) || hasUnsafeDisplayRune(st) {
+			t.Fatalf("status shows ticket %q: %q", id, st)
+		}
+	}
+	if rs.RunID != run.ID || rs.ProjectID != projectID || rs.Root != "(invalid id)" || rs.Current != "(invalid id)" ||
+		utf8.RuneCountInString(rs.AwaitingHuman) != 500 {
+		t.Fatalf("status = %+v", rs)
 	}
 }

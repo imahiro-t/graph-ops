@@ -166,15 +166,33 @@ func (r *Run) SharedView() (*Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	v.TerminalTTY, v.TerminalTabDisabled = "", ""
-	if v.Reservation != nil {
-		v.Reservation.Previous = nil
+	v.dropLocalOnly()
+	return v, nil
+}
+
+// dropLocalOnly clears, in place, what SharedView leaves out of a run's
+// shared view (see there).
+//
+// RunFromRecord calls it too (DFLT-00339): a record saved the regular way
+// has none of it anyway, but a member who writes to the data source
+// directly could put a branch name or a tty there, and none of it is ever
+// used from another member's run -- a shared run is only listed, checked
+// for overlaps (decideBegin, Overtaker), counted for retention
+// (SharedRetention, which looks at IDs, states and times) and asked for its
+// revision (stamp), and it never becomes a local run file. If a shared
+// record is ever used to rebuild a local run, this needs another look.
+func (r *Run) dropLocalOnly() {
+	r.TerminalTTY, r.TerminalTabDisabled = "", ""
+	if r.Reservation != nil {
+		r.Reservation.Previous = nil
 	}
-	for _, st := range v.Tickets {
+	for _, st := range r.Tickets {
+		if st == nil {
+			continue
+		}
 		st.Worktree, st.Branch, st.BaseBranch = "", "", ""
 		st.DBFingerprint, st.WorktreeFingerprint = "", ""
 	}
-	return v, nil
 }
 
 // cloneRun returns a deep copy of r (a JSON round trip: a Run holds only
@@ -224,12 +242,22 @@ func (r *Run) ToRecord() (domain.AutopilotRunRecord, error) {
 }
 
 // RunFromRecord rebuilds a run from its shared record: the snapshot, with
-// the record's columns taking precedence.
+// the record's columns taking precedence, and without what only means
+// something on the machine that wrote it (dropLocalOnly).
+//
+// The record may be another member's, or written to the data source
+// directly, so its strings are not trusted for display; they are not
+// rewritten here, though (DFLT-00339): the IDs, root, project, mode, state
+// and machine ID are what runs are matched on -- by ID, for overlaps, for
+// retention (the IDs deleted), by BelongsTo -- so they are kept as they are,
+// and every display sanitizes them instead (runner's runStatus, the start
+// errors, StopOvertakenBy). Only the starter's name is sanitized here
+// (sanitizeStartedBy), as it is used for display alone.
 func RunFromRecord(rec domain.AutopilotRunRecord) (*Run, error) {
 	var r Run
 	if len(rec.Snapshot) > 0 {
 		if err := json.Unmarshal(rec.Snapshot, &r); err != nil {
-			return nil, fmt.Errorf("reading the shared autopilot run %s: %w", rec.ID, err)
+			return nil, fmt.Errorf("reading the shared autopilot run %s: %w", displayname.ID(rec.ID), err)
 		}
 	}
 	r.ID, r.ProjectID, r.RootTicketID, r.Mode, r.State = rec.ID, rec.ProjectID, rec.RootTicketID, rec.Mode, rec.State
@@ -244,6 +272,7 @@ func RunFromRecord(rec domain.AutopilotRunRecord) (*Run, error) {
 	if r.Tickets == nil {
 		r.Tickets = map[string]*TicketState{}
 	}
+	r.dropLocalOnly()
 	r.sanitizeStartedBy()
 	return &r, nil
 }
@@ -297,6 +326,13 @@ func startedByDetails(r *Run, details map[string]any) map[string]any {
 		details["name_is_fallback"] = fallback
 	}
 	return details
+}
+
+// runDetails is an error's details naming r (DFLT-00339): its run ID and
+// root, through displayname.ID since r may be another member's run, and its
+// starter (startedByDetails).
+func runDetails(r *Run) map[string]any {
+	return startedByDetails(r, map[string]any{"run_id": displayname.ID(r.ID), "root_ticket_id": displayname.ID(r.RootTicketID)})
 }
 
 // startedBySuffix is " (started by <name>)" for an error message, "" when
@@ -429,10 +465,14 @@ func Overtaker(r *Run, others []*Run, descendants func(string) ([]string, error)
 }
 
 // StopOvertakenBy stops r, overtaken by o (see Overtaker), naming o and who
-// started it in the stop's detail.
+// started it in the stop's detail. o is another member's run, so its ID and
+// root are sanitized (displayname.ID) before they go into the detail
+// (DFLT-00339): the detail is saved in r's own run file and shared record,
+// and shown by next, launch, summary and the Web UI from there on -- the
+// one way a value of another member's run gets into this machine's runs.
 func (r *Run) StopOvertakenBy(o *Run, now time.Time) {
 	detail := fmt.Sprintf("the overlapping run %s rooted at %s%s was started at %s, while this run's heartbeat had expired; this run stopped so as not to work on the same tickets alongside it -- start it again once that run has ended",
-		o.ID, o.RootTicketID, startedBySuffix(o), o.begunAt().UTC().Format(time.RFC3339))
+		displayname.ID(o.ID), displayname.ID(o.RootTicketID), startedBySuffix(o), o.begunAt().UTC().Format(time.RFC3339))
 	r.stop(now, StopOvertaken, "", detail)
 }
 
