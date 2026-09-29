@@ -1043,4 +1043,31 @@ describe('NodeTypesEditor names cut off with an ellipsis, full name in the edito
     expect(heading.querySelector('span')).toHaveTextContent(i18n.t('nodeType.implementation'));
     expect(heading.querySelector('code')).toHaveTextContent('implementation');
   });
+
+  // DFLT-00321: the selected type's list button carries aria-current="true"
+  // (the value TemplatesEditor uses); no other item -- and not the row's
+  // delete button -- carries it, and it follows the selection.
+  it('marks only the selected type with aria-current, and moves it with the selection', async () => {
+    mockedFetchTypes.mockResolvedValue([...TYPES, { type: 'custom_lint', has_default: false, has_user_override: true }]);
+    const user = userEvent.setup();
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    const listButton = (type: string) =>
+      screen.getByRole('button', { name: new RegExp(`^${type === 'custom_lint' ? 'custom_lint' : i18n.t(`nodeType.${type}`)}`) });
+    const deleteButton = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.deleteTypeAriaLabel', { name: 'custom_lint' }) });
+
+    expect(listButton('implementation')).toHaveAttribute('aria-current', 'true');
+    expect(listButton('review')).not.toHaveAttribute('aria-current');
+    expect(listButton('custom_lint')).not.toHaveAttribute('aria-current');
+    expect(deleteButton).not.toHaveAttribute('aria-current');
+    expect(document.querySelectorAll('[aria-current]')).toHaveLength(1);
+
+    await user.click(listButton('custom_lint'));
+    await screen.findByDisplayValue('custom_lint-tier-text');
+    expect(listButton('custom_lint')).toHaveAttribute('aria-current', 'true');
+    expect(listButton('implementation')).not.toHaveAttribute('aria-current');
+    expect(deleteButton).not.toHaveAttribute('aria-current');
+    expect(document.querySelectorAll('[aria-current]')).toHaveLength(1);
+  });
 });

@@ -6,7 +6,7 @@
 // minus the plugin-default layer skills don't have.
 import React, { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Save, CheckCircle2 } from 'lucide-react';
+import { Save, CheckCircle2 } from 'lucide-react';
 import { SettingsSkillInfo } from '../../types';
 import { fetchSettingsSkill, fetchSettingsSkills, saveSettingsSkill } from '../../lib/settingsApi';
 import { errorMessage } from '../../lib/apiError';
@@ -17,6 +17,7 @@ import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 import { submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
 import { LIST_HEADING_CLASS, LIST_ITEM_FOCUS_CLASS, LIST_LAYOUT_CLASS, LIST_PANE_CLASS } from './listPane';
+import { Spinner } from '../Spinner';
 
 interface Props {
   onDirtyChange: (dirty: boolean) => void;
@@ -146,6 +147,11 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
             <button
               key={info.name}
               onClick={() => void select(info.name)}
+              // DFLT-00321: aria-current marks the one skill whose editor is
+              // shown on the right, with the same value TemplatesEditor uses.
+              // undefined (not false) keeps the attribute off the other
+              // items -- React would render false as "false".
+              aria-current={selected === info.name ? 'true' : undefined}
               className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 border-b border-slate-100 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-900 transition ${LIST_ITEM_FOCUS_CLASS} ${
                 selected === info.name ? 'bg-white dark:bg-slate-900 font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'
               }`}
@@ -164,7 +170,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
         {error && <ErrorBox className="p-2.5 text-[0.6875rem]">{error}</ErrorBox>}
         {loading ? (
           <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
-            <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> {t('settings.common.loading')}
+            <Spinner className="w-4 h-4" /> {t('settings.common.loading')}
           </div>
         ) : (
           <>
@@ -206,7 +212,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 {...submittingProps(saving)}
                 className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
               >
-                {saving ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Save aria-hidden="true" className="w-3.5 h-3.5" />}
+                {saving ? <Spinner className="w-3.5 h-3.5" /> : <Save aria-hidden="true" className="w-3.5 h-3.5" />}
                 {saving ? t('settings.common.saving') : t('settings.common.save')}
               </button>
             </div>

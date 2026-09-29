@@ -1,12 +1,13 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Bot, Loader2 } from 'lucide-react';
+import { Bot } from 'lucide-react';
 import { AutopilotMode, TicketStatus } from '../types';
 import { startAutopilot, TicketAutopilotView } from '../lib/autopilotApi';
 import { errorMessage } from '../lib/apiError';
 import { StatusLiveRegion } from './StatusLiveRegion';
 import { ConfirmDialog } from './ConfirmDialog';
 import { SubmittingText, submittingProps } from './Submitting';
+import { Spinner } from './Spinner';
 
 interface Props {
   ticketId: string;
@@ -356,7 +357,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
               className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-slate-700 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 rounded-lg text-xs font-semibold sm:whitespace-nowrap flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
             >
               {starting !== null ? (
-                <Loader2 className="w-3.5 h-3.5 shrink-0 motion-safe:animate-spin" aria-hidden="true" />
+                <Spinner className="w-3.5 h-3.5 shrink-0" />
               ) : (
                 <Bot className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
               )}

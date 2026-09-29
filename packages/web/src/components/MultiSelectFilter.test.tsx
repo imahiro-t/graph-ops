@@ -52,6 +52,20 @@ function Harness({
 const trigger = () => screen.getByRole('button', { name: /^ステータス: / });
 const clearButton = () => screen.getByRole('button', { name: i18n.t('toolbar.filterClear') });
 
+// DFLT-00321: the same keyboard focus line as the other controls (a 2px
+// blue-500 / dark:blue-400 outline on focus-visible), and no ring-0 override.
+// The ring-0 class is assembled at run time so Tailwind does not pick it up
+// from this file.
+const NO_RING = ['focus', 'ring-0'].join(':');
+const CHECKBOX_FOCUS = [
+  'focus:outline-hidden',
+  'focus-visible:outline-solid',
+  'focus-visible:outline-2',
+  'focus-visible:outline-offset-0',
+  'focus-visible:outline-blue-500',
+  'dark:focus-visible:outline-blue-400'
+];
+
 describe('MultiSelectFilter', () => {
   it('reads "All" with nothing selected and "N selected" afterwards', async () => {
     const user = userEvent.setup();
@@ -562,5 +576,17 @@ describe('MultiSelectFilter', () => {
       expect(panel()).toHaveClass('left-0');
       expect(panel()).not.toHaveClass('right-0');
     });
+  });
+
+  it('gives each checkbox the same keyboard focus line as the other controls (DFLT-00321)', async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(trigger());
+    const boxes = screen.getAllByRole('checkbox');
+    expect(boxes).toHaveLength(3);
+    for (const box of boxes) {
+      expect(box).toHaveClass(...CHECKBOX_FOCUS);
+      expect(box).not.toHaveClass(NO_RING);
+    }
   });
 });

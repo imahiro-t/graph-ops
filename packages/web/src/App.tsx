@@ -47,6 +47,7 @@ import { focusIfLost, focusKeySelector, neighborAfterRemoval } from './lib/focus
 import { installPlainCopy } from './lib/plainCopy';
 import { useLatest } from './hooks/useLatest';
 import { useTransientAnnouncement } from './hooks/useTransientAnnouncement';
+import { SPIN_CLASS } from './components/Spinner';
 
 // Cycles through the three-way theme preference in a fixed order, used by
 // the header toggle button (light -> dark -> system -> light -> ...).
@@ -221,8 +222,10 @@ export const App: React.FC = () => {
   const projectSwitcherDescriptionId = useId();
   // The switcher's second tooltip line and its description are the same
   // text, computed once so the two cannot drift apart (DFLT-00285).
+  // DFLT-00321: a missing path reads "Local path: Not set" rather than a bare
+  // "Not set", which did not say what was not set.
   const currentProjectPathLabel = currentProject
-    ? currentProject.local_path || t('settings.appSettings.projects.notSet')
+    ? currentProject.local_path || t('projectSwitcher.localPathNotSet')
     : undefined;
   // Memoized: IconButton re-runs its positioning effect whenever the
   // tooltip content changes, and a fresh element on every App render (the
@@ -1577,7 +1580,7 @@ export const App: React.FC = () => {
               className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition"
               label={t('toolbar.refreshTitle')}
             >
-              <RotateCw aria-hidden="true" className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <RotateCw aria-hidden="true" className={`w-3.5 h-3.5 ${loading ? SPIN_CLASS : ''}`} />
             </IconButton>
             <span className="min-w-0 wrap-anywhere">
               {t('toolbar.updatedAt', {

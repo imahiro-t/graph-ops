@@ -11,7 +11,6 @@ import {
   ExternalLink,
   Download,
   Send,
-  Loader2,
   Layers,
   ClipboardEdit,
   Check,
@@ -50,6 +49,7 @@ import { plainCopyProps } from '../lib/plainCopy';
 import { withBreaks, WORD_JOINER } from '../lib/wbr';
 import { graphNodeLabel } from '../lib/graphNodeLabel';
 import { rootFontSizePx } from '../lib/popupPlacement';
+import { Spinner } from './Spinner';
 
 interface Props {
   ticket: TicketDetail;
@@ -346,7 +346,7 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
         className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded-sm text-[0.6875rem] font-bold flex items-center gap-1 transition shrink-0 max-w-full wrap-anywhere"
       >
         {isSubmitting ? (
-          <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
+          <Spinner className="w-3 h-3" />
         ) : (
           <X aria-hidden="true" className="w-3 h-3" />
         )}
@@ -1254,10 +1254,35 @@ export const TicketItem: React.FC<Props> = ({
   // React 19 callback-ref cleanup. The ref must be stable (useCallback with
   // no deps): an inline function would run the cleanup on every render and
   // clear the state while the button still has focus.
+  //
+  // DFLT-00321: when the button leaves the DOM while it has focus (the only
+  // way that happens with the focus rule above is the description being
+  // emptied by an external update), the focus would drop to <body>. The
+  // cleanup runs before React removes the node, so it can still see that the
+  // button has focus; it only raises a flag, and the layout effect below --
+  // which runs after the commit has removed the button -- moves the focus to
+  // the description card's heading. When the card itself is gone as well
+  // (ticket closed, unmount) there is no heading and nothing is moved.
+  const descriptionHeadingRef = useRef<HTMLSpanElement>(null);
+  const descriptionToggleHadFocusRef = useRef(false);
   const descriptionToggleRef = useCallback((el: HTMLButtonElement | null) => {
     if (!el) return;
-    return () => setIsDescriptionToggleFocused(false);
+    return () => {
+      if (el.ownerDocument.activeElement === el) descriptionToggleHadFocusRef.current = true;
+      setIsDescriptionToggleFocused(false);
+    };
   }, []);
+  useLayoutEffect(() => {
+    if (!descriptionToggleHadFocusRef.current) return;
+    descriptionToggleHadFocusRef.current = false;
+    const heading = descriptionHeadingRef.current;
+    if (!heading) return;
+    // Only take over a focus that was actually lost -- never pull it away
+    // from an element that already has it.
+    const active = heading.ownerDocument.activeElement;
+    if (active && active !== heading.ownerDocument.body) return;
+    heading.focus();
+  });
   const showDescriptionToggle =
     description.length > 0 &&
     (isDescriptionExpanded || isCollapsedDescriptionOverflowing || isDescriptionToggleFocused);
@@ -1714,7 +1739,7 @@ export const TicketItem: React.FC<Props> = ({
                     label={t('ticketItem.selfAssign.unassign')}
                     className="p-0.5 text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-200 disabled:opacity-50 rounded-full"
                   >
-                    {assignToMeSaving ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <X aria-hidden="true" className="w-3 h-3" />}
+                    {assignToMeSaving ? <Spinner className="w-3 h-3" /> : <X aria-hidden="true" className="w-3 h-3" />}
                   </IconButton>
                 </span>
               ) : ticket.assignee ? (
@@ -1739,7 +1764,7 @@ export const TicketItem: React.FC<Props> = ({
                   {...submittingProps(assignToMeSaving)}
                   className="px-2 py-0.5 rounded-full border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 disabled:opacity-50 text-[0.6875rem] font-semibold flex items-center gap-1 min-w-0 max-w-full wrap-anywhere transition"
                 >
-                  {assignToMeSaving ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <UserPlus aria-hidden="true" className="w-3 h-3" />}
+                  {assignToMeSaving ? <Spinner className="w-3 h-3" /> : <UserPlus aria-hidden="true" className="w-3 h-3" />}
                   {t('ticketItem.selfAssign.assign')}
                   <SubmittingText busy={assignToMeSaving} />
                 </button>
@@ -1807,7 +1832,7 @@ export const TicketItem: React.FC<Props> = ({
               wrapperClassName="-m-1"
               className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 rounded-sm"
             >
-              {isReopeningTicket ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <RotateCcw aria-hidden="true" className="w-4 h-4" />}
+              {isReopeningTicket ? <Spinner className="w-4 h-4" /> : <RotateCcw aria-hidden="true" className="w-4 h-4" />}
             </IconButton>
           ) : (
             <IconButton
@@ -1840,7 +1865,7 @@ export const TicketItem: React.FC<Props> = ({
             wrapperClassName="-m-1"
             className="text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 rounded-sm"
           >
-            {isDeletingTicket ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <Trash2 aria-hidden="true" className="w-4 h-4" />}
+            {isDeletingTicket ? <Spinner className="w-4 h-4" /> : <Trash2 aria-hidden="true" className="w-4 h-4" />}
           </IconButton>
         </div>
       </div>
@@ -1874,7 +1899,7 @@ export const TicketItem: React.FC<Props> = ({
             {...submittingProps(isClosingTicket)}
             className="px-2 py-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-sm text-xs font-bold flex items-center gap-1 transition shrink-0"
           >
-            {isClosingTicket ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Archive aria-hidden="true" className="w-3.5 h-3.5" />}
+            {isClosingTicket ? <Spinner className="w-3.5 h-3.5" /> : <Archive aria-hidden="true" className="w-3.5 h-3.5" />}
             {t('ticketItem.close.confirm')}
             <SubmittingText busy={isClosingTicket} />
           </button>
@@ -2046,7 +2071,14 @@ export const TicketItem: React.FC<Props> = ({
                 time wrap instead of the FileText and History icons being
                 squeezed (to 0px for History at 200% on 320px). */}
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mb-2">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 min-w-0 wrap-anywhere">
+              {/* DFLT-00321: tabIndex=-1 makes the heading a target for the
+                  focus when the "Full text" button disappears under it (see
+                  descriptionToggleRef) without adding a tab stop. */}
+              <span
+                ref={descriptionHeadingRef}
+                tabIndex={-1}
+                className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 min-w-0 wrap-anywhere rounded-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+              >
                 <FileText aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
                 <span className="min-w-0 wrap-anywhere">{t('ticketItem.description.title')}</span>
               </span>
@@ -2688,7 +2720,7 @@ export const TicketItem: React.FC<Props> = ({
                                     className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded-sm text-[0.6875rem] font-bold flex items-center gap-1 transition below-80rem:min-w-0 below-80rem:max-w-full below-80rem:flex-wrap below-80rem:wrap-anywhere upto-15rem:px-1"
                                   >
                                     {isApprovalSubmitting ? (
-                                      <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
+                                      <Spinner className="w-3 h-3" />
                                     ) : (
                                       <Check aria-hidden="true" className="w-3 h-3" />
                                     )}
@@ -3003,7 +3035,7 @@ export const TicketItem: React.FC<Props> = ({
                       {...submittingProps(isRunning)}
                       className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
                     >
-                      {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-600" />}
+                      {isRunning ? <Spinner className="w-3.5 h-3.5 shrink-0" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-600" />}
                       {t('ticketItem.actions.refine')}
                       <SubmittingText busy={isRunning} />
                     </button>
@@ -3013,7 +3045,7 @@ export const TicketItem: React.FC<Props> = ({
                       {...submittingProps(isRunning)}
                       className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition"
                     >
-                      {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />}
+                      {isRunning ? <Spinner className="w-3.5 h-3.5 shrink-0" /> : <Play aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />}
                       {t('ticketItem.actions.run')}
                       <SubmittingText busy={isRunning} />
                     </button>
@@ -3059,7 +3091,7 @@ export const TicketItem: React.FC<Props> = ({
                 {...submittingProps(isRunning)}
                 className="px-4 max-sm:px-3 max-sm:py-2 max-sm:ml-auto max-w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center justify-center gap-1.5 transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
               >
-                {isRunning ? <Loader2 aria-hidden="true" className="w-4 h-4 shrink-0 animate-spin" /> : <Send aria-hidden="true" className="w-4 h-4 shrink-0" />}
+                {isRunning ? <Spinner className="w-4 h-4 shrink-0" /> : <Send aria-hidden="true" className="w-4 h-4 shrink-0" />}
                 {t('ticketItem.send')}
                 <SubmittingText busy={isRunning} />
               </button>

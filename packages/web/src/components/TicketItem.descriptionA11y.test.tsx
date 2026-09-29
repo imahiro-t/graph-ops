@@ -484,6 +484,67 @@ describe.each(['ja', 'en'] as const)('TicketItem description card accessibility 
     expect(queryFullTextButton()).toBeNull();
   });
 
+  // DFLT-00321: the focused button disappears when an external update
+  // empties the description; the focus goes to the card's heading (a
+  // tabIndex=-1 target, not a tab stop) instead of dropping to <body>.
+  it('moves the focus to the card heading when the description is emptied under a focused button', () => {
+    overflow();
+    const { rerender } = render(itemElement());
+    act(() => fullTextButton().focus());
+    expect(fullTextButton()).toHaveFocus();
+
+    rerender(itemElement(''));
+    expect(queryFullTextButton()).toBeNull();
+    const heading = document.activeElement as HTMLElement;
+    expect(heading).not.toBe(document.body);
+    expect(heading).toHaveTextContent(i18n.t('ticketItem.description.title'));
+    expect(heading).toContainElement(screen.getByText(i18n.t('ticketItem.description.title')));
+    expect(heading).toHaveAttribute('tabindex', '-1');
+    expect(heading).toHaveClass(...FOCUS_RING);
+  });
+
+  // Unlike the focus-move test above, this checks the heading on a plain
+  // render, before anything has moved the focus to it: tabindex=-1 is there
+  // from the start, so the heading never becomes an extra Tab stop.
+  it('keeps the heading out of the tab order from the first render, before any focus move', () => {
+    renderExpanded();
+    const heading = screen.getByText(i18n.t('ticketItem.description.title')).parentElement as HTMLElement;
+    expect(heading).not.toHaveFocus();
+    expect(heading).toHaveAttribute('tabindex', '-1');
+  });
+
+  it('leaves the focus on the button when an external update changes the description to another non-empty text', () => {
+    overflow();
+    const { rerender } = render(itemElement());
+    const button = fullTextButton();
+    act(() => button.focus());
+
+    rerender(itemElement('別の長い説明'));
+    expect(fullTextButton()).toBe(button);
+    expect(button).toHaveFocus();
+  });
+
+  it('does not move the focus to the heading when the button leaves without focus', () => {
+    overflow();
+    const { rerender } = render(itemElement());
+    expect(fullTextButton()).not.toHaveFocus();
+
+    rerender(itemElement(''));
+    expect(queryFullTextButton()).toBeNull();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('does not move the focus anywhere when the ticket is closed with the button focused', () => {
+    overflow();
+    const { rerender } = render(itemElement());
+    act(() => fullTextButton().focus());
+
+    rerender(itemElement(undefined, false));
+    expect(queryFullTextButton()).toBeNull();
+    expect(screen.queryByText(i18n.t('ticketItem.description.title'))).toBeNull();
+    expect(document.activeElement?.getAttribute('tabindex')).not.toBe('-1');
+  });
+
   it('sizes the refined time in rem so it follows the default font size', () => {
     renderExpanded();
     const refinedText = screen.getByText(

@@ -1617,6 +1617,20 @@ describe('ReviewGatesEditor removal announcement', () => {
 // height and inner scroll (the tab panel scrolls instead), and the bottom
 // add / save row wraps. The wide classes stay. jsdom does no layout, so the
 // classes are pinned.
+// DFLT-00321: the same keyboard focus line as the other controls (a 2px
+// blue-500 / dark:blue-400 outline on focus-visible), and no ring-0 override.
+// The ring-0 class is assembled at run time so Tailwind does not pick it up
+// from this file.
+const NO_RING = ['focus', 'ring-0'].join(':');
+const CHECKBOX_FOCUS = [
+  'focus:outline-hidden',
+  'focus-visible:outline-solid',
+  'focus-visible:outline-2',
+  'focus-visible:outline-offset-0',
+  'focus-visible:outline-blue-500',
+  'dark:focus-visible:outline-blue-400'
+];
+
 describe('ReviewGatesEditor narrow reflow (DFLT-00261)', () => {
   beforeEach(async () => {
     mockedFetchCatalog.mockReset();
@@ -1649,5 +1663,16 @@ describe('ReviewGatesEditor narrow reflow (DFLT-00261)', () => {
     expect(addButton.parentElement).toHaveClass('flex', 'justify-between', 'items-center', 'narrow:flex-wrap', 'narrow:gap-2');
     const saveButton = screen.getByRole('button', { name: i18n.t('settings.common.save') });
     expect(saveButton.parentElement).toHaveClass('flex', 'items-center', 'gap-2', 'narrow:flex-wrap');
+  });
+
+  it('gives each enabled checkbox the same keyboard focus line as the other controls (DFLT-00321)', async () => {
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+    const boxes = screen.getAllByRole('checkbox', { name: i18n.t('settings.reviewGates.enabledLabel') });
+    expect(boxes).toHaveLength(2);
+    for (const box of boxes) {
+      expect(box).toHaveClass(...CHECKBOX_FOCUS);
+      expect(box).not.toHaveClass(NO_RING);
+    }
   });
 });

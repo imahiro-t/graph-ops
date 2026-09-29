@@ -493,9 +493,11 @@ describe.each(['ja', 'en'] as const)('full project name in the switcher\'s toolt
     expect(await hoverTooltipLines(user)).toEqual(['Alpha', '/work/alpha']);
   });
 
-  it('writes "not set" on the second line and in the description when the project has no local path', async () => {
+  // DFLT-00321: "Local path: Not set", not a bare "Not set".
+  it('writes "local path: not set" on the second line and in the description when the project has no local path', async () => {
     const user = await renderWith(beta.id);
-    const notSet = i18n.t('settings.appSettings.projects.notSet');
+    const notSet = i18n.t('projectSwitcher.localPathNotSet');
+    expect(notSet).toBe(i18n.language === 'en' ? 'Local path: Not set' : 'ローカルパス: 未設定');
     const button = switcherButton();
     expect(button).not.toHaveAttribute('title');
     expect(button).toHaveAccessibleName('Beta');

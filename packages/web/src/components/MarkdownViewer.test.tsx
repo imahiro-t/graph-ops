@@ -175,3 +175,52 @@ describe('MarkdownViewer remote images', () => {
     expect(imgSrc).not.toContain('*');
   });
 });
+
+// DFLT-00321: the viewer without `scrollable` (the ticket description, the
+// artifact preview page) is not a scroll container. overflow-x-auto on it
+// made Chromium and Firefox turn it into a nameless tab stop whenever
+// something in it ran past its width (keyboard-focusable scrollers); it now
+// breaks long words instead (wrap-break-word), and tables and code blocks
+// keep their own scroll boxes. The scrollable viewer is unchanged: a named,
+// focusable region with a blue-500 ring. jsdom does no layout, so what is
+// pinned here is the attributes and classes; the real-browser check at 320px
+// wide and 200% text is in the implementation notes.
+describe('MarkdownViewer tab stop (DFLT-00321)', () => {
+  const WIDE = '| A | B |\n|---|---|\n| x | y |\n\n```ts\nconst a = 1;\n```\n\n`a/very/long/path/to/a/file.tsx`';
+
+  it('is neither a tab stop nor a scroll container without scrollable', () => {
+    render(<MarkdownViewer content={WIDE} />);
+    const root = screen.getByTestId('markdown-viewer');
+    expect(root).not.toHaveAttribute('tabindex');
+    expect(root).not.toHaveAttribute('role');
+    expect(root).not.toHaveAttribute('aria-label');
+    for (const cls of ['overflow-x-auto', 'overflow-y-auto', 'overflow-auto', 'overflow-scroll', 'max-h-64']) {
+      expect(root).not.toHaveClass(cls);
+    }
+    expect(root).toHaveClass('wrap-break-word');
+  });
+
+  it('leaves the table and the code block their own horizontal scroll boxes', () => {
+    render(<MarkdownViewer content={WIDE} />);
+    const root = screen.getByTestId('markdown-viewer');
+    const table = root.querySelector('table') as HTMLElement;
+    expect(table.parentElement).toHaveClass('overflow-x-auto');
+    expect(root.querySelector('pre')).toHaveClass('overflow-x-auto');
+  });
+
+  it('keeps the scrollable viewer a named, focusable scroll region with a focus ring', () => {
+    render(<MarkdownViewer content={WIDE} scrollable label="名前" />);
+    const root = screen.getByRole('region', { name: '名前' });
+    expect(root).toHaveAttribute('data-testid', 'markdown-viewer');
+    expect(root).toHaveAttribute('tabindex', '0');
+    expect(root).toHaveClass(
+      'overflow-x-auto',
+      'overflow-y-auto',
+      'max-h-64',
+      'focus-visible:outline-hidden',
+      'focus-visible:ring-2',
+      'focus-visible:ring-blue-500'
+    );
+    expect(root).not.toHaveClass('wrap-break-word');
+  });
+});

@@ -319,4 +319,25 @@ describe('SkillsEditor narrow reflow (DFLT-00261)', () => {
     expect(list.firstElementChild).toHaveTextContent(i18n.t('settings.skills.listTitle'));
     expect(list.firstElementChild).toHaveClass('sticky', 'top-0', 'z-10');
   });
+
+  // DFLT-00321: the selected skill's list button carries aria-current="true"
+  // (the value TemplatesEditor uses), no other item carries it, and it
+  // follows the selection.
+  it('marks only the selected skill with aria-current, and moves it with the selection', async () => {
+    const user = userEvent.setup();
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('create-ticket-tier-text');
+
+    const createButton = screen.getByRole('button', { name: new RegExp(i18n.t('settings.skills.names.createTicket')) });
+    const refineButton = screen.getByRole('button', { name: new RegExp(i18n.t('settings.skills.names.refineTicket')) });
+    expect(createButton).toHaveAttribute('aria-current', 'true');
+    expect(refineButton).not.toHaveAttribute('aria-current');
+    expect(document.querySelectorAll('[aria-current]')).toHaveLength(1);
+
+    await user.click(refineButton);
+    await screen.findByDisplayValue('refine-ticket-tier-text');
+    expect(refineButton).toHaveAttribute('aria-current', 'true');
+    expect(createButton).not.toHaveAttribute('aria-current');
+    expect(document.querySelectorAll('[aria-current]')).toHaveLength(1);
+  });
 });

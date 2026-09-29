@@ -1,7 +1,8 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Bot, Hand, Hourglass, Loader2 } from 'lucide-react';
+import { Bot, Hand, Hourglass } from 'lucide-react';
 import { AutopilotBadge, TicketAutopilotView } from '../lib/autopilotApi';
+import { Spinner } from './Spinner';
 
 // The autopilot badges of one ticket (DFLT-00142 phase 5), shown in its
 // header row -- so both the collapsed list and the expanded detail show them.
@@ -27,7 +28,7 @@ const STYLE: Record<AutopilotBadge, string> = {
 
 const ICON: Record<AutopilotBadge, React.ReactNode> = {
   running: <Bot className="w-3 h-3 shrink-0" aria-hidden="true" />,
-  processing: <Loader2 className="w-3 h-3 shrink-0 motion-safe:animate-spin" aria-hidden="true" />,
+  processing: <Spinner className="w-3 h-3 shrink-0" />,
   awaitingHuman: <Hand className="w-3 h-3 shrink-0" aria-hidden="true" />,
   waiting: <Hourglass className="w-3 h-3 shrink-0" aria-hidden="true" />
 };

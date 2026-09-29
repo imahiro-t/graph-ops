@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { ChevronDown } from 'lucide-react';
 import { StatusLiveRegion } from './StatusLiveRegion';
 import { useTransientAnnouncement } from '../hooks/useTransientAnnouncement';
+import { CHECKBOX_FOCUS_CLASS } from './checkboxFocus';
 
 // The one filter control the toolbar's four filters (status / assignee /
 // priority / label) are all built from (DFLT-00086). Before this, the label
@@ -337,7 +338,7 @@ export function MultiSelectFilter<T extends string>({
                   checked={selected.includes(o.value)}
                   onChange={() => toggle(o.value)}
                   aria-label={o.optionLabel}
-                  className="rounded-sm border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0"
+                  className={`rounded-sm border-slate-300 dark:border-slate-600 text-blue-600 ${CHECKBOX_FOCUS_CLASS}`}
                 />
                 {o.label}
               </label>

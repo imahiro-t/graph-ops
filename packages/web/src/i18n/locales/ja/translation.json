@@ -77,7 +77,8 @@
     "noProjectYet": "まだプロジェクトが作成されていません。作成するとチケットの管理を始められます。",
     "loadFailed": "現在のプロジェクトの設定を読み込めませんでした。ホームの設定ファイル（~/.graph-ops/config.json）を確認してから再試行してください。",
     "retry": "再試行",
-    "pendingApprovals": "承認待ち {{count}} 件"
+    "pendingApprovals": "承認待ち {{count}} 件",
+    "localPathNotSet": "ローカルパス: 未設定"
   },
   "createProjectModal": {
     "title": "新規プロジェクト作成",
