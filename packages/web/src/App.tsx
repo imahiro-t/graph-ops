@@ -38,7 +38,7 @@ import { useTheme, ThemePreference } from './hooks/useTheme';
 import { useFitsSticky } from './hooks/useFitsSticky';
 import { useStickyHeaderScrollPadding } from './hooks/useStickyHeaderScrollPadding';
 import { formatTime } from './i18n/formatDate';
-import { localizedApiErrorMessage } from './lib/apiError';
+import { localizedApiErrorMessage, parseApiError } from './lib/apiError';
 import { apiFetch } from './lib/apiFetch';
 import { fetchPendingApprovalCounts } from './lib/pendingApprovals';
 import { fetchAppSettings } from './lib/settingsApi';
@@ -129,6 +129,11 @@ export const App: React.FC = () => {
   // is empty unless the tag matches the header's project.
   const [ticketList, setTicketList] = useState<ProjectScoped<TicketDetail[]> | null>(null);
   const [loading, setLoading] = useState(false);
+  // DFLT-00331: the server answered CLIENT_TOO_OLD -- its graph-engine is
+  // older than the database now requires, so it serves nothing until it is
+  // updated and restarted. Without this the ticket list would just stay
+  // empty (its failures only go to the console), leaving the cause unsaid.
+  const [clientTooOld, setClientTooOld] = useState(false);
   const [expandedTicketIds, setExpandedTicketIds] = useState<Set<string>>(new Set());
 
   // The viewer's own display name (GET/PUT /api/settings/app's "myName"),
@@ -702,7 +707,19 @@ export const App: React.FC = () => {
   const expandedTicketIdsRef = useLatest(expandedTicketIds);
   const ticketFetchSeqRef = useRef(0);
   const ticketFetchesInFlightRef = useRef(new Map<string, number>());
-  const fetchAllTickets = useCallback(async (projectId: string) => {
+
+  // DFLT-00351: the run resolves to whether the list could be fetched, and
+  // never rejects -- every caller that ignores the result (the poll, the
+  // toolbar's refresh button, the create-ticket launch, the settings modal)
+  // keeps behaving as before. Only LabelSelect looks at it, to tell a
+  // conflict whose reload failed from one whose reload brought the ticket
+  // back. No project to load is not a failure. A superseded run counts as
+  // a success too: the list was fetched, and the run that took its place is
+  // the one that puts the latest on screen. The expanded tickets' details
+  // are left out of the result (fetchTicketDetail keeps swallowing its own
+  // failures): a ticket's labels and updated_at come back in the list, so a
+  // fetched list is all a conflict needs to be shown again.
+  const fetchAllTickets = useCallback(async (projectId: string): Promise<boolean> => {
     const seq = ++ticketFetchSeqRef.current;
     if (!projectId) {
       setTicketList(null);
@@ -710,7 +727,7 @@ export const App: React.FC = () => {
       // just deleted from the settings modal, say), and those skip their
       // own setLoading(false). Nothing else would clear the spinner.
       setLoading(false);
-      return;
+      return true;
     }
     const isSuperseded = () => seq !== ticketFetchSeqRef.current || projectId !== currentProjectIdRef.current;
     const inFlight = ticketFetchesInFlightRef.current;
@@ -718,10 +735,14 @@ export const App: React.FC = () => {
     setLoading(true);
     try {
       const res = await fetch(`/api/tickets?project_id=${encodeURIComponent(projectId)}`);
-      if (!res.ok) throw new Error(`GET /api/tickets: ${res.status}`);
+      if (!res.ok) {
+        if ((await parseApiError(res))?.code === 'CLIENT_TOO_OLD') setClientTooOld(true);
+        throw new Error(`GET /api/tickets: ${res.status}`);
+      }
+      setClientTooOld(false);
       const summaries: TicketGraph[] = await res.json();
 
-      if (isSuperseded()) return;
+      if (isSuperseded()) return true;
       // Artifacts are carried over only from this same project's list; a
       // list tagged with another project has nothing to contribute.
       setTicketList(prev => ({
@@ -732,6 +753,7 @@ export const App: React.FC = () => {
 
       const expanded = summaries.filter(t => expandedTicketIdsRef.current.has(t.id));
       await Promise.all(expanded.map(t => fetchTicketDetail(t.id)));
+      return true;
     } catch (e) {
       console.error('Failed to load tickets', e);
       // A failed refresh keeps the list it already had for this project. A
@@ -741,6 +763,7 @@ export const App: React.FC = () => {
       if (!isSuperseded()) {
         setTicketList(prev => (prev?.projectId === projectId ? prev : { projectId, value: [] }));
       }
+      return false;
     } finally {
       const remaining = (inFlight.get(projectId) ?? 1) - 1;
       if (remaining > 0) inFlight.set(projectId, remaining);
@@ -754,6 +777,8 @@ export const App: React.FC = () => {
   // uses (the toolbar's refresh button, a ticket edit, the create-ticket
   // launch, a label change), so none of them has to thread the project id
   // through by hand -- and none of them can accidentally fetch unscoped.
+  // It resolves to fetchAllTickets' result, whether the list could be
+  // fetched; only LabelSelect uses it (DFLT-00351).
   const refreshTickets = useCallback(
     () => fetchAllTickets(currentProjectIdRef.current),
     [fetchAllTickets, currentProjectIdRef]
@@ -796,7 +821,10 @@ export const App: React.FC = () => {
     let next: CurrentProjectState;
     try {
       const res = await fetch('/api/current-project');
-      if (!res.ok) throw new Error(`GET /api/current-project: ${res.status}`);
+      if (!res.ok) {
+        if ((await parseApiError(res))?.code === 'CLIENT_TOO_OLD') setClientTooOld(true);
+        throw new Error(`GET /api/current-project: ${res.status}`);
+      }
       const data = await res.json();
       next = { kind: 'resolved', project: data ?? null };
     } catch (e) {
@@ -1733,6 +1761,14 @@ export const App: React.FC = () => {
               not the empty state, and never the previous project's list. */}
           <StatusLiveRegion message={openNotice} />
           <StatusLiveRegion message={ticketDeleteNotice} />
+          {clientTooOld && (
+            <div
+              role="alert"
+              className="mb-4 p-4 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-sm rounded-xl border border-red-200 dark:border-red-900 wrap-anywhere"
+            >
+              {t('errors.CLIENT_TOO_OLD')}
+            </div>
+          )}
           {!isCurrentProjectResolved ? (
             <div
               className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm"

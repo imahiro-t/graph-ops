@@ -2,7 +2,7 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Bot } from 'lucide-react';
 import { AutopilotMode, TicketStatus } from '../types';
-import { startAutopilot, TicketAutopilotView } from '../lib/autopilotApi';
+import { startAutopilot, starterLabel, TicketAutopilotView } from '../lib/autopilotApi';
 import { errorMessage } from '../lib/apiError';
 import { StatusLiveRegion } from './StatusLiveRegion';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -216,9 +216,17 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
   const reasonFor = (mode: AutopilotMode): string => {
     const blocked = view.blockedBy[mode];
     if (blocked) {
-      return mode === 'tree' && !view.blockedBy.ticket
-        ? t('autopilot.blockedDescendant', { root: blocked })
-        : t('autopilot.blocked', { root: blocked });
+      const descendant = mode === 'tree' && !view.blockedBy.ticket;
+      // Another member's run names them (DFLT-00326); this machine's own
+      // run keeps the wording it always had.
+      const starter = view.blockedByStarter[mode];
+      if (starter) {
+        const name = starterLabel(t, starter);
+        return descendant
+          ? t('autopilot.blockedDescendantBy', { root: blocked, name })
+          : t('autopilot.blockedBy', { root: blocked, name });
+      }
+      return descendant ? t('autopilot.blockedDescendant', { root: blocked }) : t('autopilot.blocked', { root: blocked });
     }
     if (finished && !view.resumable[mode]) return t('autopilot.finished');
     return '';

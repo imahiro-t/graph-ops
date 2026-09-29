@@ -52,6 +52,19 @@ func nodePatchAssignments(patch NodePatch) ([]string, []any) {
 	}
 	if patch.Status != nil {
 		add("status=?", string(*patch.Status))
+		// A status write through UpdateNode never carries a claim, so it
+		// always clears the node's claim columns (see claimFieldsFor):
+		// complete, loop-back rewind, unstick, reopen -- every write that
+		// moves a node off IN PROGRESS / IN REVIEW -- goes through here.
+		cols, vals := claimColumnAssignments(*patch.Status, nil)
+		sets = append(sets, cols...)
+		args = append(args, vals...)
+		// Nor a decision (DFLT-00329): only a node transition records one,
+		// so this status write clears the decision columns too
+		// (decisionFieldsFor).
+		cols, vals = decisionColumnAssignments(nil)
+		sets = append(sets, cols...)
+		args = append(args, vals...)
 	}
 	if patch.IterationCount != nil {
 		add("iteration_count=?", *patch.IterationCount)
@@ -154,9 +167,20 @@ func updateProjectColumns(db *sql.DB, getProject func(string) (*domain.Project, 
 // claimNodeCAS is the shared body of SQLiteRepository.ClaimNode and
 // MySQLRepository.ClaimNode -- see GraphRepository.ClaimNode for the contract,
 // including why newStatus has to be one of excluded.
-func claimNodeCAS(db *sql.DB, getNode func(string) (*domain.GraphNode, error), id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus) (*domain.GraphNode, error) {
-	query := `UPDATE nodes SET status=?, updated_at=? WHERE id=?`
-	args := []any{string(newStatus), time.Now().UTC().Format(time.RFC3339Nano), id}
+//
+// claim is recorded only when newStatus is IN PROGRESS / IN REVIEW; any other
+// newStatus (a release, a loop-back rewind to TODO) clears the claim columns
+// -- the same rule UpdateNode applies (claimFieldsFor).
+func claimNodeCAS(db *sql.DB, getNode func(string) (*domain.GraphNode, error), id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus, claim *domain.NodeClaim) (*domain.GraphNode, error) {
+	cols, vals := claimColumnAssignments(newStatus, claim)
+	// A claim, a release or a rewind is never a decision: it clears the
+	// decision columns (decisionFieldsFor).
+	dcols, dvals := decisionColumnAssignments(nil)
+	cols = append(cols, dcols...)
+	vals = append(vals, dvals...)
+	query := `UPDATE nodes SET status=?, ` + strings.Join(cols, ", ") + `, updated_at=? WHERE id=?`
+	args := append([]any{string(newStatus)}, vals...)
+	args = append(args, time.Now().UTC().Format(time.RFC3339Nano), id)
 	if len(excluded) > 0 {
 		placeholders := make([]string, len(excluded))
 		for i, s := range excluded {
@@ -178,4 +202,98 @@ func claimNodeCAS(db *sql.DB, getNode func(string) (*domain.GraphNode, error), i
 		return nil, nil
 	}
 	return getNode(id)
+}
+
+// claimFields is what a status write stores in a node's five claim columns
+// (DFLT-00327). A nil field is stored as NULL.
+type claimFields struct {
+	Name           *string
+	NameIsFallback *bool
+	Token          *string
+	SessionID      *string
+	ClaimedAt      *string
+}
+
+// claimFieldsFor is the one rule every backend applies to the claim columns
+// whenever it writes a node's status: a claim is kept only on a node being
+// moved to IN PROGRESS or IN REVIEW *with* a claim (get-executable's
+// ClaimNode); every other status write -- completing, rewinding, releasing,
+// unsticking, reopening, or claiming without claim information -- clears
+// all five columns. Nothing writes the claim columns without also writing
+// the status (NodePatch has no claim fields), so a claim can neither outlive
+// the IN PROGRESS / IN REVIEW it was made for nor appear on a node that is
+// not claimed.
+//
+// The SQL backends turn the result into assignments (claimColumnAssignments)
+// and the HTTP data source into a PATCH body (claimPatchBody), so the rule
+// is written once.
+func claimFieldsFor(status domain.NodeStatus, claim *domain.NodeClaim) claimFields {
+	if claim == nil || (status != domain.NodeInProgress && status != domain.NodeInReview) {
+		return claimFields{}
+	}
+	name, fallback, token, claimedAt := claim.Name, claim.NameIsFallback, claim.Token, claim.ClaimedAt
+	f := claimFields{Name: &name, NameIsFallback: &fallback, Token: &token, ClaimedAt: &claimedAt}
+	if claim.SessionID != "" {
+		sid := claim.SessionID
+		f.SessionID = &sid
+	}
+	return f
+}
+
+// claimColumnAssignments is claimFieldsFor as SQL assignments, always all
+// five columns.
+func claimColumnAssignments(status domain.NodeStatus, claim *domain.NodeClaim) ([]string, []any) {
+	f := claimFieldsFor(status, claim)
+	var fallback any
+	if f.NameIsFallback != nil {
+		fallback = boolToInt(*f.NameIsFallback)
+	}
+	return []string{"claimed_by_name=?", "claimed_by_name_is_fallback=?", "claim_token=?", "claim_session_id=?", "claimed_at=?"},
+		[]any{nullableString(f.Name), fallback, nullableString(f.Token), nullableString(f.SessionID), nullableString(f.ClaimedAt)}
+}
+
+// decisionFields is what a status write stores in a node's four decision
+// columns (DFLT-00329). A nil field is stored as NULL.
+type decisionFields struct {
+	Name           *string
+	NameIsFallback *bool
+	DecidedAt      *string
+	Autopilot      *bool
+}
+
+// decisionFieldsFor is the one rule every backend applies to the decision
+// columns whenever it writes a node's status, next to claimFieldsFor: a
+// decision is written only by the status write that records it -- a node
+// transition step carrying both SetStatus and Decision, i.e. a manual
+// node's completion -- and every other status write (a rewind, a reopen,
+// an unstick, a claim, a status-only UpdateNode) clears all four. Nothing
+// writes the decision columns without also writing the status (NodePatch
+// has no decision fields, and a transition step with a Decision but no
+// SetStatus is refused), so a decision cannot outlive the status it set:
+// a rewound approval_gate is back at TODO with no decider on it.
+//
+// The SQL backends turn the result into assignments
+// (decisionColumnAssignments) and the HTTP data source into PATCH / node
+// transition fields (addDecisionPatchFields), so the rule is written once.
+func decisionFieldsFor(decision *domain.NodeDecision) decisionFields {
+	if decision == nil {
+		return decisionFields{}
+	}
+	name, fallback, at, autopilot := decision.Name, decision.NameIsFallback, decision.DecidedAt, decision.Autopilot
+	return decisionFields{Name: &name, NameIsFallback: &fallback, DecidedAt: &at, Autopilot: &autopilot}
+}
+
+// decisionColumnAssignments is decisionFieldsFor as SQL assignments, always
+// all four columns.
+func decisionColumnAssignments(decision *domain.NodeDecision) ([]string, []any) {
+	f := decisionFieldsFor(decision)
+	var fallback, autopilot any
+	if f.NameIsFallback != nil {
+		fallback = boolToInt(*f.NameIsFallback)
+	}
+	if f.Autopilot != nil {
+		autopilot = boolToInt(*f.Autopilot)
+	}
+	return []string{"decided_by_name=?", "decided_by_name_is_fallback=?", "decided_at=?", "decided_by_autopilot=?"},
+		[]any{nullableString(f.Name), fallback, nullableString(f.DecidedAt), autopilot}
 }

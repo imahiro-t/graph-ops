@@ -400,7 +400,7 @@ func TestHTTPRepository_ClaimNodeComposesExistingOperations(t *testing.T) {
 	excluded := []domain.NodeStatus{domain.NodeDone, domain.NodeInProgress, domain.NodeInReview}
 	p.ResetRequests()
 
-	claimed, err := r.ClaimNode(f.nodeID, domain.NodeInProgress, excluded)
+	claimed, err := r.ClaimNode(f.nodeID, domain.NodeInProgress, excluded, nil)
 	must(t, err)
 	if claimed == nil || claimed.Status != domain.NodeInProgress {
 		t.Fatalf("ClaimNode = %+v, want the node at IN PROGRESS", claimed)
@@ -417,7 +417,7 @@ func TestHTTPRepository_ClaimNodeComposesExistingOperations(t *testing.T) {
 	// It is IN PROGRESS now, so it is in the excluded set: the second claim
 	// must come back empty, and must not write.
 	p.ResetRequests()
-	again, err := r.ClaimNode(f.nodeID, domain.NodeInProgress, excluded)
+	again, err := r.ClaimNode(f.nodeID, domain.NodeInProgress, excluded, nil)
 	must(t, err)
 	if again != nil {
 		t.Fatalf("second ClaimNode = %+v, want nil (already claimed)", again)
@@ -1052,6 +1052,18 @@ func TestOpenAPI_OperationIDsMatchGraphRepository(t *testing.T) {
 	for _, n := range graphRepositoryMethodNames() {
 		want = append(want, lowerCamel(n))
 	}
+	// Protocol 1.2's autopilot-runs endpoints (AutopilotRunStore, not
+	// GraphRepository; BeginAutopilotRun is a list followed by a save).
+	want = append(want, "listAutopilotRuns", "saveAutopilotRun", "deleteAutopilotRun")
+	// Protocol 1.2's processing-sessions endpoints (ProcessingSessionStore,
+	// DFLT-00327), also outside GraphRepository.
+	want = append(want, "saveProcessingSession", "touchProcessingSession", "getProcessingSession",
+		"listProcessingSessionsByTickets", "deleteProcessingSession")
+	// Protocol 1.2's graph batch endpoint (GraphBatchCreator, DFLT-00328).
+	want = append(want, "createGraphBatch")
+	// Protocol 1.2's node transition endpoint (NodeTransitionApplier,
+	// DFLT-00329).
+	want = append(want, "applyNodeTransition")
 	sort.Strings(want)
 	if !reflect.DeepEqual(ops, want) {
 		t.Fatalf("operationIds %v\nwant %v", ops, want)

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"time"
@@ -112,6 +113,15 @@ var mysqlSchemaStatements = []string{
 	config_id VARCHAR(191),
 	created_at VARCHAR(64) NOT NULL,
 	updated_at VARCHAR(64) NOT NULL,
+	claimed_by_name VARCHAR(255) NULL,
+	claimed_by_name_is_fallback TINYINT(1) NULL,
+	claim_token VARCHAR(64) NULL,
+	claim_session_id VARCHAR(64) NULL,
+	claimed_at VARCHAR(64) NULL,
+	decided_by_name VARCHAR(255) NULL,
+	decided_by_name_is_fallback TINYINT(1) NULL,
+	decided_at VARCHAR(64) NULL,
+	decided_by_autopilot TINYINT(1) NULL,
 	KEY idx_nodes_ticket (ticket_id),
 	CONSTRAINT fk_nodes_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
@@ -183,6 +193,52 @@ var mysqlSchemaStatements = []string{
 	CONSTRAINT fk_ticket_labels_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
 	CONSTRAINT fk_ticket_labels_label FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
+
+	// Autopilot runs shared between members (DFLT-00326), see schemaDDL's
+	// autopilot_runs. snapshot is MEDIUMTEXT: a large tree's shared view can
+	// pass TEXT's 64KiB.
+	`CREATE TABLE IF NOT EXISTS autopilot_runs (
+	id VARCHAR(191) PRIMARY KEY,
+	project_id VARCHAR(191) NOT NULL,
+	root_ticket_id VARCHAR(191) NOT NULL,
+	mode VARCHAR(32) NOT NULL,
+	state VARCHAR(32) NOT NULL,
+	heartbeat VARCHAR(64) NOT NULL,
+	created_at VARCHAR(64) NOT NULL,
+	updated_at VARCHAR(64) NOT NULL,
+	started_by_name VARCHAR(255) NOT NULL DEFAULT '',
+	machine_id VARCHAR(64) NOT NULL DEFAULT '',
+	revision BIGINT NOT NULL DEFAULT 0,
+	snapshot MEDIUMTEXT NOT NULL,
+	KEY idx_autopilot_runs_project (project_id),
+	CONSTRAINT fk_autopilot_runs_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
+
+	// Processing sessions (DFLT-00327), see schemaDDL's processing_sessions.
+	`CREATE TABLE IF NOT EXISTS processing_sessions (
+	id VARCHAR(64) PRIMARY KEY,
+	project_id VARCHAR(191) NOT NULL,
+	ticket_id VARCHAR(191) NOT NULL,
+	actor_name VARCHAR(255) NOT NULL DEFAULT '',
+	actor_name_is_fallback TINYINT(1) NOT NULL DEFAULT 0,
+	machine_id VARCHAR(64) NOT NULL DEFAULT '',
+	run_id VARCHAR(191) NULL,
+	started_at VARCHAR(64) NOT NULL,
+	heartbeat VARCHAR(64) NOT NULL,
+	KEY idx_processing_sessions_ticket (ticket_id),
+	CONSTRAINT fk_processing_sessions_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+	CONSTRAINT fk_processing_sessions_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
+
+	// The schema record (DFLT-00331), see schemaDDL's graphops_schema. As
+	// with app_state, the one row is always id 1 by convention of the code
+	// that writes it, without SQLite's CHECK.
+	`CREATE TABLE IF NOT EXISTS graphops_schema (
+	id TINYINT PRIMARY KEY,
+	schema_version INT NOT NULL,
+	min_client_schema_version INT NOT NULL,
+	updated_at VARCHAR(64) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
 }
 
 // mysqlErDupEntry is MySQL's ER_DUP_ENTRY: a UNIQUE/PRIMARY KEY violation.
@@ -196,10 +252,85 @@ func isMySQLDuplicateKeyError(err error) bool {
 	return errors.As(err, &myErr) && myErr.Number == mysqlErDupEntry
 }
 
+// mysqlErBinlogStmtModeAndRowEngine is MySQL's
+// ER_BINLOG_STMT_MODE_AND_ROW_ENGINE: the server refuses a write because it
+// logs binary logs with binlog_format=STATEMENT and the transaction runs at
+// READ COMMITTED (or READ UNCOMMITTED), which statement-based logging cannot
+// replicate safely.
+const mysqlErBinlogStmtModeAndRowEngine = 1665
+
+// explainMySQLGraphBatchError adds the cause and the fix to a MySQL error
+// 1665 from createGraphBatchSQL, whose transaction runs at READ COMMITTED on
+// MySQL (mysqlDialect.graphBatchTx): the server's own message only says the
+// write is impossible at that level, not which GraphOps setting leads there.
+// The original error is kept (wrapped with %w, so its text stays in the
+// message and errors.As still finds the *mysqldriver.MySQLError). Every
+// other error -- nil, other MySQL numbers, ErrGraphChanged, APIError -- is
+// returned as the same value, so callers' errors.Is/As checks are unchanged.
+func explainMySQLGraphBatchError(err error) error {
+	var myErr *mysqldriver.MySQLError
+	if !errors.As(err, &myErr) || myErr.Number != mysqlErBinlogStmtModeAndRowEngine {
+		return err
+	}
+	return fmt.Errorf("%w (GraphOps creates a ticket's graph in a READ COMMITTED transaction on MySQL, "+
+		"which a server writing binary logs with binlog_format=STATEMENT refuses; "+
+		"set the server's binlog_format to ROW (the default since MySQL 8.0) or MIXED)", err)
+}
+
+// mysqlErDeadlock is MySQL's ER_LOCK_DEADLOCK: InnoDB found two
+// transactions waiting on each other's locks and rolled this one back.
+const mysqlErDeadlock = 1213
+
+// isMySQLDeadlock reports whether err is (or wraps) a MySQL error 1213.
+func isMySQLDeadlock(err error) bool {
+	var myErr *mysqldriver.MySQLError
+	return errors.As(err, &myErr) && myErr.Number == mysqlErDeadlock
+}
+
+// mysqlDeadlockAttempts is how many times retryMySQLDeadlock runs a write
+// that keeps ending in a deadlock before giving up.
+const mysqlDeadlockAttempts = 3
+
+// mysqlDeadlockBackoff is the pause before retrying a deadlocked write: a
+// few tens of milliseconds, random, so that the two parties of a deadlock
+// do not collide again in lockstep. A variable so tests can make it zero.
+var mysqlDeadlockBackoff = func() time.Duration {
+	return time.Duration(10+rand.Intn(40)) * time.Millisecond
+}
+
+// retryMySQLDeadlock runs run -- one whole transaction, or one autocommit
+// statement -- and runs it again when MySQL rolled it back as a deadlock
+// victim (Error 1213), up to mysqlDeadlockAttempts runs in all (DFLT-00329).
+// A retry is safe because a deadlock victim has been rolled back entirely,
+// and a retried transaction takes its locks and makes its decisions again
+// from the start. Any other error, and success, is returned at once. When
+// every run deadlocked, the result is CONCURRENT_WRITE_CONFLICT: nothing
+// was written, and the caller can simply make the same call again -- the
+// bare driver error never reaches it.
+//
+// SQLite has no counterpart: its transactions begin IMMEDIATE, taking the
+// write lock up front, so they wait rather than deadlock.
+func retryMySQLDeadlock(what string, run func() error) error {
+	var err error
+	for attempt := 1; attempt <= mysqlDeadlockAttempts; attempt++ {
+		err = run()
+		if !isMySQLDeadlock(err) {
+			return err
+		}
+		if attempt < mysqlDeadlockAttempts {
+			time.Sleep(mysqlDeadlockBackoff())
+		}
+	}
+	return domain.NewAPIError(domain.ErrCodeConcurrentWriteConflict,
+		"%s kept colliding with other writes to the same ticket (MySQL deadlock, %d attempts); nothing was written, so the same call can simply be made again: %v",
+		what, mysqlDeadlockAttempts, err)
+}
+
 // mysqlDialect is the shared label/ticket-update code's view of MySQL:
 // explicit row locks (the pool has many connections) and error 1062.
 var mysqlDialect = sqlDialect{
 	forUpdate:         " FOR UPDATE",
+	graphBatchTx:      &sql.TxOptions{Isolation: sql.LevelReadCommitted},
 	isUniqueViolation: isMySQLDuplicateKeyError,
 }
 
@@ -214,6 +345,10 @@ var mysqlDialect = sqlDialect{
 // earn explicitly.
 type MySQLRepository struct {
 	db *sql.DB
+	// clientSchema overrides the schema versions this client acts with;
+	// nil (always, outside tests) means CurrentSchemaVersion and
+	// MinClientSchemaVersion (see schema_version.go).
+	clientSchema *clientSchema
 }
 
 // MySQL TLS mode values accepted by NormalizeMySQLTLSMode/
@@ -481,10 +616,47 @@ func PingMySQL(ctx context.Context, cfg Config) error {
 	return db.PingContext(ctx)
 }
 
-// Init applies mysqlSchemaStatements (idempotent: CREATE TABLE IF NOT
-// EXISTS, one statement per Exec call -- see mysqlSchemaStatements' doc
-// comment for why it isn't one Exec call for the whole DDL).
+// Init checks the DB's schema record before anything else and stops with
+// CLIENT_TOO_OLD, writing nothing, when this client is older than the record
+// allows; otherwise it applies the schema and the migrations (migrate), then
+// raises the record if this client is ahead of it (see schema_version.go).
 func (r *MySQLRepository) Init() error {
+	return initWithSchemaRecord("mysql", clientSchemaOrDefault(r.clientSchema), r.readSchemaRecord, r.migrate, r.writeSchemaRecord)
+}
+
+// CheckClientSchema re-reads the schema record and answers CLIENT_TOO_OLD
+// if this client no longer meets it. It writes nothing.
+func (r *MySQLRepository) CheckClientSchema() error {
+	return checkClientSchemaWith("mysql", clientSchemaOrDefault(r.clientSchema), r.readSchemaRecord)
+}
+
+var _ ClientSchemaChecker = (*MySQLRepository)(nil)
+
+// readSchemaRecord reads graphops_schema's row (readSchemaRecordFrom),
+// looking the table up in INFORMATION_SCHEMA rather than creating it.
+func (r *MySQLRepository) readSchemaRecord() (*schemaRecord, error) {
+	return readSchemaRecordFrom(r.db, `SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'graphops_schema'`)
+}
+
+// writeSchemaRecord upserts graphops_schema's row, keeping the larger of
+// each value so that a record is never lowered, whichever Init runs last.
+// VALUES() is written the way SetCurrentProjectID's upsert writes it.
+func (r *MySQLRepository) writeSchemaRecord(schemaVersion, minClient int, updatedAt string) error {
+	_, err := r.db.Exec(
+		`INSERT INTO graphops_schema (id, schema_version, min_client_schema_version, updated_at) VALUES (1, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE
+		   schema_version = GREATEST(schema_version, VALUES(schema_version)),
+		   min_client_schema_version = GREATEST(min_client_schema_version, VALUES(min_client_schema_version)),
+		   updated_at = VALUES(updated_at)`,
+		schemaVersion, minClient, updatedAt)
+	return err
+}
+
+// migrate applies mysqlSchemaStatements (idempotent: CREATE TABLE IF NOT
+// EXISTS, one statement per Exec call -- see mysqlSchemaStatements' doc
+// comment for why it isn't one Exec call for the whole DDL) and the
+// migrations.
+func (r *MySQLRepository) migrate() error {
 	for _, stmt := range mysqlSchemaStatements {
 		if _, err := r.db.Exec(stmt); err != nil {
 			return fmt.Errorf("applying mysql schema: %w", err)
@@ -507,8 +679,43 @@ func (r *MySQLRepository) Init() error {
 	if err := r.addTicketParentColumn(); err != nil {
 		return err
 	}
+	if err := addNodeClaimColumns("mysql", func() (map[string]bool, error) {
+		return r.mysqlColumnsIn("nodes", nodeClaimColumns)
+	}, func(column, sqlType string) error {
+		_, err := r.db.Exec("ALTER TABLE nodes ADD COLUMN " + column + " " + sqlType)
+		return err
+	}, mysqlNodeClaimColumnTypes); err != nil {
+		return err
+	}
+	if err := addNodeDecisionColumns("mysql", func() (map[string]bool, error) {
+		return r.mysqlColumnsIn("nodes", nodeDecisionColumns)
+	}, func(column, sqlType string) error {
+		_, err := r.db.Exec("ALTER TABLE nodes ADD COLUMN " + column + " " + sqlType)
+		return err
+	}, mysqlNodeDecisionColumnTypes); err != nil {
+		return err
+	}
 	// DFLT-00083 migration: tickets whose priority is NULL become MEDIUM.
 	return backfillNullTicketPriority(r.db)
+}
+
+// mysqlNodeClaimColumnTypes are the claim columns' types for
+// addNodeClaimColumns (see mysqlSchemaStatements' nodes).
+var mysqlNodeClaimColumnTypes = map[string]string{
+	"claimed_by_name":             "VARCHAR(255) NULL",
+	"claimed_by_name_is_fallback": "TINYINT(1) NULL",
+	"claim_token":                 "VARCHAR(64) NULL",
+	"claim_session_id":            "VARCHAR(64) NULL",
+	"claimed_at":                  "VARCHAR(64) NULL",
+}
+
+// mysqlNodeDecisionColumnTypes are the decision columns' types for
+// addNodeDecisionColumns (see mysqlSchemaStatements' nodes).
+var mysqlNodeDecisionColumnTypes = map[string]string{
+	"decided_by_name":             "VARCHAR(255) NULL",
+	"decided_by_name_is_fallback": "TINYINT(1) NULL",
+	"decided_at":                  "VARCHAR(64) NULL",
+	"decided_by_autopilot":        "TINYINT(1) NULL",
 }
 
 // addTicketParentColumn is the DFLT-00142 migration for a DB created before
@@ -580,6 +787,29 @@ func (r *MySQLRepository) mysqlForeignKeyExists(table, constraint string) (bool,
 		return false, err
 	}
 	return count > 0, nil
+}
+
+// mysqlColumnsIn reports which of columns table has, in one
+// INFORMATION_SCHEMA query.
+func (r *MySQLRepository) mysqlColumnsIn(table string, columns []string) (map[string]bool, error) {
+	ph, args := inPlaceholders(columns)
+	rows, err := r.db.Query(
+		`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME IN (`+ph+`)`,
+		append([]any{table}, args...)...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out[name] = true
+	}
+	return out, rows.Err()
 }
 
 // mysqlColumnExists checks INFORMATION_SCHEMA.COLUMNS for the current
@@ -721,8 +951,9 @@ func (r *MySQLRepository) CreateNode(n domain.GraphNode) (domain.GraphNode, erro
 	defer tx.Rollback() //nolint:errcheck
 
 	var seq int
-	row := tx.QueryRow(`SELECT node_seq FROM tickets WHERE id = ? FOR UPDATE`, n.TicketID)
-	if err := row.Scan(&seq); err != nil {
+	var prevUpdatedAt string
+	row := tx.QueryRow(`SELECT node_seq, updated_at FROM tickets WHERE id = ? FOR UPDATE`, n.TicketID)
+	if err := row.Scan(&seq, &prevUpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return domain.GraphNode{}, fmt.Errorf("ticket %s not found", n.TicketID)
 		}
@@ -730,7 +961,9 @@ func (r *MySQLRepository) CreateNode(n domain.GraphNode) (domain.GraphNode, erro
 	}
 	seq++
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := tx.Exec(`UPDATE tickets SET node_seq = ?, updated_at = ? WHERE id = ?`, seq, now, n.TicketID); err != nil {
+	// The ticket's updated_at must never repeat a value (DFLT-00330).
+	ticketUpdatedAt := nextUpdatedAt(prevUpdatedAt, time.Now())
+	if _, err := tx.Exec(`UPDATE tickets SET node_seq = ?, updated_at = ? WHERE id = ?`, seq, ticketUpdatedAt, n.TicketID); err != nil {
 		return domain.GraphNode{}, fmt.Errorf("incrementing ticket node_seq: %w", err)
 	}
 	id := fmt.Sprintf("%s-%02d", n.TicketID, seq)
@@ -794,8 +1027,8 @@ func (r *MySQLRepository) UpdateNode(id string, patch NodePatch) (domain.GraphNo
 
 // ClaimNode implements GraphRepository.ClaimNode; see that interface's doc
 // comment for the contract.
-func (r *MySQLRepository) ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus) (*domain.GraphNode, error) {
-	return claimNodeCAS(r.db, r.GetNode, id, newStatus, excluded)
+func (r *MySQLRepository) ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus, claim *domain.NodeClaim) (*domain.GraphNode, error) {
+	return claimNodeCAS(r.db, r.GetNode, id, newStatus, excluded, claim)
 }
 
 func (r *MySQLRepository) DeleteNode(id string) error {
@@ -863,14 +1096,29 @@ func (r *MySQLRepository) ClearEdgesByTicket(ticketID string) error {
 
 // --- Artifacts ---
 
+// CreateArtifact inserts the artifact. The INSERT checks its foreign keys
+// by taking shared locks on the parent ticket and node rows, which a node
+// transition may be holding exclusively while it waits for one of them in
+// turn: InnoDB then picks one of the two as a deadlock victim (Error 1213).
+// When that is this INSERT it is simply run again (retryMySQLDeadlock) --
+// the ID was minted before the call and the failed INSERT was rolled back,
+// so the artifact is never written twice (DFLT-00329).
 func (r *MySQLRepository) CreateArtifact(a domain.Artifact) (domain.Artifact, error) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := r.db.Exec(
-		`INSERT INTO artifacts (id, ticket_id, node_id, name, type, content, file_path, metadata, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.TicketID, a.NodeID, a.Name, a.Type,
-		nullableString(a.Content), nullableString(a.FilePath), nullableString(a.Metadata), now,
-	)
+	var now string
+	err := retryMySQLDeadlock("adding artifact "+a.ID, func() error {
+		now = time.Now().UTC().Format(time.RFC3339Nano)
+		_, err := r.db.Exec(
+			`INSERT INTO artifacts (id, ticket_id, node_id, name, type, content, file_path, metadata, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			a.ID, a.TicketID, a.NodeID, a.Name, a.Type,
+			nullableString(a.Content), nullableString(a.FilePath), nullableString(a.Metadata), now,
+		)
+		return err
+	})
+	var apiErr *domain.APIError
+	if errors.As(err, &apiErr) {
+		return domain.Artifact{}, err
+	}
 	if err != nil {
 		return domain.Artifact{}, fmt.Errorf("inserting artifact: %w", err)
 	}

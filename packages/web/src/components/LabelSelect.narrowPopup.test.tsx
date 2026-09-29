@@ -93,7 +93,7 @@ function renderInCard(projectLabels = LABELS) {
   return render(
     <div data-testid="card" style={{ overflowX: 'hidden' }}>
       <div>
-        <LabelSelect ticketId="T-1" labels={[]} projectLabels={projectLabels} onSaved={vi.fn()} />
+        <LabelSelect ticketId="T-1" labels={[]} projectLabels={projectLabels} updatedAt="2026-09-30T00:00:00Z" onSaved={vi.fn()} />
       </div>
     </div>
   );

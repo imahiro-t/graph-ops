@@ -5,7 +5,7 @@ a system of their own choosing -- an issue tracker, a document database, an
 internal service -- instead of the built-in SQLite or MySQL backends.
 
 - **Protocol specification:** [`openapi.yaml`](openapi.yaml) (OpenAPI 3.1,
-  protocol version `1.1`). It is the normative contract; this manual explains
+  protocol version `1.2`). It is the normative contract; this manual explains
   it and how to work with it.
 - **Sample plugin:** [`examples/jira-datasource`](../../examples/jira-datasource/README.md),
   a complete plugin that stores everything in Jira Cloud.
@@ -28,6 +28,18 @@ interface with 32 operations. With `dbBackend: "http"`, every one of those
 operations becomes one HTTP request to a server you provide, the **plugin**.
 Nothing else changes: the engine, the CLI commands, the `process-ticket`
 skill and the Web UI behave exactly as they do with SQLite.
+
+Since protocol 1.2 there are also nine endpoints outside those 32 operations:
+three for the records of autopilot runs shared between members, five for
+the processing sessions that tell whether a claimed node is still being
+worked on (together with five claim fields on nodes), and one that creates a
+ticket's graph in a single atomic request. They are optional: a plugin that
+does not implement them reports protocol 1.1, and graph-engine then keeps
+run records on each machine only, records no node claims, and creates a
+graph one node and one edge at a time (not atomic). See the
+`Autopilot runs (1.2)`, `Processing sessions (1.2)` and `Graph batch (1.2)`
+rows of [Endpoints](#endpoints) and the 1.2 row of
+[Handshake and versioning](#handshake-and-versioning).
 
 ```
  Claude Code agents ──> graph-engine CLI ─┐
@@ -212,6 +224,10 @@ in lowerCamelCase.
 | Projects | `POST/GET /projects`, `GET/PATCH/DELETE /projects/{projectId}` |
 | Labels | `POST/GET /projects/{projectId}/labels`, `GET/PATCH/DELETE /labels/{labelId}` |
 | Current project | `GET/PUT /current-project` (**deprecated**) |
+| Autopilot runs (1.2) | `GET /projects/{projectId}/autopilot-runs`, `PUT/DELETE /autopilot-runs/{runId}` |
+| Processing sessions (1.2) | `GET /processing-sessions?ticket_id=...`, `PUT/GET/DELETE /processing-sessions/{sessionId}`, `POST /processing-sessions/{sessionId}/heartbeat` |
+| Graph batch (1.2) | `POST /tickets/{ticketId}/graph` (`createGraphBatch`) |
+| Node transitions (1.2) | `POST /tickets/{ticketId}/node-transition` (`applyNodeTransition`) |
 
 `/current-project` is deprecated: the current project is a per-user choice, so
 graph-engine now keeps it in each user's home config file
@@ -236,11 +252,14 @@ spaces); decode them before use.
 ### Handshake and versioning
 
 `info.version` in the spec is the protocol version, `MAJOR.MINOR` (currently
-`1.1`). `GET /protocol` must answer:
+`1.2`). `GET /protocol` must answer:
 
 ```json
-{ "protocol": "graph-ops-datasource", "version": "1.1" }
+{ "protocol": "graph-ops-datasource", "version": "1.2" }
 ```
+
+(with the version your plugin implements -- a plugin that implements 1.1
+answers `"1.1"`, and graph-engine adapts, see the table below).
 
 graph-engine stops at startup with a clear error if `protocol` is anything
 else, if the endpoint is missing or does not return this JSON, or if the MAJOR
@@ -249,12 +268,23 @@ server speaks 2.0, graph-engine requires 1.x"). A different MINOR is accepted,
 because minor versions only add optional things. graph-engine sends its own
 version on every request in the `GraphOps-Protocol-Version` header.
 
+The protocol version is the only version check against an HTTP data source.
+It is a separate axis from the database schema version that graph-engine
+records in SQLite and MySQL (the `graphops_schema` table, which stops a
+graph-engine older than the database with `CLIENT_TOO_OLD`; see the README's
+notes, "Several members on the same tickets: graph-engine versions"). With an
+HTTP data source your plugin owns the storage and its schema, so graph-engine
+neither records nor checks a schema version there and asks nothing of your
+plugin for it: no table, no endpoint, no field. Keeping your own storage
+compatible across plugin versions is up to you.
+
 What each minor version added:
 
 | Version | Added |
 |---|---|
 | 1.0 | The initial protocol. |
 | 1.1 | `Ticket.parent_ticket_id` (optional, nullable): the ticket a ticket was derived from, set only by `createTicket`. graph-engine sends the key only when there is a parent, and when the plugin reports `1.0` it refuses a ticket with a parent with `PARENT_TICKET_UNSUPPORTED` before sending anything, so the parent is never silently dropped. Tickets without a parent work exactly as before on a 1.0 plugin. There is no children endpoint: graph-engine derives a ticket's children from `listTicketsByProject`, so on a large project `get-ticket` costs one project listing more. A plugin must keep the value as given (graph-engine has already checked that the parent exists and is in the same project) and may answer `VALIDATION_ERROR` for a parent it does not manage. |
+| 1.2 | **Autopilot runs shared between members** (`autopilot-runs` tag). `GET /projects/{projectId}/autopilot-runs` (`listAutopilotRuns`) lists a project's run records, `PUT /autopilot-runs/{runId}` (`saveAutopilotRun`) creates or replaces one, `DELETE /autopilot-runs/{runId}` (`deleteAutopilotRun`) removes one (a missing one is a no-op; graph-engine also uses it after a start to delete settled records beyond the 20 most recent of the project, whoever started them -- at most 2 per start, the oldest first, the rest on later starts -- and a later `PUT` may create such a record again). A record (`AutopilotRun`) has `id`, `project_id`, `root_ticket_id`, `mode`, `state`, `heartbeat`, `created_at`, `updated_at`, `started_by_name`, `machine_id`, `revision` and `snapshot`. Store `snapshot` as opaque JSON and return it unchanged. When the stored record's `revision` is equal to or greater than a `PUT`'s, keep the stored one and still answer 200 (a copy that arrived late). Never change `state` or `heartbeat` yourself: a run whose heartbeat is more than 10 minutes old simply stops counting as active. graph-engine judges a start by listing and then saving -- two requests, not atomic -- so two members starting overlapping runs at the same moment may both pass against an HTTP data source (SQLite and MySQL serialize it). Against a plugin that reports 1.1 or 1.0, graph-engine sends none of these requests: each machine judges from its own runs only (duplicate starts by other members are not detected) and says so once per process. **Node claims and processing sessions** (added to 1.2 before any release shipped it, so the version stayed 1.2). `GraphNode` and `NodePatch` gain five nullable fields -- `claimed_by_name`, `claimed_by_name_is_fallback`, `claim_token`, `claim_session_id`, `claimed_at` -- recording who took a node with `get-executable`, in which processing session, and when. graph-engine sends all five with every node `PATCH` that carries `status` (and never without it): the claimer's values when it claims the node, all `null` on every other status change (completion, loop-back, `unstick-node`, `reopen-nodes`, ...). `null` clears a field, as for `assignee`. Store them as given, include `claim_token` in what you return, and never change or clear them yourself. The `processing-sessions` endpoints keep the sessions: `PUT /processing-sessions/{sessionId}` (`saveProcessingSession`) creates or replaces one at `begin-session` (a missing ticket is `TICKET_NOT_FOUND`), `POST /processing-sessions/{sessionId}/heartbeat` (`touchProcessingSession`, body `{"heartbeat": "..."}`) moves only the heartbeat, and only forward -- an earlier or equal one is ignored with 200, a missing session is 404 -- and is sent on every command run with `--session`, so keep it cheap; `GET /processing-sessions/{sessionId}` (`getProcessingSession`, 404 when missing), `GET /processing-sessions?ticket_id=<id>&ticket_id=<id>...` (`listProcessingSessionsByTickets`, the sessions of any of the tickets, at most 100 `ticket_id`s per request; polled through the Web UI's ticket list, but only for tickets with a claimed node), and `DELETE /processing-sessions/{sessionId}` (`deleteProcessingSession`, a missing one is a no-op; `begin-session` deletes up to 5 of the same ticket's sessions that have been silent for more than 7 days and hold no claim). A session (`ProcessingSession`) has `id`, `project_id`, `ticket_id`, `actor_name`, `actor_name_is_fallback`, `machine_id`, `run_id` (autopilot only), `started_at` and `heartbeat`; never rewrite its heartbeat on graph-engine's behalf. Leases are judged from the members' own clocks, so this assumes those clocks are not minutes apart. A plugin that reports 1.2 but drops the claim fields leaves every claim unrecorded, so `unstick-node` releases other members' live claims without a check -- no worse than 1.1, but the protection is gone. Against a plugin that reports 1.1 or 1.0, graph-engine neither sends nor reads the claim fields and never calls these endpoints: nodes are handed out and released as before, without a record of who holds them; `begin-session` says so, and so does `unstick-node` when it releases such a node (commands run without a `begin-session` first, such as a bare `get-executable`, give no such warning). **Graph batch creation** (`graph` tag; added to 1.2 before any release shipped it, so the version stayed 1.2). `POST /tickets/{ticketId}/graph` (`createGraphBatch`) creates a ticket's seed nodes (the first `get-executable`, `expected_node_count` 0) or the rest of its graph (`expand-graph`, `expected_node_count` the seed's size, plus `graph_expanded_at`) with their edges in one request. Process it atomically and serialized with every other node creation of the same ticket: if the ticket no longer has exactly `expected_node_count` nodes, or the body has `graph_expanded_at` and the ticket's is already set, write nothing and answer 409 `GRAPH_CHANGED` (graph-engine absorbs it: the seed carries on with the nodes that are there, an expansion ends with "already been expanded"). Otherwise create `nodes` in order, minting their IDs as `createNode` does and ignoring `id`; each carries a `config_id`, unique in the batch. Then create `edges` in order with the `id` graph-engine sent (store it as is, as for `createEdge`); each end is `{"node_id": ...}` (a node the ticket already has) or `{"config_id": ...}` (a node of this batch). Then set `graph_expanded_at` when given. Give the new rows `created_at` values that list them in the order sent. An unresolvable edge end, a node without `config_id` or an edge without `id` is `VALIDATION_ERROR`, with nothing written. A plugin that reports 1.2 must implement it: graph-engine does not fall back when it answers 404. Against a plugin that reports 1.1 or 1.0, graph-engine never sends it and creates the graph with one `createNode` / `createEdge` per row, as before -- **not atomic**: two sessions starting the same ticket at the same moment can both create the seed (or both expand it), leaving duplicate nodes and edges, and a failure halfway leaves a partial graph. SQLite and MySQL always create the graph in one transaction. **Node transitions and decisions** (`nodes` tag; also added to 1.2 before any release shipped it, so the version stayed 1.2). `POST /tickets/{ticketId}/node-transition` (`applyNodeTransition`) is what graph-engine sends instead of separate `createArtifact` / `updateNode` / `updateTicket` calls whenever it completes a node (`complete-node`, the Web UI's approve / reject) and for `reopen-nodes`, `grant-iterations` and `unstick-node`: the conditions graph-engine decided on (per node `if_status_in` / `if_status_not_in`, `check_claim_token` + `if_claim_token`, `if_iteration_count`, `if_updated_at`; per ticket `require_ticket_open`, `if_blocked`) together with the writes (the artifacts, each node's `set_status` / `increment_iteration` / `add_max_iterations` / `touch` / `decision`, the ticket's `set_blocked`). Process it atomically and serialized with every other request that writes the same ticket's nodes: when a condition of a `required` step or of the ticket does not hold, write nothing -- not even the artifacts -- and answer 409 `INVALID_NODE_STATE`; a non-required step whose condition fails is only skipped. `increment_iteration` and `add_max_iterations` add to the stored value; never write back a value computed from an earlier read. See [Atomicity](#atomicity) for the `updated_at` rule `if_updated_at` and `touch` depend on. `GraphNode` and `NodePatch` gain four nullable decision fields -- `decided_by_name`, `decided_by_name_is_fallback`, `decided_at`, `decided_by_autopilot` -- recording who last approved, rejected or completed a manual node (an `approval_gate`, a `release`, or a custom `is_manual` node) and when; graph-engine resolves the name on its own side and writes the fields only through `applyNodeTransition`, together with the status the decision set, and sends all four `null` with every node `PATCH` that carries `status` (and never without it). Store them as given and return them unchanged. `TicketPatch` gains `if_status`, a condition rather than a field: write nothing unless the ticket's current status is exactly that value, checked and written atomically, and answer 409 `TICKET_STATUS_CHANGED` otherwise; graph-engine sends it when it brings a ticket's status in line with its nodes, so that a status derived from a stale read never overwrites another member's `CLOSED`. A plugin that reports 1.2 must implement the endpoint (graph-engine does not fall back when it answers 404) and `if_status`. Against a plugin that reports 1.1 or 1.0, graph-engine sends none of them and completes, reopens, grants and unsticks one `createArtifact` / `updateNode` / `updateTicket` at a time, as before -- **not atomic**: an approve and a reject of the same gate sent at the same moment can both get through, a completion without `--claim` cannot tell a node that was rewound and handed out again since it was read, two `reopen-nodes` or `grant-iterations` at once can spend or lose an iteration, a ticket status write may overwrite a concurrent `CLOSED` (graph-engine reads the ticket and compares before its `PATCH`, which only narrows the window), and no decider is recorded; graph-engine says once per process that it is falling back. **Ticket `if_updated_at`** (also added to 1.2 before any release shipped it, so the version stayed 1.2). `TicketPatch` gains `if_updated_at`, another condition: write nothing -- `label_ids` included -- unless the ticket's stored `updated_at` is exactly that string, checked and written atomically, and answer 409 `TICKET_CHANGED` otherwise; with `if_status` as well, write only when both hold. graph-engine sends it for `update-ticket` / `refine-ticket --if-updated-at` and for the Web UI's label changes, so two members editing the same ticket cannot silently overwrite each other. It relies on a ticket's `updated_at` becoming a different string on every write (see [Atomicity](#atomicity)). A plugin that reports 1.2 must implement both. Against a plugin that reports 1.1 or 1.0, graph-engine never sends it: it reads the ticket (`getTicket`), compares `updated_at` itself and sends the `PATCH` only on a match -- **not atomic**: a write that lands between the two requests is overwritten without being detected -- and says so once per process. |
 
 ### Errors
 
@@ -267,10 +297,22 @@ in this order:
    `NODE_NOT_FOUND`, `ARTIFACT_NOT_FOUND`, `PROJECT_NOT_FOUND`,
    `LABEL_NOT_FOUND`, `LABEL_NAME_TAKEN`, `INVALID_LABEL_NAME`,
    `INVALID_LABEL_COLOR`, `INVALID_PREFIX`, `PREFIX_TAKEN`,
-   `VALIDATION_ERROR`, `INTERNAL_ERROR`) becomes the same domain error the
-   built-in backends raise, with your message -- **regardless of the HTTP
-   status**. Still use the status the code suggests (404 for `*_NOT_FOUND`,
-   409 for `*_TAKEN`, 400 for validation codes, 500 for `INTERNAL_ERROR`).
+   `VALIDATION_ERROR`, `INTERNAL_ERROR`, `GRAPH_CHANGED`,
+   `INVALID_NODE_STATE`, `TICKET_STATUS_CHANGED`, `TICKET_CHANGED`,
+   `CONCURRENT_WRITE_CONFLICT`) becomes the same domain error the built-in
+   backends raise, with your message -- **regardless of the HTTP status**.
+   Still use the status the code suggests (404 for `*_NOT_FOUND`, 409 for
+   `*_TAKEN`, `GRAPH_CHANGED`, `INVALID_NODE_STATE`, `TICKET_STATUS_CHANGED`,
+   `TICKET_CHANGED` and `CONCURRENT_WRITE_CONFLICT`, 400 for validation codes, 500 for
+   `INTERNAL_ERROR`). `GRAPH_CHANGED` is only for `createGraphBatch` (1.2)
+   and never reaches a user. `INVALID_NODE_STATE` (a condition of
+   `applyNodeTransition` did not hold), `TICKET_STATUS_CHANGED` (an
+   `if_status` did not hold) and `TICKET_CHANGED` (an `if_updated_at` did
+   not hold) are 1.2 and mean "nothing was written".
+   `CONCURRENT_WRITE_CONFLICT` is optional: answer it from
+   `applyNodeTransition` when racing writes (a database deadlock your own
+   retries did not resolve) kept it from completing and nothing was written;
+   graph-engine tells the user the command may simply be run again.
 3. **Anything else** (an unknown code, a non-JSON body, an empty body) becomes
    a generic error naming the method, path and status.
 
@@ -283,12 +325,23 @@ failure. Deleting a missing ticket, node or project succeeds as a no-op;
 ### Partial updates: absent, `null`, value
 
 In every PATCH body an absent key means "leave unchanged". Two fields have a
-third state, so read the raw JSON, not just a decoded struct with defaults:
+third state (since 1.2, so do a node's claim and decision fields), so read the
+raw JSON, not just a decoded struct with defaults:
 
 | Field | Absent key | `null` | Value |
 |---|---|---|---|
 | `assignee` (tickets, nodes) | unchanged | clear it | set it |
 | `label_ids` (tickets) | unchanged | - | replace the ticket's labels with exactly this set (`[]` removes all) |
+| The five claim fields (nodes, 1.2) | unchanged | clear it | set it (see the 1.2 row of [Handshake and versioning](#handshake-and-versioning)) |
+| The four decision fields (nodes, 1.2) | unchanged | clear it | set it (graph-engine only ever sends `null` here; a decision is written by `applyNodeTransition`) |
+
+`if_status` in a ticket PATCH (1.2) is not a field but a condition: absent
+means no condition, and a value means "write nothing and answer 409
+`TICKET_STATUS_CHANGED` unless the ticket's status is exactly this".
+`if_updated_at` in a ticket PATCH (1.2) is one too: a value means "write
+nothing -- `label_ids` included -- and answer 409 `TICKET_CHANGED` unless
+the ticket's stored `updated_at` is exactly this string". When both are
+present, write only if both hold.
 
 Every ID in `label_ids` must be a label of the ticket's own project; otherwise
 the **whole** patch fails with `LABEL_NOT_FOUND` and no other field of it is
@@ -315,7 +368,54 @@ labels, and clears the current project if it pointed there), and
 `DELETE /labels/{id}` (detaches the label from every ticket and returns
 `removed_from_tickets`). Concurrent requests do arrive -- `process-ticket` runs
 subagents in parallel -- so serialize read-modify-write updates of shared
-records.
+records. `createGraphBatch` (1.2) is the largest such request: its check,
+every node and edge, and `graph_expanded_at` are one unit.
+`applyNodeTransition` (1.2) is the other: its checks, its artifacts, every
+node write and the ticket's `blocked` are one unit, serialized with every
+other request that writes the same ticket's nodes, so that of two members
+who approve and reject the same gate at once exactly one gets through and
+the other's request writes nothing (no status, no `rejection_reason`
+artifact, no loop-back).
+
+**`updated_at` must change on every write to a node (1.2).** A decision on
+a manual node is conditioned on the node's `updated_at` as graph-engine read
+it (`if_updated_at`), because the rejection of a `release` or a custom
+manual node blocks the ticket without changing the node's status; such a
+decision writes only `updated_at` (`touch`) so that a concurrent decision
+loses. That only works if:
+
+- every write to a node -- each applied `applyNodeTransition` step that
+  writes, and every `updateNode` -- leaves `updated_at` a **different
+  string** from the one it had just before;
+- `updated_at` is stored with **sub-second precision** (graph-engine's own
+  backends use RFC 3339 with nanoseconds), and advanced past the previous
+  value when the clock would repeat it;
+- `if_updated_at` is compared **as an exact string match** with the stored
+  value, as `getNode` / `listNodes` return it -- never parsed or compared as
+  a point in time.
+
+A plugin that rounds `updated_at` to whole seconds lets a `touch` in the
+same second as the node's previous write keep the old string, and both a
+simultaneous approve and reject of a manual node are then written. A side
+effect graph-engine accepts: any other write to a manual node between
+graph-engine's read and the decision (a `PATCH` of its assignee, say)
+refuses the decision with `INVALID_NODE_STATE`, and the person decides
+again after reloading.
+
+**A ticket's `updated_at` follows the same rule (1.2).** A ticket PATCH with
+`if_updated_at` is written only when the ticket's stored `updated_at` is
+exactly the value graph-engine read, so every write to a ticket -- every
+`updateTicket`, and the ticket writes that come with `createNode`
+(advancing the node sequence), `createGraphBatch` and an
+`applyNodeTransition` that sets `blocked` -- must leave the ticket's
+`updated_at` a different string, stored with sub-second precision and
+advanced past the previous value when the clock would repeat it; compare
+`if_updated_at` with it as an exact string, and check and write in one
+atomic step. A plugin that rounds to whole seconds lets two edits in the
+same second both through, the second silently erasing the first. The side
+effect is the same as for nodes: an unconditioned write in between (the
+engine adding a node, say) refuses the conditional one with
+`TICKET_CHANGED`, and the user reads the ticket again and redoes the change.
 
 One thing graph-engine cannot make atomic over this protocol is **claiming a
 node** -- the step where `get-executable` takes ownership of a runnable node by
@@ -323,9 +423,11 @@ moving it to `IN PROGRESS`/`IN REVIEW`. Against SQLite and MySQL that is a
 single conditional statement (`UPDATE nodes SET status=... WHERE id=... AND
 status NOT IN ('DONE','IN PROGRESS','IN REVIEW')`), so of two callers racing
 for the same node exactly one wins and the other is simply not offered it.
-The protocol has no conditional update, so against an HTTP data source
-graph-engine claims with `GET /nodes/{id}` followed by `PATCH /nodes/{id}`
-instead, and a claim that lands between those two requests is invisible to it:
+The protocol has no conditional way to claim: `applyNodeTransition` (1.2)
+carries completions and decisions but is not used for claiming, and the node
+`PATCH` carries no condition. So against an HTTP data source -- 1.2 included
+-- graph-engine claims with `GET /nodes/{id}` followed by `PATCH /nodes/{id}`,
+and a claim that lands between those two requests is invisible to it:
 **the same node can be handed out twice**. A plugin cannot close this gap on
 its own -- the PATCH it receives carries no expected-current-status to check
 against -- so treat it as a property of this backend. In practice one
@@ -334,7 +436,9 @@ waits for the subagents it launched, so the exposure is two sessions (or two
 people) driving the same ticket at once; avoid that, and the duplicate work is
 avoided with it. If it does happen, the second agent's `complete-node` is
 refused with `INVALID_NODE_STATE` and writes nothing, so the record stays
-correct even though the work was done twice.
+correct even though the work was done twice (against 1.2; against 1.1 or
+1.0 the completion itself is a read followed by writes, so a completion
+that lands between them can still get through).
 
 ### Artifact content in listings
 
@@ -393,7 +497,7 @@ export GRAPHOPS_DATASOURCE_TOKEN="$(openssl rand -hex 32)"
 # start your plugin so that it listens on 127.0.0.1:8787 and expects that token
 
 curl -s -H "Authorization: Bearer $GRAPHOPS_DATASOURCE_TOKEN" http://127.0.0.1:8787/protocol
-# {"protocol":"graph-ops-datasource","version":"1.1"}
+# {"protocol":"graph-ops-datasource","version":"1.2"}
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8787/protocol
 # 401
 ```

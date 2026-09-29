@@ -62,6 +62,7 @@ type worker func(w *workerCall)
 type harness struct {
 	t         *testing.T
 	repo      store.GraphRepository
+	dbPath    string
 	eng       *engine.GraphEngine
 	projectID string
 	gitRepo   string
@@ -94,7 +95,8 @@ func newHarness(t *testing.T) *harness {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
-	repo, err := store.NewSQLiteRepository(filepath.Join(t.TempDir(), "test.db"))
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	repo, err := store.NewSQLiteRepository(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +115,7 @@ func newHarness(t *testing.T) *harness {
 	commitIn(t, gitRepo, "README.md", "hello\n", "initial")
 
 	h := &harness{
-		t: t, repo: repo, eng: engine.New(repo), projectID: proj.ID, gitRepo: gitRepo,
+		t: t, repo: repo, dbPath: dbPath, eng: engine.New(repo), projectID: proj.ID, gitRepo: gitRepo,
 		clock:    &fakeClock{t: time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)},
 		settings: autopilot.Defaults(),
 		behave:   map[string]worker{},

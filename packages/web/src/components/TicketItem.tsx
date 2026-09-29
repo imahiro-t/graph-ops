@@ -27,6 +27,8 @@ import { getStatusMeta, TODO_META } from '../statusMeta';
 import { GherkinViewer } from './GherkinViewer';
 import { MarkdownViewer } from './MarkdownViewer';
 import { NodeTypeBadge } from './NodeTypeBadge';
+import { NodeClaimLine } from './NodeClaimLine';
+import { NodeDecisionLine } from './NodeDecisionLine';
 import { PrioritySelect } from './PrioritySelect';
 import { LabelChip } from './LabelChip';
 import { LabelSelect } from './LabelSelect';
@@ -58,7 +60,9 @@ interface Props {
   // Opens another ticket of the list (DFLT-00142): used by the parent/
   // children links. Optional so a caller without a list can omit it.
   onOpenTicket?: (id: string) => void;
-  onRefresh: () => void | Promise<void>;
+  // May resolve to whether the reload succeeded (App's refreshTickets does):
+  // only LabelSelect looks at that (DFLT-00351), everything here ignores it.
+  onRefresh: () => void | boolean | Promise<void | boolean>;
   // Called in place of onRefresh once this ticket has been deleted
   // (DFLT-00191), so the list can refresh itself and move focus off the card
   // that is about to disappear. Omitted means onRefresh is called instead.
@@ -2038,7 +2042,7 @@ export const TicketItem: React.FC<Props> = ({
                 // so it changes nothing drawn) rather than on the whole item.
                 ticketLabels.map(l => <LabelChip key={l.id} name={l.name} color={l.color} className="min-w-0 wrap-anywhere" />)
               )}
-              <LabelSelect ticketId={ticket.id} labels={ticketLabels} projectLabels={projectLabels} onSaved={onRefresh} />
+              <LabelSelect ticketId={ticket.id} labels={ticketLabels} projectLabels={projectLabels} updatedAt={ticket.updated_at} onSaved={onRefresh} />
             </div>
             {/* DFLT-00276: a closed reason with one long word (e.g.
                 "superseded-by-DFLT-00002") reached R304.9 at 320px / 200% in
@@ -2778,6 +2782,18 @@ export const TicketItem: React.FC<Props> = ({
                               </span>
                             </div>
                           </div>
+
+                          {/* Who is running the node right now
+                              (DFLT-00327), on a line of its own under the
+                              header row so it never competes with the row's
+                              badges for width. Outside the clickable row: it
+                              is text to read, not a toggle. */}
+                          <NodeClaimLine node={node} />
+
+                          {/* Who decided a manual node and when
+                              (DFLT-00329), on its own line like the claim
+                              above. */}
+                          <NodeDecisionLine node={node} />
 
                           {/* Reject-with-reason prompt (DFLT-00016). A free-
                               text reason is required -- the confirm button

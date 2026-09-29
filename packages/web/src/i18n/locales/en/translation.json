@@ -144,9 +144,15 @@
     "untrustedDismiss": "Dismiss notice",
     "blocked": "An autopilot run started from {{root}} is running, so none can be started from this ticket.",
     "blockedDescendant": "An autopilot run started from the descendant {{root}} is running, so a tree run cannot be started here.",
+    "blockedBy": "{{name}} is running an autopilot started from {{root}}, so none can be started from this ticket.",
+    "blockedDescendantBy": "{{name}} is running an autopilot started from the descendant {{root}}, so a tree run cannot be started here.",
+    "fallbackName": "{{name}} (name not set)",
+    "unknownMember": "Another member",
+    "alreadyRunningBy": "This overlaps an autopilot run {{name}} is running. Wait for it to finish, or start again once it has stopped.",
     "finished": "An autopilot cannot be started from a DONE or CLOSED ticket.",
     "badges": {
       "running": "Autopilot running",
+      "runningBy": "{{name}} is running",
       "processing": "Processing",
       "awaitingHuman": "Waiting for a person",
       "waiting": "Waiting",
@@ -272,7 +278,20 @@
     },
     "promptLabel": "Prompt for Claude",
     "promptPlaceholder": "e.g. Now that it's released, move the remaining steps forward and set the status to in review (newlines allowed; press Send, or Cmd/Ctrl+Enter, to submit)",
-    "send": "Send"
+    "send": "Send",
+    "claim": {
+      "runningBy": "Running: {{name}}",
+      "claimedAgo": "claimed {{ago}}",
+      "heartbeatAgo": "last heartbeat {{ago}}",
+      "noResponse": "not responding"
+    },
+    "decision": {
+      "approvedBy": "Approved by {{name}}",
+      "rejectedBy": "Rejected by {{name}}",
+      "completedBy": "Completed by {{name}}",
+      "sentBackBy": "Sent back by {{name}}",
+      "byAutopilot": " (autopilot)"
+    }
   },
   "artifactModal": {
     "title": "Artifact Viewer",
@@ -687,7 +706,11 @@
     "TICKET_NOT_FOUND": "That ticket could not be found.",
     "PARENT_TICKET_UNSUPPORTED": "The data source in use cannot store a parent ticket. Update the HTTP data source plugin to protocol 1.1 or later.",
     "NODE_NOT_FOUND": "That node could not be found.",
-    "INVALID_NODE_STATE": "This node cannot be completed while it is in its current state - it may already be finished, or may not have started yet. Reload the page to see where it stands now.",
+    "INVALID_NODE_STATE": "This node cannot be completed while it is in its current state - another member may have approved or rejected it first, it may already be finished, or it may not have started yet. Reload the page to see where it stands now.",
+    "CONCURRENT_WRITE_CONFLICT": "This could not be saved because it collided with other changes to the same ticket. Nothing was changed, so please try again.",
+    "CLIENT_TOO_OLD": "This Web UI server's graph-engine is older than the database now requires. Update graph-engine (the GraphOps plugin) and restart the UI server.",
+    "TICKET_STATUS_CHANGED": "The ticket's status was changed by another action, so this was not saved. Reload the page to see where it stands now.",
+    "TICKET_CHANGED": "Another member changed this ticket first, so the labels were not saved. The latest version has been loaded; please try again.",
     "VALIDATION_ERROR": "The request was invalid. Please check your input and try again.",
     "INTERNAL_ERROR": "Something went wrong on the server. Please try again.",
     "INVALID_PREFIX": "The prefix must be 1-5 alphanumeric characters.",
@@ -717,13 +740,15 @@
     "HTTP_DATASOURCE_TOKEN_RETYPE_REQUIRED": "The saved token cannot be used for a different endpoint URL. Enter the token again after changing the URL.",
     "HOME_CONFIG_UNAVAILABLE": "Your home directory could not be resolved, so there is no config file to save to and nothing was saved. Settings are only ever read from $HOME/.graph-ops/config.json and environment variables.",
     "AUTOPILOT_SETTING_LOCKED": "Settings fixed by the team settings cannot be saved. Save again without changing them.",
-    "AUTOPILOT_ALREADY_RUNNING": "An autopilot run is already running on a tree that includes this ticket. Wait for it to finish, or start again once it has stopped.",
+    "AUTOPILOT_ALREADY_RUNNING": "An autopilot run is already running on a tree that includes this ticket (possibly started by another member). Wait for it to finish, or start again once it has stopped.",
     "AUTOPILOT_ROOT_FINISHED": "This ticket is DONE or CLOSED, so no autopilot can be started from it. To process an unfinished descendant, start from that ticket.",
     "PROJECT_LOCAL_PATH_NOT_SET": "This project has no local path in this environment. Set it in the project settings, then start again.",
     "AUTOPILOT_RUN_NOT_FOUND": "The autopilot run was not found.",
     "AUTOPILOT_INVALID_STATE": "The autopilot run is in a state that does not accept this operation. Reload the page and try again.",
     "AUTOPILOT_REGISTRY_LOCKED": "The autopilot's run records are busy. Wait a moment and try again.",
-    "AUTOPILOT_REGISTRY_CORRUPT": "An autopilot run record cannot be read, so whether this start would duplicate a running autopilot cannot be told. Fix or remove the file named in the server log (under ~/.graph-ops/autopilot) and try again."
+    "AUTOPILOT_REGISTRY_CORRUPT": "An autopilot run record cannot be read, so whether this start would duplicate a running autopilot cannot be told. Fix or remove the file named in the server log (under ~/.graph-ops/autopilot) and try again.",
+    "AUTOPILOT_MACHINE_ID_UNREADABLE": "This machine's ID file (~/.graph-ops/machine-id) cannot be read, so the autopilot cannot be started: runs shared with other members need to know which machine starts them. Restore the file from a backup, or remove it, and try again (removing it creates a new ID, and this machine can then no longer resume its interrupted runs).",
+    "NODE_CLAIMED_BY_OTHER": "Another member is working on this node, so it was not released. Check with them first."
   },
   "labels": {
     "colors": {
@@ -747,9 +772,15 @@
       "editVisible": "Edit labels",
       "groupLabel": "Labels of ticket {{id}}",
       "noRegistered": "Register labels in Settings first.",
+      "conflictReloadFailed": "Another member changed this ticket first, so the labels were not saved. The latest version could not be loaded; wait a moment, reload, and try again.",
       "saveError": "Could not save labels: {{message}}",
       "more": "+{{count}}",
       "moreSr": "{{count}} more labels: {{names}}"
     }
+  },
+  "time": {
+    "justNow": "just now",
+    "minutesAgo": "{{count}} min ago",
+    "hoursAgo": "{{count}} h ago"
   }
 }

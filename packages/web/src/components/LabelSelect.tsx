@@ -5,7 +5,8 @@ import { Label } from '../types';
 import { setTicketLabels } from '../lib/labelsApi';
 import { plainCopyProps } from '../lib/plainCopy';
 import { withBreaks } from '../lib/wbr';
-import { errorMessage } from '../lib/apiError';
+import { errorMessage, hasApiErrorCode } from '../lib/apiError';
+import { isLaterTimestamp } from '../lib/timestamp';
 import { submittingProps, useSubmittingLabel } from './Submitting';
 import { fitPopupHorizontally, rootFontSizePx } from '../lib/popupPlacement';
 import { CHECKBOX_FOCUS_CLASS } from './checkboxFocus';
@@ -26,8 +27,14 @@ interface Props {
   labels: Label[];
   // The project's registered labels (the choices).
   projectLabels: Label[];
-  // Called after a successful save so the parent re-fetches the ticket.
-  onSaved: () => void | Promise<void>;
+  // The displayed ticket's updated_at, sent as if_updated_at with every
+  // label change (DFLT-00330).
+  updatedAt: string;
+  // Called after a successful save so the parent re-fetches the ticket, and
+  // after a 409 TICKET_CHANGED to load it as it is now. Returning false (or
+  // resolving to false) or rejecting means that reload failed (DFLT-00351);
+  // anything else is taken as a success.
+  onSaved: () => void | boolean | Promise<void | boolean>;
 }
 
 // A ticket's label picker (DFLT-00084): an edit button opening a checkbox
@@ -49,7 +56,22 @@ interface Props {
 // open: see the layout effect below. DFLT-00311: that includes a move with
 // no change of size (an item before the labels only getting wider), which
 // only the check on every animation frame catches.
-export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, onSaved }) => {
+//
+// DFLT-00330: each save sends the full set together with the updated_at of
+// the ticket it was built from, so a set built from a stale view can never
+// silently undo another member's label change. The value sent is the later
+// (as a time) of the ticket's updated_at as displayed and the one this
+// component's own last save returned: a second toggle with the panel still
+// open must not conflict with the first, and a parent re-fetch that is
+// older than that save must not take it back. A 409 TICKET_CHANGED says so,
+// reloads the ticket and shows its labels as they are now, so the change
+// can be made again on top of them. DFLT-00351: if that reload fails, the
+// message says the latest version could not be loaded and asks to reload
+// after a moment instead -- the ticket on screen is still the stale one, so
+// trying again at once would only conflict again. The priority and the
+// assignee are not conditioned (TicketItem): each is a single value the
+// click sets outright.
+export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, updatedAt, onSaved }) => {
   const { t } = useTranslation();
   // The trigger stays usable while labels save (it only toggles the panel),
   // but it shows the spinner, so it carries the submitting state (DFLT-00206).
@@ -140,6 +162,13 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
     setSelectedIds(labelIdsKey === '' ? [] : labelIdsKey.split(','));
   }, [labelIdsKey]);
 
+  // DFLT-00330: the updated_at the next save is conditioned on -- see the
+  // component's comment. Only ever moved forward.
+  const baseUpdatedAtRef = useRef(updatedAt);
+  useEffect(() => {
+    if (isLaterTimestamp(updatedAt, baseUpdatedAtRef.current)) baseUpdatedAtRef.current = updatedAt;
+  }, [updatedAt]);
+
   const toggle = async (id: string) => {
     if (saving) return;
     // Adding keeps every current id, including one not (yet) in a stale
@@ -148,11 +177,31 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
     setSaving(true);
     setError('');
     try {
-      await setTicketLabels(t, ticketId, next);
+      const saved = await setTicketLabels(t, ticketId, next, baseUpdatedAtRef.current);
+      if (saved?.updated_at && isLaterTimestamp(saved.updated_at, baseUpdatedAtRef.current)) {
+        baseUpdatedAtRef.current = saved.updated_at;
+      }
       setSelectedIds(next);
       await onSaved();
     } catch (err) {
-      setError(t('ticket.labels.saveError', { message: errorMessage(err, t('errors.UNKNOWN')) }));
+      if (hasApiErrorCode(err, 'TICKET_CHANGED')) {
+        // Nothing was written. Drop the attempted set and load the ticket
+        // as it is now; its labels (and updated_at) come back through the
+        // props.
+        setSelectedIds(labelIdsKey === '' ? [] : labelIdsKey.split(','));
+        setError(t('errors.TICKET_CHANGED'));
+        let reloaded: boolean;
+        try {
+          reloaded = (await onSaved()) !== false;
+        } catch {
+          reloaded = false;
+        }
+        // The ticket on screen is still the stale one: say so rather than
+        // claim the latest was loaded (DFLT-00351).
+        if (!reloaded) setError(t('ticket.labels.conflictReloadFailed'));
+      } else {
+        setError(t('ticket.labels.saveError', { message: errorMessage(err, t('errors.UNKNOWN')) }));
+      }
     } finally {
       setSaving(false);
     }

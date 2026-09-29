@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +26,12 @@ import (
 // inspecting updated_at) is what makes "no write was issued" observable
 // deterministically -- a skipped write and a write that happened to land in
 // the same clock tick would otherwise look alike.
+//
+// It embeds the store.GraphRepository interface, which hides the
+// store.NodeTransitionApplier add-on (DFLT-00329): CompleteNode through it
+// takes the sequential path, where each write is its own repository call.
+// atomicTicketWriteCountingRepo below is the same counter on the atomic
+// path.
 type ticketWriteCountingRepo struct {
 	store.GraphRepository
 	updateTicketCalls int
@@ -104,9 +111,38 @@ func TestGetExecutableNodesWritesTheTicketRowOnlyWhenItsStatusChanges(t *testing
 }
 
 // TestCompleteNodeWritesTheTicketRowOnlyWhenItsStatusChanges covers the other
-// syncTicketStatus caller that process-ticket runs concurrently.
+// syncTicketStatus caller that process-ticket runs concurrently. The
+// completions below all pass, so the only ticket write CompleteNode can make
+// is syncTicketStatus's: the counts are its writes, on the sequential path
+// (see ticketWriteCountingRepo) -- the atomic path is
+// TestCompleteNodeWritesTheTicketRowOnlyWhenItsStatusChanges_Atomic.
 func TestCompleteNodeWritesTheTicketRowOnlyWhenItsStatusChanges(t *testing.T) {
 	e, repo, projectID := newCountingEngine(t)
+	checkCompleteNodeTicketWrites(t, e, repo, &repo.updateTicketCalls, projectID)
+}
+
+// atomicTicketWriteCountingRepo is ticketWriteCountingRepo with the
+// NodeTransitionApplier add-on forwarded, so CompleteNode takes the atomic
+// path; a node transition writes the ticket only for SetBlocked, never its
+// status, so the counted calls are still syncTicketStatus's.
+type atomicTicketWriteCountingRepo struct {
+	ticketWriteCountingRepo
+	inner store.NodeTransitionApplier
+}
+
+func (r *atomicTicketWriteCountingRepo) ApplyNodeTransition(ticketID string, t store.NodeTransition) (store.NodeTransitionResult, error) {
+	return r.inner.ApplyNodeTransition(ticketID, t)
+}
+
+func TestCompleteNodeWritesTheTicketRowOnlyWhenItsStatusChanges_Atomic(t *testing.T) {
+	_, inner, projectID := newTestEngine(t)
+	repo := &atomicTicketWriteCountingRepo{ticketWriteCountingRepo: ticketWriteCountingRepo{GraphRepository: inner}, inner: inner.(store.NodeTransitionApplier)}
+	var _ store.NodeTransitionApplier = repo
+	checkCompleteNodeTicketWrites(t, New(repo), repo, &repo.updateTicketCalls, projectID)
+}
+
+func checkCompleteNodeTicketWrites(t *testing.T, e *GraphEngine, repo store.GraphRepository, updateTicketCalls *int, projectID string) {
+	t.Helper()
 	cat := baseCatalog(t)
 
 	// Already IN PROGRESS, and it stays IN PROGRESS while siblings remain:
@@ -130,12 +166,12 @@ func TestCompleteNodeWritesTheTicketRowOnlyWhenItsStatusChanges(t *testing.T) {
 	}
 
 	for i, nodeID := range nodeIDs {
-		repo.updateTicketCalls = 0
+		*updateTicketCalls = 0
 		if _, err := e.CompleteNode(nodeID, true, nil); err != nil {
 			t.Fatalf("CompleteNode(%s): %v", nodeID, err)
 		}
-		if repo.updateTicketCalls != 0 {
-			t.Errorf("complete-node %d issued %d ticket writes, want 0 -- the derived status is unchanged", i, repo.updateTicketCalls)
+		if *updateTicketCalls != 0 {
+			t.Errorf("complete-node %d issued %d ticket writes, want 0 -- the derived status is unchanged", i, *updateTicketCalls)
 		}
 	}
 
@@ -147,12 +183,12 @@ func TestCompleteNodeWritesTheTicketRowOnlyWhenItsStatusChanges(t *testing.T) {
 	if _, err := repo.UpdateTicket(ticket.ID, store.TicketPatch{GraphExpandedAt: &expandedAt}); err != nil {
 		t.Fatalf("marking the graph expanded: %v", err)
 	}
-	repo.updateTicketCalls = 0
+	*updateTicketCalls = 0
 	if _, err := e.GetExecutableNodes(ticket.ID, cat); err != nil {
 		t.Fatalf("GetExecutableNodes: %v", err)
 	}
-	if repo.updateTicketCalls != 1 {
-		t.Errorf("the IN PROGRESS -> DONE transition issued %d ticket writes, want exactly 1", repo.updateTicketCalls)
+	if *updateTicketCalls != 1 {
+		t.Errorf("the IN PROGRESS -> DONE transition issued %d ticket writes, want exactly 1", *updateTicketCalls)
 	}
 	done, err := repo.GetTicket(ticket.ID)
 	if err != nil || done == nil {
@@ -160,5 +196,76 @@ func TestCompleteNodeWritesTheTicketRowOnlyWhenItsStatusChanges(t *testing.T) {
 	}
 	if done.Status != domain.TicketDone {
 		t.Errorf("ticket status = %q, want DONE once every node is DONE and the graph has been expanded", done.Status)
+	}
+}
+
+// closeRacingRepo closes the ticket just before syncTicketStatus's status
+// write reaches the store -- another member's close-ticket landing between
+// the sync's read and its write.
+type closeRacingRepo struct {
+	*store.SQLiteRepository
+	armed bool
+}
+
+func (r *closeRacingRepo) UpdateTicket(id string, patch store.TicketPatch) (domain.Ticket, error) {
+	if r.armed && patch.Status != nil && patch.IfStatus != nil {
+		r.armed = false
+		closed, reason := domain.TicketClosed, "withdrawn"
+		if _, err := r.SQLiteRepository.UpdateTicket(id, store.TicketPatch{Status: &closed, ClosedReason: &reason}); err != nil {
+			return domain.Ticket{}, err
+		}
+	}
+	return r.SQLiteRepository.UpdateTicket(id, patch)
+}
+
+// TestSyncTicketStatusNeverOverwritesAConcurrentClose (DFLT-00329): the
+// derived status used to be written unconditionally once the read had shown
+// the ticket not CLOSED, reviving a ticket somebody closed in between.
+func TestSyncTicketStatusNeverOverwritesAConcurrentClose(t *testing.T) {
+	inner, projectID := newSQLiteForHooks(t)
+	repo := &closeRacingRepo{SQLiteRepository: inner}
+	e := New(repo)
+	ticket, err := repo.CreateTicket(projectID, domain.Ticket{Title: "close race", Status: domain.TicketTODO, AutoExecutable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateNode(domain.GraphNode{TicketID: ticket.ID, Name: "impl", Type: domain.NodeTypeImplementation, Status: domain.NodeInProgress, MaxIterations: 3}); err != nil {
+		t.Fatal(err)
+	}
+	repo.armed = true
+	if err := e.syncTicketStatus(ticket.ID); err != nil {
+		t.Fatalf("syncTicketStatus: %v", err)
+	}
+	if repo.armed {
+		t.Fatal("the sync never tried to write the status; the test did not exercise the race")
+	}
+	got, _ := repo.GetTicket(ticket.ID)
+	if got.Status != domain.TicketClosed {
+		t.Fatalf("status = %s, want CLOSED to survive the sync", got.Status)
+	}
+}
+
+// TestReopenTicket_OnlyOnce (DFLT-00329): the reopen is written only while
+// the ticket is still CLOSED.
+func TestReopenTicket_OnlyOnce(t *testing.T) {
+	e, repo, projectID := newTestEngine(t)
+	ticket, err := e.CreateTicket(projectID, "reopen twice", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.CloseTicket(ticket.ID, "x"); err != nil {
+		t.Fatal(err)
+	}
+	closed := domain.TicketClosed
+	todo := domain.TicketTODO
+	if _, err := repo.UpdateTicket(ticket.ID, store.TicketPatch{Status: &todo, IfStatus: &closed}); err != nil {
+		t.Fatalf("the first conditional reopen: %v", err)
+	}
+	_, err = repo.UpdateTicket(ticket.ID, store.TicketPatch{Status: &todo, IfStatus: &closed})
+	if !isTicketStatusChanged(err) {
+		t.Fatalf("err = %v, want TICKET_STATUS_CHANGED", err)
+	}
+	if _, err := e.ReopenTicket(ticket.ID); err == nil || !strings.Contains(err.Error(), "not CLOSED") {
+		t.Fatalf("ReopenTicket of a reopened ticket = %v, want a not-CLOSED error", err)
 	}
 }

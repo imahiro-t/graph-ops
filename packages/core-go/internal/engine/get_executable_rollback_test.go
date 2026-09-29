@@ -48,13 +48,13 @@ func isForwardClaim(s domain.NodeStatus) bool {
 	return s == domain.NodeInProgress || s == domain.NodeInReview
 }
 
-func (r *claimFaultRepo) ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus) (*domain.GraphNode, error) {
+func (r *claimFaultRepo) ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus, claim *domain.NodeClaim) (*domain.GraphNode, error) {
 	if isForwardClaim(newStatus) {
 		r.forwardClaims++
 		if r.failForwardClaimAt != 0 && r.forwardClaims == r.failForwardClaimAt {
 			return nil, errInjected
 		}
-		n, err := r.GraphRepository.ClaimNode(id, newStatus, excluded)
+		n, err := r.GraphRepository.ClaimNode(id, newStatus, excluded, claim)
 		if err == nil && n != nil {
 			r.forwardClaimed = append(r.forwardClaimed, id)
 		}
@@ -70,7 +70,7 @@ func (r *claimFaultRepo) ClaimNode(id string, newStatus domain.NodeStatus, exclu
 		return nil, errors.New("injected release failure")
 	}
 	r.released = append(r.released, id)
-	return r.GraphRepository.ClaimNode(id, newStatus, excluded)
+	return r.GraphRepository.ClaimNode(id, newStatus, excluded, claim)
 }
 
 func (r *claimFaultRepo) UpdateTicket(id string, patch store.TicketPatch) (domain.Ticket, error) {
@@ -230,6 +230,12 @@ func TestGetExecutableNodesReleasesEarlierClaimsWhenALaterClaimFails(t *testing.
 		t.Errorf("error %q does not name the node whose claim failed", err)
 	}
 	f.assertStatuses(t, nil)
+	// The release also cleared the claim it undid (DFLT-00327): a node back
+	// at its pre-claim status shows nobody working on it.
+	released, _ := f.inner.GetNode(f.faults.forwardClaimed[0])
+	if released.ClaimToken != nil || released.ClaimedByName != nil || released.ClaimedAt != nil {
+		t.Errorf("released node %s still carries a claim: %+v", released.ID, *released)
+	}
 	if st := f.ticketStatus(t); st != domain.TicketTODO {
 		t.Errorf("ticket status = %q, want TODO untouched", st)
 	}

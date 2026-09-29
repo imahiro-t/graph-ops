@@ -34,6 +34,32 @@ type TicketPatch struct {
 	// LABEL_NOT_FOUND and writes nothing at all -- not even the other
 	// fields of the same patch.
 	LabelIDs *[]string
+	// IfStatus (DFLT-00329) is a condition, not a field to write: when
+	// non-nil, UpdateTicket writes nothing unless the ticket's stored
+	// status is exactly *IfStatus at the moment of the write, and answers
+	// TICKET_STATUS_CHANGED (a *domain.APIError, 409) otherwise. The SQL
+	// backends check it in the same transaction as the write; an HTTP data
+	// source speaking protocol 1.2 receives it as if_status and must do the
+	// same, while one older than 1.2 gets a GET, a comparison and then the
+	// PATCH -- not atomic. syncTicketStatus uses it so that a status
+	// derived from a stale read can never overwrite somebody else's CLOSED.
+	IfStatus *domain.TicketStatus
+	// IfUpdatedAt (DFLT-00330) is a condition, not a field to write, like
+	// IfStatus: when non-nil, UpdateTicket writes nothing -- labels
+	// included -- unless the ticket's stored updated_at is exactly
+	// *IfUpdatedAt (an exact string comparison, never a comparison of
+	// times) at the moment of the write, and answers TICKET_CHANGED (a
+	// *domain.APIError, 409) otherwise. The SQL backends check it in the
+	// same transaction as the write, and every ticket write stores an
+	// updated_at the row has never held before (nextUpdatedAt), so a match
+	// means nobody wrote the ticket since it was read. An HTTP data source
+	// speaking protocol 1.2 receives it as if_updated_at and must do the
+	// same; one older than 1.2 gets a GET, a comparison and then the PATCH
+	// -- not atomic. With both IfStatus and IfUpdatedAt set, the write
+	// happens only when both hold. update-ticket and refine-ticket pass it
+	// for --if-updated-at; the engine's own ticket writes (status, blocked,
+	// graph_expanded_at, refined_at, ...) never set it.
+	IfUpdatedAt *string
 }
 
 // LabelPatch carries optional field updates for UpdateLabel; nil fields are
@@ -103,7 +129,13 @@ type GraphRepository interface {
 	GetNode(id string) (*domain.GraphNode, error)
 	ListNodesByTicket(ticketID string) ([]domain.GraphNode, error)
 	// UpdateNode writes only the columns patch actually names (plus
-	// updated_at, always). Two concurrent updates touching different
+	// updated_at, always). A patch that names Status also clears the node's
+	// claim columns (claimed_by_name .. claimed_at, DFLT-00327): only
+	// ClaimNode records a claim, and every other status write -- complete,
+	// rewind, unstick, reopen -- is one that ends it. It likewise clears
+	// the decision columns (decided_by_name .. decided_by_autopilot,
+	// DFLT-00329): only a node transition records a decision
+	// (decisionFieldsFor). Two concurrent updates touching different
 	// columns therefore both survive; before DFLT-00102 each wrote the
 	// whole row back and the later one reverted the earlier one's column.
 	// The returned node is read back after the write, so it shows the row
@@ -138,7 +170,14 @@ type GraphRepository interface {
 	// the Jira sample), so it implements this by fetching the node and then
 	// updating it. Against that backend the check and the write are two
 	// calls and a concurrent claim can still slip between them.
-	ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus) (*domain.GraphNode, error)
+	//
+	// claim (DFLT-00327) is recorded in the node's claim columns when
+	// newStatus is IN PROGRESS or IN REVIEW; for any other newStatus, or a
+	// nil claim, the claim columns are cleared. This is the same rule
+	// UpdateNode applies to a status write (see claimFieldsFor), so a
+	// release or a loop-back rewind through ClaimNode clears the claim too.
+	// It always clears the decision columns (decisionFieldsFor).
+	ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus, claim *domain.NodeClaim) (*domain.GraphNode, error)
 	DeleteNode(id string) error
 
 	CreateEdge(e domain.GraphEdge) (domain.GraphEdge, error)

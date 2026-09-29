@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: GraphOps HTTP data source protocol
-  version: "1.1"
+  version: "1.2"
   license:
     name: MIT
     identifier: MIT
@@ -36,6 +36,78 @@ info:
       creation with `PARENT_TICKET_UNSUPPORTED` before sending anything when
       the plugin reports 1.0. A ticket's children are derived by graph-engine
       from `listTicketsByProject`; there is no endpoint for them.
+    - 1.2 adds the `autopilot-runs` endpoints (`listAutopilotRuns`,
+      `saveAutopilotRun`, `deleteAutopilotRun`, tag `autopilot-runs`), which
+      share the autopilot runs members are driving, so a member's
+      `autopilot start` (or Web UI launch) is refused when it overlaps
+      another member's active run. They are not part of `GraphRepository`'s
+      32 methods. graph-engine calls them only when the plugin reports 1.2
+      or newer; against 1.1 or 1.0 it keeps runs on each machine only, says
+      once that other members' runs cannot be seen, and never sends these
+      requests.
+    - 1.2 also adds node claims and processing sessions: five nullable
+      claim fields on `GraphNode` and `NodePatch` (`claimed_by_name`,
+      `claimed_by_name_is_fallback`, `claim_token`, `claim_session_id`,
+      `claimed_at`), which record who took a node with `get-executable`,
+      and the `processing-sessions` endpoints (`saveProcessingSession`,
+      `touchProcessingSession`, `getProcessingSession`,
+      `listProcessingSessionsByTickets`, `deleteProcessingSession`, tag
+      `processing-sessions`), whose heartbeats tell whether a claim is still
+      being worked on, so `unstick-node` does not release another member's
+      live claim. These were added to 1.2 before any release shipped it, so
+      the version stayed 1.2. They are not part of `GraphRepository`'s 32
+      methods either. Against 1.1 or 1.0 graph-engine neither sends nor
+      reads the claim fields and never calls these endpoints: nodes are
+      handed out and released as before, without a record of who holds them
+      (`begin-session` and `unstick-node` say so).
+    - 1.2 also adds graph batch creation (`createGraphBatch`, tag `graph`):
+      one request that creates a ticket's seed nodes, or the rest of its
+      graph, together with their edges -- only if the ticket's graph is still
+      what graph-engine planned against, and atomically. It is what keeps two
+      members who start the same ticket at once from both creating the
+      graph. It was added to 1.2 before any release shipped it, so the
+      version stayed 1.2, and it is not part of `GraphRepository`'s 32
+      methods either. A plugin reporting 1.2 must implement it (graph-engine
+      does not fall back when it answers 404). Against 1.1 or 1.0
+      graph-engine never sends it and creates the graph one `createNode` /
+      `createEdge` at a time, as before -- which is not atomic: two sessions
+      starting the same ticket at once can both create nodes, and a failure
+      halfway leaves a partial graph.
+    - 1.2 also adds node transitions and decisions (`applyNodeTransition`,
+      tag `nodes`): one request that checks a node's state and writes a
+      completion, a loop-back, a reopen, a grant or an unstick -- the
+      artifacts, the node statuses, the loop target's counter and the
+      ticket's blocked flag -- only if every condition still holds, and
+      atomically. It is what keeps two members who approve and reject the
+      same approval gate at once from both getting through. With it come
+      four nullable decision fields on `GraphNode` and `NodePatch`
+      (`decided_by_name`, `decided_by_name_is_fallback`, `decided_at`,
+      `decided_by_autopilot`), which record who judged a manual node, and
+      `if_status` on `TicketPatch`, which makes a ticket status write
+      conditional (409 `TICKET_STATUS_CHANGED`). They were added to 1.2
+      before any release shipped it, so the version stayed 1.2. A plugin
+      reporting 1.2 must implement the endpoint (graph-engine does not fall
+      back when it answers 404) and `if_status`. Against 1.1 or 1.0
+      graph-engine never sends them and completes, reopens, grants and
+      unsticks one `updateNode` / `createArtifact` / `updateTicket` at a
+      time, as before -- which is not atomic: approve and reject of the same
+      gate can both get through, a completion without `--claim` cannot tell
+      a node that was rewound and handed out again since it was read, and
+      no decision is recorded. It reads the ticket before a conditional
+      status write instead of sending `if_status`.
+    - 1.2 also adds `if_updated_at` on `TicketPatch`, which makes any
+      ticket write conditional on the `updated_at` of the version it was
+      based on (409 `TICKET_CHANGED`): graph-engine sends it for
+      `update-ticket` / `refine-ticket --if-updated-at` and for the Web UI's
+      label changes, so that two members editing the same ticket cannot
+      silently overwrite each other. With it, a ticket's `updated_at` must
+      change to a different string on every write, like a node's. It was
+      added to 1.2 before any release shipped it, so the version stayed
+      1.2; a plugin reporting 1.2 must implement both. Against 1.1 or 1.0
+      graph-engine never sends it: it reads the ticket, compares
+      `updated_at` itself and sends the PATCH only on a match -- which is
+      not atomic (a write in between is not detected), and graph-engine
+      says so once per process.
 
     ## Transport and authentication
 
@@ -106,6 +178,25 @@ info:
       empty one) replaces the ticket's labels with exactly that set. Every ID
       must be a label of the ticket's own project, otherwise the whole patch
       fails with `LABEL_NOT_FOUND`.
+    - The five claim fields of a node (since 1.2) have the same three
+      states as `assignee`: absent key = unchanged, `null` = clear it, a
+      value = set it. graph-engine sends all five with every node PATCH that
+      carries `status` (and never without it): values when the PATCH claims
+      the node, all `null` otherwise.
+    - The four decision fields of a node (since 1.2) have the same three
+      states. graph-engine sends all four, `null`, with every node PATCH
+      that carries `status` (and never without it); a decision is only ever
+      written by `applyNodeTransition`.
+    - `if_status` (tickets, since 1.2) is a condition, not a field: when
+      present, write nothing unless the ticket's current status is exactly
+      that value, and answer 409 `TICKET_STATUS_CHANGED` otherwise. Check
+      and write atomically.
+    - `if_updated_at` (tickets, since 1.2) is a condition too: when
+      present, write nothing -- `label_ids` included -- unless the ticket's
+      stored `updated_at` is exactly that string (compare the strings, not
+      the times), and answer 409 `TICKET_CHANGED` otherwise. Check and write
+      atomically. With both `if_status` and `if_updated_at`, write only when
+      both hold.
 
     ## Errors
 
@@ -118,8 +209,10 @@ info:
        graph-engine raises its own domain error with that code and message,
        regardless of the HTTP status (so `500` with `INTERNAL_ERROR` is still
        read as `INTERNAL_ERROR`). Use the status the code suggests anyway
-       (404 for `*_NOT_FOUND`, 409 for `*_TAKEN`, 400 for validation codes,
-       500 for `INTERNAL_ERROR`).
+       (404 for `*_NOT_FOUND`, 409 for `*_TAKEN`, `GRAPH_CHANGED`,
+       `INVALID_NODE_STATE`, `TICKET_STATUS_CHANGED`, `TICKET_CHANGED` and
+       `CONCURRENT_WRITE_CONFLICT`, 400 for validation codes, 500 for
+       `INTERNAL_ERROR`).
     3. Anything else (an unknown code, a body that is not this JSON, an empty
        body) becomes a generic error naming the method, path and status.
 
@@ -149,6 +242,9 @@ tags:
   - name: projects
   - name: labels
   - name: current-project
+  - name: autopilot-runs
+  - name: processing-sessions
+  - name: graph
 
 paths:
   /protocol:
@@ -414,6 +510,170 @@ paths:
         "200": { description: Cleared (any body is ignored). }
         default: { $ref: "#/components/responses/Error" }
 
+  /tickets/{ticketId}/graph:
+    parameters: [{ $ref: "#/components/parameters/ticketId" }]
+    post:
+      operationId: createGraphBatch
+      tags: [graph]
+      summary: "Since 1.2. Create a ticket's seed or expanded graph in one atomic step."
+      x-since: "1.2"
+      description: |
+        graph-engine sends this instead of one `createNode` / `createEdge`
+        per row when it creates a ticket's seed nodes (the first
+        `get-executable`, `expected_node_count` 0) or the rest of its graph
+        (`expand-graph`, `expected_node_count` the seed's size, with
+        `graph_expanded_at`).
+
+        The request must be processed atomically, and serialized with every
+        other request that creates nodes for the same ticket (including
+        `createNode` and another `createGraphBatch`):
+
+        1. If the ticket does not exist, answer `TICKET_NOT_FOUND`.
+        2. Check that the ticket has exactly `expected_node_count` nodes and,
+           when the body has `graph_expanded_at`, that the ticket's
+           `graph_expanded_at` is still unset. If not, someone else created
+           the graph first: write nothing and answer 409 `GRAPH_CHANGED`.
+           graph-engine absorbs this code (the seed carries on with the
+           nodes that are there; an expansion ends with "already been
+           expanded"), so it never reaches a user.
+        3. Create `nodes` in order, minting their IDs exactly as
+           `createNode` does (recommended `<ticket id>-<seq:02d>`) and
+           ignoring `id` in the body. Every node carries a `config_id`,
+           unique within the batch, which the edges use to refer to it. A
+           `max_iterations` of 0 means 3.
+        4. Create `edges` in order, using each edge's `id` exactly as sent
+           (graph-engine mints it, as for `createEdge`). Each end is either
+           `{"node_id": ...}`, a node the ticket already has, or
+           `{"config_id": ...}`, a node of this batch. An empty `condition`
+           means `always`.
+        5. When the body has `graph_expanded_at`, set the ticket's
+           `graph_expanded_at` to it.
+
+        Give each created node and edge a `created_at` that lists them in
+        the order they were sent (for example one microsecond apart, written
+        with a fixed number of fractional digits). An edge naming a node
+        that is neither the ticket's nor the batch's, a node without a
+        `config_id`, or an edge without an `id` is `VALIDATION_ERROR`; in
+        every error case nothing may have been written.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GraphBatchRequest" }
+      responses:
+        "201":
+          description: Everything was created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraphBatchResponse" }
+        "200":
+          description: Same as 201 (any body is ignored).
+        "204":
+          description: Created (no body).
+        "409":
+          description: "`GRAPH_CHANGED`: the check in step 2 failed; nothing was written."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /tickets/{ticketId}/node-transition:
+    parameters: [{ $ref: "#/components/parameters/ticketId" }]
+    post:
+      operationId: applyNodeTransition
+      tags: [nodes]
+      summary: "Since 1.2. Check a ticket's nodes and write a node state transition in one atomic step."
+      x-since: "1.2"
+      description: |
+        graph-engine sends this instead of separate `createArtifact` /
+        `updateNode` / `updateTicket` calls whenever it completes a node
+        (`complete-node`, the Web UI's approve / reject), and for
+        `reopen-nodes`, `grant-iterations` and `unstick-node`. The request
+        carries the writes together with the state graph-engine decided
+        them on, and must be processed atomically, serialized with every
+        other request that writes the same ticket's nodes:
+
+        1. If the ticket does not exist, answer `TICKET_NOT_FOUND`.
+        2. Check the ticket: with `require_ticket_open`, it must not be
+           `CLOSED`; with `if_blocked`, its `blocked` must equal it.
+        3. Go through `steps` in order. A step's conditions are
+           `if_status_in` (the node's status is one of them),
+           `if_status_not_in` (it is none of them), `check_claim_token`
+           (its `claim_token` equals `if_claim_token`, or is unset when
+           `if_claim_token` is absent or `null`), `if_iteration_count` and
+           `if_updated_at` (its stored `updated_at` is exactly that string,
+           compared character for character as stored and as `getNode` /
+           `listNodes` return it -- never parsed or compared as a point in
+           time: the node has not been written since graph-engine read
+           it); an
+           absent condition is not checked. A `required` step also
+           requires the node to exist. When a condition of a `required`
+           step does not hold, or a ticket condition of step 2 did not,
+           write nothing and answer 409 `INVALID_NODE_STATE`. When a
+           condition of any other step does not hold, skip that step only
+           (`applied` false). Later steps see what earlier steps of the
+           same request wrote.
+        4. Create `artifacts` as `createArtifact` would, keeping their `id`.
+        5. Apply each applied step's writes: `set_status` writes the status
+           and, in the same write, clears the five claim fields and writes
+           `decision` into the four decision fields (`name` ->
+           `decided_by_name`, `name_is_fallback` ->
+           `decided_by_name_is_fallback`, `decided_at` -> `decided_at`,
+           `autopilot` -> `decided_by_autopilot`) or clears them when there
+           is no `decision`; `increment_iteration` adds 1 to
+           `iteration_count`; `add_max_iterations` adds that many to
+           `max_iterations`. Add to the stored value -- never write back a
+           value computed from an earlier read. `touch` writes only
+           `updated_at` (graph-engine uses it when a decision on a manual
+           node blocks the ticket without changing the node's status, so
+           that a concurrent decision conditioned on `if_updated_at` loses).
+           Every step with a write sets `updated_at`; a step with none of
+           these writes nothing, not even `updated_at`.
+
+           `if_updated_at` and `touch` rely on this requirement: **every
+           write to a node** (each applied step with a write here, and
+           every `updateNode`) **must leave its `updated_at` a different
+           string from the one it had just before**. Store it with
+           sub-second precision (graph-engine's own backends use RFC 3339
+           with nanoseconds), and when the new value would equal the
+           previous one (a coarse clock, two writes in the same tick)
+           advance it past the previous value instead. A plugin that
+           rounds `updated_at` to whole seconds would let a `touch` in the
+           same second as the node's previous write keep the old string,
+           so a concurrent decision read before that `touch` would still
+           match its `if_updated_at` -- and both a simultaneous approve and
+           reject of a manual node would be written.
+        6. With `set_blocked`, write the ticket's `blocked`.
+
+        A step with `decision` but no `set_status`, a node of another
+        ticket, or an artifact of another ticket is `VALIDATION_ERROR`. In
+        every error case nothing may have been written. graph-engine turns
+        409 `INVALID_NODE_STATE` into the same code for the user ("another
+        member decided or completed the node first"). If the plugin cannot
+        complete the request because of other writes it is racing (a
+        database deadlock that its own retries did not resolve), it may
+        answer 409 `CONCURRENT_WRITE_CONFLICT` with nothing written; the
+        user can then simply run the command again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NodeTransition" }
+      responses:
+        "200":
+          description: Every condition held (for required steps) and every write was made.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NodeTransitionResult" }
+        "409":
+          description: "`INVALID_NODE_STATE`: a condition of a required step or of the ticket did not hold; nothing was written. `CONCURRENT_WRITE_CONFLICT`: nothing was written; the same request may be sent again."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+
   /tickets/{ticketId}/artifacts:
     parameters: [{ $ref: "#/components/parameters/ticketId" }]
     post:
@@ -673,6 +933,217 @@ paths:
                   removed_from_tickets: { type: integer, minimum: 0 }
         default: { $ref: "#/components/responses/Error" }
 
+  /projects/{projectId}/autopilot-runs:
+    parameters: [{ $ref: "#/components/parameters/projectId" }]
+    get:
+      operationId: listAutopilotRuns
+      tags: [autopilot-runs]
+      summary: "Since 1.2. List a project's autopilot run records, every member's."
+      x-since: "1.2"
+      description: |
+        Every record `saveAutopilotRun` stored for the project and
+        `deleteAutopilotRun` has not removed, in any order. graph-engine reads
+        it at every autopilot start (to refuse a start that overlaps another
+        member's active run) and for the Web UI's runs list. A missing
+        project is `PROJECT_NOT_FOUND`.
+
+        graph-engine decides a start by listing the records and then saving
+        its own with `saveAutopilotRun`: two requests, with nothing in the
+        protocol to make them one. Two members starting overlapping runs at
+        the same moment may therefore both pass against an HTTP data source
+        (the SQLite and MySQL backends serialize the two steps; this protocol
+        cannot).
+      responses:
+        "200":
+          description: The project's run records.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AutopilotRun" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /autopilot-runs/{runId}:
+    parameters: [{ $ref: "#/components/parameters/runId" }]
+    put:
+      operationId: saveAutopilotRun
+      tags: [autopilot-runs]
+      summary: "Since 1.2. Create or replace one autopilot run record."
+      x-since: "1.2"
+      description: |
+        Stores the body as the record `runId` (the body's `id` is the same
+        value). graph-engine sends it whenever a member's run changes -- at
+        least every 30 seconds while the run waits for a session -- so keep
+        it cheap.
+
+        `revision` orders the writes of one run: when the stored record's
+        `revision` is already equal to or greater than the body's, keep the
+        stored record and still answer 200 (the copy arrived late; it is not
+        an error). Store `snapshot` as opaque JSON and return it unchanged. A
+        missing project (`project_id`) is `PROJECT_NOT_FOUND`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutopilotRun" }
+      responses:
+        "200": { description: Saved, or ignored as older than the stored record (any body is ignored). }
+        "204": { description: Saved, or ignored as older than the stored record. }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteAutopilotRun
+      tags: [autopilot-runs]
+      summary: "Since 1.2. Delete one autopilot run record. A missing record is a no-op."
+      x-since: "1.2"
+      description: |
+        graph-engine deletes the records of its own cancelled or pruned
+        runs, and, after starting a run, the settled records (not active:
+        finished, stopped, or with a heartbeat more than 10 minutes old)
+        of any member beyond the 20 most recently updated in the project
+        -- at most 2 per start, the least recently updated first; the
+        rest are deleted by later starts.
+        A record deleted this way may be saved again later by its run's
+        machine (a PUT of a record that does not exist creates it).
+      responses:
+        "204": { description: Deleted. }
+        "200": { description: Deleted (any body is ignored). }
+        default: { $ref: "#/components/responses/Error" }
+
+  /processing-sessions:
+    get:
+      operationId: listProcessingSessionsByTickets
+      tags: [processing-sessions]
+      summary: "Since 1.2. List the processing sessions of one or more tickets."
+      x-since: "1.2"
+      description: |
+        Every session `saveProcessingSession` stored whose `ticket_id` is one
+        of the `ticket_id` query parameters, in any order, including sessions
+        whose heartbeat is old (graph-engine judges them itself). A ticket
+        with no sessions, or one that does not exist, simply contributes
+        nothing; answer `[]` when nothing matches.
+
+        graph-engine reads this at every `begin-session` (one ticket), and
+        when it shows claims for `get-ticket` and the Web UI's ticket
+        listings -- then only for the tickets that have an `IN PROGRESS` /
+        `IN REVIEW` node claimed in a session, all of them in one request
+        (at most 100 `ticket_id` parameters per request; more are split over
+        several requests). The Web UI polls the ticket list, so keep it
+        cheap. (`unstick-node` does not list: it reads the caller's and the
+        claimant's sessions one by one with `getProcessingSession`.)
+      parameters:
+        - name: ticket_id
+          in: query
+          required: true
+          description: A ticket ID; repeated once per ticket (`?ticket_id=A-00001&ticket_id=A-00002`).
+          style: form
+          explode: true
+          schema: { type: array, minItems: 1, maxItems: 100, items: { type: string } }
+      responses:
+        "200":
+          description: The matching sessions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProcessingSession" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /processing-sessions/{sessionId}:
+    parameters: [{ $ref: "#/components/parameters/sessionId" }]
+    put:
+      operationId: saveProcessingSession
+      tags: [processing-sessions]
+      summary: "Since 1.2. Create or replace one processing session."
+      x-since: "1.2"
+      description: |
+        Stores the body as the session `sessionId` (the body's `id` is the
+        same value). graph-engine sends it once per `begin-session`, the
+        command a person's (or an autopilot worker's) `process-ticket` runs
+        before it starts on a ticket. A missing ticket (`ticket_id`) is
+        `TICKET_NOT_FOUND`.
+
+        Store every field as given and never change one yourself: a session
+        whose heartbeat is old simply stops protecting its claims.
+        Deleting a ticket or a project should delete its sessions too (the
+        SQL backends cascade); graph-engine does not rely on it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProcessingSession" }
+      responses:
+        "200": { description: Saved (any body is ignored). }
+        "204": { description: Saved. }
+        default: { $ref: "#/components/responses/Error" }
+    get:
+      operationId: getProcessingSession
+      tags: [processing-sessions]
+      summary: "Since 1.2. Get one processing session."
+      x-since: "1.2"
+      description: |
+        graph-engine reads the session of a claimed node, and the caller's
+        own session, when `unstick-node` decides whether it may release the
+        node. A missing session is 404 (with no body, or with an error code
+        that is not in `ErrorCode`); graph-engine reads that as "no such
+        session".
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProcessingSession" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteProcessingSession
+      tags: [processing-sessions]
+      summary: "Since 1.2. Delete one processing session. A missing session is a no-op."
+      x-since: "1.2"
+      description: |
+        graph-engine deletes old sessions at `begin-session`: of the same
+        ticket's sessions, those whose heartbeat is more than 7 days old and
+        that hold no claim, at most 5 per `begin-session`. A ticket nobody
+        begins a session on again keeps its old sessions (they are harmless;
+        a plugin may delete such sessions itself).
+      responses:
+        "204": { description: Deleted. }
+        "200": { description: Deleted (any body is ignored). }
+        default: { $ref: "#/components/responses/Error" }
+
+  /processing-sessions/{sessionId}/heartbeat:
+    parameters: [{ $ref: "#/components/parameters/sessionId" }]
+    post:
+      operationId: touchProcessingSession
+      tags: [processing-sessions]
+      summary: "Since 1.2. Move a processing session's heartbeat forward."
+      x-since: "1.2"
+      description: |
+        Updates only the session's `heartbeat`, and only when the body's is
+        later (compare them as times) than the stored one; an earlier or
+        equal one is ignored and still answered with 200. Never touch the
+        session's other fields here. A missing session is 404 (as for
+        `getProcessingSession`).
+
+        graph-engine sends it on every command run with `--session` --
+        `get-executable`, `get-ticket`, `complete-node`, `unstick-node`,
+        `add-artifact`, and `wait-node` at most once a minute while it
+        waits -- so it is the most frequent of these requests. Keep it cheap.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [heartbeat]
+              properties:
+                heartbeat: { $ref: "#/components/schemas/Timestamp" }
+      responses:
+        "200": { description: Recorded, or ignored as not later than the stored heartbeat (any body is ignored). }
+        "204": { description: Recorded, or ignored as not later than the stored heartbeat. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+
   /current-project:
     get:
       operationId: getCurrentProjectID
@@ -748,6 +1219,8 @@ components:
     nodeId: { name: nodeId, in: path, required: true, schema: { type: string } }
     artifactId: { name: artifactId, in: path, required: true, schema: { type: string } }
     labelId: { name: labelId, in: path, required: true, schema: { type: string } }
+    runId: { name: runId, in: path, required: true, schema: { type: string } }
+    sessionId: { name: sessionId, in: path, required: true, schema: { type: string } }
 
   responses:
     Error:
@@ -793,6 +1266,11 @@ components:
         - PREFIX_TAKEN
         - VALIDATION_ERROR
         - INTERNAL_ERROR
+        - GRAPH_CHANGED
+        - INVALID_NODE_STATE
+        - TICKET_STATUS_CHANGED
+        - TICKET_CHANGED
+        - CONCURRENT_WRITE_CONFLICT
 
     ErrorResponse:
       type: object
@@ -880,7 +1358,9 @@ components:
         auto_executable: { type: boolean }
         blocked: { type: boolean }
         created_at: { $ref: "#/components/schemas/Timestamp" }
-        updated_at: { $ref: "#/components/schemas/Timestamp" }
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+          description: Since 1.2, must change (to a different string) on every write to the ticket -- updateTicket, and the ticket writes of createNode, createGraphBatch and applyNodeTransition; `updateTicket` compares it exactly with `if_updated_at`, so store it with sub-second precision, move it past the stored value when the clock has not (e.g. by a nanosecond), and return it unchanged.
         refined_at: { $ref: "#/components/schemas/Timestamp" }
         closed_reason: { type: string }
         assignee: { type: string }
@@ -911,6 +1391,27 @@ components:
         graph_expanded_at: { $ref: "#/components/schemas/Timestamp" }
         priority: { $ref: "#/components/schemas/TicketPriority" }
         label_ids: { type: array, items: { type: string } }
+        if_status:
+          $ref: "#/components/schemas/TicketStatus"
+          x-since: "1.2"
+          description: |
+            Since 1.2. A condition, not a field: write nothing unless the
+            ticket's current status is exactly this, and answer 409
+            `TICKET_STATUS_CHANGED` otherwise (check and write atomically).
+            graph-engine sends it when it brings a ticket's status in line
+            with its nodes, so that a status derived from a stale read never
+            overwrites another member's `CLOSED`.
+        if_updated_at:
+          type: string
+          x-since: "1.2"
+          description: |
+            Since 1.2. A condition, not a field: write nothing -- `label_ids`
+            included -- unless the ticket's stored `updated_at` is exactly
+            this string (a string comparison, not a comparison of times),
+            and answer 409 `TICKET_CHANGED` otherwise (check and write
+            atomically). graph-engine sends it for `update-ticket` /
+            `refine-ticket --if-updated-at` and for the Web UI's label
+            changes. With `if_status` as well, write only when both hold.
 
     GraphNode:
       type: object
@@ -929,11 +1430,76 @@ components:
         criteria: { type: string, description: Review criteria frozen at refine time; may be long. }
         config_id: { type: string }
         created_at: { $ref: "#/components/schemas/Timestamp" }
-        updated_at: { $ref: "#/components/schemas/Timestamp" }
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+          description: Must change (to a different string) on every write to the node; since 1.2 `applyNodeTransition` compares it exactly with `if_updated_at`, so store it with sub-second precision and return it unchanged.
+        claimed_by_name:
+          type: [string, "null"]
+          x-since: "1.2"
+          description: |
+            Since 1.2 (like the other four claim fields below). The display
+            name of whoever claimed the node with `get-executable`, while it
+            is `IN PROGRESS` / `IN REVIEW`. For display only. The five claim
+            fields are written only through `updateNode` (see `NodePatch`);
+            store them as given, return them unchanged (absent or `null` when
+            not set), and never change or clear them yourself. A 1.2 plugin
+            that drops them leaves every claim unrecorded, so `unstick-node`
+            releases other members' live claims without a check.
+        claimed_by_name_is_fallback:
+          type: [boolean, "null"]
+          x-since: "1.2"
+          description: "`true` when `claimed_by_name` is `<OS user>@<host>` because the claimer set no name (shown as \"(name not set)\")."
+        claim_token:
+          type: [string, "null"]
+          x-since: "1.2"
+          description: |
+            A token graph-engine mints for each claim (a UUID) and checks
+            when the node is completed with `complete-node --claim`. Return
+            it with the node; graph-engine itself shows it only to the
+            session that claimed the node.
+        claim_session_id:
+          type: [string, "null"]
+          x-since: "1.2"
+          description: The processing session the node was claimed in (see `ProcessingSession`); `null` for a claim made without `--session`.
+        claimed_at:
+          type: [string, "null"]
+          x-since: "1.2"
+          description: When the node was claimed (RFC 3339 in UTC), from the claimer's clock.
+        decided_by_name:
+          type: [string, "null"]
+          x-since: "1.2"
+          description: |
+            Since 1.2 (like the other three decision fields below). The
+            display name of whoever last decided this manual node (approved
+            or rejected an approval gate, completed a release or another
+            manual node), resolved by the graph-engine that recorded it. For
+            display only. Written by `applyNodeTransition` together with the
+            status the decision set, and cleared (all four `null`) by every
+            other status write; store them as given and return them
+            unchanged.
+        decided_by_name_is_fallback:
+          type: [boolean, "null"]
+          x-since: "1.2"
+          description: "`true` when `decided_by_name` is `<OS user>@<host>` because the decider set no name (shown as \"(name not set)\")."
+        decided_at:
+          type: [string, "null"]
+          x-since: "1.2"
+          description: When the decision was made (RFC 3339 in UTC), from the decider's clock.
+        decided_by_autopilot:
+          type: [boolean, "null"]
+          x-since: "1.2"
+          description: "`true` when the decision was made by an autopilot run rather than a person."
 
     NodePatch:
       type: object
-      description: "Absent key = unchanged. `assignee`: `null` clears, a string sets."
+      description: |
+        Absent key = unchanged. `assignee`: `null` clears, a string sets.
+        Since 1.2 the five claim fields work the same way (`null` clears).
+        graph-engine sends all five with every PATCH that carries `status`,
+        and never without it: the claimer's values when it moves the node to
+        `IN PROGRESS` / `IN REVIEW` with `get-executable`, all `null` on
+        every other status change (completion, loop-back, `unstick-node`,
+        `reopen-nodes`, ...). Apply them in the same request as `status`.
       properties:
         name: { type: string }
         type: { $ref: "#/components/schemas/NodeType" }
@@ -944,6 +1510,15 @@ components:
         is_manual: { type: boolean }
         gate_id: { type: string }
         criteria: { type: string }
+        claimed_by_name: { type: [string, "null"], x-since: "1.2" }
+        claimed_by_name_is_fallback: { type: [boolean, "null"], x-since: "1.2" }
+        claim_token: { type: [string, "null"], x-since: "1.2" }
+        claim_session_id: { type: [string, "null"], x-since: "1.2" }
+        claimed_at: { type: [string, "null"], x-since: "1.2", description: RFC 3339 timestamp in UTC. }
+        decided_by_name: { type: [string, "null"], x-since: "1.2" }
+        decided_by_name_is_fallback: { type: [boolean, "null"], x-since: "1.2" }
+        decided_at: { type: [string, "null"], x-since: "1.2", description: RFC 3339 timestamp in UTC. }
+        decided_by_autopilot: { type: [boolean, "null"], x-since: "1.2" }
 
     GraphEdge:
       type: object
@@ -955,6 +1530,113 @@ components:
         to_node_id: { type: string }
         condition: { $ref: "#/components/schemas/EdgeCondition" }
         created_at: { $ref: "#/components/schemas/Timestamp" }
+
+    GraphBatchNodeRef:
+      type: object
+      description: One end of a batch edge. Exactly one of the two is set.
+      properties:
+        node_id: { type: string, description: "A node the ticket already has." }
+        config_id: { type: string, description: "The config_id of a node in the same batch." }
+
+    GraphBatchEdge:
+      type: object
+      required: [id, from, to, condition]
+      properties:
+        id: { type: string, description: "Minted by graph-engine (edge-...). Store it as sent." }
+        from: { $ref: "#/components/schemas/GraphBatchNodeRef" }
+        to: { $ref: "#/components/schemas/GraphBatchNodeRef" }
+        condition: { $ref: "#/components/schemas/EdgeCondition" }
+
+    GraphBatchRequest:
+      type: object
+      required: [expected_node_count, nodes, edges]
+      properties:
+        expected_node_count:
+          type: integer
+          description: How many nodes the ticket must have for the batch to be written.
+        nodes:
+          type: array
+          description: |
+            Nodes to create, as for `createNode` (`id` and `ticket_id` are
+            ignored); `config_id` is required.
+          items: { $ref: "#/components/schemas/GraphNode" }
+        edges:
+          type: array
+          items: { $ref: "#/components/schemas/GraphBatchEdge" }
+        graph_expanded_at:
+          $ref: "#/components/schemas/Timestamp"
+          description: |
+            Present only when the graph is being expanded: set the ticket's
+            `graph_expanded_at` to it, and write the batch only if that field
+            is still unset.
+
+    GraphBatchResponse:
+      type: object
+      properties:
+        nodes: { type: array, items: { $ref: "#/components/schemas/GraphNode" } }
+        edges: { type: array, items: { $ref: "#/components/schemas/GraphEdge" } }
+
+    NodeDecision:
+      type: object
+      x-since: "1.2"
+      required: [name, name_is_fallback, decided_at, autopilot]
+      properties:
+        name: { type: string }
+        name_is_fallback: { type: boolean }
+        decided_at: { $ref: "#/components/schemas/Timestamp" }
+        autopilot: { type: boolean }
+
+    NodeStep:
+      type: object
+      x-since: "1.2"
+      required: [node_id]
+      description: One node's conditions and writes; see `applyNodeTransition`.
+      properties:
+        node_id: { type: string }
+        required: { type: boolean, description: "A condition that does not hold refuses the whole request (true) or skips this step only (false or absent)." }
+        if_status_in: { type: array, items: { $ref: "#/components/schemas/NodeStatus" } }
+        if_status_not_in: { type: array, items: { $ref: "#/components/schemas/NodeStatus" } }
+        check_claim_token: { type: boolean }
+        if_claim_token: { type: [string, "null"] }
+        if_iteration_count: { type: integer }
+        if_updated_at:
+          type: string
+          description: The node's `updated_at` exactly as graph-engine read it. The condition holds only when the stored `updated_at` is the identical string (no parsing, no time-based comparison); it relies on every node write changing `updated_at` (see `applyNodeTransition`).
+        set_status: { $ref: "#/components/schemas/NodeStatus" }
+        increment_iteration: { type: boolean }
+        add_max_iterations: { type: integer, minimum: 0 }
+        decision: { $ref: "#/components/schemas/NodeDecision" }
+        touch:
+          type: boolean
+          description: Write `updated_at` even when nothing else is written. The new value must be a different string from the stored one (see `applyNodeTransition`), so that a concurrent step conditioned on the old value with `if_updated_at` fails.
+
+    NodeTransition:
+      type: object
+      x-since: "1.2"
+      required: [steps, artifacts]
+      properties:
+        require_ticket_open: { type: boolean }
+        if_blocked: { type: boolean }
+        set_blocked: { type: boolean }
+        steps: { type: array, items: { $ref: "#/components/schemas/NodeStep" } }
+        artifacts:
+          type: array
+          description: Created as by `createArtifact`, keeping each `id` (minted by graph-engine).
+          items: { $ref: "#/components/schemas/Artifact" }
+
+    NodeTransitionResult:
+      type: object
+      x-since: "1.2"
+      required: [applied, nodes]
+      properties:
+        applied:
+          type: array
+          description: One flag per step, in order -- whether its conditions held and its writes were made.
+          items: { type: boolean }
+        nodes:
+          type: array
+          description: Every node the steps name, as stored after the writes.
+          items: { $ref: "#/components/schemas/GraphNode" }
 
     Artifact:
       type: object
@@ -980,6 +1662,74 @@ components:
             nodes: { type: array, items: { $ref: "#/components/schemas/GraphNode" } }
             edges: { type: array, items: { $ref: "#/components/schemas/GraphEdge" } }
             artifacts: { type: array, items: { $ref: "#/components/schemas/Artifact" } }
+
+    AutopilotRun:
+      type: object
+      x-since: "1.2"
+      description: |
+        Since 1.2. One autopilot run as members share it: the columns
+        graph-engine needs to judge overlaps and show who is running what,
+        plus the run's shared view (`snapshot`). What only makes sense on the
+        member's own machine (terminal, worktree paths, branch names) is
+        never sent.
+      required: [id, project_id, root_ticket_id, mode, state, heartbeat, created_at, updated_at, started_by_name, machine_id, revision, snapshot]
+      properties:
+        id: { type: string, description: "The run ID (run-<UTC timestamp>-<hex>)." }
+        project_id: { type: string }
+        root_ticket_id: { type: string, description: The ticket the run started from. It may have been deleted since. }
+        mode: { type: string, enum: [ticket, tree] }
+        state: { type: string, enum: [starting, running, finalizing, finished, stopped] }
+        heartbeat:
+          $ref: "#/components/schemas/Timestamp"
+          description: |
+            The last sign of life of the run's orchestrator, from the member's
+            clock. A run that is not finished or stopped counts as active --
+            and blocks overlapping starts -- only while this is at most 10
+            minutes old. Never rewrite it (nor `state`) on graph-engine's
+            behalf.
+        created_at: { $ref: "#/components/schemas/Timestamp" }
+        updated_at: { $ref: "#/components/schemas/Timestamp" }
+        started_by_name: { type: string, description: "Display name of the member who started (or last resumed) the run. For display only." }
+        machine_id: { type: string, description: The starting machine's ID; only that machine resumes the run. }
+        revision: { type: integer, format: int64, minimum: 0, description: Increases with every write of the run; see saveAutopilotRun. }
+        snapshot:
+          type: object
+          description: The run's shared view. Opaque to the plugin; store it and return it unchanged.
+
+    ProcessingSession:
+      type: object
+      x-since: "1.2"
+      description: |
+        Since 1.2. One run of `process-ticket` over a ticket, created by
+        `graph-engine begin-session`. Its heartbeat is what tells whether the
+        claims made in it (`GraphNode.claim_session_id`) are still being
+        worked on: a session a person started is live while its heartbeat is
+        at most 60 minutes old; an autopilot worker's session (`run_id` set)
+        follows its run instead: live while the run is neither `finished`
+        nor `stopped` and its heartbeat is at most 10 minutes old (see
+        `AutopilotRun`), so a claim of a stopped or finished run expires at
+        once. When the run's record cannot be read or found (the data source
+        keeps no runs, or the record was deleted), the session's own
+        heartbeat and the 60 minutes decide.
+        Heartbeats come from each member's clock, so this assumes the
+        members' clocks are not minutes apart.
+      required: [id, project_id, ticket_id, actor_name, actor_name_is_fallback, machine_id, started_at, heartbeat]
+      properties:
+        id: { type: string, description: "The session ID (a lowercase UUID)." }
+        project_id: { type: string }
+        ticket_id: { type: string }
+        actor_name: { type: string, description: "Display name of the member who began the session. For display only." }
+        actor_name_is_fallback: { type: boolean, description: "`true` when `actor_name` is `<OS user>@<host>` because the member set no name." }
+        machine_id: { type: string, description: "The ID of the machine the session runs on." }
+        run_id: { type: string, description: "The autopilot run the session belongs to; absent for a session a person began by hand." }
+        started_at: { $ref: "#/components/schemas/Timestamp" }
+        heartbeat:
+          $ref: "#/components/schemas/Timestamp"
+          description: |
+            The session's last sign of life, from the member's clock.
+            graph-engine writes it with a fixed nine fractional digits.
+            Only `touchProcessingSession` moves it (forward only); never
+            rewrite it on graph-engine's behalf.
 
     CurrentProject:
       type: object

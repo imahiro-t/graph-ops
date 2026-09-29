@@ -40,7 +40,7 @@ func TestCmdCompleteNode_ReviewLoopBackPrintsAwaitingFix(t *testing.T) {
 
 	var cmdErr error
 	out := captureStdout(t, func() {
-		cmdErr = cmdCompleteNode(eng, repo, []string{review.ID, "false"})
+		cmdErr = cmdCompleteNode(eng, repo, runtimeConfig{HomeDir: t.TempDir()}, []string{review.ID, "false"})
 	})
 	if cmdErr != nil {
 		t.Fatalf("cmdCompleteNode: %v", cmdErr)
@@ -67,7 +67,7 @@ func TestCmdCompleteNode_ReasonSavesRejectionReasonArtifactOnApprovalGate(t *tes
 	eng := engine.New(repo)
 	_, nodeID := mustCreateTicketAndNode(t, repo, projectID, domain.NodeTypeApprovalGate)
 
-	if err := cmdCompleteNode(eng, repo, []string{nodeID, "false", "--reason", "does not match requirements"}); err != nil {
+	if err := cmdCompleteNode(eng, repo, runtimeConfig{HomeDir: t.TempDir()}, []string{nodeID, "false", "--reason", "does not match requirements"}); err != nil {
 		t.Fatalf("cmdCompleteNode: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestCmdCompleteNode_ReasonRejectedWhenApprovingRatherThanRejecting(t *testi
 	eng := engine.New(repo)
 	_, nodeID := mustCreateTicketAndNode(t, repo, projectID, domain.NodeTypeApprovalGate)
 
-	err := cmdCompleteNode(eng, repo, []string{nodeID, "true", "--reason", "should not be allowed"})
+	err := cmdCompleteNode(eng, repo, runtimeConfig{HomeDir: t.TempDir()}, []string{nodeID, "true", "--reason", "should not be allowed"})
 	if err == nil {
 		t.Fatal("expected an error using --reason with passed=true")
 	}
@@ -122,7 +122,7 @@ func TestCmdCompleteNode_ReasonRejectedOnNonApprovalGateNode(t *testing.T) {
 	eng := engine.New(repo)
 	_, nodeID := mustCreateTicketAndNode(t, repo, projectID, domain.NodeTypeReview)
 
-	err := cmdCompleteNode(eng, repo, []string{nodeID, "false", "--reason", "there are issues"})
+	err := cmdCompleteNode(eng, repo, runtimeConfig{HomeDir: t.TempDir()}, []string{nodeID, "false", "--reason", "there are issues"})
 	if err == nil {
 		t.Fatal("expected an error using --reason against a non-approval_gate node")
 	}
@@ -141,13 +141,13 @@ func TestCmdCompleteNode_UsageErrors(t *testing.T) {
 	eng := engine.New(repo)
 	_, nodeID := mustCreateTicketAndNode(t, repo, projectID, domain.NodeTypeApprovalGate)
 
-	if err := cmdCompleteNode(eng, repo, nil); err == nil {
+	if err := cmdCompleteNode(eng, repo, runtimeConfig{HomeDir: t.TempDir()}, nil); err == nil {
 		t.Error("expected an error with no arguments")
 	}
-	if err := cmdCompleteNode(eng, repo, []string{nodeID, "false", "--reason"}); err == nil {
+	if err := cmdCompleteNode(eng, repo, runtimeConfig{HomeDir: t.TempDir()}, []string{nodeID, "false", "--reason"}); err == nil {
 		t.Error("expected an error when --reason has no value")
 	}
-	if err := cmdCompleteNode(eng, repo, []string{nodeID, "false", "--unknown-flag"}); err == nil {
+	if err := cmdCompleteNode(eng, repo, runtimeConfig{HomeDir: t.TempDir()}, []string{nodeID, "false", "--unknown-flag"}); err == nil {
 		t.Error("expected an error for an unrecognized argument")
 	}
 }

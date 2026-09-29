@@ -98,3 +98,53 @@ func ensureTicketParentColumn(backend string, columnExists func() (bool, error),
 	}
 	return nil
 }
+
+// nodeClaimColumns are the claim columns DFLT-00327 added to nodes, in the
+// order addNodeClaimColumns adds them.
+var nodeClaimColumns = []string{"claimed_by_name", "claimed_by_name_is_fallback", "claim_token", "claim_session_id", "claimed_at"}
+
+// addNodeClaimColumns is the backend-independent body of the DFLT-00327
+// migration that adds the claim columns to the nodes of a DB created before
+// them: each missing column is added (as NULL-able, so existing rows read
+// back as unclaimed -- a node already IN PROGRESS then counts as claimed by
+// an older client). Init runs on every graph-engine call, so the nodes
+// columns are read once (existingColumns, one round trip) and nothing else
+// is read on a migrated DB. Like ensureTicketParentColumn, a failed ALTER is
+// forgiven when the column exists afterwards (a concurrent Init added it).
+func addNodeClaimColumns(backend string, existingColumns func() (map[string]bool, error), addColumn func(column, sqlType string) error, types map[string]string) error {
+	return addNodeColumns(backend, nodeClaimColumns, existingColumns, addColumn, types)
+}
+
+// nodeDecisionColumns are the decision columns DFLT-00329 added to nodes, in
+// the order addNodeDecisionColumns adds them.
+var nodeDecisionColumns = []string{"decided_by_name", "decided_by_name_is_fallback", "decided_at", "decided_by_autopilot"}
+
+// addNodeDecisionColumns is the DFLT-00329 migration that adds the decision
+// columns to the nodes of a DB created before them, exactly as
+// addNodeClaimColumns adds the claim columns: NULL-able, so existing rows
+// read back as undecided.
+func addNodeDecisionColumns(backend string, existingColumns func() (map[string]bool, error), addColumn func(column, sqlType string) error, types map[string]string) error {
+	return addNodeColumns(backend, nodeDecisionColumns, existingColumns, addColumn, types)
+}
+
+// addNodeColumns is the shared body of addNodeClaimColumns and
+// addNodeDecisionColumns: each of columns that existingColumns does not
+// report is added with its type from types.
+func addNodeColumns(backend string, columns []string, existingColumns func() (map[string]bool, error), addColumn func(column, sqlType string) error, types map[string]string) error {
+	have, err := existingColumns()
+	if err != nil {
+		return fmt.Errorf("inspecting nodes columns: %w", err)
+	}
+	for _, column := range columns {
+		if have[column] {
+			continue
+		}
+		if addErr := addColumn(column, types[column]); addErr != nil {
+			now, checkErr := existingColumns()
+			if checkErr != nil || !now[column] {
+				return fmt.Errorf("adding nodes.%s column (%s): %w", column, backend, addErr)
+			}
+		}
+	}
+	return nil
+}

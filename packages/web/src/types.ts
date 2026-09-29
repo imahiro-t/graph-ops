@@ -187,6 +187,29 @@ export interface GraphNode {
   config_id?: string | null;
   created_at: string;
   updated_at: string;
+  // DFLT-00327: who claimed a node that is IN PROGRESS / IN REVIEW (with
+  // get-executable) and whether they are still at it. The server sends them
+  // only for a claimed node; the claim token itself is never sent here.
+  claimed_by_name?: string;
+  // true when claimed_by_name is the "<OS user>@<host>" stand-in for an
+  // unset name.
+  claimed_by_name_is_fallback?: boolean;
+  claim_session_id?: string;
+  claimed_at?: string;
+  // The claimer's session's (or autopilot run's) last heartbeat.
+  claim_heartbeat?: string;
+  claim_lease?: 'live' | 'expired' | 'unknown' | 'legacy';
+  // DFLT-00329: who last decided a manual node (approved or rejected an
+  // approval gate, completed a release or another manual node) and when.
+  // The server resolves the name itself; it is sent only while the node
+  // still carries the status that decision set (a rewind clears it).
+  decided_by_name?: string;
+  // true when decided_by_name is the "<OS user>@<host>" stand-in for an
+  // unset name.
+  decided_by_name_is_fallback?: boolean;
+  decided_at?: string;
+  // true when an autopilot run made the decision.
+  decided_by_autopilot?: boolean;
 }
 
 export interface GraphEdge {
@@ -660,6 +683,20 @@ export interface AutopilotRun {
   // enter (beyond maxDepth/maxTickets, under a ticket in progress elsewhere
   // or a failed one) are left out. Empty for an inactive run.
   pending: string[];
+  // Who started the run (DFLT-00326), absent for a run from before that or
+  // from an older server. The name is for display only.
+  started_by?: AutopilotStarter;
+  // Whether the run is this machine's (so it can be resumed here). false for
+  // another member's run on a shared database; absent from an older server,
+  // which only ever lists this machine's runs -- treat that as true.
+  mine?: boolean;
+}
+
+// Who started an autopilot run. name_is_fallback: the name is
+// "<OS user>@<host>" because the member has not set their name.
+export interface AutopilotStarter {
+  name: string;
+  name_is_fallback: boolean;
 }
 
 // POST /api/tickets/{id}/autopilot's answer.

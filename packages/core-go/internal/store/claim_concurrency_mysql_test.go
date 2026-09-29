@@ -58,11 +58,9 @@ func mysqlRepoForClaimTest(t *testing.T) *store.MySQLRepository {
 // SetMaxOpenConns(1), which narrows the window without closing it).
 //
 // The graph is seeded by one call before the racers start, so what is under
-// test is the claim alone. Concurrent first-ever calls would also race to seed
-// the graph, which is a separate problem this ticket deliberately leaves alone
-// (deduplicating graph creation needs a (ticket_id, config_id) unique
-// constraint, and this repository has no migration mechanism to add one to
-// existing databases).
+// test is the claim alone. Concurrent first-ever calls racing to seed the
+// graph are covered separately, by graph_batch_concurrency_test.go
+// (DFLT-00328).
 func TestGetExecutableNodes_ConcurrentCallsNeverHandOutTheSameNode(t *testing.T) {
 	repo := mysqlRepoForClaimTest(t)
 	eng := engine.New(repo)

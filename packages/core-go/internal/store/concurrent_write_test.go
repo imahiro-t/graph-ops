@@ -359,7 +359,7 @@ func TestClaimNode_StatusRange(t *testing.T) {
 			t.Run(string(tc.status), func(t *testing.T) {
 				node := b.newNode(t, tc.status)
 
-				claimed, err := b.repo.ClaimNode(node.ID, domain.NodeInProgress, claimExclusions)
+				claimed, err := b.repo.ClaimNode(node.ID, domain.NodeInProgress, claimExclusions, nil)
 				if err != nil {
 					t.Fatalf("ClaimNode: %v", err)
 				}
@@ -386,7 +386,7 @@ func TestClaimNode_StatusRange(t *testing.T) {
 // the caller has to special-case.
 func TestClaimNode_MissingNodeIsNotAnError(t *testing.T) {
 	eachSQLBackend(t, func(t *testing.T, b backend) {
-		claimed, err := b.repo.ClaimNode("NO-SUCH-NODE-99", domain.NodeInProgress, claimExclusions)
+		claimed, err := b.repo.ClaimNode("NO-SUCH-NODE-99", domain.NodeInProgress, claimExclusions, nil)
 		if err != nil {
 			t.Fatalf("ClaimNode on a missing node = %v, want no error", err)
 		}
@@ -421,7 +421,7 @@ func TestClaimNode_ConcurrentClaimsYieldExactlyOneWinner(t *testing.T) {
 				go func() {
 					defer wg.Done()
 					<-start
-					claimed, err := b.repo.ClaimNode(node.ID, domain.NodeInProgress, claimExclusions)
+					claimed, err := b.repo.ClaimNode(node.ID, domain.NodeInProgress, claimExclusions, nil)
 					if err != nil {
 						errs <- err
 						return

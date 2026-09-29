@@ -56,6 +56,24 @@ export function errorMessage(e: unknown, fallback: string): string {
   return typeof message === 'string' && message !== '' ? message : fallback;
 }
 
+// An Error carrying the localized message for display plus the backend's
+// error code, for a caller that has to react to one code in particular
+// (e.g. TICKET_CHANGED, DFLT-00330). `code` is '' when the response carried
+// none.
+export class ApiCodeError extends Error {
+  readonly code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = 'ApiCodeError';
+    this.code = code;
+  }
+}
+
+// Whether e is an ApiCodeError with the given code.
+export function hasApiErrorCode(e: unknown, code: string): boolean {
+  return e instanceof ApiCodeError && e.code === code;
+}
+
 // Convenience wrapper: given a failed fetch Response, resolves the
 // localized message the UI should display.
 export async function localizedApiErrorMessage(t: TFunction, response: Response): Promise<string> {

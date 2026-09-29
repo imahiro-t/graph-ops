@@ -9,8 +9,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/graph-ops/core-go/internal/domain"
@@ -31,7 +33,7 @@ const (
 	// (MAJOR.MINOR). It is also openapi.yaml's info.version -- a test keeps the
 	// two equal. A plugin whose MAJOR differs is refused at startup; a
 	// different MINOR is accepted (minor versions only add optional things).
-	HTTPDataSourceProtocolVersion = "1.1"
+	HTTPDataSourceProtocolVersion = "1.2"
 	// HTTPDataSourceProtocolHeader carries HTTPDataSourceProtocolVersion on
 	// every request, so a plugin can adapt to (or refuse) an older client.
 	HTTPDataSourceProtocolHeader = "GraphOps-Protocol-Version"
@@ -147,11 +149,41 @@ type HTTPRepository struct {
 	maxResponseBytes int64
 	// serverMinor is the MINOR of the protocol version the plugin reported
 	// in the handshake. Features added in a minor version are only used
-	// against a plugin that speaks it (e.g. parent_ticket_id needs 1.1).
+	// against a plugin that speaks it (e.g. parent_ticket_id needs 1.1, the
+	// autopilot-runs endpoints 1.2).
 	serverMinor int
+	// logf is where this repository's warnings go (nil: stderr as
+	// "graph-engine: warning: ..."); the Web UI server points it at its
+	// structured logger through SetLogf.
+	logf func(format string, args ...any)
+	// ifUpdatedAtFallbackWarned says the non-atomic if_updated_at fallback
+	// of a data source older than 1.2 once per repository -- the CLI and
+	// the Web UI server each open exactly one, so once per process
+	// (DFLT-00330).
+	ifUpdatedAtFallbackWarned sync.Once
 }
 
 var _ GraphRepository = (*HTTPRepository)(nil)
+
+// WarningSink is implemented by a repository that has warnings of its own
+// to say; the Web UI server points it at its structured logger.
+type WarningSink interface {
+	SetLogf(logf func(format string, args ...any))
+}
+
+var _ WarningSink = (*HTTPRepository)(nil)
+
+// SetLogf sets where the repository's warnings go; nil restores the default
+// (stderr).
+func (r *HTTPRepository) SetLogf(logf func(format string, args ...any)) { r.logf = logf }
+
+func (r *HTTPRepository) warnf(format string, args ...any) {
+	if r.logf != nil {
+		r.logf(format, args...)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "graph-engine: warning: "+format+"\n", args...)
+}
 
 // newHTTPDataSourceClient builds the client used for every request: TLS
 // certificates are always verified (no InsecureSkipVerify, TLS 1.2 or newer),
@@ -306,6 +338,14 @@ var knownHTTPDataSourceErrorCodes = map[domain.ErrorCode]bool{
 	domain.ErrCodePrefixTaken:       true,
 	domain.ErrCodeValidation:        true,
 	domain.ErrCodeInternal:          true,
+	domain.ErrCodeGraphChanged:      true,
+	// DFLT-00329: a node transition that lost (409), a ticket status write
+	// whose if_status no longer matched (409), and a write the plugin could
+	// not complete because of concurrent writes and that can be retried.
+	domain.ErrCodeInvalidNodeState:        true,
+	domain.ErrCodeTicketStatusChanged:     true,
+	domain.ErrCodeTicketChanged:           true,
+	domain.ErrCodeConcurrentWriteConflict: true,
 }
 
 type httpErrorBody struct {
@@ -579,17 +619,20 @@ func (r *HTTPRepository) GetTicket(id string) (*domain.Ticket, error) {
 }
 
 func (r *HTTPRepository) GetTicketDetail(id string) (*domain.TicketDetail, error) {
-	var out domain.TicketDetail
-	if err := r.do(http.MethodGet, "/tickets/"+esc(id)+"/detail", nil, &out); err != nil {
+	var wire struct {
+		domain.Ticket
+		Nodes     []httpNodeWire     `json:"nodes"`
+		Edges     []domain.GraphEdge `json:"edges"`
+		Artifacts []domain.Artifact  `json:"artifacts"`
+	}
+	if err := r.do(http.MethodGet, "/tickets/"+esc(id)+"/detail", nil, &wire); err != nil {
 		if isNotFoundCode(err, domain.ErrCodeTicketNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
+	out := domain.TicketDetail{Ticket: wire.Ticket, Nodes: r.nodesFromWire(wire.Nodes), Edges: wire.Edges, Artifacts: wire.Artifacts}
 	normalizeTicket(&out.Ticket)
-	if out.Nodes == nil {
-		out.Nodes = []domain.GraphNode{}
-	}
 	if out.Edges == nil {
 		out.Edges = []domain.GraphEdge{}
 	}
@@ -621,9 +664,46 @@ func (r *HTTPRepository) ListTicketsByProject(projectID string) ([]domain.Ticket
 	return r.listTickets("/projects/" + esc(projectID) + "/tickets")
 }
 
+// UpdateTicket sends patch as a PATCH. patch.IfStatus travels as if_status
+// and patch.IfUpdatedAt as if_updated_at (DFLT-00330) to a data source
+// speaking 1.2, which must refuse the PATCH with 409 TICKET_STATUS_CHANGED /
+// TICKET_CHANGED when the stored value differs. An older data source has
+// neither, so the ticket is fetched (once for both conditions) and compared
+// first and the PATCH sent only when it matches -- two calls, not atomic,
+// which is said once per repository for if_updated_at.
 func (r *HTTPRepository) UpdateTicket(id string, patch TicketPatch) (domain.Ticket, error) {
+	body := ticketPatchBody(patch)
+	if patch.IfStatus != nil || patch.IfUpdatedAt != nil {
+		if r.supportsNodeTransitions() {
+			if patch.IfStatus != nil {
+				body["if_status"] = *patch.IfStatus
+			}
+			if patch.IfUpdatedAt != nil {
+				body["if_updated_at"] = *patch.IfUpdatedAt
+			}
+		} else {
+			if patch.IfUpdatedAt != nil {
+				r.ifUpdatedAtFallbackWarned.Do(func() {
+					r.warnf("the data source speaks HTTP data source protocol 1.%d, older than 1.2, so a ticket write conditioned on updated_at (--if-updated-at, if_updated_at) is checked by reading the ticket first and is not atomic: a change made between the read and the write is not detected", r.serverMinor)
+				})
+			}
+			cur, err := r.GetTicket(id)
+			if err != nil {
+				return domain.Ticket{}, err
+			}
+			if cur == nil {
+				return domain.Ticket{}, domain.NewAPIError(domain.ErrCodeTicketNotFound, "ticket %s not found", id)
+			}
+			if patch.IfStatus != nil && cur.Status != *patch.IfStatus {
+				return domain.Ticket{}, ticketStatusChanged(id, *patch.IfStatus, cur.Status)
+			}
+			if patch.IfUpdatedAt != nil && cur.UpdatedAt != *patch.IfUpdatedAt {
+				return domain.Ticket{}, ticketChanged(id, *patch.IfUpdatedAt, cur.UpdatedAt)
+			}
+		}
+	}
 	var out domain.Ticket
-	if err := r.do(http.MethodPatch, "/tickets/"+esc(id), ticketPatchBody(patch), &out); err != nil {
+	if err := r.do(http.MethodPatch, "/tickets/"+esc(id), body, &out); err != nil {
 		return domain.Ticket{}, err
 	}
 	normalizeTicket(&out)
@@ -634,50 +714,124 @@ func (r *HTTPRepository) DeleteTicket(id string) error {
 	return r.do(http.MethodDelete, "/tickets/"+esc(id), nil, nil)
 }
 
+// httpNodeWire is a node as it travels to and from the data source. It is
+// domain.GraphNode plus claim_token, which GraphNode itself never
+// serializes (see its ClaimToken): the data source has to keep the token
+// like any other column, and this is one of the only two places it is
+// allowed onto the wire (get-executable's output is the other).
+type httpNodeWire struct {
+	domain.GraphNode
+	ClaimToken *string `json:"claim_token,omitempty"`
+}
+
+// nodeToWire is n as sent to the data source: with its claim token, and
+// without what the engine computes for display (claim_heartbeat,
+// claim_lease), which is not the data source's to keep.
+func nodeToWire(n domain.GraphNode) httpNodeWire {
+	token := n.ClaimToken
+	n.ClaimHeartbeat, n.ClaimLease = nil, ""
+	return httpNodeWire{GraphNode: n, ClaimToken: token}
+}
+
+// nodeFromWire is the node the data source sent. Against a data source
+// older than protocol 1.2 the claim fields are dropped even if present:
+// such a data source does not keep them, so whatever it echoes is not a
+// claim graph-engine can rely on.
+func (r *HTTPRepository) nodeFromWire(w httpNodeWire) domain.GraphNode {
+	n := w.GraphNode
+	n.ClaimToken = w.ClaimToken
+	n.ClaimHeartbeat, n.ClaimLease = nil, ""
+	if !r.supportsClaims() {
+		n.ClaimedByName, n.ClaimedByNameIsFallback, n.ClaimToken, n.ClaimSessionID, n.ClaimedAt = nil, nil, nil, nil, nil
+	}
+	// The decision fields likewise (DFLT-00329).
+	if !r.supportsNodeTransitions() {
+		n.DecidedByName, n.DecidedByNameIsFallback, n.DecidedAt, n.DecidedByAutopilot = nil, nil, nil, nil
+	}
+	n.SanitizeClaimName()
+	n.SanitizeDecisionName()
+	return n
+}
+
+func (r *HTTPRepository) nodesFromWire(ws []httpNodeWire) []domain.GraphNode {
+	out := make([]domain.GraphNode, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, r.nodeFromWire(w))
+	}
+	return out
+}
+
 func (r *HTTPRepository) CreateNode(n domain.GraphNode) (domain.GraphNode, error) {
-	var out domain.GraphNode
-	if err := r.do(http.MethodPost, "/tickets/"+esc(n.TicketID)+"/nodes", n, &out); err != nil {
+	var out httpNodeWire
+	if err := r.do(http.MethodPost, "/tickets/"+esc(n.TicketID)+"/nodes", nodeToWire(n), &out); err != nil {
 		return domain.GraphNode{}, err
 	}
-	return out, nil
+	return r.nodeFromWire(out), nil
 }
 
 func (r *HTTPRepository) GetNode(id string) (*domain.GraphNode, error) {
-	var out domain.GraphNode
+	var out httpNodeWire
 	if err := r.do(http.MethodGet, "/nodes/"+esc(id), nil, &out); err != nil {
 		if isNotFoundCode(err, domain.ErrCodeNodeNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return &out, nil
+	n := r.nodeFromWire(out)
+	return &n, nil
 }
 
 func (r *HTTPRepository) ListNodesByTicket(ticketID string) ([]domain.GraphNode, error) {
-	out := []domain.GraphNode{}
+	var out []httpNodeWire
 	if err := r.do(http.MethodGet, "/tickets/"+esc(ticketID)+"/nodes", nil, &out); err != nil {
 		return nil, err
 	}
-	if out == nil {
-		out = []domain.GraphNode{}
-	}
-	return out, nil
+	return r.nodesFromWire(out), nil
 }
 
+// UpdateNode sends patch as a PATCH. When the patch writes the status and
+// the data source speaks 1.2, the five claim fields go with it, all null --
+// the rule claimFieldsFor states for every status write that is not a
+// claim, the same one the SQL backends apply.
 func (r *HTTPRepository) UpdateNode(id string, patch NodePatch) (domain.GraphNode, error) {
-	var out domain.GraphNode
-	if err := r.do(http.MethodPatch, "/nodes/"+esc(id), nodePatchBody(patch), &out); err != nil {
+	body := nodePatchBody(patch)
+	if patch.Status != nil {
+		r.addClaimPatchFields(body, *patch.Status, nil)
+		r.addDecisionPatchFields(body, nil)
+	}
+	return r.patchNode(id, body)
+}
+
+func (r *HTTPRepository) patchNode(id string, body map[string]any) (domain.GraphNode, error) {
+	var out httpNodeWire
+	if err := r.do(http.MethodPatch, "/nodes/"+esc(id), body, &out); err != nil {
 		return domain.GraphNode{}, err
 	}
-	return out, nil
+	return r.nodeFromWire(out), nil
+}
+
+// addClaimPatchFields adds claimFieldsFor(status, claim) to a PATCH body,
+// as values or nulls -- nothing at all against a data source older than
+// 1.2, which does not keep them.
+func (r *HTTPRepository) addClaimPatchFields(body map[string]any, status domain.NodeStatus, claim *domain.NodeClaim) {
+	if !r.supportsClaims() {
+		return
+	}
+	f := claimFieldsFor(status, claim)
+	body["claimed_by_name"] = f.Name
+	body["claimed_by_name_is_fallback"] = f.NameIsFallback
+	body["claim_token"] = f.Token
+	body["claim_session_id"] = f.SessionID
+	body["claimed_at"] = f.ClaimedAt
 }
 
 // ClaimNode implements GraphRepository.ClaimNode, deliberately without the
 // atomicity the SQL backends give it: see that interface's doc comment for why
 // the REST datasource keeps a fetch-then-update. The status check is still
 // made, so a node another caller has already claimed is reported as
-// (nil, nil) in every case but a genuine race.
-func (r *HTTPRepository) ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus) (*domain.GraphNode, error) {
+// (nil, nil) in every case but a genuine race. The claim is written by the
+// same PATCH as the status.
+func (r *HTTPRepository) ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus, claim *domain.NodeClaim) (*domain.GraphNode, error) {
 	cur, err := r.GetNode(id)
 	if err != nil {
 		return nil, err
@@ -690,7 +844,10 @@ func (r *HTTPRepository) ClaimNode(id string, newStatus domain.NodeStatus, exclu
 			return nil, nil
 		}
 	}
-	updated, err := r.UpdateNode(id, NodePatch{Status: &newStatus})
+	body := nodePatchBody(NodePatch{Status: &newStatus})
+	r.addClaimPatchFields(body, newStatus, claim)
+	r.addDecisionPatchFields(body, nil)
+	updated, err := r.patchNode(id, body)
 	if err != nil {
 		return nil, err
 	}

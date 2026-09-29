@@ -23,6 +23,13 @@ type sqlDialect struct {
 	// forUpdate is appended to SELECTs that read a row the transaction is
 	// about to modify based on what it read.
 	forUpdate string
+	// graphBatchTx is the transaction options createGraphBatchSQL begins
+	// with (nil: the driver's default). MySQL uses READ COMMITTED there so
+	// the batch never takes gap locks on the nodes index -- see
+	// createGraphBatchSQL. It is also why a server logging with
+	// binlog_format=STATEMENT refuses the batch with Error 1665
+	// (explainMySQLGraphBatchError).
+	graphBatchTx *sql.TxOptions
 	// isUniqueViolation reports whether err is the driver's UNIQUE
 	// constraint violation, so the labels table's (project_id, name) index
 	// -- the last line of defense against two concurrent creates/renames --
@@ -500,6 +507,19 @@ func updateTicket(db *sql.DB, d sqlDialect, id string, patch TicketPatch) (domai
 	if cur == nil {
 		return domain.Ticket{}, domain.NewAPIError(domain.ErrCodeTicketNotFound, "ticket %s not found", id)
 	}
+	// The check and the write share this transaction, and cur was read
+	// under the ticket row's lock (FOR UPDATE on MySQL, the write lock
+	// IMMEDIATE takes on SQLite), so nobody can change the status between
+	// the comparison and the UPDATE below (DFLT-00329).
+	if patch.IfStatus != nil && cur.Status != *patch.IfStatus {
+		return domain.Ticket{}, ticketStatusChanged(id, *patch.IfStatus, cur.Status)
+	}
+	// Same for IfUpdatedAt (DFLT-00330): an exact string comparison, and a
+	// mismatch writes nothing -- not the labels either, which are replaced
+	// further down in this same transaction.
+	if patch.IfUpdatedAt != nil && cur.UpdatedAt != *patch.IfUpdatedAt {
+		return domain.Ticket{}, ticketChanged(id, *patch.IfUpdatedAt, cur.UpdatedAt)
+	}
 	if patch.Title != nil {
 		cur.Title = *patch.Title
 	}
@@ -535,7 +555,9 @@ func updateTicket(db *sql.DB, d sqlDialect, id string, patch TicketPatch) (domai
 	// the default on write, as CreateTicket does, so any update -- even one
 	// that doesn't touch priority -- leaves the row with a valid level.
 	cur.Priority = domain.TicketPriority(ticketPriorityOrDefault(cur.Priority))
-	cur.UpdatedAt = nowRFC3339()
+	// Never a value the row has held before, so IfUpdatedAt can tell any
+	// two versions apart (DFLT-00330).
+	cur.UpdatedAt = nextUpdatedAt(cur.UpdatedAt, time.Now())
 
 	if patch.LabelIDs != nil {
 		if err := replaceTicketLabels(tx, cur.ID, cur.ProjectID, *patch.LabelIDs); err != nil {
@@ -565,6 +587,22 @@ func updateTicket(db *sql.DB, d sqlDialect, id string, patch TicketPatch) (domai
 		return domain.Ticket{}, err
 	}
 	return *cur, nil
+}
+
+// ticketStatusChanged is the TICKET_STATUS_CHANGED error a TicketPatch with
+// IfStatus answers when the stored status is not the expected one.
+func ticketStatusChanged(id string, want, got domain.TicketStatus) error {
+	return domain.NewAPIError(domain.ErrCodeTicketStatusChanged,
+		"ticket %s is %s, not %s as this write expected; somebody else changed its status first, so nothing was written", id, got, want).
+		WithDetails(map[string]any{"expected_status": string(want), "current_status": string(got)})
+}
+
+// ticketChanged is the TICKET_CHANGED error a TicketPatch with IfUpdatedAt
+// answers when the stored updated_at is not the expected one (DFLT-00330).
+func ticketChanged(id, want, got string) error {
+	return domain.NewAPIError(domain.ErrCodeTicketChanged,
+		"ticket %s was changed by somebody else since it was read (updated_at is %s, not %s), so nothing was written; read it again and redo the change", id, got, want).
+		WithDetails(map[string]any{"expected_updated_at": want, "current_updated_at": got})
 }
 
 // labelIDsOf extracts the IDs CreateTicket attaches from its input ticket.

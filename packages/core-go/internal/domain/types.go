@@ -471,6 +471,60 @@ type GraphNode struct {
 	ConfigID  *string `json:"config_id,omitempty"`
 	CreatedAt string  `json:"created_at"`
 	UpdatedAt string  `json:"updated_at"`
+
+	// The claim (DFLT-00327): who took this node with get-executable, in
+	// which processing session and when. The store keeps them only while
+	// the node is IN PROGRESS or IN REVIEW -- every write that moves the
+	// status anywhere else clears all five (store.claimFieldsFor) -- and
+	// never changes them otherwise. All five are nil on a node claimed by
+	// an older client (or through an HTTP data source older than 1.2).
+	//
+	// ClaimedByName is the claimer's display name (identity.DisplayName),
+	// for people to read; it is never compared. ClaimedByNameIsFallback
+	// says it is the "<OS user>@<host>" stand-in for an unset myName.
+	ClaimedByName           *string `json:"claimed_by_name,omitempty"`
+	ClaimedByNameIsFallback *bool   `json:"claimed_by_name_is_fallback,omitempty"`
+	// ClaimToken is minted per claim. It is deliberately never serialized
+	// with the node (json:"-"): the only outputs that carry it are
+	// get-executable's, to the one caller that took the node, and the HTTP
+	// data source's wire format (store's httpNodeWire), each through a type
+	// of its own. Every other output that prints a GraphNode -- get-ticket,
+	// the Web UI's API, ones added later -- leaves it out without having to
+	// remember to.
+	ClaimToken *string `json:"-"`
+	// ClaimSessionID is the processing session (begin-session) the claim
+	// was made in; nil when get-executable ran without --session.
+	ClaimSessionID *string `json:"claim_session_id,omitempty"`
+	// ClaimedAt is when the claim was made (the claimer's clock).
+	ClaimedAt *string `json:"claimed_at,omitempty"`
+
+	// ClaimHeartbeat and ClaimLease are computed for display by the engine
+	// (engine.AnnotateClaims) and are never stored or sent to a data
+	// source: the claim's session's (or autopilot run's) last heartbeat,
+	// and whether the claim is still held -- one of the ClaimLease*
+	// constants. Both are empty on a node that is not claimed.
+	ClaimHeartbeat *string `json:"claim_heartbeat,omitempty"`
+	ClaimLease     string  `json:"claim_lease,omitempty"`
+
+	// The decision (DFLT-00329): who judged this manual node (an
+	// approval_gate, a release, a custom is_manual node) and when. Written
+	// only together with the status the decision set -- DONE, REJECTED or
+	// AWAITING FIX -- and cleared by every other status write
+	// (store.decisionFieldsFor), so a node rewound to TODO carries no stale
+	// decision: only the latest decision is kept. All four are nil on an
+	// automatic node, on a manual node nobody has judged since, and on
+	// every node of an HTTP data source older than protocol 1.2.
+	//
+	// DecidedByName is the decider's display name (identity.DisplayName),
+	// resolved by the graph-engine process that recorded the decision --
+	// never taken from a client. It is for people to read and is never
+	// compared. DecidedByNameIsFallback says it is the "<OS user>@<host>"
+	// stand-in for an unset myName; DecidedByAutopilot says the decision
+	// was made inside an autopilot run's processing session.
+	DecidedByName           *string `json:"decided_by_name,omitempty"`
+	DecidedByNameIsFallback *bool   `json:"decided_by_name_is_fallback,omitempty"`
+	DecidedAt               *string `json:"decided_at,omitempty"`
+	DecidedByAutopilot      *bool   `json:"decided_by_autopilot,omitempty"`
 }
 
 type GraphEdge struct {

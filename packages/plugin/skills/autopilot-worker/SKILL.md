@@ -53,14 +53,15 @@ Run `graph-engine get-ticket "<ticketId>"`.
      <decision and reasoning>
      EOF
      ```
-  4. Only then write the refinement with `graph-engine refine-ticket`, as that skill's step 4 describes.
+  4. Only then write the refinement with `graph-engine refine-ticket`, as that skill's step 4 describes -- including `--if-updated-at` with the `updated_at` from the `get-ticket` above (`record-decision` does not change it). If it fails with `TICKET_CHANGED` (another member or session wrote the ticket meanwhile; nothing was written), follow that skill's recovery without asking anyone: `get-ticket` again, fold the other change into your completion criteria, Why, priority and labels, record the rebuilt decision again with `record-decision` (a second record is fine; the latest one is what you adopted), and write again with the new `updated_at`. If the re-read shows the ticket now has nodes or `refined_at`, stop refining and go to step 3 as above.
 
 ## 3. Process the graph (role `work`)
 
 Follow `${CLAUDE_PLUGIN_ROOT}/skills/process-ticket/SKILL.md` from its step 0. The overrides below replace every place where that skill waits for a person:
 
+- **Processing session.** Begin process-ticket's session with `graph-engine begin-session "<ticketId>" --run "<runId>"`. Claims left by an earlier worker of this run are this run's own: `unstick-node --session` releases them without `--force`. Never use `--force`: a `NODE_CLAIMED_BY_OTHER` (another run's or a person's live claim) ends the ticket -- report `blocked` with reason `blocked`, naming the holder in the summary.
 - **Attach the refine decision.** If `pending_decisions` was non-empty and the ticket had no nodes, then right after the first `get-executable` (which seeds the `plan` node and hands it out) and before launching the plan node's subagent, run `graph-engine autopilot attach-decisions "<runId>" "<ticketId>" "<planNodeId>"`. It never saves a decision twice, so repeating it is safe.
-- **approval_gate, `settings.autoApproveGates` on.** When only a `TODO` approval gate remains, read the artifacts it gates (the plan and its review for the first gate; the reviews, test results and report for the release gate) against the ticket's completion criteria, and decide. Approve unless you can name a concrete defect in completed work. Save the verdict and its reasons as a `text` artifact named `autopilot-decision-approval` on the gate node with `add-artifact`, and only then record it with `graph-engine complete-node "<gateNodeId>" true` or `graph-engine complete-node "<gateNodeId>" false --reason "<reason>"`.
+- **approval_gate, `settings.autoApproveGates` on.** When only a `TODO` approval gate remains, read the artifacts it gates (the plan and its review for the first gate; the reviews, test results and report for the release gate) against the ticket's completion criteria, and decide. Approve unless you can name a concrete defect in completed work. Save the verdict and its reasons as a `text` artifact named `autopilot-decision-approval` on the gate node with `add-artifact`, and only then record it with `graph-engine complete-node "<gateNodeId>" true --session "<sessionId>"` or `graph-engine complete-node "<gateNodeId>" false --reason "<reason>" --session "<sessionId>"`, passing the session begun with `--run` above: the gate then records the decision as the autopilot's (`decided_by_autopilot`).
   - After a rejection, continue with process-ticket's step 4 triage (`reopen-nodes` on the responsible nodes).
   - A rejection that needs a requirements-level rethink ends the ticket: report `blocked` with reason `gate_rejected` (step 6).
 - **approval_gate, `settings.autoApproveGates` off.** First run `graph-engine autopilot touch "<runId>" "<ticketId>" --awaiting-human "<gate name>: approve or reject"`, then wait for the person exactly as process-ticket's step 3 describes (a `wait-node` watcher, a plain-text request, end of turn).
@@ -85,7 +86,7 @@ If the release node is already `DONE` (a resumed session), skip to step 5. Other
   If the conflicts cannot be resolved, or `merge-into-parent` fails (`NOT_FAST_FORWARD`, `PARENT_WORKTREE_DIRTY`), do not complete the release node: save the release decision and report `blocked` with reason `merge_conflict`.
 - **`tree_root`**: commit only. Do not push and do not reflect into `default_branch` -- a `finalize` session does that once the whole tree is done.
 
-Save the reflection method and its result (the branch, the pull request URL, the merge, or why it stopped) as a `text` artifact named `autopilot-decision-release` on the release node, then complete it with `graph-engine complete-node "<releaseNodeId>" true`.
+Save the reflection method and its result (the branch, the pull request URL, the merge, or why it stopped) as a `text` artifact named `autopilot-decision-release` on the release node, then complete it with `graph-engine complete-node "<releaseNodeId>" true --session "<sessionId>"` (the same `--run` session, so the release is recorded as the autopilot's decision).
 
 ## 5. Decide the handoff (role `work`)
 

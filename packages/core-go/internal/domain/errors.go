@@ -179,6 +179,57 @@ const (
 	// "saved but not in effect" for "saved". Details carries "keys", the
 	// sorted list of offending keys. Returned with a 400.
 	ErrCodeAutopilotSettingLocked ErrorCode = "AUTOPILOT_SETTING_LOCKED"
+	// ErrCodeNodeClaimedByOther: unstick-node was asked to release a node
+	// that another processing session claimed and is still working on --
+	// its session (or autopilot run) has shown a heartbeat within its lease
+	// (DFLT-00327). Nothing is written. Details names who holds it and
+	// since when; --force releases it anyway, which is only right once a
+	// person has made sure that nobody is working on the node. Returned
+	// with a 409.
+	ErrCodeNodeClaimedByOther ErrorCode = "NODE_CLAIMED_BY_OTHER"
+	// ErrCodeGraphChanged: an HTTP data source (protocol 1.2) refused a
+	// POST /tickets/{ticketId}/graph because the ticket's graph no longer
+	// matches what the batch was planned against -- another session created
+	// the seed or expanded the graph first (DFLT-00328). Nothing was
+	// written. Returned by the plugin with a 409; graph-engine absorbs it
+	// (the seed carries on with the existing graph, an expansion ends with
+	// "already been expanded"), so it never reaches the CLI or the Web UI.
+	ErrCodeGraphChanged ErrorCode = "GRAPH_CHANGED"
+	// ErrCodeTicketStatusChanged: a ticket status write carried the status
+	// it was derived from (store.TicketPatch.IfStatus, DFLT-00329) and the
+	// stored status no longer matched -- somebody else changed it first,
+	// e.g. closed the ticket. Nothing was written. Returned with a 409 by an
+	// HTTP data source (protocol 1.2); the engine absorbs it (it re-reads
+	// and derives again), so it does not normally reach the CLI or the Web
+	// UI.
+	ErrCodeTicketStatusChanged ErrorCode = "TICKET_STATUS_CHANGED"
+	// ErrCodeTicketChanged: a ticket write carried the updated_at of the
+	// version it was based on (store.TicketPatch.IfUpdatedAt, the
+	// if_updated_at of PATCH /api/tickets/{id} and --if-updated-at of
+	// update-ticket / refine-ticket, DFLT-00330) and the stored updated_at
+	// no longer matched -- somebody else wrote the ticket after it was
+	// read. Nothing was written; read the ticket again and redo the change.
+	// Not to be confused with TICKET_STATUS_CHANGED, which answers a
+	// mismatched if_status. Returned with a 409.
+	ErrCodeTicketChanged ErrorCode = "TICKET_CHANGED"
+	// ErrCodeConcurrentWriteConflict: a write kept colliding with another
+	// write to the same ticket (on MySQL, a deadlock that was still there
+	// after the retries, DFLT-00329). Nothing was written, so the same call
+	// can simply be made again -- unlike INVALID_NODE_STATE, which says the
+	// state has changed and the same call will be refused again. Returned
+	// with a 409.
+	ErrCodeConcurrentWriteConflict ErrorCode = "CONCURRENT_WRITE_CONFLICT"
+	// ErrCodeClientTooOld: the SQLite/MySQL database records a minimum
+	// client schema version this graph-engine does not meet -- a newer
+	// graph-engine has migrated it (DFLT-00331; see internal/store's
+	// schema_version.go). Nothing was written: Init stops before it touches
+	// the schema. The fix is to update graph-engine (the GraphOps plugin)
+	// and, for the Web UI, restart its server. The CLI exits non-zero; a
+	// running Web UI server answers its /api/ requests (except health and
+	// settings) with a 503, since the server itself is what is out of date.
+	// Details carries db_schema_version, min_client_schema_version and
+	// client_schema_version.
+	ErrCodeClientTooOld ErrorCode = "CLIENT_TOO_OLD"
 )
 
 // APIError pairs a machine-readable Code with a developer-facing English

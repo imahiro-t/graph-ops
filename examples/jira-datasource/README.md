@@ -339,6 +339,28 @@ requests in flight finish.
 
 ## Limitations
 
+- **Protocol 1.1: autopilot runs are not shared, node claims are not
+  recorded, and neither a graph nor a conditional ticket edit is atomic.** The sample stays at protocol 1.1 and does not implement 1.2's
+  `autopilot-runs` endpoints.
+  graph-engine therefore keeps each member's autopilot runs on that member's
+  machine only (and says so once per process): a member's `autopilot start`
+  or Web UI launch is still refused when it overlaps one of their *own* runs,
+  but a duplicate start by another member sharing this Jira site is **not**
+  detected. Nor does it implement 1.2's node claim fields and
+  `processing-sessions` endpoints, so who is running a node is not recorded
+  and `unstick-node` can release a node another member is still working on
+  (`begin-session` says so). Nor does it implement 1.2's graph batch
+  creation (`POST /tickets/{ticketId}/graph`), so graph-engine creates a
+  ticket's graph one node and one edge at a time: two members starting the
+  same ticket at the same moment can both create its seed (or both expand
+  it), leaving duplicate nodes and edges, and a failure halfway leaves a
+  partial graph. Nor does it implement 1.2's `if_updated_at` on a ticket
+  `PATCH`, so `update-ticket` / `refine-ticket --if-updated-at` and the Web
+  UI's label changes are checked by graph-engine reading the ticket and
+  comparing `updated_at` before it writes: an edit another member saves
+  between that read and the write is still overwritten without being
+  detected (graph-engine says so once per process). A plugin that wants these protections implements
+  protocol 1.2 (see the [developer manual](../../docs/http-datasource/README.md)).
 - **One plugin process per Jira site.** Properties are updated with
   read-modify-write under an in-process per-issue lock; two plugin processes
   writing the same issue could lose each other's update.

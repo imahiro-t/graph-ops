@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -23,6 +24,7 @@ import (
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/httpserver"
+	"github.com/graph-ops/core-go/internal/identity"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
 )
@@ -109,6 +111,8 @@ func run(cmd string, args []string) error {
 		return cmdUpdateTicket(repo, args)
 	case "get-ticket":
 		return cmdGetTicket(eng, args)
+	case "begin-session":
+		return cmdBeginSession(eng, rc, args)
 	case "list-tickets":
 		return cmdListTickets(repo)
 	case "get-executable":
@@ -116,19 +120,19 @@ func run(cmd string, args []string) error {
 	case "expand-graph":
 		return cmdExpandGraph(eng, repo, rc, args)
 	case "complete-node":
-		return cmdCompleteNode(eng, repo, args)
+		return cmdCompleteNode(eng, repo, rc, args)
 	case "reopen-nodes":
 		return cmdReopenNodes(eng, args)
 	case "grant-iterations":
 		return cmdGrantIterations(eng, args)
 	case "unstick-node":
-		return cmdUnstickNode(eng, args)
+		return cmdUnstickNode(eng, rc, args)
 	case "add-artifact":
-		return cmdAddArtifact(repo, rc.ArtifactsDir, args)
+		return cmdAddArtifact(eng, repo, rc.ArtifactsDir, args)
 	case "get-review-criteria":
 		return cmdGetReviewCriteria(repo, args)
 	case "wait-node":
-		return cmdWaitNode(repo, args)
+		return cmdWaitNode(eng, repo, args)
 	case "get-language-settings":
 		return cmdGetLanguageSettings(rc, args)
 	case "ui":
@@ -157,20 +161,36 @@ func run(cmd string, args []string) error {
 // what is failing.
 func openStore(rc runtimeConfig) (store.GraphRepository, error) {
 	repo, err := store.Open(storeConfigFromRuntimeConfig(rc))
-	if err != nil && rc.DBBackend == "mysql" {
-		configPath := runtimeconfig.HomeConfigPathForMessage(rc.HomeDir)
-		return nil, fmt.Errorf(
-			"%w\n\nThis MySQL connection could not be established with its configured TLS settings "+
-				"(mysqlTls %q). There is no plaintext fallback -- see this ticket's (DFLT-00037) README "+
-				"section on MySQL TLS for why. To recover:\n"+
-				"  - If the server does not support TLS, set mysqlTls to \"disabled\" explicitly.\n"+
-				"  - If the server uses a self-signed or auto-generated certificate (e.g. a fresh MySQL "+
-				"8 install), set mysqlTls to \"verify-ca\" and mysqlTlsCa to that CA's PEM file.\n"+
-				"Edit %s directly, or set GRAPH_MYSQL_TLS / GRAPH_MYSQL_TLS_CA -- the web settings UI "+
-				"cannot help here, because opening the store is exactly the step that is failing.",
-			err, rc.MySQLTLSMode, configPath)
+	if err != nil {
+		return nil, explainOpenStoreError(rc, err)
 	}
-	return repo, err
+	return repo, nil
+}
+
+// explainOpenStoreError adds the MySQL TLS recovery steps to a failure to
+// open a MySQL store. CLIENT_TOO_OLD (DFLT-00331) is the exception: it means
+// the connection worked and the DB said this graph-engine is out of date, so
+// the TLS advice would send the reader after the wrong fix and the error is
+// returned as is.
+func explainOpenStoreError(rc runtimeConfig, err error) error {
+	var apiErr *domain.APIError
+	if errors.As(err, &apiErr) && apiErr.Code == domain.ErrCodeClientTooOld {
+		return err
+	}
+	if rc.DBBackend != "mysql" {
+		return err
+	}
+	configPath := runtimeconfig.HomeConfigPathForMessage(rc.HomeDir)
+	return fmt.Errorf(
+		"%w\n\nThis MySQL connection could not be established with its configured TLS settings "+
+			"(mysqlTls %q). There is no plaintext fallback -- see this ticket's (DFLT-00037) README "+
+			"section on MySQL TLS for why. To recover:\n"+
+			"  - If the server does not support TLS, set mysqlTls to \"disabled\" explicitly.\n"+
+			"  - If the server uses a self-signed or auto-generated certificate (e.g. a fresh MySQL "+
+			"8 install), set mysqlTls to \"verify-ca\" and mysqlTlsCa to that CA's PEM file.\n"+
+			"Edit %s directly, or set GRAPH_MYSQL_TLS / GRAPH_MYSQL_TLS_CA -- the web settings UI "+
+			"cannot help here, because opening the store is exactly the step that is failing.",
+		err, rc.MySQLTLSMode, configPath)
 }
 
 // isHelpRequest reports whether args (the arguments after the binary name) ask
@@ -272,6 +292,7 @@ Commands:
                                            an unknown project (PROJECT_NOT_FOUND) is an error and creates
                                            nothing. Renaming and deleting labels are Web UI only)
   refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...
+                [--if-updated-at <updated_at>]
                                           (replaces the ticket's description with the refined text; builds
                                            no graph. Description "-" -> read from stdin and saved byte
                                            for byte (trailing newline included), same as create-ticket;
@@ -293,7 +314,14 @@ Commands:
                                            (pass --project <the ticket's project_id> to both, since they
                                            otherwise resolve the project from the cwd). Like any refine, this
                                            sets the status to REFINED; to fix a title, description or
-                                           priority without changing the status, use update-ticket)
+                                           priority without changing the status, use update-ticket.
+                                           --if-updated-at <updated_at>: pass the "updated_at" get-ticket
+                                           printed, as is (compared as an exact string). If the ticket has
+                                           been written since, the command fails with TICKET_CHANGED and
+                                           nothing changes -- not the description, priority, labels or
+                                           refined_at, and the status does not become REFINED; read it
+                                           again, merge the other change and refine with the new
+                                           updated_at. Omitted -> overwrites unconditionally, as before)
   close-ticket <ticketId> [--reason "<text>"]
                                           (withdraws the ticket without marking it complete: sets status to
                                            CLOSED from ANY status, including one with nodes IN PROGRESS/IN
@@ -316,6 +344,7 @@ Commands:
                                            even with nodes IN PROGRESS. An unknown id is an error
                                            (TICKET_NOT_FOUND). Prints {"id":"<ticketId>","deleted":true})
   update-ticket <ticketId> [--title <text>] [--description <text|->] [--priority <HIGH|MEDIUM|LOW>]
+                [--if-updated-at <updated_at>]
                                           (changes only the given fields; the status and refined_at are
                                            NOT changed (unlike refine-ticket), nor are labels, assignee,
                                            auto_executable or blocked -- labels via refine-ticket --label or
@@ -326,13 +355,43 @@ Commands:
                                            (see Help below). No field given, a priority other than
                                            HIGH/MEDIUM/LOW, an empty title, an unknown flag (e.g. --assignee)
                                            or an unknown id (TICKET_NOT_FOUND) is an error and changes
-                                           nothing. Prints the updated ticket JSON)
-  get-ticket <ticketId>                  (the ticket with its nodes, edges and artifacts, plus
+                                           nothing. --if-updated-at <updated_at>: pass the "updated_at"
+                                           get-ticket printed, as is (an exact string match; its value
+                                           cannot start with "-"); if the ticket has been written since,
+                                           the command fails with TICKET_CHANGED and changes nothing.
+                                           Omitted -> overwrites unconditionally, as before. Prints the
+                                           updated ticket JSON)
+  get-ticket <ticketId> [--session <sessionId>]
+                                          (the ticket with its nodes, edges and artifacts, plus
                                            "parent_ticket_id", "parent" ({id,title,status} or null) and
-                                           "children" (the same shape, in creation order, [] if none))
+                                           "children" (the same shape, in creation order, [] if none).
+                                           A node at IN PROGRESS/IN REVIEW also shows who claimed it:
+                                           "claimed_by_name" (+ "claimed_by_name_is_fallback" when it is
+                                           the <user>@<host> stand-in for an unset myName),
+                                           "claim_session_id", "claimed_at", "claim_heartbeat" and
+                                           "claim_lease" (live|expired|unknown|legacy). The claim token
+                                           is never shown here)
+  begin-session <ticketId> [--run <runId>]
+                                          (starts a processing session of the ticket and prints
+                                           {"session_id","lease_minutes","sessions_supported","others",
+                                           "same_run"}. Pass the session ID with --session to
+                                           get-executable, get-ticket, complete-node, unstick-node,
+                                           wait-node and add-artifact: each such call is a heartbeat, and
+                                           a session silent for lease_minutes (60) no longer protects its
+                                           claims (an autopilot session, begun with --run, follows its
+                                           run's heartbeat instead). "others" lists the other live
+                                           sessions of the ticket -- somebody else processing it -- with
+                                           the nodes they hold; they are also named in a warning on
+                                           stderr. It never blocks: the exit status is 0 either way.
+                                           "sessions_supported": false means the data source cannot keep
+                                           sessions (HTTP older than protocol 1.2); do not pass --session
+                                           then)
   list-tickets
-  get-executable <ticketId> [--language <code>]
-                                          (auto-seeds the graph's plan/plan_review nodes on first call;
+  get-executable <ticketId> [--language <code>] [--session <sessionId>]
+                                          (claims the nodes it prints in your name and --session's
+                                           session, each with its own "claim_token" -- pass it back with
+                                           complete-node --claim. Auto-seeds the graph's plan/plan_review
+                                           nodes on first call;
                                            --language, only meaningful on that first/seeding call, is this
                                            one call's explicit language choice -- see get-language-settings --
                                            and outranks the persistent (user-tier) language setting)
@@ -340,8 +399,27 @@ Commands:
                                           (call once the seed passes; no patch = default full template;
                                            --language is this one call's explicit language choice, same
                                            precedence note as get-executable's)
-  complete-node <nodeId> [true|false] [--reason "<text>"]
-                                          (--reason saves the text as a "rejection_reason" text
+  complete-node <nodeId> [true|false] [--reason "<text>"] [--claim <token>] [--session <sessionId>]
+                                          (--claim refuses the completion (INVALID_NODE_STATE, nothing
+                                           written) unless the node still carries that claim token, i.e.
+                                           it has not been released and claimed again since. Always pass
+                                           it for a node get-executable handed out (a warning on stderr
+                                           says so when it is missing).
+                                           The completion is checked and written in one atomic step: if
+                                           another member or session decided or completed the node first
+                                           (e.g. approve and reject of the same approval_gate at once), or
+                                           it was rewound, or the ticket was CLOSED, this call is refused
+                                           with INVALID_NODE_STATE and writes nothing -- check the outcome
+                                           with get-ticket, do not retry. CONCURRENT_WRITE_CONFLICT means
+                                           the write kept colliding with other writes to the ticket and
+                                           nothing was written: run the same command again.
+                                           On a manual node (approval_gate, release, is_manual) it records
+                                           you -- your myName, or <OS user>@<host> when that is unset -- as
+                                           the decider, with the time; with --session in an autopilot run's
+                                           session, as the autopilot's decision.
+                                           (An HTTP data source older than protocol 1.2 cannot do any of
+                                           this: the writes are separate calls and no decider is recorded.)
+                                           --reason saves the text as a "rejection_reason" text
                                            artifact on the node in the same call; valid ONLY when
                                            passed=false and the node is type approval_gate --
                                            any other combination (passed=true, or a non-approval_gate
@@ -367,7 +445,11 @@ Commands:
                                            ITERATION LIMIT blocked, the loop target has used its last
                                            round by definition (the review failed in round
                                            max_iterations), so raise the budget with grant-iterations
-                                           first -- see below.)
+                                           first -- see below. Applied in one atomic step: if another
+                                           reopen-nodes (or anything else) changed the ticket or those
+                                           nodes after this call read them, it is refused with
+                                           INVALID_NODE_STATE and writes nothing -- check with get-ticket
+                                           before running it again, so no iteration is spent twice.)
   grant-iterations <ticketId> <nodeId1,nodeId2,...> [--extra <n>]
                                           (raises the given nodes' max_iterations by n (default 1),
                                            touching nothing else -- not their status, not their
@@ -383,15 +465,25 @@ Commands:
                                            A deliberate human decision each time: n is capped per
                                            call, and no flag makes retries unlimited. An unknown id,
                                            an id from another ticket, or an out-of-range n is an
-                                           error that writes nothing.)
-  unstick-node <nodeId>                  (resets a single node stuck at IN PROGRESS/IN REVIEW back to
+                                           error that writes nothing. n is added to the stored value, so
+                                           two grants at the same moment both count.)
+  unstick-node <nodeId> [--session <sessionId>] [--force]
+                                          (resets a single node stuck at IN PROGRESS/IN REVIEW back to
                                            TODO, no iteration_count change, no Blocked precondition --
                                            for a node get-executable claimed but that no worker ever
                                            actually completed (e.g. a stray get-executable poll from
                                            elsewhere claimed it out from under the intended dispatch).
-                                           process-ticket must first satisfy itself nothing is still
-                                           working the node -- this does not check.)
-  add-artifact <ticketId> <nodeId> <name> <type:text|gherkin|html|image|json> [contentOrPath] [--allow-outside-artifacts-dir]
+                                           It checks who holds the node first: your own session's claim
+                                           (or one of your autopilot run's sessions) is released; a
+                                           claim whose session has gone silent past its lease, one made
+                                           without a session, or one with no claim record at all is
+                                           released with a warning on stderr; a claim another session
+                                           is still working on is refused with NODE_CLAIMED_BY_OTHER
+                                           (nothing written). --force releases that too -- only once a
+                                           person has made sure nobody is working on the node. A node
+                                           completed, rewound or claimed again between that check and the
+                                           release is refused with INVALID_NODE_STATE, nothing released.)
+  add-artifact <ticketId> <nodeId> <name> <type:text|gherkin|html|image|json> [contentOrPath] [--allow-outside-artifacts-dir] [--session <sessionId>]
                                           (for a "report" node's html artifact, contentOrPath's file
                                            must match the fixed report template's structural markers;
                                            for html/image, a contentOrPath that names a real file is read
@@ -415,7 +507,7 @@ Commands:
                                            round granted past it is Final. From round 2 on it also
                                            tells the reviewer to fetch its previous review and the
                                            changes made since.)
-  wait-node <nodeId> [<nodeId> ...] [--timeout <duration>]
+  wait-node <nodeId> [<nodeId> ...] [--timeout <duration>] [--session <sessionId>]
                                           (blocks, polling the DB every ~2s, until at least one given node
                                            is no longer TODO -- any other status counts, including IN
                                            PROGRESS, not only DONE/REJECTED -- then prints
@@ -532,8 +624,32 @@ func printJSON(v any) error {
 // error and check that both commands report the same description error.
 const (
 	createTicketUsageLine = `usage: graph-engine create-ticket <title> [description|-] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]... [--parent <ticketId>]`
-	refineTicketUsageLine = `usage: graph-engine refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...`
+	refineTicketUsageLine = `usage: graph-engine refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]... [--if-updated-at <updated_at>]`
 )
+
+// ifUpdatedAtValue validates the value of --if-updated-at (DFLT-00330) for
+// update-ticket and refine-ticket: the updated_at get-ticket printed, passed
+// as is. A missing value, or a next argument that starts with "-" (another
+// flag, or refine-ticket's "-" description), is a usage error rather than a
+// value -- no updated_at starts with "-", and taking "--priority" as one
+// would quietly turn the rest of the command line into a description.
+func ifUpdatedAtValue(usage string, rest []string, i int) (string, error) {
+	if i+1 >= len(rest) || rest[i+1] == "" || strings.HasPrefix(rest[i+1], "-") {
+		return "", fmt.Errorf("%s: --if-updated-at requires a value (the ticket's updated_at as get-ticket printed it)", usage)
+	}
+	return rest[i+1], nil
+}
+
+// withTicketChangedCode prefixes a TICKET_CHANGED error with its code, so
+// the CLI's "Error: ..." line names it the way other conflict errors do
+// (e.g. NODE_CLAIMED_BY_OTHER). Any other error is returned unchanged.
+func withTicketChangedCode(err error) error {
+	var apiErr *domain.APIError
+	if errors.As(err, &apiErr) && apiErr.Code == domain.ErrCodeTicketChanged {
+		return fmt.Errorf("%s: %w", domain.ErrCodeTicketChanged, err)
+	}
+	return err
+}
 
 // readDescriptionArg resolves the [description|-] positional shared by
 // create-ticket and refine-ticket, so both commands accept and reject the
@@ -993,8 +1109,21 @@ func cmdRefineTicket(eng *engine.GraphEngine, args []string) error {
 	var priorityGiven bool
 	var labelNames []string
 	var positional []string
+	var ifUpdatedAt *string
 	rest := args[1:]
 	for i := 0; i < len(rest); i++ {
+		if rest[i] == "--if-updated-at" {
+			if ifUpdatedAt != nil {
+				return fmt.Errorf("%s: --if-updated-at given more than once", usage)
+			}
+			v, err := ifUpdatedAtValue(usage, rest, i)
+			if err != nil {
+				return err
+			}
+			ifUpdatedAt = &v
+			i++
+			continue
+		}
 		if rest[i] == "--label" {
 			if i+1 >= len(rest) {
 				return fmt.Errorf("%s: --label requires a value", usage)
@@ -1043,9 +1172,9 @@ func cmdRefineTicket(eng *engine.GraphEngine, args []string) error {
 		labels = engine.SetLabelsByName(labelNames)
 	}
 
-	ticket, err := eng.RefineTicketWithLabels(ticketID, description, priority, labels)
+	ticket, err := eng.RefineTicketIfUnchanged(ticketID, description, priority, labels, ifUpdatedAt)
 	if err != nil {
-		return err
+		return withTicketChangedCode(err)
 	}
 	return printJSON(ticket)
 }
@@ -1176,22 +1305,38 @@ type deleteTicketResult struct {
 //     stored byte for byte. Any other value -- "" to clear the description,
 //     or "- item" -- is used literally.
 //
-// A flag's value is always the next argument, even when it starts with "-".
+// A flag's value is always the next argument, even when it starts with "-"
+// -- except --if-updated-at's (DFLT-00330), which the write is conditioned
+// on: the ticket's stored updated_at must be exactly that string, or the
+// command fails with TICKET_CHANGED and nothing is written. Without it the
+// fields are overwritten unconditionally, as before.
 // An unknown ID is TICKET_NOT_FOUND on every backend (checked with GetTicket
 // first, since an HTTP data source's PATCH error depends on the plugin).
 // Prints the updated ticket (with labels) as JSON.
 func cmdUpdateTicket(repo store.GraphRepository, args []string) error {
-	const usage = `usage: graph-engine update-ticket <ticketId> [--title <text>] [--description <text|->] [--priority <HIGH|MEDIUM|LOW>]`
+	const usage = `usage: graph-engine update-ticket <ticketId> [--title <text>] [--description <text|->] [--priority <HIGH|MEDIUM|LOW>] [--if-updated-at <updated_at>]`
 	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
 		return fmt.Errorf(usage)
 	}
 	ticketID := args[0]
 
 	values := map[string]string{}
+	var ifUpdatedAt *string
 	rest := args[1:]
 	for i := 0; i < len(rest); i++ {
 		flag := rest[i]
 		switch flag {
+		case "--if-updated-at":
+			if ifUpdatedAt != nil {
+				return fmt.Errorf("%s: --if-updated-at given more than once", usage)
+			}
+			v, err := ifUpdatedAtValue(usage, rest, i)
+			if err != nil {
+				return err
+			}
+			ifUpdatedAt = &v
+			i++
+			continue
 		case "--title", "--description", "--priority":
 		default:
 			return fmt.Errorf("%s: unrecognized argument %q", usage, flag)
@@ -1209,7 +1354,7 @@ func cmdUpdateTicket(repo store.GraphRepository, args []string) error {
 		return fmt.Errorf("%s: specify at least one of --title, --description or --priority", usage)
 	}
 
-	var patch store.TicketPatch
+	patch := store.TicketPatch{IfUpdatedAt: ifUpdatedAt}
 	if v, ok := values["--priority"]; ok {
 		parsed, err := domain.ParseTicketPriority(v)
 		if err != nil {
@@ -1247,7 +1392,7 @@ func cmdUpdateTicket(repo store.GraphRepository, args []string) error {
 	}
 	ticket, err := repo.UpdateTicket(ticketID, patch)
 	if err != nil {
-		return err
+		return withTicketChangedCode(err)
 	}
 	return printJSON(ticket)
 }
@@ -1255,9 +1400,15 @@ func cmdUpdateTicket(repo store.GraphRepository, args []string) error {
 // cmdGetTicket prints the ticket's detail plus its parent and children
 // (DFLT-00142, see engine.GetTicketDetailWithFamily).
 func cmdGetTicket(eng *engine.GraphEngine, args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: graph-engine get-ticket <ticketId>")
+	const usage = "usage: graph-engine get-ticket <ticketId> [--session <sessionId>]"
+	session, args, err := takeSessionFlag(args, usage)
+	if err != nil {
+		return err
 	}
+	if len(args) < 1 {
+		return fmt.Errorf(usage)
+	}
+	touchSession(eng, session)
 	detail, err := eng.GetTicketDetailWithFamily(args[0])
 	if err != nil {
 		return err
@@ -1277,7 +1428,11 @@ func cmdListTickets(repo store.GraphRepository) error {
 }
 
 func cmdGetExecutable(eng *engine.GraphEngine, repo store.GraphRepository, rc runtimeConfig, args []string) error {
-	const usage = `usage: graph-engine get-executable <ticketId> [--language <code>]`
+	const usage = `usage: graph-engine get-executable <ticketId> [--language <code>] [--session <sessionId>]`
+	session, args, err := takeSessionFlag(args, usage)
+	if err != nil {
+		return err
+	}
 	if len(args) < 1 {
 		return fmt.Errorf(usage)
 	}
@@ -1297,11 +1452,15 @@ func cmdGetExecutable(eng *engine.GraphEngine, repo store.GraphRepository, rc ru
 		return err
 	}
 	emitCatalogWarnings(catalog)
-	nodes, err := eng.GetExecutableNodes(ticketID, catalog)
+	touchSession(eng, session)
+	// Every node handed out is claimed in the caller's name (DFLT-00327),
+	// with or without a session; the name is for display only.
+	name, fallback := identity.DisplayName(rc.HomeDir)
+	nodes, err := eng.GetExecutableNodesAs(ticketID, catalog, engine.Claimer{Name: name, NameIsFallback: fallback, SessionID: session})
 	if err != nil {
 		return err
 	}
-	return printJSON(nodes)
+	return printJSON(claimedNodeViews(nodes))
 }
 
 // cmdExpandGraph builds the rest of a ticket's graph once the seed
@@ -1383,8 +1542,21 @@ func readPatch(source string) (*engine.Patch, error) {
 // accepted-and-ignored or attached somewhere a later reader wouldn't expect
 // it -- see plan art-5f8847a4 section 2.3(a) and the corresponding
 // misuse-prevention scenarios in the Gherkin spec (art-eff6ffdb section 3.5).
-func cmdCompleteNode(eng *engine.GraphEngine, repo store.GraphRepository, args []string) error {
-	const usage = `usage: graph-engine complete-node <nodeId> [true|false] [--reason "<text>"]`
+func cmdCompleteNode(eng *engine.GraphEngine, repo store.GraphRepository, rc runtimeConfig, args []string) error {
+	const usage = `usage: graph-engine complete-node <nodeId> [true|false] [--reason "<text>"] [--claim <token>] [--session <sessionId>]`
+	// --claim and --session are taken out first, so the positional and
+	// --reason parsing below sees exactly the arguments it always did.
+	// --reason's value is never mistaken for one of them: they are only
+	// taken as flags, and a reason that is literally "--claim" has to go
+	// through the Web UI.
+	session, args, err := takeSessionFlag(args, usage)
+	if err != nil {
+		return err
+	}
+	claimToken, args, err := takeIDFlag(args, "--claim", usage)
+	if err != nil {
+		return err
+	}
 	if len(args) < 1 {
 		return fmt.Errorf(usage)
 	}
@@ -1448,7 +1620,17 @@ func cmdCompleteNode(eng *engine.GraphEngine, repo store.GraphRepository, args [
 		artifacts = []domain.Artifact{{Name: "rejection_reason", Type: domain.ArtifactText, Content: &reason}}
 	}
 
-	result, err := eng.CompleteNode(nodeID, passed, artifacts)
+	touchSession(eng, session)
+	// Who decides a manual node is resolved here, from this process's own
+	// home config (DFLT-00329) -- the same name get-executable claims in.
+	// It is recorded only on a manual node; an automatic node records none.
+	name, fallback := identity.DisplayName(rc.HomeDir)
+	result, err := eng.CompleteNodeWith(nodeID, passed, artifacts, engine.CompleteNodeOptions{
+		ClaimToken:       claimToken,
+		Decider:          &engine.Decider{Name: name, NameIsFallback: fallback},
+		SessionID:        session,
+		WarnWithoutClaim: true,
+	})
 	if err != nil {
 		return err
 	}
@@ -1537,16 +1719,40 @@ func cmdGrantIterations(eng *engine.GraphEngine, args []string) error {
 // CLI-only for the same reason reopen-nodes and expand-graph's --patch are:
 // deciding a node's claim is actually stale is process-ticket's judgment
 // call, not something a human should trigger by clicking through the Web UI.
-func cmdUnstickNode(eng *engine.GraphEngine, args []string) error {
-	const usage = `usage: graph-engine unstick-node <nodeId>`
-	if len(args) < 1 {
-		return fmt.Errorf(usage)
-	}
-	node, err := eng.UnstickNode(args[0])
+//
+// Since DFLT-00327 it checks who holds the node first (engine.UnstickNodeWith):
+// another session's claim that is still live is refused with
+// NODE_CLAIMED_BY_OTHER unless --force is given; every release it allows
+// without being able to vouch for it comes with a warning on stderr.
+func cmdUnstickNode(eng *engine.GraphEngine, rc runtimeConfig, args []string) error {
+	const usage = `usage: graph-engine unstick-node <nodeId> [--session <sessionId>] [--force]`
+	session, args, err := takeSessionFlag(args, usage)
 	if err != nil {
 		return err
 	}
-	return printJSON(node)
+	force := false
+	var positional []string
+	for _, a := range args {
+		switch {
+		case a == "--force":
+			force = true
+		case strings.HasPrefix(a, "-"):
+			return fmt.Errorf("%s: unrecognized argument %q", usage, a)
+		default:
+			positional = append(positional, a)
+		}
+	}
+	if len(positional) != 1 {
+		return fmt.Errorf(usage)
+	}
+	touchSession(eng, session)
+	machineID, _ := identity.MachineID(rc.HomeDir)
+	res, err := eng.UnstickNodeWith(positional[0], engine.UnstickOptions{SessionID: session, MachineID: machineID, Force: force})
+	if err != nil {
+		return err
+	}
+	emitSessionWarnings(res.Warnings)
+	return printJSON(res.Node)
 }
 
 // cmdAddArtifact is the CLI's independent artifact-creation path -- it does
@@ -1579,10 +1785,15 @@ func cmdUnstickNode(eng *engine.GraphEngine, args []string) error {
 //     types this command always treats it as literal content (below, the
 //     `else { artifact.Content = contentOrPath }` branch) and never even has
 //     a FilePath value to reject.
-func cmdAddArtifact(repo store.GraphRepository, artifactsDir string, args []string) error {
-	// --allow-outside-artifacts-dir can appear anywhere after the required
-	// positional args; stripping it out first keeps the positional-argument
-	// parsing beneath unaware of flags entirely.
+func cmdAddArtifact(eng *engine.GraphEngine, repo store.GraphRepository, artifactsDir string, args []string) error {
+	const usage = "usage: graph-engine add-artifact <ticketId> <nodeId> <name> <type> [contentOrPath] [--allow-outside-artifacts-dir] [--session <sessionId>]"
+	// --allow-outside-artifacts-dir and --session can appear anywhere after
+	// the required positional args; stripping them out first keeps the
+	// positional-argument parsing beneath unaware of flags entirely.
+	session, args, err := takeSessionFlag(args, usage)
+	if err != nil {
+		return err
+	}
 	allowOutside := false
 	positional := args[:0:0]
 	for _, a := range args {
@@ -1595,8 +1806,9 @@ func cmdAddArtifact(repo store.GraphRepository, artifactsDir string, args []stri
 	args = positional
 
 	if len(args) < 4 {
-		return fmt.Errorf("usage: graph-engine add-artifact <ticketId> <nodeId> <name> <type> [contentOrPath] [--allow-outside-artifacts-dir]")
+		return fmt.Errorf(usage)
 	}
+	touchSession(eng, session)
 	ticketID, nodeID, name, artType := args[0], args[1], args[2], args[3]
 
 	// Verify the ticket/node exist before writing anything.

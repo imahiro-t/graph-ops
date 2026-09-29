@@ -75,7 +75,7 @@ func TestCmdCompleteNode_PassFailArgumentTable(t *testing.T) {
 
 			var err error
 			captureStdout(t, func() {
-				err = cmdCompleteNode(eng, repo, append([]string{nodeID}, tc.args...))
+				err = cmdCompleteNode(eng, repo, runtimeConfig{HomeDir: t.TempDir()}, append([]string{nodeID}, tc.args...))
 			})
 
 			accepted := tc.name == "true" || tc.name == "false" || tc.name == "omitted defaults to pass"
@@ -128,7 +128,7 @@ func TestCmdCompleteNode_InvalidPassFailArgumentWritesNothing(t *testing.T) {
 		t.Fatalf("GetTicket: %v", err)
 	}
 
-	if err := cmdCompleteNode(eng, repo, []string{nodeID, "False"}); err == nil {
+	if err := cmdCompleteNode(eng, repo, runtimeConfig{HomeDir: t.TempDir()}, []string{nodeID, "False"}); err == nil {
 		t.Fatal(`cmdCompleteNode(..., "False") succeeded; it must be a usage error`)
 	}
 
@@ -163,7 +163,7 @@ func TestCmdCompleteNode_InvalidPassFailArgumentBeatsReason(t *testing.T) {
 	eng := engine.New(repo)
 	_, gateID := mustCreateTicketAndNode(t, repo, projectID, domain.NodeTypeApprovalGate)
 
-	err := cmdCompleteNode(eng, repo, []string{gateID, "passed:false", "--reason", "理由"})
+	err := cmdCompleteNode(eng, repo, runtimeConfig{HomeDir: t.TempDir()}, []string{gateID, "passed:false", "--reason", "理由"})
 	if err == nil {
 		t.Fatal(`cmdCompleteNode(..., "passed:false", "--reason", ...) succeeded; it must be a usage error`)
 	}
@@ -194,8 +194,8 @@ func TestCmdCompleteNode_MissingNodeWithReasonIsNodeNotFound(t *testing.T) {
 		t.Fatalf("CreateTicket: %v", err)
 	}
 
-	withReason := cmdCompleteNode(eng, repo, []string{"NO-SUCH-NODE-99", "false", "--reason", "理由"})
-	withoutReason := cmdCompleteNode(eng, repo, []string{"NO-SUCH-NODE-99", "false"})
+	withReason := cmdCompleteNode(eng, repo, runtimeConfig{HomeDir: t.TempDir()}, []string{"NO-SUCH-NODE-99", "false", "--reason", "理由"})
+	withoutReason := cmdCompleteNode(eng, repo, runtimeConfig{HomeDir: t.TempDir()}, []string{"NO-SUCH-NODE-99", "false"})
 
 	for name, err := range map[string]error{"--reason": withReason, "no --reason": withoutReason} {
 		var apiErr *domain.APIError
@@ -243,7 +243,7 @@ func TestCmdCompleteNode_StatusTableViaCLI(t *testing.T) {
 
 			var cmdErr error
 			captureStdout(t, func() {
-				cmdErr = cmdCompleteNode(eng, repo, []string{node.ID, "true"})
+				cmdErr = cmdCompleteNode(eng, repo, runtimeConfig{HomeDir: t.TempDir()}, []string{node.ID, "true"})
 			})
 
 			got, _ := repo.GetNode(node.ID)
@@ -278,7 +278,7 @@ func TestCmdCompleteNode_ClosedTicketRefusedViaCLI(t *testing.T) {
 		t.Fatalf("closing the ticket: %v", err)
 	}
 
-	err := cmdCompleteNode(eng, repo, []string{nodeID, "true"})
+	err := cmdCompleteNode(eng, repo, runtimeConfig{HomeDir: t.TempDir()}, []string{nodeID, "true"})
 	var apiErr *domain.APIError
 	if !errors.As(err, &apiErr) || apiErr.Code != domain.ErrCodeInvalidNodeState {
 		t.Fatalf("complete-node on a CLOSED ticket = %v, want an INVALID_NODE_STATE APIError", err)
@@ -302,7 +302,7 @@ func TestCompleteNodeHelpNotationMatchesWhatIsAccepted(t *testing.T) {
 	}
 
 	repo, _ := newTestRepoWithProject(t)
-	usageErr := cmdCompleteNode(engine.New(repo), repo, nil)
+	usageErr := cmdCompleteNode(engine.New(repo), repo, runtimeConfig{HomeDir: t.TempDir()}, nil)
 	if usageErr == nil || !strings.Contains(usageErr.Error(), want) {
 		t.Errorf("the usage line is %v, want it to show %q", usageErr, want)
 	}

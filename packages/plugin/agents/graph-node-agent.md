@@ -7,6 +7,8 @@ description: Executes exactly one node of a GraphOps ticket's execution graph (p
 
 You have been assigned exactly one node of a GraphOps ticket's execution graph. Your task message tells you the ticket id, the node's id/type/name, and (for a `review`/`review_gate` node) that you must also fetch review criteria. You cannot rely on any earlier conversation for context -- everything you need comes from the DB via the commands below.
 
+The task message normally also gives you the node's **claim token** (`claim_token`) and the driving **session ID**. When it does, pass `--session "<sessionId>"` to your `get-ticket`, `add-artifact` and `complete-node` calls (each call tells other members that the session is still working, which keeps them from releasing your node) and `--claim "<claimToken>"` to `complete-node`. When the task gives neither, call those commands without the flags, as written below.
+
 ## 1. Load the ticket's context
 
 ```bash
@@ -61,13 +63,13 @@ cat "<scratchFile>" | graph-engine add-artifact "<ticketId>" "<nodeId>" "<artifa
 ## 5. Report completion
 
 ```bash
-graph-engine complete-node "<nodeId>" <true|false>
+graph-engine complete-node "<nodeId>" <true|false> --claim "<claimToken>" --session "<sessionId>"
 ```
-Call this yourself once your work (and, for review nodes, your pass/fail judgment) is final. Nothing else marks the node done. The verdict argument is exactly `true` or `false`; anything else -- `False`, `0`, `no`, or the old `passed:`-prefixed form -- is a usage error that completes nothing.
+(Leave off `--claim` / `--session` when your task gave you no token / session ID.) Call this yourself once your work (and, for review nodes, your pass/fail judgment) is final. Nothing else marks the node done. The verdict argument is exactly `true` or `false`; anything else -- `False`, `0`, `no`, or the old `passed:`-prefixed form -- is a usage error that completes nothing.
 
 ### If `complete-node` fails with `INVALID_NODE_STATE`
 
-The engine refuses to complete a node that is not in a state it can be completed from -- an automatic node back at `TODO` (either never handed out by `get-executable`, or rewound there by a loop-back), or one already at `DONE`/`REJECTED`/`AWAITING FIX`, or any node of a `CLOSED` ticket. The call writes nothing at all when it is refused: no status change, and none of the artifacts passed to `complete-node` itself.
+The engine refuses to complete a node that is not in a state it can be completed from -- an automatic node back at `TODO` (either never handed out by `get-executable`, or rewound there by a loop-back), or one already at `DONE`/`REJECTED`/`AWAITING FIX`, or any node of a `CLOSED` ticket -- and, with `--claim`, a node that no longer carries your claim token because it was released and handed out again (the message says so; treat it like case 3 below: somebody else holds the node now). The call writes nothing at all when it is refused: no status change, and none of the artifacts passed to `complete-node` itself.
 
 **Do not retry the call** -- it is not a transient failure, and `complete-node` is not idempotent, so a retry cannot succeed where the first attempt was refused. Instead:
 
@@ -77,3 +79,7 @@ The engine refuses to complete a node that is not in a state it can be completed
 4. In any other case, treat it as a situation you were not given the context to resolve. Do not try to force the completion, and do not run recovery commands (`unstick-node`, `reopen-nodes`, `grant-iterations`) yourself -- those belong to the session driving the ticket.
 
 Either way, finish by reporting what happened: what work you did, that `complete-node` was refused, and the node's actual status. **Never report the node as completed when the call was refused** -- that is exactly the mismatch between the record and reality that this check exists to prevent. Note that anything you already saved with `add-artifact` in step 4 stays on the node regardless: `add-artifact` does not look at the node's status, so in the rewind case your superseded write-up sits there next to whatever the re-run produces later. Say so in your report rather than trying to remove it.
+
+### If `complete-node` fails with `CONCURRENT_WRITE_CONFLICT`
+
+This one is the exception to "do not retry": the completion kept colliding with other writes to the same ticket (for example another agent adding an artifact at the same moment on a shared MySQL database), and the engine says nothing at all was written -- no status, no artifacts. Run the same `complete-node` command once more. If it is refused again with `INVALID_NODE_STATE`, follow the section above; if `CONCURRENT_WRITE_CONFLICT` keeps coming back, stop and report it rather than looping.

@@ -1,6 +1,6 @@
 // Package httpdatasourcetest is an in-memory reference implementation of the
 // HTTP custom data source protocol (docs/http-datasource/openapi.yaml,
-// protocol version 1.1), for tests. It is an http.Handler: wrap it in an
+// protocol version 1.2), for tests. It is an http.Handler: wrap it in an
 // httptest.Server and point store.Open at that server's URL.
 //
 // It deliberately lives in a regular (non-_test.go) internal package and
@@ -36,7 +36,7 @@ const (
 	// and store.HTTPDataSourceProtocolVersion (restated here because this
 	// package must not import internal/store).
 	ProtocolName   = "graph-ops-datasource"
-	DefaultVersion = "1.1"
+	DefaultVersion = "1.2"
 )
 
 // RecordedRequest is one request the plugin received, for assertions.
@@ -71,6 +71,10 @@ type Plugin struct {
 	labels         []*domain.Label
 	currentProject string
 	idSeq          int
+	// autopilotRuns holds the autopilot run records (protocol 1.2), by ID.
+	autopilotRuns map[string]domain.AutopilotRunRecord
+	// sessions holds the processing sessions (protocol 1.2), by ID.
+	sessions map[string]domain.ProcessingSession
 
 	mux *http.ServeMux
 }
@@ -84,6 +88,8 @@ func New(token string) *Plugin {
 		ticketSeq:      map[string]int{},
 		ticketLabelIDs: map[string][]string{},
 		nodeSeq:        map[string]int{},
+		autopilotRuns:  map[string]domain.AutopilotRunRecord{},
+		sessions:       map[string]domain.ProcessingSession{},
 	}
 	p.routes()
 	return p
@@ -151,6 +157,9 @@ func (p *Plugin) routes() {
 	h("PATCH /nodes/{nodeId}", p.updateNode)
 	h("DELETE /nodes/{nodeId}", p.deleteNode)
 
+	h("POST /tickets/{ticketId}/graph", p.createGraphBatch)
+	h("POST /tickets/{ticketId}/node-transition", p.applyNodeTransition)
+
 	h("POST /tickets/{ticketId}/edges", p.createEdge)
 	h("GET /tickets/{ticketId}/edges", p.listEdges)
 	h("DELETE /tickets/{ticketId}/edges", p.clearEdges)
@@ -171,6 +180,16 @@ func (p *Plugin) routes() {
 	h("GET /projects/{projectId}/labels", p.listLabels)
 	h("PATCH /labels/{labelId}", p.updateLabel)
 	h("DELETE /labels/{labelId}", p.deleteLabel)
+
+	h("GET /projects/{projectId}/autopilot-runs", p.listAutopilotRuns)
+	h("PUT /autopilot-runs/{runId}", p.putAutopilotRun)
+	h("DELETE /autopilot-runs/{runId}", p.deleteAutopilotRun)
+
+	h("PUT /processing-sessions/{sessionId}", p.putSession)
+	h("POST /processing-sessions/{sessionId}/heartbeat", p.sessionHeartbeat)
+	h("GET /processing-sessions/{sessionId}", p.getSession)
+	h("GET /processing-sessions", p.listSessions)
+	h("DELETE /processing-sessions/{sessionId}", p.deleteSession)
 
 	h("GET /current-project", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"project_id": p.currentProject})
@@ -213,7 +232,8 @@ func writeAPIErr(w http.ResponseWriter, err error) {
 	case domain.ErrCodeTicketNotFound, domain.ErrCodeNodeNotFound, domain.ErrCodeArtifactNotFound,
 		domain.ErrCodeProjectNotFound, domain.ErrCodeLabelNotFound:
 		status = http.StatusNotFound
-	case domain.ErrCodeLabelNameTaken, domain.ErrCodePrefixTaken:
+	case domain.ErrCodeLabelNameTaken, domain.ErrCodePrefixTaken, domain.ErrCodeGraphChanged,
+		domain.ErrCodeInvalidNodeState, domain.ErrCodeTicketStatusChanged, domain.ErrCodeTicketChanged:
 		status = http.StatusConflict
 	}
 	writeErr(w, status, string(apiErr.Code), apiErr.Message)
@@ -228,6 +248,19 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
+
+// nextTicketUpdatedAt is the updated_at a ticket write stores: now, or the
+// ticket's current updated_at plus a nanosecond when the clock has not moved
+// past it (compared as times, not strings), so that every write leaves a
+// value the ticket has never held -- what protocol 1.2 requires for
+// if_updated_at (DFLT-00330).
+func nextTicketUpdatedAt(prev string) string {
+	n := time.Now().UTC()
+	if p, err := time.Parse(time.RFC3339Nano, prev); err == nil && !n.After(p) {
+		n = p.UTC().Add(time.Nanosecond)
+	}
+	return n.Format(time.RFC3339Nano)
+}
 
 func (p *Plugin) nextID(prefix string) string {
 	p.idSeq++
@@ -335,6 +368,16 @@ func (p *Plugin) deleteProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	p.labels = keptLabels
+	for rid, rec := range p.autopilotRuns {
+		if rec.ProjectID == id {
+			delete(p.autopilotRuns, rid)
+		}
+	}
+	for sid, sess := range p.sessions {
+		if sess.ProjectID == id {
+			delete(p.sessions, sid)
+		}
+	}
 	var kept []*domain.Project
 	for _, pr := range p.projects {
 		if pr.ID != id {
@@ -342,6 +385,180 @@ func (p *Plugin) deleteProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	p.projects = kept
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- autopilot runs (protocol 1.2) ---
+
+// speaksAutopilotRuns reports whether the plugin's Version has the
+// autopilot-runs endpoints (1.2 or newer). With Version set to "1.1" they
+// answer 404, like a real 1.1 plugin that has never heard of them.
+func (p *Plugin) speaksAutopilotRuns() bool {
+	major, minor := 0, 0
+	if _, err := fmt.Sscanf(p.Version, "%d.%d", &major, &minor); err != nil {
+		return false
+	}
+	return major > 1 || (major == 1 && minor >= 2)
+}
+
+// AutopilotRuns returns a copy of the stored autopilot run records, for
+// assertions.
+func (p *Plugin) AutopilotRuns() map[string]domain.AutopilotRunRecord {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make(map[string]domain.AutopilotRunRecord, len(p.autopilotRuns))
+	for k, v := range p.autopilotRuns {
+		out[k] = v
+	}
+	return out
+}
+
+func (p *Plugin) listAutopilotRuns(w http.ResponseWriter, r *http.Request) {
+	if !p.speaksAutopilotRuns() {
+		http.NotFound(w, r)
+		return
+	}
+	id := r.PathValue("projectId")
+	if p.findProject(id) == nil {
+		writeAPIErr(w, notFound(domain.ErrCodeProjectNotFound, "project", id))
+		return
+	}
+	out := []domain.AutopilotRunRecord{}
+	for _, rec := range p.autopilotRuns {
+		if rec.ProjectID == id {
+			out = append(out, rec)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	writeJSON(w, http.StatusOK, out)
+}
+
+// putAutopilotRun upserts a record, ignoring one whose revision is not
+// greater than the stored one's (still 200), as the protocol allows.
+func (p *Plugin) putAutopilotRun(w http.ResponseWriter, r *http.Request) {
+	if !p.speaksAutopilotRuns() {
+		http.NotFound(w, r)
+		return
+	}
+	var rec domain.AutopilotRunRecord
+	if !decode(w, r, &rec) {
+		return
+	}
+	rec.ID = r.PathValue("runId")
+	if p.findProject(rec.ProjectID) == nil {
+		writeAPIErr(w, notFound(domain.ErrCodeProjectNotFound, "project", rec.ProjectID))
+		return
+	}
+	if cur, ok := p.autopilotRuns[rec.ID]; !ok || rec.Revision > cur.Revision {
+		p.autopilotRuns[rec.ID] = rec
+	}
+	writeJSON(w, http.StatusOK, p.autopilotRuns[rec.ID])
+}
+
+func (p *Plugin) deleteAutopilotRun(w http.ResponseWriter, r *http.Request) {
+	if !p.speaksAutopilotRuns() {
+		http.NotFound(w, r)
+		return
+	}
+	delete(p.autopilotRuns, r.PathValue("runId"))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- processing sessions (protocol 1.2) ---
+
+// ProcessingSessions returns a copy of the stored processing sessions, for
+// assertions.
+func (p *Plugin) ProcessingSessions() map[string]domain.ProcessingSession {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make(map[string]domain.ProcessingSession, len(p.sessions))
+	for k, v := range p.sessions {
+		out[k] = v
+	}
+	return out
+}
+
+func (p *Plugin) putSession(w http.ResponseWriter, r *http.Request) {
+	if !p.speaksAutopilotRuns() {
+		http.NotFound(w, r)
+		return
+	}
+	var s domain.ProcessingSession
+	if !decode(w, r, &s) {
+		return
+	}
+	s.ID = r.PathValue("sessionId")
+	if p.findTicket(s.TicketID) == nil {
+		writeAPIErr(w, notFound(domain.ErrCodeTicketNotFound, "ticket", s.TicketID))
+		return
+	}
+	p.sessions[s.ID] = s
+	writeJSON(w, http.StatusOK, s)
+}
+
+// sessionHeartbeat keeps the later of the stored and the sent heartbeat
+// (compared as times), and answers 404 for an unknown session.
+func (p *Plugin) sessionHeartbeat(w http.ResponseWriter, r *http.Request) {
+	if !p.speaksAutopilotRuns() {
+		http.NotFound(w, r)
+		return
+	}
+	var body struct {
+		Heartbeat string `json:"heartbeat"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	s, ok := p.sessions[r.PathValue("sessionId")]
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if domain.CompareTimestamps(body.Heartbeat, s.Heartbeat) > 0 {
+		s.Heartbeat = body.Heartbeat
+		p.sessions[s.ID] = s
+	}
+	writeJSON(w, http.StatusOK, s)
+}
+
+func (p *Plugin) getSession(w http.ResponseWriter, r *http.Request) {
+	if !p.speaksAutopilotRuns() {
+		http.NotFound(w, r)
+		return
+	}
+	s, ok := p.sessions[r.PathValue("sessionId")]
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, s)
+}
+
+func (p *Plugin) listSessions(w http.ResponseWriter, r *http.Request) {
+	if !p.speaksAutopilotRuns() {
+		http.NotFound(w, r)
+		return
+	}
+	want := map[string]bool{}
+	for _, id := range r.URL.Query()["ticket_id"] {
+		want[id] = true
+	}
+	out := []domain.ProcessingSession{}
+	for _, s := range p.sessions {
+		if want[s.TicketID] {
+			out = append(out, s)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (p *Plugin) deleteSession(w http.ResponseWriter, r *http.Request) {
+	if !p.speaksAutopilotRuns() {
+		http.NotFound(w, r)
+		return
+	}
+	delete(p.sessions, r.PathValue("sessionId"))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -624,7 +841,12 @@ func (p *Plugin) getTicketDetail(w http.ResponseWriter, r *http.Request) {
 		writeAPIErr(w, notFound(domain.ErrCodeTicketNotFound, "ticket", id))
 		return
 	}
-	writeJSON(w, http.StatusOK, domain.TicketDetail{
+	writeJSON(w, http.StatusOK, struct {
+		domain.Ticket
+		Nodes     []WireNode         `json:"nodes"`
+		Edges     []domain.GraphEdge `json:"edges"`
+		Artifacts []domain.Artifact  `json:"artifacts"`
+	}{
 		Ticket:    p.withLabels(t),
 		Nodes:     p.nodesOf(id),
 		Edges:     p.edgesOf(id),
@@ -672,6 +894,26 @@ func (o *optionalString) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// optionalBool decodes a JSON field that may be absent, null or a boolean.
+type optionalBool struct {
+	set   bool
+	value *bool
+}
+
+func (o *optionalBool) UnmarshalJSON(b []byte) error {
+	o.set = true
+	if string(b) == "null" {
+		o.value = nil
+		return nil
+	}
+	var v bool
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	o.value = &v
+	return nil
+}
+
 func (p *Plugin) updateTicket(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("ticketId")
 	var body struct {
@@ -686,6 +928,12 @@ func (p *Plugin) updateTicket(w http.ResponseWriter, r *http.Request) {
 		GraphExpandedAt *string                `json:"graph_expanded_at"`
 		Priority        *domain.TicketPriority `json:"priority"`
 		LabelIDs        *[]string              `json:"label_ids"`
+		// IfStatus (1.2) is a condition: the PATCH is refused with 409
+		// TICKET_STATUS_CHANGED unless the stored status is exactly this.
+		IfStatus *domain.TicketStatus `json:"if_status"`
+		// IfUpdatedAt (1.2) likewise: 409 TICKET_CHANGED unless the stored
+		// updated_at is exactly this string.
+		IfUpdatedAt *string `json:"if_updated_at"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -693,6 +941,14 @@ func (p *Plugin) updateTicket(w http.ResponseWriter, r *http.Request) {
 	t := p.findTicket(id)
 	if t == nil {
 		writeAPIErr(w, notFound(domain.ErrCodeTicketNotFound, "ticket", id))
+		return
+	}
+	if body.IfStatus != nil && p.speaksAutopilotRuns() && t.Status != *body.IfStatus {
+		writeAPIErr(w, domain.NewAPIError(domain.ErrCodeTicketStatusChanged, "ticket %s is %s, not %s", id, t.Status, *body.IfStatus))
+		return
+	}
+	if body.IfUpdatedAt != nil && p.speaksAutopilotRuns() && t.UpdatedAt != *body.IfUpdatedAt {
+		writeAPIErr(w, domain.NewAPIError(domain.ErrCodeTicketChanged, "ticket %s is at updated_at %s, not %s", id, t.UpdatedAt, *body.IfUpdatedAt))
 		return
 	}
 	var newLabels []string
@@ -740,7 +996,7 @@ func (p *Plugin) updateTicket(w http.ResponseWriter, r *http.Request) {
 	if body.LabelIDs != nil {
 		p.ticketLabelIDs[t.ID] = newLabels
 	}
-	t.UpdatedAt = now()
+	t.UpdatedAt = nextTicketUpdatedAt(t.UpdatedAt)
 	writeJSON(w, http.StatusOK, p.withLabels(t))
 }
 
@@ -760,6 +1016,11 @@ func (p *Plugin) removeTicket(id string) {
 	}
 	p.tickets = tickets
 	delete(p.ticketLabelIDs, id)
+	for sid, sess := range p.sessions {
+		if sess.TicketID == id {
+			delete(p.sessions, sid)
+		}
+	}
 	var nodes []*domain.GraphNode
 	for _, n := range p.nodes {
 		if n.TicketID != id {
@@ -799,21 +1060,58 @@ func (p *Plugin) findNode(id string) *domain.GraphNode {
 	return nil
 }
 
-func (p *Plugin) nodesOf(ticketID string) []domain.GraphNode {
-	out := []domain.GraphNode{}
+func (p *Plugin) nodesOf(ticketID string) []WireNode {
+	out := []WireNode{}
 	for _, n := range p.nodes {
 		if n.TicketID == ticketID {
-			out = append(out, *n)
+			out = append(out, p.wire(n))
 		}
 	}
 	return out
 }
 
+// WireNode is a node as the protocol sends it: domain.GraphNode (which never
+// serializes its claim token) plus claim_token.
+type WireNode struct {
+	domain.GraphNode
+	ClaimToken *string `json:"claim_token,omitempty"`
+}
+
+// wire is n as this plugin answers it. With Version below 1.2 the claim
+// fields are left out, like a plugin that has never heard of them.
+func (p *Plugin) wire(n *domain.GraphNode) WireNode {
+	c := *n
+	if !p.speaksAutopilotRuns() {
+		c.ClaimedByName, c.ClaimedByNameIsFallback, c.ClaimToken, c.ClaimSessionID, c.ClaimedAt = nil, nil, nil, nil, nil
+		c.DecidedByName, c.DecidedByNameIsFallback, c.DecidedAt, c.DecidedByAutopilot = nil, nil, nil, nil
+	}
+	return WireNode{GraphNode: c, ClaimToken: c.ClaimToken}
+}
+
+// StoredNode returns a copy of the stored node, claim token included, for
+// assertions (nil when there is no such node).
+func (p *Plugin) StoredNode(id string) *domain.GraphNode {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	n := p.findNode(id)
+	if n == nil {
+		return nil
+	}
+	c := *n
+	return &c
+}
+
 func (p *Plugin) createNode(w http.ResponseWriter, r *http.Request) {
 	ticketID := r.PathValue("ticketId")
-	var in domain.GraphNode
-	if !decode(w, r, &in) {
+	var wireIn WireNode
+	if !decode(w, r, &wireIn) {
 		return
+	}
+	in := wireIn.GraphNode
+	in.ClaimToken = wireIn.ClaimToken
+	if !p.speaksAutopilotRuns() {
+		in.ClaimedByName, in.ClaimedByNameIsFallback, in.ClaimToken, in.ClaimSessionID, in.ClaimedAt = nil, nil, nil, nil, nil
+		in.DecidedByName, in.DecidedByNameIsFallback, in.DecidedAt, in.DecidedByAutopilot = nil, nil, nil, nil
 	}
 	if p.findTicket(ticketID) == nil {
 		writeAPIErr(w, notFound(domain.ErrCodeTicketNotFound, "ticket", ticketID))
@@ -834,9 +1132,9 @@ func (p *Plugin) createNode(w http.ResponseWriter, r *http.Request) {
 	n.CreatedAt, n.UpdatedAt = ts, ts
 	p.nodes = append(p.nodes, &n)
 	if t := p.findTicket(ticketID); t != nil {
-		t.UpdatedAt = ts
+		t.UpdatedAt = nextTicketUpdatedAt(t.UpdatedAt)
 	}
-	writeJSON(w, http.StatusCreated, n)
+	writeJSON(w, http.StatusCreated, p.wire(&n))
 }
 
 func (p *Plugin) getNode(w http.ResponseWriter, r *http.Request) {
@@ -846,7 +1144,7 @@ func (p *Plugin) getNode(w http.ResponseWriter, r *http.Request) {
 		writeAPIErr(w, notFound(domain.ErrCodeNodeNotFound, "node", id))
 		return
 	}
-	writeJSON(w, http.StatusOK, n)
+	writeJSON(w, http.StatusOK, p.wire(n))
 }
 
 func (p *Plugin) listNodes(w http.ResponseWriter, r *http.Request) {
@@ -865,6 +1163,17 @@ func (p *Plugin) updateNode(w http.ResponseWriter, r *http.Request) {
 		IsManual       *bool              `json:"is_manual"`
 		GateID         *string            `json:"gate_id"`
 		Criteria       *string            `json:"criteria"`
+		// Claim fields (1.2): absent leaves them, null clears them.
+		ClaimedByName           optionalString `json:"claimed_by_name"`
+		ClaimedByNameIsFallback optionalBool   `json:"claimed_by_name_is_fallback"`
+		ClaimToken              optionalString `json:"claim_token"`
+		ClaimSessionID          optionalString `json:"claim_session_id"`
+		ClaimedAt               optionalString `json:"claimed_at"`
+		// Decision fields (1.2): absent leaves them, null clears them.
+		DecidedByName           optionalString `json:"decided_by_name"`
+		DecidedByNameIsFallback optionalBool   `json:"decided_by_name_is_fallback"`
+		DecidedAt               optionalString `json:"decided_at"`
+		DecidedByAutopilot      optionalBool   `json:"decided_by_autopilot"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -901,8 +1210,37 @@ func (p *Plugin) updateNode(w http.ResponseWriter, r *http.Request) {
 	if body.Criteria != nil {
 		n.Criteria = body.Criteria
 	}
+	if p.speaksAutopilotRuns() {
+		if body.ClaimedByName.set {
+			n.ClaimedByName = body.ClaimedByName.value
+		}
+		if body.ClaimedByNameIsFallback.set {
+			n.ClaimedByNameIsFallback = body.ClaimedByNameIsFallback.value
+		}
+		if body.ClaimToken.set {
+			n.ClaimToken = body.ClaimToken.value
+		}
+		if body.ClaimSessionID.set {
+			n.ClaimSessionID = body.ClaimSessionID.value
+		}
+		if body.ClaimedAt.set {
+			n.ClaimedAt = body.ClaimedAt.value
+		}
+		if body.DecidedByName.set {
+			n.DecidedByName = body.DecidedByName.value
+		}
+		if body.DecidedByNameIsFallback.set {
+			n.DecidedByNameIsFallback = body.DecidedByNameIsFallback.value
+		}
+		if body.DecidedAt.set {
+			n.DecidedAt = body.DecidedAt.value
+		}
+		if body.DecidedByAutopilot.set {
+			n.DecidedByAutopilot = body.DecidedByAutopilot.value
+		}
+	}
 	n.UpdatedAt = now()
-	writeJSON(w, http.StatusOK, n)
+	writeJSON(w, http.StatusOK, p.wire(n))
 }
 
 func (p *Plugin) deleteNode(w http.ResponseWriter, r *http.Request) {
@@ -964,6 +1302,325 @@ func (p *Plugin) createEdge(w http.ResponseWriter, r *http.Request) {
 	e.CreatedAt = now()
 	p.edges = append(p.edges, &e)
 	writeJSON(w, http.StatusCreated, e)
+}
+
+// --- graph batch (protocol 1.2) ---
+
+// graphRef is one end of a graph batch edge: an existing node's ID or the
+// config_id of a node in the same batch.
+type graphRef struct {
+	NodeID   string `json:"node_id"`
+	ConfigID string `json:"config_id"`
+}
+
+type graphBatchEdge struct {
+	ID        string               `json:"id"`
+	From      graphRef             `json:"from"`
+	To        graphRef             `json:"to"`
+	Condition domain.EdgeCondition `json:"condition"`
+}
+
+type graphBatchRequest struct {
+	ExpectedNodeCount *int             `json:"expected_node_count"`
+	Nodes             []WireNode       `json:"nodes"`
+	Edges             []graphBatchEdge `json:"edges"`
+	GraphExpandedAt   *string          `json:"graph_expanded_at"`
+}
+
+// createGraphBatch is POST /tickets/{ticketId}/graph: every node and edge
+// of the batch, and graph_expanded_at, or nothing. Every handler runs under
+// p.mu, so the check and the writes are one step. Everything is validated
+// before anything is written, which is how this plugin keeps the request
+// atomic; a real plugin would typically use a transaction instead.
+func (p *Plugin) createGraphBatch(w http.ResponseWriter, r *http.Request) {
+	if !p.speaksAutopilotRuns() {
+		http.NotFound(w, r)
+		return
+	}
+	ticketID := r.PathValue("ticketId")
+	var in graphBatchRequest
+	if !decode(w, r, &in) {
+		return
+	}
+	t := p.findTicket(ticketID)
+	if t == nil {
+		writeAPIErr(w, notFound(domain.ErrCodeTicketNotFound, "ticket", ticketID))
+		return
+	}
+	if in.ExpectedNodeCount == nil {
+		writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "expected_node_count is required"))
+		return
+	}
+	existing := map[string]bool{}
+	for _, n := range p.nodes {
+		if n.TicketID == ticketID {
+			existing[n.ID] = true
+		}
+	}
+	if len(existing) != *in.ExpectedNodeCount || (in.GraphExpandedAt != nil && t.GraphExpandedAt != nil) {
+		writeAPIErr(w, domain.NewAPIError(domain.ErrCodeGraphChanged, "ticket %s's graph has changed since the batch was planned", ticketID))
+		return
+	}
+	if p.nodeSeq[ticketID]+len(in.Nodes) > 99 {
+		writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "ticket %s would exceed the maximum of 99 nodes", ticketID))
+		return
+	}
+
+	// Plan every row first; nothing is stored until all of them are valid.
+	seq := p.nodeSeq[ticketID]
+	idByConfigID := map[string]string{}
+	var newNodes []*domain.GraphNode
+	for i, wn := range in.Nodes {
+		n := wn.GraphNode
+		if n.ConfigID == nil || *n.ConfigID == "" {
+			writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "node %d has no config_id", i))
+			return
+		}
+		if _, dup := idByConfigID[*n.ConfigID]; dup {
+			writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "two nodes have config_id %q", *n.ConfigID))
+			return
+		}
+		seq++
+		n.ID = fmt.Sprintf("%s-%02d", ticketID, seq)
+		n.TicketID = ticketID
+		n.ClaimedByName, n.ClaimedByNameIsFallback, n.ClaimToken, n.ClaimSessionID, n.ClaimedAt = nil, nil, nil, nil, nil
+		n.DecidedByName, n.DecidedByNameIsFallback, n.DecidedAt, n.DecidedByAutopilot = nil, nil, nil, nil
+		if n.MaxIterations == 0 {
+			n.MaxIterations = 3
+		}
+		idByConfigID[*n.ConfigID] = n.ID
+		newNodes = append(newNodes, &n)
+	}
+	resolve := func(ref graphRef) (string, bool) {
+		switch {
+		case ref.NodeID != "" && ref.ConfigID == "":
+			return ref.NodeID, existing[ref.NodeID]
+		case ref.ConfigID != "" && ref.NodeID == "":
+			id, ok := idByConfigID[ref.ConfigID]
+			return id, ok
+		}
+		return "", false
+	}
+	var newEdges []*domain.GraphEdge
+	for j, ge := range in.Edges {
+		from, okFrom := resolve(ge.From)
+		to, okTo := resolve(ge.To)
+		if ge.ID == "" || !okFrom || !okTo {
+			writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "edge %d has no id or names a node that is neither this ticket's nor this batch's", j))
+			return
+		}
+		cond := ge.Condition
+		if cond == "" {
+			cond = domain.EdgeAlways
+		}
+		newEdges = append(newEdges, &domain.GraphEdge{ID: ge.ID, TicketID: ticketID, FromNodeID: from, ToNodeID: to, Condition: cond})
+	}
+
+	base := time.Now().UTC()
+	stamp := func(i int) string {
+		return base.Add(time.Duration(i) * time.Microsecond).Format("2006-01-02T15:04:05.000000000Z")
+	}
+	outNodes := []WireNode{}
+	for i, n := range newNodes {
+		n.CreatedAt, n.UpdatedAt = stamp(i), stamp(i)
+		p.nodes = append(p.nodes, n)
+		outNodes = append(outNodes, p.wire(n))
+	}
+	outEdges := []domain.GraphEdge{}
+	for j, e := range newEdges {
+		e.CreatedAt = stamp(len(newNodes) + j)
+		p.edges = append(p.edges, e)
+		outEdges = append(outEdges, *e)
+	}
+	p.nodeSeq[ticketID] = seq
+	if in.GraphExpandedAt != nil {
+		v := *in.GraphExpandedAt
+		t.GraphExpandedAt = &v
+	}
+	t.UpdatedAt = nextTicketUpdatedAt(t.UpdatedAt)
+	writeJSON(w, http.StatusCreated, map[string]any{"nodes": outNodes, "edges": outEdges})
+}
+
+// nodeTransitionStep and nodeTransitionRequest are POST
+// /tickets/{ticketId}/node-transition's body (store.NodeStep /
+// store.NodeTransition, restated because this package must not import
+// internal/store).
+type nodeTransitionStep struct {
+	NodeID             string               `json:"node_id"`
+	Required           bool                 `json:"required"`
+	IfStatusIn         []domain.NodeStatus  `json:"if_status_in"`
+	IfStatusNotIn      []domain.NodeStatus  `json:"if_status_not_in"`
+	CheckClaimToken    bool                 `json:"check_claim_token"`
+	IfClaimToken       *string              `json:"if_claim_token"`
+	IfIterationCount   *int                 `json:"if_iteration_count"`
+	IfUpdatedAt        *string              `json:"if_updated_at"`
+	SetStatus          *domain.NodeStatus   `json:"set_status"`
+	IncrementIteration bool                 `json:"increment_iteration"`
+	AddMaxIterations   int                  `json:"add_max_iterations"`
+	Decision           *domain.NodeDecision `json:"decision"`
+	Touch              bool                 `json:"touch"`
+}
+
+type nodeTransitionRequest struct {
+	RequireTicketOpen bool                 `json:"require_ticket_open"`
+	IfBlocked         *bool                `json:"if_blocked"`
+	SetBlocked        *bool                `json:"set_blocked"`
+	Steps             []nodeTransitionStep `json:"steps"`
+	Artifacts         []domain.Artifact    `json:"artifacts"`
+}
+
+func statusIn(list []domain.NodeStatus, s domain.NodeStatus) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+// stepHolds is whether st's conditions hold for n (nil: no such node).
+func stepHolds(st nodeTransitionStep, n *domain.GraphNode) bool {
+	if n == nil {
+		return false
+	}
+	if len(st.IfStatusIn) > 0 && !statusIn(st.IfStatusIn, n.Status) {
+		return false
+	}
+	if statusIn(st.IfStatusNotIn, n.Status) {
+		return false
+	}
+	if st.CheckClaimToken {
+		if st.IfClaimToken == nil && n.ClaimToken != nil {
+			return false
+		}
+		if st.IfClaimToken != nil && (n.ClaimToken == nil || *n.ClaimToken != *st.IfClaimToken) {
+			return false
+		}
+	}
+	if st.IfIterationCount != nil && *st.IfIterationCount != n.IterationCount {
+		return false
+	}
+	if st.IfUpdatedAt != nil && *st.IfUpdatedAt != n.UpdatedAt {
+		return false
+	}
+	return true
+}
+
+// applyStep is st's writes applied to n.
+func applyStep(st nodeTransitionStep, n *domain.GraphNode, ts string) {
+	if st.SetStatus != nil {
+		n.Status = *st.SetStatus
+		n.ClaimedByName, n.ClaimedByNameIsFallback, n.ClaimToken, n.ClaimSessionID, n.ClaimedAt = nil, nil, nil, nil, nil
+		n.DecidedByName, n.DecidedByNameIsFallback, n.DecidedAt, n.DecidedByAutopilot = nil, nil, nil, nil
+		if d := st.Decision; d != nil {
+			name, fallback, at, autopilot := d.Name, d.NameIsFallback, d.DecidedAt, d.Autopilot
+			n.DecidedByName, n.DecidedByNameIsFallback, n.DecidedAt, n.DecidedByAutopilot = &name, &fallback, &at, &autopilot
+		}
+	}
+	if st.IncrementIteration {
+		n.IterationCount++
+	}
+	n.MaxIterations += st.AddMaxIterations
+	if st.SetStatus != nil || st.IncrementIteration || st.AddMaxIterations != 0 || st.Touch {
+		n.UpdatedAt = ts
+	}
+}
+
+// applyNodeTransition is POST /tickets/{ticketId}/node-transition (1.2):
+// every condition is checked and every write made, or nothing. Every
+// handler runs under p.mu, so the check and the writes are one step; the
+// writes are applied to copies first and stored only once everything has
+// been checked, which is how this plugin keeps the request atomic (a real
+// plugin would typically use a transaction).
+func (p *Plugin) applyNodeTransition(w http.ResponseWriter, r *http.Request) {
+	if !p.speaksAutopilotRuns() {
+		http.NotFound(w, r)
+		return
+	}
+	ticketID := r.PathValue("ticketId")
+	var in nodeTransitionRequest
+	if !decode(w, r, &in) {
+		return
+	}
+	t := p.findTicket(ticketID)
+	if t == nil {
+		writeAPIErr(w, notFound(domain.ErrCodeTicketNotFound, "ticket", ticketID))
+		return
+	}
+	if in.RequireTicketOpen && t.Status == domain.TicketClosed {
+		writeAPIErr(w, domain.NewAPIError(domain.ErrCodeInvalidNodeState, "ticket %s is CLOSED", ticketID))
+		return
+	}
+	if in.IfBlocked != nil && *in.IfBlocked != t.Blocked {
+		writeAPIErr(w, domain.NewAPIError(domain.ErrCodeInvalidNodeState, "ticket %s's blocked flag is %v", ticketID, t.Blocked))
+		return
+	}
+	copies := map[string]*domain.GraphNode{}
+	for _, st := range in.Steps {
+		if st.Decision != nil && st.SetStatus == nil {
+			writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "step %s records a decision without a status", st.NodeID))
+			return
+		}
+		if _, ok := copies[st.NodeID]; ok {
+			continue
+		}
+		if n := p.findNode(st.NodeID); n != nil {
+			if n.TicketID != ticketID {
+				writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "node %s is not a node of ticket %s", st.NodeID, ticketID))
+				return
+			}
+			c := *n
+			copies[st.NodeID] = &c
+		} else {
+			copies[st.NodeID] = nil
+		}
+	}
+	ts := now()
+	applied := make([]bool, len(in.Steps))
+	for i, st := range in.Steps {
+		n := copies[st.NodeID]
+		if !stepHolds(st, n) {
+			if st.Required {
+				writeAPIErr(w, domain.NewAPIError(domain.ErrCodeInvalidNodeState, "node %s no longer matches the transition's conditions", st.NodeID))
+				return
+			}
+			continue
+		}
+		applied[i] = true
+		applyStep(st, n, ts)
+	}
+	for _, a := range in.Artifacts {
+		if a.TicketID != ticketID || p.findNode(a.NodeID) == nil {
+			writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "artifact %s does not belong to a node of ticket %s", a.ID, ticketID))
+			return
+		}
+	}
+
+	// Everything checked: store.
+	for _, a := range in.Artifacts {
+		c := a
+		c.CreatedAt = now()
+		c.HasContent = hasContent(&c)
+		p.artifacts = append(p.artifacts, &c)
+	}
+	ids := make([]string, 0, len(copies))
+	for id, c := range copies {
+		if c == nil {
+			continue
+		}
+		*p.findNode(id) = *c
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	if in.SetBlocked != nil {
+		t.Blocked = *in.SetBlocked
+		t.UpdatedAt = nextTicketUpdatedAt(t.UpdatedAt)
+	}
+	out := []WireNode{}
+	for _, id := range ids {
+		out = append(out, p.wire(p.findNode(id)))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"applied": applied, "nodes": out})
 }
 
 func (p *Plugin) listEdges(w http.ResponseWriter, r *http.Request) {

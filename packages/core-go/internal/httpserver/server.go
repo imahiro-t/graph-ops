@@ -6,6 +6,7 @@ package httpserver
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -84,6 +85,9 @@ type Server struct {
 	// other operational warnings (e.g. a best-effort home config
 	// cleanup that failed -- see handleDeleteProject).
 	logger *slog.Logger
+	// schemaGuard stops the API once the DB needs a newer graph-engine than
+	// this server's (DFLT-00331; see client_schema_guard.go).
+	schemaGuard *clientSchemaGuard
 }
 
 func New(repo store.GraphRepository, eng *engine.GraphEngine, cfg Config) *Server {
@@ -91,7 +95,24 @@ func New(repo store.GraphRepository, eng *engine.GraphEngine, cfg Config) *Serve
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
-	return &Server{repo: repo, engine: eng, cfg: cfg, rejectLog: newRejectLogger(logger), logger: logger}
+	// The engine's warnings (reading the processing sessions of claimed
+	// nodes failed, a data source that keeps none -- DFLT-00327) go to the
+	// server's log like its own, not bare onto stderr. The engine throttles
+	// the ones that would otherwise repeat on every poll.
+	if eng != nil {
+		eng.SetLogf(func(format string, args ...any) {
+			logger.Warn(fmt.Sprintf(format, args...), slog.String("event", "node_claims"))
+		})
+	}
+	// The repository's own warnings (an HTTP data source older than 1.2
+	// checking if_updated_at non-atomically -- DFLT-00330) likewise.
+	if sink, ok := repo.(store.WarningSink); ok {
+		sink.SetLogf(func(format string, args ...any) {
+			logger.Warn(fmt.Sprintf(format, args...), slog.String("event", "data_source"))
+		})
+	}
+	return &Server{repo: repo, engine: eng, cfg: cfg, rejectLog: newRejectLogger(logger), logger: logger,
+		schemaGuard: newClientSchemaGuard(repo, logger)}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -204,10 +225,16 @@ func (s *Server) Routes() http.Handler {
 	//  2. withAllowedHost -- a request whose Host header does not name this
 	//     server is answered before any other layer looks at it.
 	//  3. withCORS -- answers preflights and enforces the CSRF header.
-	//  4. withRequestBodyLimit -- innermost, wrapping only the mux: a
+	//  4. withRequestBodyLimit -- wrapping the schema guard and the mux: a
 	//     request rejected by 2 or 3 never has its body read at all, so
 	//     capping it any further out would buy nothing.
-	return withSecurityHeaders(withAllowedHost(s.cfg.Host, s.rejectLog, withCORS(s.rejectLog, withRequestBodyLimit(s.rejectLog, mux))))
+	//  5. withClientSchemaGuard -- innermost, right before the mux: once
+	//     the DB records a minimum graph-engine newer than this server's,
+	//     /api/ requests (but health and settings) get 503 CLIENT_TOO_OLD
+	//     instead of reaching a handler (DFLT-00331). It sits inside the
+	//     host and CSRF checks so a rejected request never costs a DB read.
+	return withSecurityHeaders(withAllowedHost(s.cfg.Host, s.rejectLog, withCORS(s.rejectLog,
+		withRequestBodyLimit(s.rejectLog, withClientSchemaGuard(s.schemaGuard, mux)))))
 }
 
 // csrfHeaderName is the header every state-changing request to this API must
@@ -633,20 +660,29 @@ func statusForError(err error, fallback int) int {
 		// valid and the row exists -- what stands in the way is the
 		// state the row is in right now, which is what 409 means
 		// (DFLT-00102).
-		case domain.ErrCodeInvalidNodeState:
+		case domain.ErrCodeInvalidNodeState, domain.ErrCodeNodeClaimedByOther,
+			domain.ErrCodeTicketStatusChanged, domain.ErrCodeTicketChanged, domain.ErrCodeConcurrentWriteConflict:
 			return http.StatusConflict
 		// The autopilot (DFLT-00142): a start that collides with another
 		// run or with the root's state is a conflict with the current
 		// state, like INVALID_NODE_STATE; a project with no local path is
 		// the request's precondition not being met, a 400 like the
 		// validation errors above.
+		// A broken machine-id file (DFLT-00326) is, like an unreadable
+		// run file, local state that stands in the way of the start.
 		case autopilot.ErrCodeAlreadyRunning, autopilot.ErrCodeRootFinished,
-			autopilot.ErrCodeInvalidRunState, autopilot.ErrCodeRegistryLockTimed, autopilot.ErrCodeRegistryCorrupt:
+			autopilot.ErrCodeInvalidRunState, autopilot.ErrCodeRegistryLockTimed, autopilot.ErrCodeRegistryCorrupt,
+			autopilot.ErrCodeMachineIDUnreadable:
 			return http.StatusConflict
 		case autopilot.ErrCodeLocalPathNotSet:
 			return http.StatusBadRequest
 		case autopilot.ErrCodeRunNotFound:
 			return http.StatusNotFound
+		// This server's graph-engine is older than the DB allows
+		// (DFLT-00331): nothing the client can change, and nothing this
+		// server can serve until it is updated and restarted.
+		case domain.ErrCodeClientTooOld:
+			return http.StatusServiceUnavailable
 		}
 	}
 	return fallback

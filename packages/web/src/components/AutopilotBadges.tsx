@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Bot, Hand, Hourglass } from 'lucide-react';
-import { AutopilotBadge, TicketAutopilotView } from '../lib/autopilotApi';
+import { AutopilotBadge, starterLabel, TicketAutopilotView } from '../lib/autopilotApi';
 import { Spinner } from './Spinner';
 
 // The autopilot badges of one ticket (DFLT-00142 phase 5), shown in its
@@ -33,9 +33,16 @@ const ICON: Record<AutopilotBadge, React.ReactNode> = {
   waiting: <Hourglass className="w-3 h-3 shrink-0" aria-hidden="true" />
 };
 
+// DFLT-00326: the running badge of another member's run names them ("Alice
+// is running") -- same color and shape as one's own, the difference said in
+// text. A long name wraps like any other badge text.
 export const AutopilotBadges: React.FC<{ view: TicketAutopilotView }> = ({ view }) => {
   const { t } = useTranslation();
   if (view.badges.length === 0) return null;
+  const label = (b: AutopilotBadge): string =>
+    b === 'running' && view.runningBy
+      ? t('autopilot.badges.runningBy', { name: starterLabel(t, view.runningBy) })
+      : t(`autopilot.badges.${b}`);
   return (
     <span className="flex flex-wrap items-center gap-1 min-w-0 max-w-full" data-testid="autopilot-badges">
       {view.badges.map(b => (
@@ -46,7 +53,7 @@ export const AutopilotBadges: React.FC<{ view: TicketAutopilotView }> = ({ view 
           className={`relative flex items-center gap-1 min-w-0 px-2 py-0.5 rounded-full border text-[0.6875rem] font-bold wrap-anywhere ${STYLE[b]}`}
         >
           {ICON[b]}
-          {t(`autopilot.badges.${b}`)}
+          {label(b)}
           {b === 'awaitingHuman' && view.awaiting && (
             <span className="sr-only">{t('autopilot.badges.awaitingTitle', { what: view.awaiting })}</span>
           )}

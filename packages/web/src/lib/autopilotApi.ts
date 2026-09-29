@@ -3,9 +3,10 @@
 // logic that turns the runs list into what one ticket shows: its badges, and
 // whether (and why) its autopilot buttons are disabled.
 import { TFunction } from 'i18next';
-import { AutopilotMode, AutopilotRun, AutopilotStartResponse } from '../types';
+import { AutopilotMode, AutopilotRun, AutopilotStarter, AutopilotStartResponse } from '../types';
 import { apiFetch } from './apiFetch';
-import { localizedApiErrorMessage } from './apiError';
+import { memberLabel } from './memberName';
+import { localizedApiErrorMessage, parseApiError, translateErrorCode } from './apiError';
 
 export async function fetchAutopilotRuns(t: TFunction, projectId: string): Promise<AutopilotRun[]> {
   const res = await apiFetch(`/api/autopilot/runs?project_id=${encodeURIComponent(projectId)}`);
@@ -27,8 +28,24 @@ export async function startAutopilot(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode })
   });
-  if (!res.ok) throw new Error(await localizedApiErrorMessage(t, res));
+  if (!res.ok) {
+    const payload = await parseApiError(res);
+    if (!payload) throw new Error(t('errors.UNKNOWN'));
+    throw new Error(startErrorMessage(t, payload.code, payload.details));
+  }
   return (await res.json()) as AutopilotStartResponse;
+}
+
+// startErrorMessage localizes a refused start. AUTOPILOT_ALREADY_RUNNING
+// names who started the overlapping run when the server says (DFLT-00326:
+// another member's run on a shared database, details.started_by).
+export function startErrorMessage(t: TFunction, code: string, details?: Record<string, unknown>): string {
+  const name = details?.started_by;
+  if (code === 'AUTOPILOT_ALREADY_RUNNING' && typeof name === 'string' && name !== '') {
+    const label = starterLabel(t, { name, name_is_fallback: details?.name_is_fallback === true });
+    return t('autopilot.alreadyRunningBy', { name: label });
+  }
+  return translateErrorCode(t, code);
 }
 
 // The badges a ticket can carry while an active run owns it:
@@ -50,9 +67,16 @@ export interface TicketAutopilotView {
   // ticket an active run owns; a tree start is also refused when an active
   // run's root lies among the ticket's descendants.
   blockedBy: Record<AutopilotMode, string>;
+  // Per mode, who started the run in blockedBy when it is another member's
+  // (DFLT-00326), null when it is this machine's own or nothing blocks.
+  blockedByStarter: Record<AutopilotMode, AutopilotStarter | null>;
+  // With the running badge: who started the run when it is another
+  // member's, null when it is this machine's own.
+  runningBy: AutopilotStarter | null;
   // Per mode, whether a start would take over this ticket's newest run of
   // that mode (stopped, or interrupted) instead of creating one -- which the
-  // server allows even when the ticket is DONE by now (spec S4/S5).
+  // server allows even when the ticket is DONE by now (spec S4/S5). Only this
+  // machine's runs count: another member's run is never taken over.
   resumable: Record<AutopilotMode, boolean>;
 }
 
@@ -60,8 +84,23 @@ export const NO_AUTOPILOT: TicketAutopilotView = {
   badges: [],
   awaiting: '',
   blockedBy: { ticket: '', tree: '' },
+  blockedByStarter: { ticket: null, tree: null },
+  runningBy: null,
   resumable: { ticket: false, tree: false }
 };
+
+// isMine: whether run is this machine's. An older server sends no `mine`
+// and lists only this machine's runs.
+export function isMine(run: AutopilotRun): boolean {
+  return run.mine !== false;
+}
+
+// foreignStarter is who started run when it is another member's, null for
+// this machine's own run.
+function foreignStarter(run: AutopilotRun): AutopilotStarter | null {
+  if (isMine(run)) return null;
+  return run.started_by ?? { name: '', name_is_fallback: false };
+}
 
 // Returns a lookup of every descendant of a ticket (the ticket excluded),
 // built from the ticket list's parent_ticket_id.
@@ -105,21 +144,31 @@ export function ticketAutopilotView(
   };
   let awaiting = '';
   const blockedBy: Record<AutopilotMode, string> = { ticket: '', tree: '' };
+  const blockedByStarter: Record<AutopilotMode, AutopilotStarter | null> = { ticket: null, tree: null };
+  let runningBy: AutopilotStarter | null = null;
   const resumable: Record<AutopilotMode, boolean> = { ticket: false, tree: false };
   const newestSeen: Record<AutopilotMode, boolean> = { ticket: false, tree: false };
+  const block = (mode: AutopilotMode, run: AutopilotRun) => {
+    blockedBy[mode] = run.root;
+    blockedByStarter[mode] = foreignStarter(run);
+  };
 
   for (const run of runs) {
-    if (run.root === ticketId && !newestSeen[run.mode]) {
-      // A start takes over only the newest run of the same root and mode,
-      // and only when that one is stopped or interrupted.
+    if (run.root === ticketId && isMine(run) && !newestSeen[run.mode]) {
+      // A start takes over only the newest of this machine's runs of the
+      // same root and mode, and only when that one is stopped or
+      // interrupted. Another member's run is never taken over (DFLT-00326).
       newestSeen[run.mode] = true;
       resumable[run.mode] = !run.active && run.state !== 'finished';
     }
     if (!run.active) continue;
     if (run.members.includes(ticketId)) {
-      if (!blockedBy.ticket) blockedBy.ticket = run.root;
-      if (!blockedBy.tree) blockedBy.tree = run.root;
-      if (run.root === ticketId) add('running');
+      if (!blockedBy.ticket) block('ticket', run);
+      if (!blockedBy.tree) block('tree', run);
+      if (run.root === ticketId) {
+        add('running');
+        runningBy = foreignStarter(run);
+      }
       if (run.current === ticketId) {
         if (run.awaiting_human) {
           add('awaitingHuman');
@@ -131,11 +180,17 @@ export function ticketAutopilotView(
         add('waiting');
       }
     } else if (!blockedBy.tree && descendantsOf(ticketId).has(run.root)) {
-      blockedBy.tree = run.root;
+      block('tree', run);
     }
   }
   if (badges.length === 0 && !blockedBy.ticket && !blockedBy.tree && !resumable.ticket && !resumable.tree) {
     return NO_AUTOPILOT;
   }
-  return { badges, awaiting, blockedBy, resumable };
+  return { badges, awaiting, blockedBy, blockedByStarter, runningBy, resumable };
+}
+
+// starterLabel is how a run's starter is named on screen: the name, with
+// "(name not set)" after a "<OS user>@<host>" fallback.
+export function starterLabel(t: TFunction, starter: AutopilotStarter): string {
+  return memberLabel(t, starter.name, starter.name_is_fallback);
 }

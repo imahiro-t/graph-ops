@@ -143,7 +143,18 @@ func runRepresentativeFlow(t *testing.T, repo store.GraphRepository) []string {
 // plugin lives in the non-test package internal/store/httpdatasourcetest for
 // the same reason (DFLT-00088 plan review, condition 1).
 func TestEngineFlow_HTTPBackendMatchesSQLite(t *testing.T) {
+	for _, version := range []string{"1.2", "1.1"} {
+		t.Run("protocol "+version, func(t *testing.T) { testEngineFlowHTTPBackendMatchesSQLite(t, version) })
+	}
+}
+
+// testEngineFlowHTTPBackendMatchesSQLite is the flow against a plugin
+// reporting version. Against 1.1 every completion takes the engine's
+// sequential path (no node transition, no decision -- DFLT-00329) and must
+// still end up exactly where SQLite's atomic path does.
+func testEngineFlowHTTPBackendMatchesSQLite(t *testing.T, version string) {
 	plugin := httpdatasourcetest.New("engine-flow-token")
+	plugin.Version = version
 	srv := httptest.NewServer(plugin)
 	defer srv.Close()
 	httpRepo, err := store.Open(store.Config{Backend: "http", HTTPURL: srv.URL, HTTPToken: "engine-flow-token"})
@@ -166,5 +177,20 @@ func TestEngineFlow_HTTPBackendMatchesSQLite(t *testing.T) {
 	}
 	if len(plugin.Requests()) == 0 {
 		t.Fatal("the plugin recorded no requests")
+	}
+	transitions := 0
+	for _, r := range plugin.Requests() {
+		if strings.HasSuffix(r.Path, "/node-transition") {
+			transitions++
+		}
+		if version == "1.1" && (strings.Contains(string(r.Body), "decided_by") || strings.Contains(string(r.Body), "if_status")) {
+			t.Errorf("a 1.1 plugin was sent a 1.2 field: %s %s %s", r.Method, r.Path, r.Body)
+		}
+	}
+	switch {
+	case version == "1.1" && transitions != 0:
+		t.Errorf("a 1.1 plugin was sent %d node transitions", transitions)
+	case version == "1.2" && transitions == 0:
+		t.Error("a 1.2 plugin was never sent a node transition")
 	}
 }

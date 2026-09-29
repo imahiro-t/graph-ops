@@ -31,6 +31,7 @@ const FEAT = mk('label-feat', '機能追加', 'blue');
 const UI = mk('label-ui', 'UI', 'purple');
 const PERF = mk('label-perf', '性能', 'amber');
 const PROJECT_LABELS = [BUG, FEAT, UI, PERF];
+const U0 = '2026-09-30T00:00:00Z';
 
 const editButtonName = () => `${i18n.t('ticket.labels.edit')}: TEST-00001`;
 
@@ -67,7 +68,7 @@ describe('LabelSelect', () => {
     mockedSet.mockImplementation(() => new Promise(r => (resolveSave = r)));
     const onSaved = vi.fn();
     const user = userEvent.setup();
-    render(<LabelSelect ticketId="TEST-00001" labels={[BUG]} projectLabels={PROJECT_LABELS} onSaved={onSaved} />);
+    render(<LabelSelect ticketId="TEST-00001" labels={[BUG]} projectLabels={PROJECT_LABELS} updatedAt={U0} onSaved={onSaved} />);
 
     await openPanel(user);
     const boxes = screen.getAllByRole('checkbox');
@@ -99,19 +100,19 @@ describe('LabelSelect', () => {
   it('PATCHes the remaining labels when one is removed', async () => {
     mockedSet.mockResolvedValue({});
     const user = userEvent.setup();
-    render(<LabelSelect ticketId="TEST-00001" labels={[BUG, UI]} projectLabels={PROJECT_LABELS} onSaved={vi.fn()} />);
+    render(<LabelSelect ticketId="TEST-00001" labels={[BUG, UI]} projectLabels={PROJECT_LABELS} updatedAt={U0} onSaved={vi.fn()} />);
 
     await openPanel(user);
     await user.click(screen.getByRole('checkbox', { name: 'バグ' }));
 
-    expect(mockedSet).toHaveBeenCalledWith(expect.anything(), 'TEST-00001', ['label-ui']);
+    expect(mockedSet).toHaveBeenCalledWith(expect.anything(), 'TEST-00001', ['label-ui'], U0);
   });
 
   it('shows a save error and does not call onSaved when the PATCH fails', async () => {
     mockedSet.mockRejectedValue(new Error(i18n.t('errors.LABEL_NOT_FOUND')));
     const onSaved = vi.fn();
     const user = userEvent.setup();
-    render(<LabelSelect ticketId="TEST-00001" labels={[]} projectLabels={PROJECT_LABELS} onSaved={onSaved} />);
+    render(<LabelSelect ticketId="TEST-00001" labels={[]} projectLabels={PROJECT_LABELS} updatedAt={U0} onSaved={onSaved} />);
 
     await openPanel(user);
     await user.click(screen.getByRole('checkbox', { name: 'UI' }));
@@ -124,7 +125,7 @@ describe('LabelSelect', () => {
 
   it('points to Settings when the project has no labels', async () => {
     const user = userEvent.setup();
-    render(<LabelSelect ticketId="TEST-00001" labels={[]} projectLabels={[]} onSaved={vi.fn()} />);
+    render(<LabelSelect ticketId="TEST-00001" labels={[]} projectLabels={[]} updatedAt={U0} onSaved={vi.fn()} />);
 
     await openPanel(user);
     expect(screen.getByText(i18n.t('ticket.labels.noRegistered'))).toBeInTheDocument();
@@ -136,7 +137,7 @@ describe('LabelSelect', () => {
     const user = userEvent.setup();
     render(
       <div onClick={onParentClick}>
-        <LabelSelect ticketId="TEST-00001" labels={[]} projectLabels={PROJECT_LABELS} onSaved={vi.fn()} />
+        <LabelSelect ticketId="TEST-00001" labels={[]} projectLabels={PROJECT_LABELS} updatedAt={U0} onSaved={vi.fn()} />
       </div>
     );
 
@@ -156,13 +157,13 @@ describe('LabelSelect', () => {
     let resolveSave: (v: unknown) => void = () => {};
     mockedSet.mockImplementation(() => new Promise(r => (resolveSave = r)));
     const user = userEvent.setup();
-    render(<LabelSelect ticketId="TEST-00001" labels={[]} projectLabels={PROJECT_LABELS} onSaved={vi.fn()} />);
+    render(<LabelSelect ticketId="TEST-00001" labels={[]} projectLabels={PROJECT_LABELS} updatedAt={U0} onSaved={vi.fn()} />);
 
     await openPanel(user);
     const bug = screen.getByRole('checkbox', { name: 'バグ' });
     bug.focus();
     await user.keyboard(' ');
-    expect(mockedSet).toHaveBeenLastCalledWith(expect.anything(), 'TEST-00001', ['label-bug']);
+    expect(mockedSet).toHaveBeenLastCalledWith(expect.anything(), 'TEST-00001', ['label-bug'], U0);
     expect(bug).toHaveFocus();
     resolveSave({});
     await waitFor(() => expect(bug).toHaveAttribute('aria-disabled', 'false'));
@@ -172,7 +173,7 @@ describe('LabelSelect', () => {
     const feat = screen.getByRole('checkbox', { name: '機能追加' });
     expect(feat).toHaveFocus();
     await user.keyboard(' ');
-    expect(mockedSet).toHaveBeenLastCalledWith(expect.anything(), 'TEST-00001', ['label-bug', 'label-feat']);
+    expect(mockedSet).toHaveBeenLastCalledWith(expect.anything(), 'TEST-00001', ['label-bug', 'label-feat'], U0);
     resolveSave({});
     await waitFor(() => expect(feat).toHaveAttribute('aria-disabled', 'false'));
     expect(feat).toHaveFocus();
@@ -186,12 +187,12 @@ describe('LabelSelect', () => {
     mockedSet.mockResolvedValue({});
     const NEW = mk('label-new', '新規', 'green');
     const user = userEvent.setup();
-    render(<LabelSelect ticketId="TEST-00001" labels={[NEW]} projectLabels={PROJECT_LABELS} onSaved={vi.fn()} />);
+    render(<LabelSelect ticketId="TEST-00001" labels={[NEW]} projectLabels={PROJECT_LABELS} updatedAt={U0} onSaved={vi.fn()} />);
 
     await openPanel(user);
     await user.click(screen.getByRole('checkbox', { name: 'UI' }));
 
-    expect(mockedSet).toHaveBeenCalledWith(expect.anything(), 'TEST-00001', ['label-new', 'label-ui']);
+    expect(mockedSet).toHaveBeenCalledWith(expect.anything(), 'TEST-00001', ['label-new', 'label-ui'], U0);
   });
 });
 
@@ -211,7 +212,7 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
     const tree = (labels: Label[]) => (
       <div data-testid="clip" style={{ overflowX: 'clip' }}>
         <div data-testid="row">
-          <LabelSelect ticketId="TEST-00001" labels={labels} projectLabels={PROJECT_LABELS} onSaved={vi.fn()} />
+          <LabelSelect ticketId="TEST-00001" labels={labels} projectLabels={PROJECT_LABELS} updatedAt={U0} onSaved={vi.fn()} />
         </div>
       </div>
     );
@@ -655,7 +656,7 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
 
   it('gives each checkbox the same keyboard focus line as the other controls (DFLT-00321)', async () => {
     const user = userEvent.setup();
-    render(<LabelSelect ticketId="TEST-00001" labels={[BUG]} projectLabels={PROJECT_LABELS} onSaved={vi.fn()} />);
+    render(<LabelSelect ticketId="TEST-00001" labels={[BUG]} projectLabels={PROJECT_LABELS} updatedAt={U0} onSaved={vi.fn()} />);
     await openPanel(user);
     const boxes = screen.getAllByRole('checkbox');
     expect(boxes).toHaveLength(4);

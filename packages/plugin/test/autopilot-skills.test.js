@@ -240,3 +240,30 @@ test('the existing skills and node types defer to the autopilot-worker overrides
     );
   }
 });
+
+// DFLT-00327: node claims and processing sessions. The skills and the node
+// agent carry the session and the claim token, and state the unstick rules.
+test('process-ticket, autopilot-worker and graph-node-agent carry the processing session and claim token', () => {
+  assertAll(read('skills/process-ticket/SKILL.md'), 'process-ticket', [
+    'graph-engine begin-session "<ticketId>"',
+    '`sessions_supported: false`',
+    'graph-engine get-executable "<ticketId>" --session "<sessionId>"',
+    "the node's `claim_token` from `get-executable`'s output and this session's `session_id`",
+    'graph-engine complete-node "<nodeId>" <true|false> --claim "<claimToken>" --session "<sessionId>"',
+    'graph-engine unstick-node "<nodeId>" --session "<sessionId>"',
+    '`NODE_CLAIMED_BY_OTHER`',
+    '**only after a person has confirmed that nobody is working on that node any more**',
+    '`same_machine: true`',
+    '`(another session on this machine)`',
+    'the nodes it claims are not protected at all'
+  ]);
+  assertAll(read('skills/autopilot-worker/SKILL.md'), 'autopilot-worker', [
+    'graph-engine begin-session "<ticketId>" --run "<runId>"',
+    'Never use `--force`',
+    'report `blocked` with reason `blocked`, naming the holder'
+  ]);
+  assertAll(read('agents/graph-node-agent.md'), 'graph-node-agent', [
+    'graph-engine complete-node "<nodeId>" <true|false> --claim "<claimToken>" --session "<sessionId>"',
+    'When the task gives neither, call those commands without the flags'
+  ]);
+});
