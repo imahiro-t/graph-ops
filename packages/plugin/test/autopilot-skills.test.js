@@ -138,14 +138,16 @@ test('autopilot-worker/SKILL.md sorts handoff items into a Drop kind before the 
     'When unsure whether an item matches, do not drop it',
     // Backlog items must say why they are worth working on.
     'why it is worth working on (one line)',
-    'An item goes into the backlog only if you can say in one line why it is worth working on; if you cannot, drop it.',
+    'An item goes into the backlog only if you can say in one line why it is worth working on; if you cannot, drop it with the reason "no reason worth working on".',
+    // The no-reason path is a recognised Drop reason alongside the five criteria.
+    'or when it is out of scope with no one-line reason worth working on (its Drop reason is then "no reason worth working on")',
     // Dropped items get no ticket and are only recorded.
     'A dropped item creates no ticket',
     'its decision (child ticket, backlog, dropped or not created)',
-    'For a dropped item, always record the kind and the reason, naming the Drop criterion it matches',
+    'For a dropped item, always record the kind and the reason, naming the Drop criterion it matches or "no reason worth working on"',
     // With autoCreateTickets off, dropped items are still shown to the person.
     '`<n>` counts every sorted item, dropped ones included',
-    'dropped items included, each with its kind and the reason (which Drop criterion it matches)',
+    'dropped items included, each with its kind and the reason (which Drop criterion it matches, or "no reason worth working on")',
     'picked by the person at handoff'
   ]);
   // The old two-kind wording, whose "drop the rest" clashed with the new kind, is gone.
