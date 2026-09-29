@@ -1316,7 +1316,7 @@ func (e *GraphEngine) CompleteNodeWith(nodeID string, passed bool, artifacts []d
 	// claim token this decision was made on. Comparing the token read here
 	// -- not only one passed with --claim -- is what closes the ABA window
 	// between this read and the write for a call without --claim too.
-	main := store.NodeStep{
+	ownStep := store.NodeStep{
 		NodeID:          node.ID,
 		Required:        true,
 		IfStatusIn:      []domain.NodeStatus{node.Status},
@@ -1333,15 +1333,30 @@ func (e *GraphEngine) CompleteNodeWith(nodeID string, passed bool, artifacts []d
 	// exactly one gets through, whichever the outcome.
 	if node.IsManual {
 		readAt := node.UpdatedAt
-		main.IfUpdatedAt = &readAt
+		ownStep.IfUpdatedAt = &readAt
 	}
 	decision := e.decisionFor(node, opts)
-	transition := store.NodeTransition{RequireTicketOpen: true, Artifacts: arts}
-	apply := func(t store.NodeTransition) error {
-		if _, err := e.applyTransition(node.TicketID, t); err != nil {
+	// decided is ownStep writing the node's new status together with the
+	// decision -- a copy, so each branch builds its own step and none of
+	// them changes ownStep for another.
+	decided := func(status domain.NodeStatus) store.NodeStep {
+		step := ownStep
+		step.SetStatus, step.Decision = &status, decision
+		return step
+	}
+	// commit writes steps together with this call's artifacts as one
+	// transition (blocking the ticket when blockTicket is set), then resyncs
+	// the ticket's status. Every branch below ends in exactly one commit.
+	commit := func(steps []store.NodeStep, blockTicket bool) error {
+		transition := store.NodeTransition{RequireTicketOpen: true, Artifacts: arts, Steps: steps}
+		if blockTicket {
+			blocked := true
+			transition.SetBlocked = &blocked
+		}
+		if _, err := e.applyTransition(node.TicketID, transition); err != nil {
 			return e.transitionConflictError(err, "completing node "+node.ID, node.ID, node.Status, node.TicketID)
 		}
-		return nil
+		return e.syncTicketStatus(node.TicketID)
 	}
 	// block is the two branches that stop the ticket without the node's own
 	// status changing (a round limit reached, no loop edge to take): the
@@ -1352,31 +1367,19 @@ func (e *GraphEngine) CompleteNodeWith(nodeID string, passed bool, artifacts []d
 	// manual node that ends up here: a decision is only ever written
 	// together with the status it set (store.decisionFieldsFor), and there
 	// is no status write. Its artifacts still are.
-	block := func() (CompleteNodeResult, error) {
-		blocked := true
+	block := func(step store.NodeStep) (CompleteNodeResult, error) {
 		// Touched (updated_at only) on a manual node, so that a concurrent
 		// decision on the same node conflicts -- see IfUpdatedAt above. An
 		// automatic node's row is left exactly as it was.
-		main.Touch = node.IsManual
-		transition.Steps = []store.NodeStep{main}
-		transition.SetBlocked = &blocked
-		if err := apply(transition); err != nil {
-			return CompleteNodeResult{}, err
-		}
-		if err := e.syncTicketStatus(node.TicketID); err != nil {
+		step.Touch = node.IsManual
+		if err := commit([]store.NodeStep{step}, true); err != nil {
 			return CompleteNodeResult{}, err
 		}
 		return CompleteNodeResult{NextStatus: "BLOCKED", LoopedBack: false}, nil
 	}
 
 	if passed {
-		done := domain.NodeDone
-		main.SetStatus, main.Decision = &done, decision
-		transition.Steps = []store.NodeStep{main}
-		if err := apply(transition); err != nil {
-			return CompleteNodeResult{}, err
-		}
-		if err := e.syncTicketStatus(node.TicketID); err != nil {
+		if err := commit([]store.NodeStep{decided(domain.NodeDone)}, false); err != nil {
 			return CompleteNodeResult{}, err
 		}
 		return CompleteNodeResult{NextStatus: "DONE", LoopedBack: false}, nil
@@ -1405,15 +1408,7 @@ func (e *GraphEngine) CompleteNodeWith(nodeID string, passed bool, artifacts []d
 	// on this string (confirmed during planning), so the only callers
 	// affected are this package's own tests.
 	if node.Type == domain.NodeTypeApprovalGate {
-		rejected := domain.NodeRejected
-		blocked := true
-		main.SetStatus, main.Decision = &rejected, decision
-		transition.Steps = []store.NodeStep{main}
-		transition.SetBlocked = &blocked
-		if err := apply(transition); err != nil {
-			return CompleteNodeResult{}, err
-		}
-		if err := e.syncTicketStatus(node.TicketID); err != nil {
+		if err := commit([]store.NodeStep{decided(domain.NodeRejected)}, true); err != nil {
 			return CompleteNodeResult{}, err
 		}
 		return CompleteNodeResult{NextStatus: "REJECTED", LoopedBack: false}, nil
@@ -1472,7 +1467,7 @@ func (e *GraphEngine) CompleteNodeWith(nodeID string, passed bool, artifacts []d
 		// which means the check is simply one round late -- the next
 		// failure blocks.
 		if newIteration && target.IterationCount+1 >= target.MaxIterations {
-			return block()
+			return block(ownStep)
 		}
 		// Computed before any write and only once the budget check above has
 		// passed: a loop-back that blocks the ticket must leave the graph
@@ -1529,27 +1524,21 @@ func (e *GraphEngine) CompleteNodeWith(nodeID string, passed bool, artifacts []d
 		// Deliberately not branched on node type: any node that reaches this
 		// loop-back branch has already judged its target's output. Last, so
 		// the sequential path keeps the old write order.
-		awaitingFix := domain.NodeAwaitingFix
-		main.SetStatus, main.Decision = &awaitingFix, decision
-		steps = append(steps, main)
-		transition.Steps = steps
-		if err := apply(transition); err != nil {
-			return CompleteNodeResult{}, err
-		}
-		// Resync (this branch did not use to, because it only ever moved one
-		// DONE node back to TODO): the rewind can now take several DONE nodes
-		// out at once, and a manual approval_gate among them turns the ticket
-		// into one waiting on a human again, which deriveTicketStatus reports
-		// as IN REVIEW. Every other status-changing path -- the passing
-		// branch, the blocking branches, ReopenNodes, UnstickNode -- already
-		// resyncs.
-		if err := e.syncTicketStatus(node.TicketID); err != nil {
+		steps = append(steps, decided(domain.NodeAwaitingFix))
+		// commit resyncs (this branch did not use to, because it only ever
+		// moved one DONE node back to TODO): the rewind can now take several
+		// DONE nodes out at once, and a manual approval_gate among them turns
+		// the ticket into one waiting on a human again, which
+		// deriveTicketStatus reports as IN REVIEW. Every other status-changing
+		// path -- the passing branch, the blocking branches, ReopenNodes,
+		// UnstickNode -- already resyncs.
+		if err := commit(steps, false); err != nil {
 			return CompleteNodeResult{}, err
 		}
 		return CompleteNodeResult{NextStatus: string(domain.NodeAwaitingFix), LoopedBack: true}, nil
 	}
 
-	return block()
+	return block(ownStep)
 }
 
 // ReopenNodes is the mechanical primitive behind rejection triage

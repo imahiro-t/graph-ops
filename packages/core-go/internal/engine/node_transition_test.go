@@ -680,3 +680,25 @@ func TestUnstickNodeWith_CompletedInBetween(t *testing.T) {
 		t.Fatalf("gate1 = %s, want DONE", n.Status)
 	}
 }
+
+// TestApplyTransition_NonRequiredCheckStepAppliedMatches: a step that writes
+// nothing and is not required is only a check, and its Applied has to mean
+// the same on both paths -- true when its conditions hold, false when they
+// do not -- without failing the transition (code review round 1, item 5).
+func TestApplyTransition_NonRequiredCheckStepAppliedMatches(t *testing.T) {
+	forEachTransitionPath(t, func(t *testing.T, e *GraphEngine, repo store.GraphRepository, projectID string) {
+		f := newTransitionFixture(t, repo, projectID)
+		done := domain.NodeDone
+		res, err := e.applyTransition(f.ticketID, store.NodeTransition{Steps: []store.NodeStep{
+			{NodeID: f.impl, IfStatusIn: []domain.NodeStatus{domain.NodeDone}},
+			{NodeID: f.release, IfStatusIn: []domain.NodeStatus{domain.NodeDone}},
+			{NodeID: f.gate2, Required: true, IfStatusIn: []domain.NodeStatus{domain.NodeDone}, SetStatus: &done},
+		}})
+		if err != nil {
+			t.Fatalf("applyTransition: %v", err)
+		}
+		if want := []bool{true, false, true}; fmt.Sprint(res.Applied) != fmt.Sprint(want) {
+			t.Fatalf("Applied = %v, want %v", res.Applied, want)
+		}
+	})
+}

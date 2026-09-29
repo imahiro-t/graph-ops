@@ -583,8 +583,11 @@ paths:
            `if_status_not_in` (it is none of them), `check_claim_token`
            (its `claim_token` equals `if_claim_token`, or is unset when
            `if_claim_token` is absent or `null`), `if_iteration_count` and
-           `if_updated_at` (its `updated_at` is exactly that string: the
-           node has not been written since graph-engine read it); an
+           `if_updated_at` (its stored `updated_at` is exactly that string,
+           compared character for character as stored and as `getNode` /
+           `listNodes` return it -- never parsed or compared as a point in
+           time: the node has not been written since graph-engine read
+           it); an
            absent condition is not checked. A `required` step also
            requires the node to exist. When a condition of a `required`
            step does not hold, or a ticket condition of step 2 did not,
@@ -608,6 +611,20 @@ paths:
            that a concurrent decision conditioned on `if_updated_at` loses).
            Every step with a write sets `updated_at`; a step with none of
            these writes nothing, not even `updated_at`.
+
+           `if_updated_at` and `touch` rely on this requirement: **every
+           write to a node** (each applied step with a write here, and
+           every `updateNode`) **must leave its `updated_at` a different
+           string from the one it had just before**. Store it with
+           sub-second precision (graph-engine's own backends use RFC 3339
+           with nanoseconds), and when the new value would equal the
+           previous one (a coarse clock, two writes in the same tick)
+           advance it past the previous value instead. A plugin that
+           rounds `updated_at` to whole seconds would let a `touch` in the
+           same second as the node's previous write keep the old string,
+           so a concurrent decision read before that `touch` would still
+           match its `if_updated_at` -- and both a simultaneous approve and
+           reject of a manual node would be written.
         6. With `set_blocked`, write the ticket's `blocked`.
 
         A step with `decision` but no `set_status`, a node of another
@@ -1380,7 +1397,9 @@ components:
         criteria: { type: string, description: Review criteria frozen at refine time; may be long. }
         config_id: { type: string }
         created_at: { $ref: "#/components/schemas/Timestamp" }
-        updated_at: { $ref: "#/components/schemas/Timestamp" }
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+          description: Must change (to a different string) on every write to the node; since 1.2 `applyNodeTransition` compares it exactly with `if_updated_at`, so store it with sub-second precision and return it unchanged.
         claimed_by_name:
           type: [string, "null"]
           x-since: "1.2"
@@ -1547,12 +1566,16 @@ components:
         check_claim_token: { type: boolean }
         if_claim_token: { type: [string, "null"] }
         if_iteration_count: { type: integer }
-        if_updated_at: { type: string, description: "The node's `updated_at` exactly as graph-engine read it." }
+        if_updated_at:
+          type: string
+          description: The node's `updated_at` exactly as graph-engine read it. The condition holds only when the stored `updated_at` is the identical string (no parsing, no time-based comparison); it relies on every node write changing `updated_at` (see `applyNodeTransition`).
         set_status: { $ref: "#/components/schemas/NodeStatus" }
         increment_iteration: { type: boolean }
         add_max_iterations: { type: integer, minimum: 0 }
         decision: { $ref: "#/components/schemas/NodeDecision" }
-        touch: { type: boolean, description: "Write `updated_at` even when nothing else is written." }
+        touch:
+          type: boolean
+          description: Write `updated_at` even when nothing else is written. The new value must be a different string from the stored one (see `applyNodeTransition`), so that a concurrent step conditioned on the old value with `if_updated_at` fails.
 
     NodeTransition:
       type: object

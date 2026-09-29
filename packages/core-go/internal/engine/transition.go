@@ -3,7 +3,8 @@ package engine
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/store"
@@ -69,6 +70,11 @@ func (e *GraphEngine) applyTransition(ticketID string, t store.NodeTransition) (
 // the round first, and the step is skipped. Relative writes
 // (IncrementIteration, AddMaxIterations) are turned into absolute ones from
 // a fresh read.
+//
+// Applied means what it means on the atomic path: a step's conditions held
+// (on the fresh read) and its writes, if any, were made. A step that writes
+// nothing is only a check -- a required one was checked above, before any
+// write; any other is checked on a fresh read where it stands.
 func (e *GraphEngine) applyNodeTransitionSequential(ticketID string, t store.NodeTransition) (store.NodeTransitionResult, error) {
 	if err := t.Validate(ticketID); err != nil {
 		return store.NodeTransitionResult{}, err
@@ -111,14 +117,22 @@ func (e *GraphEngine) applyNodeTransitionSequential(ticketID string, t store.Nod
 	applied := make([]bool, len(t.Steps))
 	for i, st := range t.Steps {
 		if !st.Writes() {
-			applied[i] = true
+			if st.Required {
+				applied[i] = true
+				continue
+			}
+			n, err := e.repo.GetNode(st.NodeID)
+			if err != nil {
+				return store.NodeTransitionResult{}, err
+			}
+			applied[i] = st.Conflict(n) == ""
 			continue
 		}
 		if !st.Required && st.HasConditions() && st.SetStatus != nil {
 			// The status CAS: newStatus has to be one of the excluded
 			// statuses (see GraphRepository.ClaimNode), which the loop
 			// target's step (TODO, excluding TODO) satisfies.
-			if len(st.IfStatusIn) > 0 || st.CheckClaimToken || st.IfIterationCount != nil || !containsNodeStatus(st.IfStatusNotIn, *st.SetStatus) {
+			if len(st.IfStatusIn) > 0 || st.CheckClaimToken || st.IfIterationCount != nil || !slices.Contains(st.IfStatusNotIn, *st.SetStatus) {
 				return store.NodeTransitionResult{}, fmt.Errorf("node transition step %s: a conditional non-required step can only be a status CAS (if_status_not_in including set_status) on this data source", st.NodeID)
 			}
 			claimed, err := e.repo.ClaimNode(st.NodeID, *st.SetStatus, st.IfStatusNotIn, nil)
@@ -131,16 +145,7 @@ func (e *GraphEngine) applyNodeTransitionSequential(ticketID string, t store.Nod
 			applied[i] = true
 			written[st.NodeID] = *claimed
 			if st.IncrementIteration || st.AddMaxIterations != 0 {
-				patch := store.NodePatch{}
-				if st.IncrementIteration {
-					next := claimed.IterationCount + 1
-					patch.IterationCount = &next
-				}
-				if st.AddMaxIterations != 0 {
-					max := claimed.MaxIterations + st.AddMaxIterations
-					patch.MaxIterations = &max
-				}
-				n, err := e.repo.UpdateNode(st.NodeID, patch)
+				n, err := e.repo.UpdateNode(st.NodeID, relativePatch(st, *claimed))
 				if err != nil {
 					return store.NodeTransitionResult{}, err
 				}
@@ -148,7 +153,7 @@ func (e *GraphEngine) applyNodeTransitionSequential(ticketID string, t store.Nod
 			}
 			continue
 		}
-		patch := store.NodePatch{Status: st.SetStatus}
+		var patch store.NodePatch
 		if st.IncrementIteration || st.AddMaxIterations != 0 {
 			cur, err := e.repo.GetNode(st.NodeID)
 			if err != nil {
@@ -160,15 +165,9 @@ func (e *GraphEngine) applyNodeTransitionSequential(ticketID string, t store.Nod
 				}
 				continue
 			}
-			if st.IncrementIteration {
-				next := cur.IterationCount + 1
-				patch.IterationCount = &next
-			}
-			if st.AddMaxIterations != 0 {
-				max := cur.MaxIterations + st.AddMaxIterations
-				patch.MaxIterations = &max
-			}
+			patch = relativePatch(st, *cur)
 		}
+		patch.Status = st.SetStatus
 		n, err := e.repo.UpdateNode(st.NodeID, patch)
 		if err != nil {
 			return store.NodeTransitionResult{}, err
@@ -191,28 +190,27 @@ func (e *GraphEngine) applyNodeTransitionSequential(ticketID string, t store.Nod
 	}
 
 	out := store.NodeTransitionResult{Applied: applied}
-	for _, id := range sortedKeys(written) {
+	for _, id := range slices.Sorted(maps.Keys(written)) {
 		out.Nodes = append(out.Nodes, written[id])
 	}
 	return out, nil
 }
 
-func containsNodeStatus(list []domain.NodeStatus, s domain.NodeStatus) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
+// relativePatch turns st's relative writes (IncrementIteration,
+// AddMaxIterations) into absolute ones computed from cur, a fresh read of
+// the node -- the sequential path's stand-in for the store adding to the
+// stored value. Status is left for the caller.
+func relativePatch(st store.NodeStep, cur domain.GraphNode) store.NodePatch {
+	var patch store.NodePatch
+	if st.IncrementIteration {
+		nextCount := cur.IterationCount + 1
+		patch.IterationCount = &nextCount
 	}
-	return false
-}
-
-func sortedKeys(m map[string]domain.GraphNode) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
+	if st.AddMaxIterations != 0 {
+		nextMax := cur.MaxIterations + st.AddMaxIterations
+		patch.MaxIterations = &nextMax
 	}
-	sort.Strings(keys)
-	return keys
+	return patch
 }
 
 // transitionConflictError turns a *store.NodeTransitionConflictError into the

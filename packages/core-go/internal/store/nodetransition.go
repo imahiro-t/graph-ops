@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -236,10 +237,10 @@ func (st NodeStep) Conflict(n *domain.GraphNode) string {
 	if n == nil {
 		return ConflictNodeMissing
 	}
-	if len(st.IfStatusIn) > 0 && !containsStatus(st.IfStatusIn, n.Status) {
+	if len(st.IfStatusIn) > 0 && !slices.Contains(st.IfStatusIn, n.Status) {
 		return ConflictStatus
 	}
-	if containsStatus(st.IfStatusNotIn, n.Status) {
+	if slices.Contains(st.IfStatusNotIn, n.Status) {
 		return ConflictStatus
 	}
 	if st.CheckClaimToken {
@@ -287,15 +288,6 @@ func (st NodeStep) ApplyTo(n *domain.GraphNode, now string) {
 		n.IterationCount++
 	}
 	n.MaxIterations += st.AddMaxIterations
-}
-
-func containsStatus(list []domain.NodeStatus, s domain.NodeStatus) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 // stepNodeIDs is the steps' distinct node IDs, ascending -- the order the SQL
