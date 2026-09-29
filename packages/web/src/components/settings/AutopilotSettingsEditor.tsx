@@ -91,7 +91,12 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
   const idPrefix = useId();
   const [data, setData] = useState<AutopilotSettingsResponse | null>(null);
   const [draft, setDraft] = useState<Draft>({});
-  const [loading, setLoading] = useState(false);
+  // Starts true whenever there is a project to load for: the first render
+  // then already shows the loading line, so the settings are never drawn with
+  // their defaults for a frame before load() runs (DFLT-00323, DFLT-00343).
+  // With no project the component returns the noProject message and never
+  // loads, so there is nothing to wait for.
+  const [loading, setLoading] = useState(projectId !== '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const { savedFlash, showSavedFlash } = useSavedFlash();
