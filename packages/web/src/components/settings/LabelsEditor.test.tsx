@@ -1944,7 +1944,12 @@ describe('LabelsEditor load failure, retry and project switch', () => {
     render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
     await act(async () => { take('proj-A').reject(new Error('network down')); });
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('network down');
+    const alert = await screen.findByRole('alert');
+    // The Labels tab's own wording: the create form stays on screen,
+    // disabled, so the message says labels cannot be created -- not the
+    // other editors' "the editor stays hidden".
+    expect(alert).toHaveTextContent(i18n.t('settings.labels.loadFailed', { message: 'network down' }));
+    expect(alert).not.toHaveTextContent(i18n.t('settings.common.loadFailed', { message: 'network down' }));
     expect(retryButton()).toBeInTheDocument();
     expect(screen.queryByText(i18n.t('settings.labels.empty'))).not.toBeInTheDocument();
     expect(statusTexts()).not.toContain(i18n.t('settings.labels.loading'));
@@ -2001,7 +2006,7 @@ describe('LabelsEditor load failure, retry and project switch', () => {
     await act(async () => { take('proj-A').reject(new Error('still down')); });
 
     await waitFor(() => expect(screen.getByRole('alert')).not.toBe(first));
-    expect(screen.getByRole('alert')).toHaveTextContent('still down');
+    expect(screen.getByRole('alert')).toHaveTextContent(i18n.t('settings.labels.loadFailed', { message: 'still down' }));
     expect(retryButton()).toHaveFocus();
     expect(retryButton()).not.toHaveAttribute('aria-busy');
     expect(nameInput()).toBeDisabled();

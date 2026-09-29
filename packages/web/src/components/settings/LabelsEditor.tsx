@@ -646,7 +646,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       {/* List */}
       {loadFailed && (
         <LoadFailure
-          message={t('settings.common.loadFailed', { message: loadError.message })}
+          message={t('settings.labels.loadFailed', { message: loadError.message })}
           retrying={retrying}
           onRetry={() => void retryLoad()}
           failureKey={loadFailures}
