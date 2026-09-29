@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -275,6 +276,7 @@ Commands:
                                            an unknown project (PROJECT_NOT_FOUND) is an error and creates
                                            nothing. Renaming and deleting labels are Web UI only)
   refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...
+                [--if-updated-at <updated_at>]
                                           (replaces the ticket's description with the refined text; builds
                                            no graph. Description "-" -> read from stdin and saved byte
                                            for byte (trailing newline included), same as create-ticket;
@@ -296,7 +298,14 @@ Commands:
                                            (pass --project <the ticket's project_id> to both, since they
                                            otherwise resolve the project from the cwd). Like any refine, this
                                            sets the status to REFINED; to fix a title, description or
-                                           priority without changing the status, use update-ticket)
+                                           priority without changing the status, use update-ticket.
+                                           --if-updated-at <updated_at>: pass the "updated_at" get-ticket
+                                           printed, as is (compared as an exact string). If the ticket has
+                                           been written since, the command fails with TICKET_CHANGED and
+                                           nothing changes -- not the description, priority, labels or
+                                           refined_at, and the status does not become REFINED; read it
+                                           again, merge the other change and refine with the new
+                                           updated_at. Omitted -> overwrites unconditionally, as before)
   close-ticket <ticketId> [--reason "<text>"]
                                           (withdraws the ticket without marking it complete: sets status to
                                            CLOSED from ANY status, including one with nodes IN PROGRESS/IN
@@ -319,6 +328,7 @@ Commands:
                                            even with nodes IN PROGRESS. An unknown id is an error
                                            (TICKET_NOT_FOUND). Prints {"id":"<ticketId>","deleted":true})
   update-ticket <ticketId> [--title <text>] [--description <text|->] [--priority <HIGH|MEDIUM|LOW>]
+                [--if-updated-at <updated_at>]
                                           (changes only the given fields; the status and refined_at are
                                            NOT changed (unlike refine-ticket), nor are labels, assignee,
                                            auto_executable or blocked -- labels via refine-ticket --label or
@@ -329,7 +339,12 @@ Commands:
                                            (see Help below). No field given, a priority other than
                                            HIGH/MEDIUM/LOW, an empty title, an unknown flag (e.g. --assignee)
                                            or an unknown id (TICKET_NOT_FOUND) is an error and changes
-                                           nothing. Prints the updated ticket JSON)
+                                           nothing. --if-updated-at <updated_at>: pass the "updated_at"
+                                           get-ticket printed, as is (an exact string match; its value
+                                           cannot start with "-"); if the ticket has been written since,
+                                           the command fails with TICKET_CHANGED and changes nothing.
+                                           Omitted -> overwrites unconditionally, as before. Prints the
+                                           updated ticket JSON)
   get-ticket <ticketId> [--session <sessionId>]
                                           (the ticket with its nodes, edges and artifacts, plus
                                            "parent_ticket_id", "parent" ({id,title,status} or null) and
@@ -593,8 +608,32 @@ func printJSON(v any) error {
 // error and check that both commands report the same description error.
 const (
 	createTicketUsageLine = `usage: graph-engine create-ticket <title> [description|-] [--project <id>] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]... [--parent <ticketId>]`
-	refineTicketUsageLine = `usage: graph-engine refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]...`
+	refineTicketUsageLine = `usage: graph-engine refine-ticket <ticketId> [description|-] [--priority <HIGH|MEDIUM|LOW>] [--label <name>]... [--if-updated-at <updated_at>]`
 )
+
+// ifUpdatedAtValue validates the value of --if-updated-at (DFLT-00330) for
+// update-ticket and refine-ticket: the updated_at get-ticket printed, passed
+// as is. A missing value, or a next argument that starts with "-" (another
+// flag, or refine-ticket's "-" description), is a usage error rather than a
+// value -- no updated_at starts with "-", and taking "--priority" as one
+// would quietly turn the rest of the command line into a description.
+func ifUpdatedAtValue(usage string, rest []string, i int) (string, error) {
+	if i+1 >= len(rest) || rest[i+1] == "" || strings.HasPrefix(rest[i+1], "-") {
+		return "", fmt.Errorf("%s: --if-updated-at requires a value (the ticket's updated_at as get-ticket printed it)", usage)
+	}
+	return rest[i+1], nil
+}
+
+// withTicketChangedCode prefixes a TICKET_CHANGED error with its code, so
+// the CLI's "Error: ..." line names it the way other conflict errors do
+// (e.g. NODE_CLAIMED_BY_OTHER). Any other error is returned unchanged.
+func withTicketChangedCode(err error) error {
+	var apiErr *domain.APIError
+	if errors.As(err, &apiErr) && apiErr.Code == domain.ErrCodeTicketChanged {
+		return fmt.Errorf("%s: %w", domain.ErrCodeTicketChanged, err)
+	}
+	return err
+}
 
 // readDescriptionArg resolves the [description|-] positional shared by
 // create-ticket and refine-ticket, so both commands accept and reject the
@@ -1054,8 +1093,21 @@ func cmdRefineTicket(eng *engine.GraphEngine, args []string) error {
 	var priorityGiven bool
 	var labelNames []string
 	var positional []string
+	var ifUpdatedAt *string
 	rest := args[1:]
 	for i := 0; i < len(rest); i++ {
+		if rest[i] == "--if-updated-at" {
+			if ifUpdatedAt != nil {
+				return fmt.Errorf("%s: --if-updated-at given more than once", usage)
+			}
+			v, err := ifUpdatedAtValue(usage, rest, i)
+			if err != nil {
+				return err
+			}
+			ifUpdatedAt = &v
+			i++
+			continue
+		}
 		if rest[i] == "--label" {
 			if i+1 >= len(rest) {
 				return fmt.Errorf("%s: --label requires a value", usage)
@@ -1104,9 +1156,9 @@ func cmdRefineTicket(eng *engine.GraphEngine, args []string) error {
 		labels = engine.SetLabelsByName(labelNames)
 	}
 
-	ticket, err := eng.RefineTicketWithLabels(ticketID, description, priority, labels)
+	ticket, err := eng.RefineTicketIfUnchanged(ticketID, description, priority, labels, ifUpdatedAt)
 	if err != nil {
-		return err
+		return withTicketChangedCode(err)
 	}
 	return printJSON(ticket)
 }
@@ -1237,22 +1289,38 @@ type deleteTicketResult struct {
 //     stored byte for byte. Any other value -- "" to clear the description,
 //     or "- item" -- is used literally.
 //
-// A flag's value is always the next argument, even when it starts with "-".
+// A flag's value is always the next argument, even when it starts with "-"
+// -- except --if-updated-at's (DFLT-00330), which the write is conditioned
+// on: the ticket's stored updated_at must be exactly that string, or the
+// command fails with TICKET_CHANGED and nothing is written. Without it the
+// fields are overwritten unconditionally, as before.
 // An unknown ID is TICKET_NOT_FOUND on every backend (checked with GetTicket
 // first, since an HTTP data source's PATCH error depends on the plugin).
 // Prints the updated ticket (with labels) as JSON.
 func cmdUpdateTicket(repo store.GraphRepository, args []string) error {
-	const usage = `usage: graph-engine update-ticket <ticketId> [--title <text>] [--description <text|->] [--priority <HIGH|MEDIUM|LOW>]`
+	const usage = `usage: graph-engine update-ticket <ticketId> [--title <text>] [--description <text|->] [--priority <HIGH|MEDIUM|LOW>] [--if-updated-at <updated_at>]`
 	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
 		return fmt.Errorf(usage)
 	}
 	ticketID := args[0]
 
 	values := map[string]string{}
+	var ifUpdatedAt *string
 	rest := args[1:]
 	for i := 0; i < len(rest); i++ {
 		flag := rest[i]
 		switch flag {
+		case "--if-updated-at":
+			if ifUpdatedAt != nil {
+				return fmt.Errorf("%s: --if-updated-at given more than once", usage)
+			}
+			v, err := ifUpdatedAtValue(usage, rest, i)
+			if err != nil {
+				return err
+			}
+			ifUpdatedAt = &v
+			i++
+			continue
 		case "--title", "--description", "--priority":
 		default:
 			return fmt.Errorf("%s: unrecognized argument %q", usage, flag)
@@ -1270,7 +1338,7 @@ func cmdUpdateTicket(repo store.GraphRepository, args []string) error {
 		return fmt.Errorf("%s: specify at least one of --title, --description or --priority", usage)
 	}
 
-	var patch store.TicketPatch
+	patch := store.TicketPatch{IfUpdatedAt: ifUpdatedAt}
 	if v, ok := values["--priority"]; ok {
 		parsed, err := domain.ParseTicketPriority(v)
 		if err != nil {
@@ -1308,7 +1376,7 @@ func cmdUpdateTicket(repo store.GraphRepository, args []string) error {
 	}
 	ticket, err := repo.UpdateTicket(ticketID, patch)
 	if err != nil {
-		return err
+		return withTicketChangedCode(err)
 	}
 	return printJSON(ticket)
 }

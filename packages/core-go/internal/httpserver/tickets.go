@@ -376,9 +376,20 @@ func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 		// 400. Every ID must be a label of the ticket's project, otherwise
 		// the whole PATCH is a 400 LABEL_NOT_FOUND and nothing is written.
 		LabelIDs nullableStringSlice `json:"label_ids"`
+		// IfUpdatedAt (DFLT-00330) is a condition, not a field: when
+		// present, nothing is written unless the ticket's stored updated_at
+		// is exactly this string, and a mismatch is a 409 TICKET_CHANGED.
+		// Absent (or null) writes unconditionally, as before. The Web UI
+		// sends it with label changes, which replace the whole set.
+		IfUpdatedAt *string `json:"if_updated_at"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.IfUpdatedAt != nil && *body.IfUpdatedAt == "" {
+		writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation,
+			"if_updated_at cannot be empty: send the ticket's updated_at as read, or leave it out"))
 		return
 	}
 
@@ -391,6 +402,7 @@ func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
 	patch := store.TicketPatch{
 		Title: body.Title, Description: body.Description,
 		AutoExecutable: body.AutoExecutable, Blocked: body.Blocked,
+		IfUpdatedAt: body.IfUpdatedAt,
 	}
 	if body.Status != nil {
 		status, err := domain.ParseTicketStatus(*body.Status)

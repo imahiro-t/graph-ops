@@ -320,6 +320,20 @@ func (e *GraphEngine) RefineTicket(ticketID string, description string, priority
 // status and refined_at all stay as they were. Otherwise the labels are
 // replaced in the same UpdateTicket call as everything else.
 func (e *GraphEngine) RefineTicketWithLabels(ticketID string, description string, priority PriorityChange, labels LabelChange) (*domain.Ticket, error) {
+	return e.RefineTicketIfUnchanged(ticketID, description, priority, labels, nil)
+}
+
+// RefineTicketIfUnchanged is RefineTicketWithLabels conditioned on the
+// ticket's updated_at (refine-ticket --if-updated-at, DFLT-00330): with a
+// non-nil ifUpdatedAt, a ticket whose stored updated_at is not exactly that
+// string fails with TICKET_CHANGED and nothing is written -- not the
+// description, priority, labels or refined_at, and the status does not
+// become REFINED. The comparison is made early, right after the CLOSED
+// check and before label names are resolved, and again atomically by the
+// UpdateTicket that writes everything (TicketPatch.IfUpdatedAt), so a
+// change made in between is caught too. A nil ifUpdatedAt overwrites
+// unconditionally, as before.
+func (e *GraphEngine) RefineTicketIfUnchanged(ticketID string, description string, priority PriorityChange, labels LabelChange, ifUpdatedAt *string) (*domain.Ticket, error) {
 	ticket, err := e.repo.GetTicket(ticketID)
 	if err != nil {
 		return nil, err
@@ -330,8 +344,13 @@ func (e *GraphEngine) RefineTicketWithLabels(ticketID string, description string
 	if ticket.Status == domain.TicketClosed {
 		return nil, fmt.Errorf("ticket %s is CLOSED; reopen it first with reopen-ticket", ticketID)
 	}
+	if ifUpdatedAt != nil && ticket.UpdatedAt != *ifUpdatedAt {
+		return nil, domain.NewAPIError(domain.ErrCodeTicketChanged,
+			"ticket %s was changed by somebody else since it was read (updated_at is %s, not %s), so nothing was written; read it again with get-ticket, merge the change and refine again with the new updated_at", ticketID, ticket.UpdatedAt, *ifUpdatedAt).
+			WithDetails(map[string]any{"expected_updated_at": *ifUpdatedAt, "current_updated_at": ticket.UpdatedAt})
+	}
 
-	patch := store.TicketPatch{}
+	patch := store.TicketPatch{IfUpdatedAt: ifUpdatedAt}
 	if labels.set {
 		ids, err := e.resolveLabelNames(ticket.ProjectID, labels.names)
 		if err != nil {
