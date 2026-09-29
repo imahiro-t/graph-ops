@@ -58,8 +58,8 @@ func (s StoreSharedRuns) List(projectID string) ([]*autopilot.Run, error) {
 }
 
 // Begin implements autopilot.SharedRuns.
-func (s StoreSharedRuns) Begin(projectID string, decide func(shared []*autopilot.Run) (*autopilot.Run, []string, error)) error {
-	err := s.Store.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
+func (s StoreSharedRuns) Begin(projectID string, decide func(shared []*autopilot.Run) (*autopilot.Run, []string, error)) (dropErr, err error) {
+	dropErr, err = s.Store.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
 		run, drop, err := decide(s.runs(existing))
 		if err != nil {
 			return nil, nil, err
@@ -73,7 +73,10 @@ func (s StoreSharedRuns) Begin(projectID string, decide func(shared []*autopilot
 		}
 		return &rec, drop, nil
 	})
-	return sharedErr(err)
+	if err != nil {
+		return nil, sharedErr(err)
+	}
+	return sharedErr(dropErr), nil
 }
 
 // Save implements autopilot.SharedRuns.
@@ -120,7 +123,7 @@ func (s *Service) shareRun(run *autopilot.Run) {
 	if shared == nil || run == nil {
 		return
 	}
-	autopilot.LogSharedError(s.logf, "sharing autopilot run "+run.ID,
+	autopilot.LogSharedError(s.logf, autopilot.SharedOpShare, "sharing autopilot run "+run.ID,
 		"the run goes on; other members may see it as interrupted until the shared copy is written again",
 		shared.Save(run))
 }
@@ -135,7 +138,7 @@ func (s *Service) otherRuns(projectID string) []*autopilot.Run {
 		return nil
 	}
 	runs, err := shared.List(projectID)
-	autopilot.LogSharedError(s.logf, "listing the shared autopilot runs of project "+projectID,
+	autopilot.LogSharedError(s.logf, autopilot.SharedOpList, "listing the shared autopilot runs of project "+projectID,
 		"whether another member's run has overtaken this one cannot be told; the run goes on", err)
 	if err != nil {
 		return nil

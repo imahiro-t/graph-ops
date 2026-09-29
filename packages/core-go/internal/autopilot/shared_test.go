@@ -22,6 +22,11 @@ type memShared struct {
 	records map[string]domain.AutopilotRunRecord
 	deletes []string
 	dropped []string
+	// dropFail makes Begin's drop of these IDs fail (as an HTTP data
+	// source's DELETE can), leaving the record; beginDrops counts the drops
+	// Begin was asked for (the begun run not counted).
+	dropFail   map[string]error
+	beginDrops int
 }
 
 func newMemShared() *memShared { return &memShared{records: map[string]domain.AutopilotRunRecord{}} }
@@ -42,30 +47,39 @@ func (m *memShared) List(projectID string) ([]*Run, error) {
 	return out, nil
 }
 
-func (m *memShared) Begin(projectID string, decide func([]*Run) (*Run, []string, error)) error {
+func (m *memShared) Begin(projectID string, decide func([]*Run) (*Run, []string, error)) (dropErr, err error) {
 	runs, err := m.List(projectID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	run, drop, err := decide(runs)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if run != nil {
 		if err := m.Save(run); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var failed []string
 	for _, id := range drop {
 		if run != nil && id == run.ID {
+			continue
+		}
+		m.beginDrops++
+		if ferr := m.dropFail[id]; ferr != nil {
+			failed = append(failed, id+": "+ferr.Error())
 			continue
 		}
 		delete(m.records, id)
 		m.dropped = append(m.dropped, id)
 	}
-	return nil
+	if len(failed) > 0 {
+		return errors.New("deleting settled autopilot run records: " + strings.Join(failed, "; ")), nil
+	}
+	return nil, nil
 }
 
 func (m *memShared) Save(run *Run) error {
@@ -260,8 +274,8 @@ func TestShared_UnsupportedFallsBackAndWarnsOnce(t *testing.T) {
 type unsupportedShared struct{}
 
 func (unsupportedShared) List(string) ([]*Run, error) { return nil, ErrSharedRunsUnsupported }
-func (unsupportedShared) Begin(string, func([]*Run) (*Run, []string, error)) error {
-	return ErrSharedRunsUnsupported
+func (unsupportedShared) Begin(string, func([]*Run) (*Run, []string, error)) (dropErr, err error) {
+	return nil, ErrSharedRunsUnsupported
 }
 func (unsupportedShared) Save(*Run) error     { return ErrSharedRunsUnsupported }
 func (unsupportedShared) Delete(string) error { return ErrSharedRunsUnsupported }
@@ -274,14 +288,14 @@ func TestShared_LogSharedErrorIsReArmedBySuccess(t *testing.T) {
 	t.Cleanup(ResetSharedErrorLog)
 	logs := &logSink{}
 	down := errors.New("db down")
-	LogSharedError(logs.logf, "listing runs", "showing this machine's runs only", down)
-	LogSharedError(logs.logf, "listing runs", "showing this machine's runs only", down)
+	LogSharedError(logs.logf, SharedOpList, "listing runs", "showing this machine's runs only", down)
+	LogSharedError(logs.logf, SharedOpList, "listing runs", "showing this machine's runs only", down)
 	if len(logs.lines) != 1 {
 		t.Fatalf("a repeated failure was logged again: %v", logs.lines)
 	}
-	LogSharedError(logs.logf, "listing runs", "showing this machine's runs only", nil)
-	LogSharedError(logs.logf, "listing runs", "showing this machine's runs only", nil)
-	LogSharedError(logs.logf, "listing runs", "showing this machine's runs only", down)
+	LogSharedError(logs.logf, SharedOpList, "listing runs", "showing this machine's runs only", nil)
+	LogSharedError(logs.logf, SharedOpList, "listing runs", "showing this machine's runs only", nil)
+	LogSharedError(logs.logf, SharedOpList, "listing runs", "showing this machine's runs only", down)
 	if len(logs.lines) != 3 || !strings.Contains(logs.lines[1], "reachable again") || !strings.Contains(logs.lines[2], "db down") {
 		t.Fatalf("failure, recovery, same failure = %v", logs.lines)
 	}
@@ -292,12 +306,46 @@ func TestShared_LogSharedErrorSaysTheCallersConsequence(t *testing.T) {
 	ResetSharedErrorLog()
 	t.Cleanup(ResetSharedErrorLog)
 	logs := &logSink{}
-	LogSharedError(logs.logf, "listing runs", "showing this machine's runs only", errors.New("db down"))
+	LogSharedError(logs.logf, SharedOpList, "listing runs", "showing this machine's runs only", errors.New("db down"))
 	if len(logs.lines) != 1 || logs.lines[0] != "autopilot: listing runs: db down (showing this machine's runs only)" {
 		t.Fatalf("logged %v", logs.lines)
 	}
 	if strings.Contains(logs.lines[0], "the run goes on") {
 		t.Fatal("a listing failure carries a run's consequence")
+	}
+}
+
+// DFLT-00337: the thinning is per kind of call. Another kind succeeding
+// while listing fails says nothing and does not re-arm listing; only
+// listing succeeding does.
+func TestShared_LogSharedErrorIsPerKind(t *testing.T) {
+	ResetSharedErrorLog()
+	t.Cleanup(ResetSharedErrorLog)
+	logs := &logSink{}
+	down := errors.New("db down")
+	LogSharedError(logs.logf, SharedOpList, "listing runs", "showing this machine's runs only", down)
+	LogSharedError(logs.logf, SharedOpShare, "sharing run-1", "the run goes on", nil)
+	LogSharedError(logs.logf, SharedOpRetention, "deleting settled runs", "later", nil)
+	if len(logs.lines) != 1 {
+		t.Fatalf("another kind's success was logged while listing fails: %v", logs.lines)
+	}
+	LogSharedError(logs.logf, SharedOpList, "listing runs", "showing this machine's runs only", down)
+	if len(logs.lines) != 1 {
+		t.Fatalf("another kind's success re-armed listing's thinning: %v", logs.lines)
+	}
+	// A failure of another kind is reported on its own, even while listing
+	// fails with the same error.
+	LogSharedError(logs.logf, SharedOpShare, "listing runs", "showing this machine's runs only", down)
+	if len(logs.lines) != 2 {
+		t.Fatalf("a failure of another kind was thinned out: %v", logs.lines)
+	}
+	LogSharedError(logs.logf, SharedOpList, "listing runs", "showing this machine's runs only", nil)
+	if len(logs.lines) != 3 || logs.lines[2] != "autopilot: the shared autopilot runs are reachable again (listing runs)" {
+		t.Fatalf("listing's recovery = %v", logs.lines)
+	}
+	LogSharedError(logs.logf, SharedOpList, "listing runs", "showing this machine's runs only", nil)
+	if len(logs.lines) != 3 {
+		t.Fatalf("a recovery was said twice: %v", logs.lines)
 	}
 }
 
@@ -321,14 +369,12 @@ func TestShared_SharedRetention(t *testing.T) {
 	stale.State = RunRunning // interrupted: its heartbeat expired long ago
 	shared = append(shared, active, stale)
 	drop := SharedRetention(shared, "run-old-00", now)
-	want := map[string]bool{"run-stale": true, "run-old-01": true, "run-old-02": true} // run-old-00 is the one kept
-	if len(drop) != len(want) {
-		t.Fatalf("drop = %v", drop)
-	}
-	for _, id := range drop {
-		if !want[id] {
-			t.Fatalf("dropped %s (drop %v)", id, drop)
-		}
+	// run-old-00 is the one kept. The least recently updated come first
+	// (DFLT-00337), so a data source deleting only the first few drops the
+	// oldest.
+	want := []string{"run-stale", "run-old-01", "run-old-02"}
+	if fmt.Sprint(drop) != fmt.Sprint(want) {
+		t.Fatalf("drop = %v, want %v", drop, want)
 	}
 	if SharedRetention(shared[:KeepSharedSettledRuns], "", now) != nil {
 		t.Fatal("dropped records within the limit")
@@ -365,6 +411,123 @@ func TestShared_BeginDropsSettledRecordsBeyondTheLimit(t *testing.T) {
 		if _, ok := m.get(id); !ok {
 			t.Fatalf("%s was dropped", id)
 		}
+	}
+}
+
+// retentionLines is what logs holds about the retention's deletes.
+func retentionLines(logs *logSink) []string {
+	logs.mu.Lock()
+	defer logs.mu.Unlock()
+	var out []string
+	for _, l := range logs.lines {
+		if strings.Contains(l, "deleting settled shared autopilot runs") {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// sharedRegistryWithSettled is sharedRegistry with KeepSharedSettledRuns+2
+// of Bob's settled records (run-bob-00 the oldest) and its log captured.
+func sharedRegistryWithSettled(t *testing.T) (*Registry, *memShared, *logSink) {
+	t.Helper()
+	ResetSharedErrorLog()
+	t.Cleanup(ResetSharedErrorLog)
+	g, clock, m := sharedRegistry(t)
+	logs := &logSink{}
+	g.Logf = logs.logf
+	for i := 0; i < KeepSharedSettledRuns+2; i++ {
+		if err := m.Save(settledRun(fmt.Sprintf("run-bob-%02d", i), clock.Now().Add(-time.Duration(50-i)*time.Hour), "machine-b")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return g, m, logs
+}
+
+// DFLT-00337: a retention delete that fails does not fail the start, and is
+// logged on one line -- once while it keeps failing the same way, then a
+// recovery line when it succeeds. A start with nothing to delete logs
+// nothing.
+func TestShared_BeginLogsAFailedRetentionDelete(t *testing.T) {
+	g, m, logs := sharedRegistryWithSettled(t)
+	m.dropFail = map[string]error{"run-bob-00": errors.New("status 500")}
+
+	res, err := sharedBegin(g, "R1")
+	if err != nil {
+		t.Fatalf("a failed retention delete failed the start: %v", err)
+	}
+	if _, ok := m.get(res.Run.ID); !ok {
+		t.Fatal("the run's shared record was not saved")
+	}
+	if _, err := g.Load("proj-A", res.Run.ID); err != nil {
+		t.Fatalf("the run was not saved locally: %v", err)
+	}
+	want := "autopilot: deleting settled shared autopilot runs of project proj-A: deleting settled autopilot run records: run-bob-00: status 500 (they are deleted by a later start)"
+	if got := retentionLines(logs); len(got) != 1 || got[0] != want {
+		t.Fatalf("logged %q, want %q", got, want)
+	}
+
+	// The same failure at the next start is thinned out.
+	if _, err := sharedBegin(g, "R2"); err != nil {
+		t.Fatal(err)
+	}
+	if got := retentionLines(logs); len(got) != 1 {
+		t.Fatalf("the same failure was logged again: %q", got)
+	}
+
+	// The delete getting through says so, once.
+	m.dropFail = nil
+	if _, err := sharedBegin(g, "R3"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m.get("run-bob-00"); ok {
+		t.Fatal("run-bob-00 was not deleted once its delete worked")
+	}
+	got := retentionLines(logs)
+	if len(got) != 2 || got[1] != "autopilot: the shared autopilot runs are reachable again (deleting settled shared autopilot runs of project proj-A)" {
+		t.Fatalf("logged %q, want one recovery line", got)
+	}
+
+	// Nothing left to delete: no DELETE asked for, nothing logged.
+	logs.mu.Lock()
+	before := len(logs.lines)
+	logs.mu.Unlock()
+	drops := m.beginDrops
+	if _, err := sharedBegin(g, "R4"); err != nil {
+		t.Fatal(err)
+	}
+	if m.beginDrops != drops {
+		t.Fatalf("a start within the limit asked for %d drop(s)", m.beginDrops-drops)
+	}
+	logs.mu.Lock()
+	after := logs.lines[before:]
+	logs.mu.Unlock()
+	if len(after) != 0 {
+		t.Fatalf("a start with nothing to delete logged %q", after)
+	}
+}
+
+// Plan review, round 1, finding 1: when the local save fails after the data
+// source's Begin (which already sent the deletes), a failed delete is still
+// logged -- on one line, with its consequence -- besides the start failing
+// and being compensated.
+func TestShared_BeginLogsAFailedRetentionDeleteWhenTheLocalSaveFails(t *testing.T) {
+	g, m, logs := sharedRegistryWithSettled(t)
+	m.dropFail = map[string]error{"run-bob-00": errors.New("status 500")}
+	boom := errors.New("disk full")
+	var tried string
+	g.failSave = func(run *Run) error { tried = run.ID; return boom }
+
+	if _, err := sharedBegin(g, "R"); !errors.Is(err, boom) {
+		t.Fatalf("Begin = %v, want the local save's failure", err)
+	}
+	if _, ok := m.get(tried); ok || len(m.deletes) != 1 || m.deletes[0] != tried {
+		t.Fatalf("not compensated: deletes %v", m.deletes)
+	}
+	got := retentionLines(logs)
+	if len(got) != 1 || strings.ContainsAny(got[0], "\r\n") ||
+		!strings.Contains(got[0], "run-bob-00: status 500") || !strings.HasSuffix(got[0], " (they are deleted by a later start)") {
+		t.Fatalf("logged %q, want the failed delete on one line with its consequence", got)
 	}
 }
 

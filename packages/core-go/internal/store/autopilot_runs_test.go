@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/graph-ops/core-go/internal/domain"
+	"github.com/graph-ops/core-go/internal/store/httpdatasourcetest"
 )
 
 func runRecord(projectID, id, root string, rev int64) domain.AutopilotRunRecord {
@@ -87,36 +90,44 @@ func exerciseAutopilotRunStore(t *testing.T, s AutopilotRunStore, projectID stri
 
 	// decide failing writes nothing; decide returning a record writes it.
 	boom := errors.New("boom")
-	if err := s.BeginAutopilotRun(projectID, func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
+	if dropErr, err := s.BeginAutopilotRun(projectID, func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
 		return nil, nil, boom
-	}); !errors.Is(err, boom) {
-		t.Fatalf("BeginAutopilotRun with a failing decide: %v", err)
+	}); !errors.Is(err, boom) || dropErr != nil {
+		t.Fatalf("BeginAutopilotRun with a failing decide: %v (dropErr %v)", err, dropErr)
 	}
 	if recs, _ := s.ListAutopilotRuns(projectID); len(recs) != 0 {
 		t.Fatalf("a failing decide wrote %d record(s)", len(recs))
 	}
-	if err := s.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
+	if dropErr, err := s.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
 		r := runRecord(projectID, "run-2", "T-2", 1)
 		return &r, nil, nil
-	}); err != nil {
-		t.Fatalf("BeginAutopilotRun: %v", err)
+	}); err != nil || dropErr != nil {
+		t.Fatalf("BeginAutopilotRun: %v (dropErr %v)", err, dropErr)
 	}
 	if findRecord(t, s, projectID, "run-2") == nil {
 		t.Fatal("the record decide returned was not stored")
 	}
 
 	// The records decide drops are deleted along with the save (the
-	// retention of settled records); the saved one is never dropped.
+	// retention of settled records); the saved one is never dropped, nor
+	// counted against the HTTP data source's per-start limit (the two
+	// records to delete are within it there).
 	for _, id := range []string{"run-old-1", "run-old-2", "run-kept"} {
 		if err := s.SaveAutopilotRun(runRecord(projectID, id, "T-9", 1)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
+	if dropErr, err := s.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
 		r := runRecord(projectID, "run-3", "T-3", 1)
-		return &r, []string{"run-old-1", "run-old-2", "run-3", "run-missing"}, nil
-	}); err != nil {
-		t.Fatalf("BeginAutopilotRun with drops: %v", err)
+		return &r, []string{"run-old-1", "run-3", "run-old-2"}, nil
+	}); err != nil || dropErr != nil {
+		t.Fatalf("BeginAutopilotRun with drops: %v (dropErr %v)", err, dropErr)
+	}
+	// Dropping a record that is not there is no failure either.
+	if dropErr, err := s.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
+		return nil, []string{"run-missing"}, nil
+	}); err != nil || dropErr != nil {
+		t.Fatalf("BeginAutopilotRun dropping a missing record: %v (dropErr %v)", err, dropErr)
 	}
 	if findRecord(t, s, projectID, "run-old-1") != nil || findRecord(t, s, projectID, "run-old-2") != nil {
 		t.Fatal("a dropped record is still listed")
@@ -133,7 +144,7 @@ func TestSQLiteAutopilotRuns(t *testing.T) {
 
 func TestSQLiteBeginAutopilotRunUnknownProject(t *testing.T) {
 	repo := newTestRepo(t)
-	err := repo.BeginAutopilotRun("nope", func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
+	_, err := repo.BeginAutopilotRun("nope", func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
 		return nil, nil, nil
 	})
 	var apiErr *domain.APIError
@@ -200,7 +211,7 @@ func TestSQLiteInitAddsAutopilotRunsToAnExistingDB(t *testing.T) {
 // start only when no record of root exists yet.
 func startOverlapping(s AutopilotRunStore, projectID, runID, root string) (bool, error) {
 	started := false
-	err := s.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
+	_, err := s.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
 		for _, r := range existing {
 			if r.RootTicketID == root {
 				return nil, nil, nil
@@ -318,10 +329,13 @@ func TestHTTPAutopilotRunsUnsupportedBefore12(t *testing.T) {
 	called := false
 	errs := []error{
 		func() error { _, err := repo.ListAutopilotRuns("proj"); return err }(),
-		repo.BeginAutopilotRun("proj", func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
-			called = true
-			return nil, nil, nil
-		}),
+		func() error {
+			_, err := repo.BeginAutopilotRun("proj", func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
+				called = true
+				return nil, nil, nil
+			})
+			return err
+		}(),
 		repo.SaveAutopilotRun(runRecord("proj", "run-1", "T-1", 1)),
 		repo.DeleteAutopilotRun("run-1"),
 	}
@@ -350,5 +364,168 @@ func TestFakePlugin11Answers404ForAutopilotRuns(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status %d, want 404", resp.StatusCode)
+	}
+}
+
+// failingDeletes wraps the reference plugin: a DELETE /autopilot-runs/{id}
+// of an ID in fail answers 500 with body (and deletes nothing), and every
+// such DELETE is recorded in order.
+type failingDeletes struct {
+	next http.Handler
+	body string
+
+	mu      sync.Mutex
+	fail    map[string]bool
+	deletes []string
+}
+
+func (f *failingDeletes) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if id, ok := strings.CutPrefix(r.URL.Path, "/autopilot-runs/"); ok && r.Method == http.MethodDelete {
+		f.mu.Lock()
+		f.deletes = append(f.deletes, id)
+		fail := f.fail[id]
+		f.mu.Unlock()
+		if fail {
+			http.Error(w, f.body, http.StatusInternalServerError)
+			return
+		}
+	}
+	f.next.ServeHTTP(w, r)
+}
+
+func (f *failingDeletes) sent() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.deletes...)
+}
+
+// startFailingDeletes opens an HTTP repository against the reference plugin
+// behind failingDeletes, with a project and the settled records ids saved.
+func startFailingDeletes(t *testing.T, body string, ids ...string) (*HTTPRepository, *failingDeletes, string) {
+	t.Helper()
+	f := &failingDeletes{next: httpdatasourcetest.New(testToken), body: body, fail: map[string]bool{}}
+	srv := httptest.NewServer(f)
+	t.Cleanup(srv.Close)
+	repo := openHTTP(t, srv.URL, testToken)
+	proj, err := repo.CreateProject("HTTP", "HT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range ids {
+		if err := repo.SaveAutopilotRun(runRecord(proj.ID, id, "T-9", 1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return repo, f, proj.ID
+}
+
+func beginDropping(repo *HTTPRepository, projectID, saveID string, drop ...string) (dropErr, err error) {
+	return repo.BeginAutopilotRun(projectID, func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
+		rec := runRecord(projectID, saveID, "T-1", 1)
+		return &rec, drop, nil
+	})
+}
+
+// A DELETE that fails does not fail the start -- the record is saved -- but
+// comes back in dropErr, naming the record, on one line (DFLT-00337).
+func TestHTTPBeginAutopilotRunReportsAFailedDrop(t *testing.T) {
+	repo, f, projectID := startFailingDeletes(t, "", "run-old-1")
+	f.fail["run-old-1"] = true
+	dropErr, err := beginDropping(repo, projectID, "run-new", "run-old-1")
+	if err != nil {
+		t.Fatalf("a failed DELETE failed the start: %v", err)
+	}
+	if dropErr == nil || !strings.Contains(dropErr.Error(), "run-old-1") || strings.ContainsAny(dropErr.Error(), "\r\n") {
+		t.Fatalf("dropErr = %v, want one line naming run-old-1", dropErr)
+	}
+	if findRecord(t, repo, projectID, "run-new") == nil {
+		t.Fatal("the record was not saved (no PUT)")
+	}
+	if findRecord(t, repo, projectID, "run-old-1") == nil {
+		t.Fatal("the record whose DELETE failed is gone")
+	}
+}
+
+// An error body spanning lines still makes a one-line dropErr.
+func TestHTTPBeginAutopilotRunDropErrorIsOneLine(t *testing.T) {
+	repo, f, projectID := startFailingDeletes(t, "upstream failed\r\nat line 2\nand 3", "run-old-1")
+	f.fail["run-old-1"] = true
+	dropErr, err := beginDropping(repo, projectID, "run-new", "run-old-1")
+	if err != nil || dropErr == nil {
+		t.Fatalf("got err %v, dropErr %v; want only a dropErr", err, dropErr)
+	}
+	if msg := dropErr.Error(); strings.ContainsAny(msg, "\r\n") || !strings.Contains(msg, "upstream failed at line 2 and 3") {
+		t.Fatalf("dropErr = %q, want the body on one line", msg)
+	}
+}
+
+// At most httpAutopilotRunDropLimit DELETEs go per start, the first ones of
+// drop; the rest are left for a later start and are no failure.
+func TestHTTPBeginAutopilotRunDropsAtMostTheLimit(t *testing.T) {
+	ids := []string{"run-old-1", "run-old-2", "run-old-3", "run-old-4", "run-old-5"}
+	repo, f, projectID := startFailingDeletes(t, "", ids...)
+	dropErr, err := beginDropping(repo, projectID, "run-new", ids...)
+	if err != nil || dropErr != nil {
+		t.Fatalf("got err %v, dropErr %v", err, dropErr)
+	}
+	if got := f.sent(); len(got) != httpAutopilotRunDropLimit || got[0] != "run-old-1" || got[1] != "run-old-2" {
+		t.Fatalf("DELETEs sent: %v, want the first %d of drop", got, httpAutopilotRunDropLimit)
+	}
+	for i, id := range ids {
+		if gone := findRecord(t, repo, projectID, id) == nil; gone != (i < httpAutopilotRunDropLimit) {
+			t.Fatalf("%s gone = %v", id, gone)
+		}
+	}
+}
+
+// A failed DELETE does not stop the next one; when both fail, dropErr names
+// both on one line and still unwraps to each error.
+func TestHTTPBeginAutopilotRunGoesOnAfterAFailedDrop(t *testing.T) {
+	repo, f, projectID := startFailingDeletes(t, "", "run-old-1", "run-old-2")
+	f.fail["run-old-1"] = true
+	dropErr, err := beginDropping(repo, projectID, "run-new", "run-old-1", "run-old-2")
+	if err != nil || dropErr == nil {
+		t.Fatalf("got err %v, dropErr %v; want only a dropErr", err, dropErr)
+	}
+	if got := f.sent(); len(got) != 2 || got[1] != "run-old-2" {
+		t.Fatalf("DELETEs sent: %v, want the second one after the failure", got)
+	}
+	if findRecord(t, repo, projectID, "run-old-2") != nil {
+		t.Fatal("run-old-2 was not deleted after run-old-1's DELETE failed")
+	}
+
+	if err := repo.SaveAutopilotRun(runRecord(projectID, "run-old-2", "T-9", 1)); err != nil {
+		t.Fatal(err)
+	}
+	f.fail["run-old-2"] = true
+	dropErr, err = beginDropping(repo, projectID, "run-new-2", "run-old-1", "run-old-2")
+	if err != nil || dropErr == nil {
+		t.Fatalf("got err %v, dropErr %v; want only a dropErr", err, dropErr)
+	}
+	msg := dropErr.Error()
+	if strings.ContainsAny(msg, "\r\n") || !strings.Contains(msg, "run-old-1: ") || !strings.Contains(msg, "; run-old-2: ") {
+		t.Fatalf("dropErr = %q, want both runs on one line, separated by \"; \"", msg)
+	}
+	var status *httpStatusError
+	if !errors.As(dropErr, &status) || status.status != http.StatusInternalServerError {
+		t.Fatalf("dropErr does not unwrap to the DELETE's error: %#v", dropErr)
+	}
+	if !errors.Is(dropErr, dropErr.(runDropErrors)[1].err) {
+		t.Fatal("errors.Is does not reach the second DELETE's error")
+	}
+}
+
+// The record being saved is never deleted, nor counted against the limit.
+func TestHTTPBeginAutopilotRunSkipsTheSavedRecord(t *testing.T) {
+	repo, f, projectID := startFailingDeletes(t, "", "run-old-1", "run-old-2")
+	dropErr, err := beginDropping(repo, projectID, "run-new", "run-new", "run-old-1", "run-old-2")
+	if err != nil || dropErr != nil {
+		t.Fatalf("got err %v, dropErr %v", err, dropErr)
+	}
+	if got := f.sent(); len(got) != 2 || got[0] != "run-old-1" || got[1] != "run-old-2" {
+		t.Fatalf("DELETEs sent: %v, want run-old-1 and run-old-2 only", got)
+	}
+	if findRecord(t, repo, projectID, "run-new") == nil {
+		t.Fatal("the saved record was deleted")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/graph-ops/core-go/internal/domain"
 )
@@ -45,13 +46,27 @@ type AutopilotRunStore interface {
 	// held by the transaction decide runs in, so such a call would wait for
 	// itself forever.
 	//
+	// err is the start's own failure; nothing was written then (on HTTP:
+	// it failed before the PUT). dropErr is non-nil only when the record
+	// was saved but deleting some of drop failed -- the start itself
+	// succeeded, and the records left are dropped by a later start. The two
+	// are separate so a caller looking at err alone cannot take a saved
+	// record for a failed start. The SQL backends delete in the same
+	// transaction and fail as a whole (err), so their dropErr is always
+	// nil.
+	//
 	// On an HTTP data source this is a GET, a PUT and a DELETE per dropped
 	// record, which is not atomic: two starts at the same moment may both
 	// pass there, and a record saved again between the GET and its DELETE
-	// is deleted anyway (its run's next save brings it back). A DELETE that
-	// fails is ignored -- the run is already saved, and the record is
-	// dropped by a later start.
-	BeginAutopilotRun(projectID string, decide func(existing []domain.AutopilotRunRecord) (save *domain.AutopilotRunRecord, drop []string, err error)) error
+	// is deleted anyway (its run's next save brings it back). Only the
+	// first httpAutopilotRunDropLimit records of drop (the saved record
+	// itself not counted) are deleted per call, so a slow data source does
+	// not hold the caller's lock for as many requests as records have piled
+	// up; drop should therefore list the records to delete first (the
+	// oldest) first. The rest are dropped by later starts. A DELETE that
+	// fails does not stop the next one, and the failures come back in
+	// dropErr as one line ("run-a: ...; run-b: ...").
+	BeginAutopilotRun(projectID string, decide func(existing []domain.AutopilotRunRecord) (save *domain.AutopilotRunRecord, drop []string, err error)) (dropErr error, err error)
 	// SaveAutopilotRun upserts rec, unless the stored record's revision is
 	// already rec.Revision or more (then it does nothing and succeeds).
 	//
@@ -228,8 +243,8 @@ func (r *SQLiteRepository) ListAutopilotRuns(projectID string) ([]domain.Autopil
 // BeginAutopilotRun implements AutopilotRunStore. The immediate transaction
 // (see NewSQLiteRepository's _txlock) holds the database's write lock from
 // the read to the write, across processes too.
-func (r *SQLiteRepository) BeginAutopilotRun(projectID string, decide func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error)) error {
-	return beginAutopilotRun(r.db, sqliteDialect, projectID, decide)
+func (r *SQLiteRepository) BeginAutopilotRun(projectID string, decide func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error)) (dropErr, err error) {
+	return nil, beginAutopilotRun(r.db, sqliteDialect, projectID, decide)
 }
 
 // SaveAutopilotRun implements AutopilotRunStore.
@@ -249,8 +264,8 @@ func (r *MySQLRepository) ListAutopilotRuns(projectID string) ([]domain.Autopilo
 
 // BeginAutopilotRun implements AutopilotRunStore: the project row, locked
 // FOR UPDATE, serializes the starts of the project's runs.
-func (r *MySQLRepository) BeginAutopilotRun(projectID string, decide func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error)) error {
-	return beginAutopilotRun(r.db, mysqlDialect, projectID, decide)
+func (r *MySQLRepository) BeginAutopilotRun(projectID string, decide func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error)) (dropErr, err error) {
+	return nil, beginAutopilotRun(r.db, mysqlDialect, projectID, decide)
 }
 
 // SaveAutopilotRun implements AutopilotRunStore.
@@ -287,32 +302,100 @@ func (r *HTTPRepository) ListAutopilotRuns(projectID string) ([]domain.Autopilot
 	return out, nil
 }
 
+// httpAutopilotRunDropLimit is how many settled records one
+// BeginAutopilotRun deletes at most on an HTTP data source (DFLT-00337).
+//
+// The DELETEs stay inside the call -- under the caller's lock -- rather
+// than being sent after it: the lock orders them against this machine's
+// other starts, and a start that took over or adopted one of the records
+// in between would otherwise have it deleted while it is active again,
+// hiding it from other members until its next save (see the implementation
+// notes of DFLT-00326). The limit bounds how long they hold that lock
+// instead: at most two requests' timeouts, not one per record piled up. A
+// steady project adds at most one settled record per start, so deleting two
+// also works off a backlog (after an upgrade, or of many members), over
+// several starts. There is no time limit on top: a data source that is
+// down fails the GET or the PUT first.
+const httpAutopilotRunDropLimit = 2
+
+// runDropErrors is the dropErr of BeginAutopilotRun: the DELETEs that
+// failed, reported as one line so a log line stays one line.
+type runDropErrors []runDropError
+
+type runDropError struct {
+	id  string
+	err error
+}
+
+func (e runDropErrors) Error() string {
+	var b strings.Builder
+	b.WriteString("deleting settled autopilot run records: ")
+	for i, d := range e {
+		if i > 0 {
+			b.WriteString("; ")
+		}
+		b.WriteString(d.id)
+		b.WriteString(": ")
+		b.WriteString(oneLine(d.err.Error()))
+	}
+	return b.String()
+}
+
+// Unwrap lets errors.Is and errors.As see each DELETE's error.
+func (e runDropErrors) Unwrap() []error {
+	out := make([]error, len(e))
+	for i, d := range e {
+		out[i] = d.err
+	}
+	return out
+}
+
+// oneLine turns the line breaks of s (an HTTP error body may have some)
+// into single spaces.
+func oneLine(s string) string {
+	if !strings.ContainsAny(s, "\r\n") {
+		return s
+	}
+	return strings.Join(strings.Fields(s), " ")
+}
+
 // BeginAutopilotRun implements AutopilotRunStore as a GET, a PUT, and a
-// DELETE per dropped record. The protocol has no cross-request
-// transaction, so this is not atomic: two members starting overlapping runs
-// at the same moment may both pass. A failed DELETE is ignored (see the
-// interface).
-func (r *HTTPRepository) BeginAutopilotRun(projectID string, decide func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error)) error {
+// DELETE per dropped record, up to httpAutopilotRunDropLimit of them. The
+// protocol has no cross-request transaction, so this is not atomic: two
+// members starting overlapping runs at the same moment may both pass. A
+// failed DELETE is reported in dropErr (see the interface).
+func (r *HTTPRepository) BeginAutopilotRun(projectID string, decide func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error)) (dropErr, err error) {
 	existing, err := r.ListAutopilotRuns(projectID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	rec, drop, err := decide(existing)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if rec != nil {
 		if err := r.SaveAutopilotRun(*rec); err != nil {
-			return err
+			return nil, err
 		}
 	}
+	var failed runDropErrors
+	sent := 0
 	for _, id := range drop {
+		if sent == httpAutopilotRunDropLimit {
+			break // the rest go at a later start
+		}
 		if rec != nil && id == rec.ID {
 			continue
 		}
-		_ = r.DeleteAutopilotRun(id) // best effort: a later start drops it
+		sent++
+		if derr := r.DeleteAutopilotRun(id); derr != nil {
+			failed = append(failed, runDropError{id: id, err: derr})
+		}
 	}
-	return nil
+	if len(failed) > 0 {
+		return failed, nil
+	}
+	return nil, nil
 }
 
 // SaveAutopilotRun implements AutopilotRunStore (PUT /autopilot-runs/{runId}).

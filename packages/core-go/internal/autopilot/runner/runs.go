@@ -71,7 +71,7 @@ func (s *Service) Runs(projectID string) ([]RunView, error) {
 	runs := append([]*autopilot.Run(nil), local...)
 	if shared := s.registry().Shared; shared != nil {
 		others, err := shared.List(projectID)
-		autopilot.LogSharedError(s.logf, "listing the shared autopilot runs of project "+projectID,
+		autopilot.LogSharedError(s.logf, autopilot.SharedOpList, "listing the shared autopilot runs of project "+projectID,
 			"showing this machine's runs only", err)
 		for _, r := range others {
 			if !isLocal[r.ID] {

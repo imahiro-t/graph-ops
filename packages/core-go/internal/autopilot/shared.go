@@ -31,10 +31,16 @@ type SharedRuns interface {
 	// records decide lists in drop (the retention of settled records, see
 	// SharedRetention), serialized against every other Begin and Save of
 	// the project where the data source can (the SQL backends: all in one
-	// transaction). decide must not call the data source. Where the data
-	// source cannot delete atomically (HTTP), a drop that fails is left for
-	// a later start rather than failing this one.
-	Begin(projectID string, decide func(shared []*Run) (run *Run, drop []string, err error)) error
+	// transaction). decide must not call the data source.
+	//
+	// err is the start's own failure (nothing saved). dropErr is non-nil
+	// only when the run was saved but deleting some of drop failed, which
+	// only happens where the data source cannot delete atomically (HTTP):
+	// the start has succeeded, and the records left are dropped by a later
+	// start. There, too, only the first few records of drop are deleted per
+	// start (store.AutopilotRunStore), so drop lists the ones to delete
+	// first first.
+	Begin(projectID string, decide func(shared []*Run) (run *Run, drop []string, err error)) (dropErr error, err error)
 	// Save writes run's shared view, unless a copy with the same or a
 	// higher Revision is already there.
 	Save(run *Run) error
@@ -64,31 +70,56 @@ func WarnSharedUnsupported(logf func(format string, args ...any)) {
 // ResetSharedUnsupportedWarning re-arms WarnSharedUnsupported (tests only).
 func ResetSharedUnsupportedWarning() { sharedUnsupportedWarned.Store(false) }
 
-// sharedErrLog thins out a repeated shared-run error: the same message is
-// logged once until a different one, or a success, comes along.
+// SharedOp is the kind of data source call LogSharedError reports on: each
+// kind is thinned out on its own, so one kind failing while another
+// succeeds neither re-arms the failing one nor says it is reachable again.
+type SharedOp string
+
+const (
+	// SharedOpList is listing a project's shared runs (the runs listing,
+	// and the overtaking check of next and launch).
+	SharedOpList SharedOp = "list"
+	// SharedOpShare is writing a run's shared copy after a local save.
+	SharedOpShare SharedOp = "share"
+	// SharedOpUndoReservation is putting back the shared record of a
+	// cancelled reservation.
+	SharedOpUndoReservation SharedOp = "undo-reservation"
+	// SharedOpRetention is deleting settled shared records when a run
+	// starts (SharedRetention).
+	SharedOpRetention SharedOp = "retention"
+)
+
+// sharedErrLog thins out a repeated shared-run error: per SharedOp, the
+// same message is logged once until a different one, or a success of the
+// same kind, comes along.
 var sharedErrLog struct {
 	mu   sync.Mutex
-	last string
+	last map[SharedOp]string
 }
 
-// LogSharedError reports the outcome of a data source call for shared runs.
+// LogSharedError reports the outcome of a data source call of kind op for
+// shared runs.
 //
 // A failure is reported through logf as "autopilot: <what>: <err>
-// (<consequence>)" unless it is the same as the previous failure reported,
-// so a data source that stays down is not logged on every poll of the Web
-// UI. what says what was being done, consequence what the failure means for
-// the caller -- they differ between writing a run and listing runs, so each
-// caller says its own. ErrSharedRunsUnsupported goes to
+// (<consequence>)" unless it is the same as the previous failure reported
+// for op, so a data source that stays down is not logged on every poll of
+// the Web UI. what says what was being done, consequence what the failure
+// means for the caller -- they differ between writing a run and listing
+// runs, so each caller says its own. ErrSharedRunsUnsupported goes to
 // WarnSharedUnsupported instead.
 //
-// A success (err nil) re-arms it: the next failure is reported even if it
-// is the same one as before, and if a failure had been reported, one line
-// says the shared runs are reachable again.
-func LogSharedError(logf func(format string, args ...any), what, consequence string, err error) {
+// A success (err nil) re-arms op only: the next failure of op is reported
+// even if it is the same one as before, and if a failure of op had been
+// reported, one line says the shared runs are reachable again. A success
+// of another kind changes nothing for op -- listing may keep failing while
+// writing works, and saying "reachable again" then would be misleading.
+// The state is per kind, not per project: what names the project, so the
+// log tells projects apart.
+func LogSharedError(logf func(format string, args ...any), op SharedOp, what, consequence string, err error) {
 	if err == nil {
 		sharedErrLog.mu.Lock()
-		recovered := sharedErrLog.last != ""
-		sharedErrLog.last = ""
+		recovered := sharedErrLog.last[op] != ""
+		delete(sharedErrLog.last, op)
 		sharedErrLog.mu.Unlock()
 		if recovered && logf != nil {
 			logf("autopilot: the shared autopilot runs are reachable again (%s)", what)
@@ -101,8 +132,11 @@ func LogSharedError(logf func(format string, args ...any), what, consequence str
 	}
 	msg := what + ": " + err.Error()
 	sharedErrLog.mu.Lock()
-	repeat := sharedErrLog.last == msg
-	sharedErrLog.last = msg
+	repeat := sharedErrLog.last[op] == msg
+	if sharedErrLog.last == nil {
+		sharedErrLog.last = map[SharedOp]string{}
+	}
+	sharedErrLog.last[op] = msg
 	sharedErrLog.mu.Unlock()
 	if repeat || logf == nil {
 		return
@@ -114,11 +148,11 @@ func LogSharedError(logf func(format string, args ...any), what, consequence str
 	logf("autopilot: %s (%s)", msg, consequence)
 }
 
-// ResetSharedErrorLog forgets the last shared-run error reported (tests
-// only).
+// ResetSharedErrorLog forgets the last shared-run error reported of every
+// kind (tests only).
 func ResetSharedErrorLog() {
 	sharedErrLog.mu.Lock()
-	sharedErrLog.last = ""
+	sharedErrLog.last = nil
 	sharedErrLog.mu.Unlock()
 }
 
@@ -286,8 +320,11 @@ const KeepSharedSettledRuns = KeepSettledRuns
 // SharedRetention returns the IDs of the shared records to delete so that
 // at most KeepSharedSettledRuns settled ones remain: the settled records
 // beyond the KeepSharedSettledRuns most recently updated, whoever started
-// them. Active records, and keep (the run being begun), are never among
-// them.
+// them, the least recently updated first -- a data source that deletes only
+// a few per start (HTTP) then drops the oldest first. Active records, and
+// keep (the run being begun), are never among them; this is where the run
+// being begun is left out (the data source skipping it too is only a
+// safeguard).
 //
 // Without it a record whose machine never starts a run again -- a member
 // who left, a replaced machine, a removed machine-id -- would stay until
@@ -313,8 +350,8 @@ func SharedRetention(shared []*Run, keep string, now time.Time) []string {
 		return settled[i].ID > settled[j].ID
 	})
 	drop := make([]string, 0, len(settled)-KeepSharedSettledRuns)
-	for _, r := range settled[KeepSharedSettledRuns:] {
-		drop = append(drop, r.ID)
+	for i := len(settled) - 1; i >= KeepSharedSettledRuns; i-- {
+		drop = append(drop, settled[i].ID)
 	}
 	return drop
 }

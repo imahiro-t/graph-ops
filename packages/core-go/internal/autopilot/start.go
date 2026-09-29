@@ -81,8 +81,10 @@ type BeginResult struct {
 // backends two members' overlapping starts cannot both pass), and the run
 // is saved locally afterwards with the same revision. The same transaction
 // deletes the settled records beyond the project's retention
-// (SharedRetention). If the local save fails, the shared record is put back
-// (after the lock is released). A data
+// (SharedRetention); where that is not atomic (HTTP), a delete that fails
+// does not fail the start but is logged (LogSharedError, SharedOpRetention),
+// also when the local save then fails. If the local save fails, the shared
+// record is put back (after the lock is released). A data
 // source that cannot share runs (ErrSharedRunsUnsupported) falls back to
 // the local runs alone, with a one-time warning; any other data source
 // error fails the start, since it could not be told whether it duplicates a
@@ -98,6 +100,10 @@ func (g *Registry) Begin(req BeginRequest) (BeginResult, error) {
 		sharedUsed bool
 		compensate func()
 		pruned     []string
+		// The retention's deletes asked of the data source, and what of
+		// them failed (see SharedRuns.Begin).
+		dropped int
+		dropErr error
 	)
 	err := g.WithLock(req.ProjectID, func(tx *Tx) error {
 		now := g.now()
@@ -137,17 +143,20 @@ func (g *Registry) Begin(req BeginRequest) (BeginResult, error) {
 		if g.Shared != nil {
 			// The only data source call made under the lock (see Registry).
 			// decide itself touches neither the data source nor any file.
-			err := g.Shared.Begin(req.ProjectID, func(shared []*Run) (*Run, []string, error) {
+			derr, err := g.Shared.Begin(req.ProjectID, func(shared []*Run) (*Run, []string, error) {
 				r, err := decide(shared)
 				if err != nil {
 					return nil, nil, err
 				}
 				run = r
-				return r, SharedRetention(shared, r.ID, now), nil
+				drop := SharedRetention(shared, r.ID, now)
+				dropped = len(drop)
+				return r, drop, nil
 			})
 			switch {
 			case err == nil:
 				sharedUsed = true
+				dropErr = derr
 			case errors.Is(err, ErrSharedRunsUnsupported):
 				WarnSharedUnsupported(g.Logf)
 				run = nil
@@ -183,11 +192,19 @@ func (g *Registry) Begin(req BeginRequest) (BeginResult, error) {
 	if compensate != nil {
 		compensate()
 	}
+	// The retention's outcome was settled in the data source when its Begin
+	// succeeded, so it is reported even if the local save then failed: the
+	// compensation puts back the run's own record, not the ones deleted.
+	// Nothing is reported when nothing was to be deleted, so a start that
+	// sent no DELETE does not say the data source is reachable again.
+	if sharedUsed && dropped > 0 {
+		LogSharedError(g.Logf, SharedOpRetention, "deleting settled shared autopilot runs of project "+req.ProjectID,
+			"they are deleted by a later start", dropErr)
+	}
 	if err != nil {
 		return BeginResult{}, err
 	}
 	if sharedUsed {
-		LogSharedError(g.Logf, "starting a run in project "+req.ProjectID, "", nil)
 		for _, id := range pruned {
 			if derr := g.Shared.Delete(id); derr != nil {
 				g.logf("deleting the shared record of pruned autopilot run %s: %v (it is inactive, so it blocks nobody)", id, derr)
@@ -490,7 +507,7 @@ func (g *Registry) CancelReservation(projectID, runID string) error {
 	case restored != nil:
 		serr = g.Shared.Save(restored)
 	}
-	LogSharedError(g.Logf, fmt.Sprintf("putting back the shared record of cancelled reservation %s", runID),
+	LogSharedError(g.Logf, SharedOpUndoReservation, fmt.Sprintf("putting back the shared record of cancelled reservation %s", runID),
 		"the reservation is undone on this machine; other members may see it as starting until its heartbeat expires", serr)
 	return nil
 }

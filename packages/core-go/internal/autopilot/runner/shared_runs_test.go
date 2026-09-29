@@ -652,9 +652,9 @@ func (f failingShared) List(projectID string) ([]*autopilot.Run, error) {
 	return f.SharedRuns.List(projectID)
 }
 
-func (f failingShared) Begin(projectID string, decide func([]*autopilot.Run) (*autopilot.Run, []string, error)) error {
+func (f failingShared) Begin(projectID string, decide func([]*autopilot.Run) (*autopilot.Run, []string, error)) (dropErr, err error) {
 	if f.beginErr != nil {
-		return f.beginErr
+		return nil, f.beginErr
 	}
 	return f.SharedRuns.Begin(projectID, decide)
 }
@@ -1034,6 +1034,48 @@ func TestSharedRuns_RunsLogsARecurringFailureAgain(t *testing.T) {
 		if strings.Contains(l, "db down") && (!strings.Contains(l, "showing this machine's runs only") || strings.Contains(l, "the run goes on")) {
 			t.Fatalf("listing failure logged as %q", l)
 		}
+	}
+}
+
+// DFLT-00337: the thinning is per kind of call. While listing fails, next
+// still shares the run (a successful write), which neither says the shared
+// runs are reachable again nor re-arms the listing's failure; a listing
+// that works again does say so.
+func TestSharedRuns_AWriteDoesNotEndAListingFailure(t *testing.T) {
+	autopilot.ResetSharedErrorLog()
+	t.Cleanup(autopilot.ResetSharedErrorLog)
+	h, tr, a, _ := newSharedHarness(t)
+	resA := mustStart(t, a, tr.R, autopilot.ModeTree)
+	h.svc = a
+	logs := &logSink{}
+	a.Logf = logs.logf
+	healthy := a.Registry.Shared
+	a.Registry.Shared = failingShared{SharedRuns: healthy, listErr: errors.New("db down")}
+	revision := func() int64 {
+		for _, rec := range sharedRecords(t, h.repo, h.projectID) {
+			if rec.ID == resA.RunID {
+				return rec.Revision
+			}
+		}
+		t.Fatalf("run %s has no shared record", resA.RunID)
+		return 0
+	}
+	before := revision()
+	for i := 0; i < 2; i++ {
+		h.next(resA.RunID) // lists (fails), then saves and shares the run (succeeds)
+	}
+	if revision() <= before {
+		t.Fatal("next did not share the run while listing failed")
+	}
+	if logs.count("db down") != 1 || logs.count("reachable again") != 0 {
+		t.Fatalf("logs = %v", logs.lines)
+	}
+	a.Registry.Shared = healthy
+	if _, err := a.Runs(h.projectID); err != nil {
+		t.Fatal(err)
+	}
+	if logs.count("reachable again") != 1 {
+		t.Fatalf("logs = %v", logs.lines)
 	}
 }
 
