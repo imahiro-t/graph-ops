@@ -67,14 +67,18 @@
 //   tooltip covered.
 // - Touch never opens the hover tooltip (DFLT-00322). After a tap the
 //   browser sends compatibility mouseover / mouseenter events, and a finger
-//   never "leaves", so a tooltip opened by them would stay. The pointerType
-//   of the latest pointer event on the wrapper or the tooltip is kept, and a
-//   mouseenter while it is "touch" is ignored. No time window is involved:
-//   the compatibility events come after pointerup, which a long press can
-//   put well after pointerdown. A mouse or pen overwrites the record with
-//   its own pointerover / pointermove, which arrive before the mouse events
-//   of the same movement. A touch pointerdown also ends a hover-opened
-//   state. Focus is not affected: a :focus-visible focus still opens it.
+//   never "leaves", so a tooltip opened by them would stay. The wrapper
+//   keeps the pointerType of the latest pointerover / pointermove /
+//   pointerdown, and a mouseenter while it is "touch" is ignored. Those
+//   events on the tooltip reach the wrapper's handlers too, through the
+//   React tree out of the portal (see above). The tooltip's own pointerdown
+//   is stopped there, but the pointerover that comes before it has already
+//   recorded the pointer. No time window is involved: the compatibility
+//   events come after pointerup, which a long press can put well after
+//   pointerdown. A mouse or pen overwrites the record with its own
+//   pointerover / pointermove, which arrive before the mouse events of the
+//   same movement. A touch pointerdown also ends a hover-opened state.
+//   Focus is not affected: a :focus-visible focus still opens it.
 // - The tooltip is measured at the viewport's top-left corner (DFLT-00322).
 //   Measured where it sits, a tooltip that a narrowing window has left near
 //   the right edge shrinks to a narrow, tall column, and the position
@@ -218,8 +222,8 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
   // Mirrors `hovered` for the event handlers, which must not wait for a
   // re-render to see it.
   const hoveredRef = useRef(false);
-  // The pointerType of the latest pointer event on the wrapper or the
-  // tooltip (see the header comment on touch).
+  // The pointerType of the latest pointerover / pointermove / pointerdown
+  // over the button or the tooltip (see the header comment on touch).
   const lastPointerTypeRef = useRef<string | null>(null);
 
   const setButtonRef = useCallback(
@@ -313,9 +317,9 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
 
   const handleTooltipPointerDown = (e: React.PointerEvent) => {
     // Keep the press from reaching the button's ancestors (see the header
-    // comment), then end the hover-opened state.
+    // comment), then end the hover-opened state. Its pointerType was
+    // recorded by the pointerover before it.
     e.stopPropagation();
-    recordPointer(e);
     endHover();
   };
 
@@ -417,12 +421,8 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       onMouseEnter={() => startHover(false)}
       onMouseLeave={scheduleHoverEnd}
       onPointerOver={recordPointer}
-      onPointerEnter={recordPointer}
       onPointerMove={recordPointer}
       onPointerDown={handleWrapperPointerDown}
-      onPointerUp={recordPointer}
-      onPointerCancel={recordPointer}
-      onPointerLeave={recordPointer}
       onFocus={e => {
         if (isFocusVisible(e.target)) setFocused(true);
       }}
@@ -460,12 +460,6 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
             }}
             onMouseEnter={() => startHover(true)}
             onMouseLeave={scheduleHoverEnd}
-            onPointerOver={recordPointer}
-            onPointerEnter={recordPointer}
-            onPointerMove={recordPointer}
-            onPointerUp={recordPointer}
-            onPointerCancel={recordPointer}
-            onPointerLeave={recordPointer}
             onClick={stopPropagation}
             onMouseDown={stopPropagation}
             onMouseUp={stopPropagation}

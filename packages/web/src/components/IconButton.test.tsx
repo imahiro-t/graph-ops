@@ -234,9 +234,21 @@ describe('IconButton', () => {
         </IconButton>
       </div>
     );
-    await user.hover(screen.getByRole('button', { name: 'Delete' }));
-    await waitForHoverOpenDelay();
-    await user.click(openIconButtonTooltip());
+    // Opened by keyboard focus: a press on the tooltip ends only a
+    // hover-opened state (DFLT-00322), so this tooltip stays in place and the
+    // whole press lands on it. (A hover-opened one closes on the pointerdown,
+    // and the rest of the press no longer reaches it -- see "closes a
+    // hover-opened tooltip on a pointerdown on it" below.) The events are
+    // fired one by one because user.click's mousedown would also move focus
+    // off the button, which closes the tooltip before the mouseup and the
+    // click; each of the four has its own stopPropagation to guard.
+    await user.tab();
+    const tooltip = openIconButtonTooltip();
+    fireEvent.pointerDown(tooltip);
+    fireEvent.mouseDown(tooltip);
+    fireEvent.mouseUp(tooltip);
+    fireEvent.click(tooltip);
+    expect(openIconButtonTooltip()).toBe(tooltip);
     expect(onClick).not.toHaveBeenCalled();
     expect(onMouseDown).not.toHaveBeenCalled();
     expect(onMouseUp).not.toHaveBeenCalled();
@@ -245,6 +257,34 @@ describe('IconButton', () => {
     // The button's own click still bubbles as before.
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a whole click on a describeWithTooltip tooltip from the ancestors, though the press closes it', async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    const onMouseDown = vi.fn();
+    const onMouseUp = vi.fn();
+    const onPointerDown = vi.fn();
+    render(
+      <div onClick={onClick} onMouseDown={onMouseDown} onMouseUp={onMouseUp} onPointerDown={onPointerDown}>
+        <IconButton label="Delete type: plan" tooltip="Defaults cannot be deleted" describeWithTooltip>
+          <Icon />
+        </IconButton>
+      </div>
+    );
+    await user.hover(screen.getByRole('button', { name: 'Delete type: plan' }));
+    await waitForHoverOpenDelay();
+    const tooltip = openIconButtonTooltip();
+    // The pointerdown ends the hover-opened state, but the element stays
+    // (hidden) for aria-describedby, so the rest of the press still lands on
+    // it and has to be stopped there as well.
+    await user.click(tooltip);
+    expect(openIconButtonTooltips()).toHaveLength(0);
+    expect(allIconButtonTooltips()).toEqual([tooltip]);
+    expect(onClick).not.toHaveBeenCalled();
+    expect(onMouseDown).not.toHaveBeenCalled();
+    expect(onMouseUp).not.toHaveBeenCalled();
+    expect(onPointerDown).not.toHaveBeenCalled();
   });
 
   it('exposes the tooltip as the description only with describeWithTooltip, even while it is closed', async () => {
