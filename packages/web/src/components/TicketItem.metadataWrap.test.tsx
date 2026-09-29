@@ -272,15 +272,23 @@ describe.each(['ja', 'en'])('TicketItem metadata bar wrapping (%s)', lng => {
     await i18n.changeLanguage(lng);
     renderTicket();
     const details = screen.getByTestId('ticket-details');
+    // The side padding is the variable; the top and bottom keep what p-*
+    // gave them (DFLT-00290 / DFLT-00293).
     expect(details).toHaveClass(
-      'p-(--details-pad)',
+      'px-(--details-pad)',
       '[--details-pad:1.5rem]',
       'max-sm:[--details-pad:0.75rem]',
       'upto-15rem:[--details-pad:0.75rem]',
-      '[@media(max-width:200px)]:[--details-pad:0.5rem]',
+      'upto-200px:[--details-pad:0.25rem]',
+      'upto-7_5rem:[--details-pad:0.25rem]',
+      'py-6',
+      'max-sm:py-3',
+      'upto-15rem:py-3',
+      'upto-200px:py-2',
+      'upto-7_5rem:py-1',
       'space-y-6'
     );
-    for (const cls of ['p-6', 'max-sm:p-3', 'upto-15rem:p-3', '[@media(max-width:200px)]:p-2']) expect(details).not.toHaveClass(cls);
+    for (const cls of ['p-6', 'max-sm:p-3', 'upto-15rem:p-3', 'upto-200px:p-2', 'upto-200px:px-1', 'upto-7_5rem:p-1']) expect(details).not.toHaveClass(cls);
   });
 
   it('lets a label save error break inside a word on a line of its own (DFLT-00292)', async () => {

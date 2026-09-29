@@ -39,12 +39,13 @@ import i18n from './i18n';
 import App from './App';
 import { Project } from './types';
 import { createFakeBackend, installFakeBackend } from './test/fakeBackend';
+import { findPreviousPage } from './test/waitForAnswers';
 import { allIconButtonTooltips, openIconButtonTooltip } from './test/iconButtonTooltip';
 import { PROJECT_MENU_WIDTH_REM } from './lib/popupPlacement';
 
 // The container-query variant for a popup narrower than 8rem (DFLT-00285).
 // Assembled at run time so Tailwind does not pick up extra classes from here.
-const BELOW_8REM = ['[@container(width<8rem)]', ''].join(':');
+const BELOW_8REM = ['cq-below-8rem', ''].join(':');
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 
@@ -155,7 +156,7 @@ describe.each(['ja', 'en'] as const)('pagination row with large text (%s)', lng 
 
   it('wraps, keeping previous / page number / next together in one group', async () => {
     await renderApp();
-    const previous = screen.getByRole('button', { name: i18n.t('pagination.previous') });
+    const previous = await findPreviousPage();
     const next = screen.getByRole('button', { name: i18n.t('pagination.next') });
     const pageOf = screen.getByText(i18n.t('pagination.pageOf', { page: 1, total: 2 }));
 
@@ -193,6 +194,17 @@ describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 1
     expect(main).not.toHaveClass('sm:px-3');
   });
 
+  // DFLT-00290: from 7.5rem down (a 32px default font in a 160px window) it
+  // pads with px-1, so the expanded ticket's node rows have room for their
+  // status badges; with the default font that is 120px and below.
+  it('pads <main> with px-1 only from 7.5rem down', async () => {
+    await renderApp();
+    const main = screen.getByRole('main');
+    expect(main).toHaveClass('px-6', 'max-sm:px-3', `${NARROW}px-3`, 'upto-7_5rem:px-1');
+    expect(main).not.toHaveClass('px-1');
+    expect(main).not.toHaveClass(`${NARROW}px-1`);
+  });
+
   it('keeps the summary card\'s children inside the card and the numbers wrapping between items', async () => {
     await renderApp();
     const metrics = screen.getByTestId('summary-metrics');
@@ -228,7 +240,7 @@ describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 1
   // fits the 136px row of a 160px window. From 15rem up nothing changes.
   it('closes up the pagination buttons under 15rem and lets the count break', async () => {
     await renderApp();
-    const previous = screen.getByRole('button', { name: i18n.t('pagination.previous') });
+    const previous = await findPreviousPage();
     const group = previous.parentElement as HTMLElement;
     expect(group).toHaveClass('gap-3', `${NARROW}gap-1`, 'shrink-0');
     expect(group).not.toHaveClass(`${NARROW}gap-2`);
@@ -284,7 +296,7 @@ describe.each(['ja', 'en'] as const)('summary card numbers with large text (%s)'
 // DFLT-00258: the rest of DFLT-00251's backlog on the summary card.
 describe.each(['ja', 'en'] as const)('summary card with a root font size set on the page (%s)', lng => {
   const NARROW = 'upto-15rem:';
-  const CARD_NARROW = '[@container(max-width:12rem)]:';
+  const CARD_NARROW = 'cq-upto-12rem:';
 
   beforeEach(async () => {
     seed();
@@ -455,9 +467,14 @@ describe.each(['ja', 'en'] as const)('full project name in the switcher\'s toolt
     return user;
   }
 
+  // The popup's items are the project list (GET /api/projects), a request of
+  // its own that seeing a ticket does not imply has been answered: wait for
+  // an item before looking at them (DFLT-00296).
   async function openPopup(user: ReturnType<typeof userEvent.setup>) {
     await user.click(switcherButton());
-    return screen.getByRole('dialog', { name: i18n.t('projectSwitcher.menuLabel') });
+    const popup = screen.getByRole('dialog', { name: i18n.t('projectSwitcher.menuLabel') });
+    await within(popup).findByText(noSpace.name, { exact: true });
+    return popup;
   }
 
   // An item's name span: the text node's own element, found by exact text.
@@ -575,6 +592,10 @@ describe.each(['ja', 'en'] as const)('full project name in the switcher\'s toolt
   it('keeps the prefix and the pending-approval badge in the group on the item\'s right', async () => {
     const user = await renderWith(alpha.id);
     const popup = await openPopup(user);
+    // The counts are fetched when the popup opens (GET
+    // /api/projects/pending-approvals) and arrive after it: wait for both
+    // badges (DFLT-00296).
+    await waitFor(() => expect(within(popup).getAllByRole('img')).toHaveLength(2));
     const cases: Array<[Project, number | null]> = [
       [alpha, null],
       [beta, 2],

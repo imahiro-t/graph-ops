@@ -26,9 +26,20 @@
 // as before. In a real browser p-2 wins over max-sm:p-3 and the 15rem p-3
 // (computed padding 16px at a 32px root).
 //
-// DFLT-00295: the expanded details set the same four paddings through the
-// --details-pad variable (p-(--details-pad)), with the same variants in the
-// same order, because the metadata bar's labels may run into that padding.
+// DFLT-00290: that p-2 is the named upto-200px:p-2 (index.css, DFLT-00294),
+// the same @media (max-width: 200px) condition, and from 7.5rem down (a 32px default
+// font in a 160px window) both pad with p-1 (upto-7_5rem:p-1). The arbitrary
+// [@media(max-width:200px)]: prefix came out after every named variant, so
+// it would have beaten upto-7_5rem:p-1 at 160px; upto-200px is declared
+// before upto-7_5rem, and still after upto-15rem. Measured in a real browser:
+// at a 16px default font the padding is 8px at 160/200px and 12px at 201px,
+// and the untrusted-folder notice and its dismiss button sit where they did
+// before; at 32px x 160px it is 8px (p-1), not 16px (p-2).
+//
+// DFLT-00295: the expanded details set the side padding through the
+// --details-pad variable (px-(--details-pad)), with the same variants in the
+// same order, because the metadata bar's labels may run into that padding;
+// the top and bottom padding are py-* with the values p-* gave them.
 import { render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
@@ -37,7 +48,11 @@ import { TicketItem } from './TicketItem';
 
 const NARROW_LARGE_TEXT_PADDING = 'upto-15rem:p-3';
 const BELOW_SM_PADDING = 'max-sm:p-3';
-const TINY_WINDOW_PADDING = '[@media(max-width:200px)]:p-2';
+const TINY_WINDOW_PADDING = 'upto-200px:p-2';
+const EXTREME_PADDING = 'upto-7_5rem:p-1';
+// The arbitrary form upto-200px:p-2 replaced, assembled at run time so that
+// Tailwind does not pick it up as a class of the app.
+const ARBITRARY_TINY_WINDOW_PADDING = ['[@media(max-width:', '200px)]:p-2'].join('');
 
 const makeTicket = (): TicketDetail => ({
   id: 'TEST-00227',
@@ -105,11 +120,17 @@ describe.each(['ja', 'en'] as const)('TicketItem padding with large text on a na
     renderTicket();
     const details = screen.getByTestId('ticket-details');
     expect(details).toHaveClass(
-      'p-(--details-pad)',
+      'px-(--details-pad)',
       '[--details-pad:1.5rem]',
       'max-sm:[--details-pad:0.75rem]',
       'upto-15rem:[--details-pad:0.75rem]',
-      '[@media(max-width:200px)]:[--details-pad:0.5rem]'
+      'upto-200px:[--details-pad:0.25rem]',
+      'upto-7_5rem:[--details-pad:0.25rem]',
+      'py-6',
+      'max-sm:py-3',
+      'upto-15rem:py-3',
+      'upto-200px:py-2',
+      'upto-7_5rem:py-1'
     );
     // Unconditional or sm+ forms would change the look from sm up, and the
     // padding classes themselves would override the variable.
@@ -118,20 +139,23 @@ describe.each(['ja', 'en'] as const)('TicketItem padding with large text on a na
       'p-3',
       'p-2',
       'p-4',
+      'p-1',
       'sm:p-6',
       'sm:p-3',
       'max-sm:p-2',
       'upto-15rem:p-2',
       BELOW_SM_PADDING,
       NARROW_LARGE_TEXT_PADDING,
-      TINY_WINDOW_PADDING
+      TINY_WINDOW_PADDING,
+      EXTREME_PADDING,
+      ARBITRARY_TINY_WINDOW_PADDING
     ]);
   });
 
   it('pads the Action Footer less only below sm or with large text on a narrow screen', () => {
     renderTicket();
     const footer = screen.getByTestId('ticket-action-footer');
-    expect(footer).toHaveClass('p-4', BELOW_SM_PADDING, NARROW_LARGE_TEXT_PADDING, TINY_WINDOW_PADDING);
-    expectNoneOf(footer, ['p-3', 'p-2', 'p-6', 'sm:p-4', 'sm:p-3', 'max-sm:p-2', 'upto-15rem:p-2']);
+    expect(footer).toHaveClass('p-4', BELOW_SM_PADDING, NARROW_LARGE_TEXT_PADDING, TINY_WINDOW_PADDING, EXTREME_PADDING);
+    expectNoneOf(footer, ['p-3', 'p-2', 'p-6', 'p-1', 'sm:p-4', 'sm:p-3', 'max-sm:p-2', 'upto-15rem:p-2', ARBITRARY_TINY_WINDOW_PADDING]);
   });
 });

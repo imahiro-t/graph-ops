@@ -721,6 +721,23 @@ describe('IconButton text-named options', () => {
     expect(tooltip).not.toHaveClass('max-w-xs', 'wrap-break-word');
   });
 
+  // DFLT-00293: in a window of 200px or less the tooltip is where the header's
+  // hidden labels are read, so its text size is in rem and grows with a 200%
+  // root or browser font size (a px size would stay 11px). 0.6875rem is 11px
+  // at a 16px root, so the look at 100% is unchanged.
+  it('sizes the tooltip text in rem, not px', async () => {
+    const user = userEvent.setup();
+    render(
+      <IconButton label="Settings">
+        <Icon />
+      </IconButton>
+    );
+    await user.hover(screen.getByRole('button', { name: 'Settings' }));
+    const tooltip = openIconButtonTooltip();
+    expect(tooltip).toHaveClass('text-[0.6875rem]');
+    expect(Array.from(tooltip.classList).filter(c => /^text-\[[\d.]+px\]$/.test(c))).toEqual([]);
+  });
+
   it('gives an existing one-line tooltip the same width cap and wrapping', async () => {
     const user = userEvent.setup();
     render(

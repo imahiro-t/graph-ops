@@ -97,7 +97,9 @@ describe('App focus after deleting a ticket', () => {
   it('moves focus to the previous page\'s last ticket when the last page empties', async () => {
     seed(3, 2);
     const user = await renderApp();
-    await user.click(screen.getByRole('button', { name: i18n.t('pagination.next') }));
+    // The page size of two is its own request (GET /api/settings/app), so
+    // the pager can arrive after the first ticket does (DFLT-00296).
+    await user.click(await screen.findByRole('button', { name: i18n.t('pagination.next') }));
     await screen.findByText('ALP-00003');
 
     await deleteTicket(user, 'ALP-00003');

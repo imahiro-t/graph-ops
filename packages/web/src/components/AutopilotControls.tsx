@@ -342,7 +342,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
         >
           <div
             data-testid="autopilot-group"
-            className="flex items-center sm:[@container(min-width:16rem)]:border-l sm:[@container(min-width:16rem)]:pl-3 border-slate-200 dark:border-slate-700"
+            className="flex items-center sm:cq-from-16rem:border-l sm:cq-from-16rem:pl-3 border-slate-200 dark:border-slate-700"
           >
             <button
               ref={buttonRef}
@@ -353,7 +353,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
               {...submittingProps(starting !== null)}
               title={distinctReasons.length > 0 ? distinctReasons.join('\n') : undefined}
               aria-describedby={reasonIds.length > 0 ? reasonIds.join(' ') : undefined}
-              className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-slate-700 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 rounded-lg text-xs font-semibold sm:whitespace-nowrap flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
+              className="px-3 upto-200px:px-1.5 py-1.5 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-slate-700 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 rounded-lg text-xs font-semibold sm:whitespace-nowrap flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
             >
               {starting !== null ? (
                 <Loader2 className="w-3.5 h-3.5 shrink-0 motion-safe:animate-spin" aria-hidden="true" />
@@ -424,7 +424,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
             // are.
             <div
               data-testid="autopilot-untrusted"
-              className="self-stretch flex flex-wrap items-start gap-2 p-2 [@media(max-width:200px)]:p-1 rounded-lg border text-[0.6875rem] bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100"
+              className="self-stretch flex flex-wrap items-start gap-2 p-2 upto-200px:p-1 rounded-lg border text-[0.6875rem] bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100"
             >
               <p aria-hidden="true" className="flex-1 basis-24 min-w-0 wrap-anywhere">
                 {t('autopilot.untrustedFolder', { path: untrustedFolder })}
@@ -434,7 +434,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
                 data-testid="autopilot-untrusted-dismiss"
                 onClick={dismissUntrusted}
                 aria-describedby={untrustedId}
-                className="shrink-0 max-w-full max-sm:wrap-anywhere min-h-6 min-w-[min(1.5rem,100%)] inline-flex items-center justify-center px-2 [@media(max-width:200px)]:px-0.5 py-0.5 rounded-sm border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 font-semibold hover:bg-amber-100 dark:hover:bg-slate-700 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-violet-500 dark:focus-visible:ring-violet-400"
+                className="shrink-0 max-w-full max-sm:wrap-anywhere min-h-6 min-w-[min(1.5rem,100%)] inline-flex items-center justify-center px-2 upto-200px:px-0.5 py-0.5 rounded-sm border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 font-semibold hover:bg-amber-100 dark:hover:bg-slate-700 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-violet-500 dark:focus-visible:ring-violet-400"
               >
                 {t('autopilot.untrustedDismiss')}
               </button>

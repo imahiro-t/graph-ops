@@ -107,7 +107,7 @@ export const CreateTicketModal: React.FC<Props> = ({ onSubmit, onClose, isCreati
           {status && (
             <div
               aria-hidden="true"
-              className="p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] rounded-lg border border-slate-200 dark:border-slate-700"
+              className="p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[0.6875rem] rounded-lg border border-slate-200 dark:border-slate-700"
             >
               {status}
             </div>

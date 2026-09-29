@@ -37,18 +37,26 @@ export const AutopilotDecisions: React.FC<Props> = ({ artifacts, nodes }) => {
   if (items.length === 0) return null;
   const nodeName = new Map(nodes.map(n => [n.id, n.name]));
 
+  // DFLT-00293: in a window of 200px or less the card pads less and each
+  // item stacks its parts (flex-col), each no wider than the card and
+  // breaking inside a word only when that word is wider than the line.
+  // DFLT-00290: from 7.5rem down (a 32px default font in a 240px window or
+  // narrower) the <section> card below pads 0.25rem (upto-7_5rem:p-1), so
+  // its labels and dates wrap inside it.
   return (
     <section
       data-testid="autopilot-decisions"
       aria-labelledby={headingId}
-      className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-xs"
+      className="bg-white dark:bg-slate-900 p-4 upto-200px:px-1 upto-200px:py-2 upto-7_5rem:p-1 rounded-xl border border-slate-200 dark:border-slate-800 text-xs"
     >
       <h3
         id={headingId}
-        className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-2"
+        className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 upto-200px:flex-wrap mb-2"
       >
         <Bot className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" aria-hidden="true" />
-        {t('autopilot.decisions.title', { count: items.length })}
+        <span className="upto-200px:min-w-0 upto-200px:wrap-break-word">
+          {t('autopilot.decisions.title', { count: items.length })}
+        </span>
       </h3>
       <ul className="space-y-1.5">
         {items.map(a => {
@@ -57,9 +65,9 @@ export const AutopilotDecisions: React.FC<Props> = ({ artifacts, nodes }) => {
           const node = nodeName.get(a.node_id);
           const href = `/artifacts/${a.id}/preview?type=${a.type}&name=${encodeURIComponent(a.name)}`;
           return (
-            <li key={a.id} data-testid="autopilot-decision" className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <li key={a.id} data-testid="autopilot-decision" className="flex flex-wrap items-center gap-x-3 gap-y-1 upto-200px:flex-col upto-200px:items-start upto-200px:wrap-break-word upto-200px:*:max-w-full">
               <span className="font-semibold text-slate-800 dark:text-slate-200">{label}</span>
-              <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400">{a.name}</span>
+              <span className="font-mono text-[0.625rem] text-slate-500 dark:text-slate-400">{a.name}</span>
               {node && <span className="text-slate-600 dark:text-slate-400">{node}</span>}
               <span className="text-slate-500 dark:text-slate-400">{formatDateTime(a.created_at, i18n.language)}</span>
               <a
@@ -67,7 +75,7 @@ export const AutopilotDecisions: React.FC<Props> = ({ artifacts, nodes }) => {
                 target="_blank"
                 rel="noreferrer"
                 aria-label={t('autopilot.decisions.open', { name: label })}
-                className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 text-[11px]"
+                className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 text-[0.6875rem]"
               >
                 <ExternalLink className="w-3 h-3" aria-hidden="true" />
                 {t('ticketItem.openInNewTab')}

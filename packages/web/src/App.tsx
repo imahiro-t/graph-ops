@@ -47,6 +47,7 @@ import { focusIfLost, focusKeySelector, neighborAfterRemoval } from './lib/focus
 import { installPlainCopy } from './lib/plainCopy';
 import { useLatest } from './hooks/useLatest';
 import { useTransientAnnouncement } from './hooks/useTransientAnnouncement';
+import { useMediaQuery } from './hooks/useMediaQuery';
 
 // Cycles through the three-way theme preference in a fixed order, used by
 // the header toggle button (light -> dark -> system -> light -> ...).
@@ -166,12 +167,12 @@ export const App: React.FC = () => {
   //   3. Writes. A request already in flight when the header moves still
   //      comes back. fetchAllTickets drops it (a newer run, or a different
   //      current project, supersedes it), as refreshProjectLabels does for
-  //      labels. (1) already stops such a response from being *shown*; (3)
-  //      stops it from knocking the current project's loaded list back to
-  //      "loading" until the next poll. An expanded ticket's detail
-  //      response (DFLT-00112) only ever replaces a ticket with the same id
-  //      inside the loaded list, so one for a project the user has left
-  //      matches nothing (see fetchTicketDetail).
+  //      labels (DFLT-00296). (1) already stops such a response from being
+  //      *shown*; (3) stops it from knocking the current project's loaded
+  //      list back to "loading" until the next poll. An expanded ticket's
+  //      detail response (DFLT-00112) only ever replaces a ticket with the
+  //      same id inside the loaded list, so one for a project the user has
+  //      left matches nothing (see fetchTicketDetail).
   //
   // What is NOT promised: that the header follows a switch made in another
   // tab of the same environment. It shows this window's own choice until a
@@ -228,15 +229,42 @@ export const App: React.FC = () => {
   // tooltip content changes, and a fresh element on every App render (the
   // ticket list polls) would re-measure and re-subscribe each time.
   const currentProjectName = currentProject?.name;
+  // With no project the tooltip is the button's visible label ("Select a
+  // project"), which a window of 200px or less hides (sr-only); it is enabled
+  // at that width only (DFLT-00293).
+  const noProjectLabel = t('projectSwitcher.noProject');
   const projectSwitcherTooltip = useMemo(
     () =>
-      currentProjectName === undefined ? undefined : (
+      currentProjectName === undefined ? (
+        noProjectLabel
+      ) : (
         <>
           <span className="block">{currentProjectName}</span>
           <span className="block">{currentProjectPathLabel}</span>
         </>
       ),
-    [currentProjectName, currentProjectPathLabel]
+    [currentProjectName, currentProjectPathLabel, noProjectLabel]
+  );
+  // DFLT-00293: a window of 200 CSS px or less, the same query as the
+  // header's upto-200px: classes (index.css), so the text labels are
+  // hidden (CSS) and the tooltips that stand in for them are enabled (here)
+  // at the same width, the boundary included.
+  const isTinyWindow = useMediaQuery('(max-width: 200px)');
+  // The New Ticket button's reason for being disabled (no project yet): its
+  // description at every width (the hidden span next to the button), and
+  // the second line of its visible tooltip in a tiny window.
+  const newTicketDescriptionId = useId();
+  const newTicketLabel = t('header.newTicket');
+  const newTicketDisabledReason = currentProject ? undefined : t('projectSwitcher.selectFirst');
+  const newTicketTooltip = useMemo(
+    () =>
+      newTicketDisabledReason === undefined ? newTicketLabel : (
+        <>
+          <span className="block">{newTicketLabel}</span>
+          <span className="block">{newTicketDisabledReason}</span>
+        </>
+      ),
+    [newTicketLabel, newTicketDisabledReason]
   );
   // Per-project count of tickets awaiting approval, badged on the switcher's
   // menu items (DFLT-00144). Refetched every time the menu opens; empty
@@ -448,6 +476,12 @@ export const App: React.FC = () => {
   // Tagged like ticketList, so the previous project's labels are never
   // offered (or drawn on tickets) under the new project's header while the
   // new ones load.
+  //
+  // Re-fetches overlap (a poll, a manual refresh and a settings change can
+  // each start one), and their answers may come back in any order. Like
+  // fetchAllTickets, each call takes a sequence number and only the latest
+  // call's answer is applied, so an older answer arriving last cannot put
+  // an older list back over a newer one (DFLT-00296).
   const [labelList, setLabelList] = useState<ProjectScoped<Label[]> | null>(null);
   const currentProjectId = currentProject?.id ?? '';
   const projectLabels = useMemo(
@@ -455,16 +489,23 @@ export const App: React.FC = () => {
     [currentProjectId, labelList]
   );
   const currentProjectIdRef = useLatest(currentProjectId);
+  const labelFetchSeqRef = useRef(0);
   const refreshProjectLabels = useCallback(
     async (projectId: string = currentProjectIdRef.current) => {
+      // Taken before the no-project case too: clearing the list supersedes
+      // any request still in flight, which must not fill it back in.
+      const seq = ++labelFetchSeqRef.current;
       if (!projectId) {
         setLabelList(null);
         return;
       }
       try {
         const labels = await fetchLabels(tRef.current, projectId);
-        // Ignore a response for a project that is no longer current.
-        if (projectId === currentProjectIdRef.current) setLabelList({ projectId, value: labels });
+        // Ignore a response a later call has superseded, or one for a
+        // project that is no longer current.
+        if (seq === labelFetchSeqRef.current && projectId === currentProjectIdRef.current) {
+          setLabelList({ projectId, value: labels });
+        }
       } catch (e) {
         // Keep the previous list: clearing it would also clear the filter.
         console.error('Failed to load labels', e);
@@ -1216,20 +1257,33 @@ export const App: React.FC = () => {
           button labels are spans of their own so the icons keep their size
           (shrink-0); the text is still the buttons' accessible name. On top
           of that, only for looks, in a window of 200 CSS px or less (at any
-          text size, so also at 100% there) the header pads with px-2, the Launch
-          Claude, language and New Ticket buttons may put the label on a
-          line of its own under the icon, and the project switcher and those
-          buttons pad less, so a label breaks between words rather than
-          letter by letter and the switcher's arrow stays inside its frame (a
-          px query: the 15rem one also matches 320-336px with a 32px default
-          font, where the header must not change). The
+          text size, so also at 100% there) the header pads with px-2 and the
+          project switcher and the buttons pad less (a px query: the 15rem
+          one also matches 320-336px with a 32px default font, where the
+          header must not change).
+          DFLT-00293: there, too, the header shows icons only. The "GraphOps"
+          name, the subtitle, the project name and the Launch Claude,
+          language and New Ticket labels are sr-only -- visually hidden but
+          still read, and still the buttons' accessible names -- so no word
+          is broken letter by letter ("GraphO / ps") any more; the logo
+          stays. Launch Claude and New Ticket are IconButtons whose visible
+          tooltip (hover and keyboard focus) is on only at that width
+          (isTinyWindow, the same query in script), so the label can still
+          be read; the language button always had its tooltip, and the
+          switcher's tooltip gives the project name. DFLT-00307: at that
+          width those four buttons (the switcher, Launch Claude, language,
+          New Ticket) also open their tooltip on a touch long press
+          (longPressTooltip), as a touch neither hovers nor moves keyboard
+          focus; a tap still runs the button at once. Theme and settings,
+          icon-only at every width, are left as they are. Wider than 200px
+          they look and behave as before. The
           "updated" row does not wrap: its time shrinks and wraps inside
           itself next to the refresh button, as it already did in English
           at 320-328px with a 32px root (letting the row wrap moved the time
           under the button there). */}
       <header
         ref={headerRef}
-        className={`bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 [@media(max-width:200px)]:px-2 lg:px-6 py-3.5 relative ${headerFitsSticky ? 'lg:sticky lg:top-0' : ''} z-30`}
+        className={`bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 upto-200px:px-2 lg:px-6 py-3.5 relative ${headerFitsSticky ? 'lg:sticky lg:top-0' : ''} z-30`}
       >
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
@@ -1237,10 +1291,10 @@ export const App: React.FC = () => {
                 background, so it stays visible on both light and dark headers without `dark:` variants.
                 Decorative: the adjacent "GraphOps" text already names the app. */}
             <img src="/favicon.svg" alt="" aria-hidden="true" className="w-6 h-6 shrink-0" />
-            <span className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-slate-100 min-w-0 wrap-anywhere">
+            <span className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-slate-100 min-w-0 wrap-anywhere upto-200px:sr-only">
               GraphOps
             </span>
-            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium min-w-0 wrap-anywhere">{t('header.subtitle')}</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium min-w-0 wrap-anywhere upto-200px:sr-only">{t('header.subtitle')}</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 min-w-0">
@@ -1283,22 +1337,26 @@ export const App: React.FC = () => {
                   name stays the button's text (nameFromContent) and the
                   description is the local path alone (the hidden span
                   below). No tooltip while the popup is open -- it would
-                  cover the popup's first item -- or with no project. */}
+                  cover the popup's first item. With no project the tooltip
+                  is the "Select a project" label, shown only in a window of
+                  200px or less, where that label is hidden (DFLT-00293);
+                  wider, the label is visible and no tooltip is needed. */}
               <IconButton
                 ref={projectMenuButtonRef}
                 nameFromContent
                 tooltip={projectSwitcherTooltip}
-                tooltipDisabled={isProjectMenuOpen || !currentProject}
+                tooltipDisabled={isProjectMenuOpen || (!currentProject && !isTinyWindow)}
+                longPressTooltip={isTinyWindow}
                 aria-describedby={currentProject ? projectSwitcherDescriptionId : undefined}
                 wrapperClassName="min-w-0 max-w-full"
                 onClick={toggleProjectMenu}
                 aria-expanded={isProjectMenuOpen}
                 aria-haspopup="dialog"
                 aria-controls={isProjectMenuOpen ? PROJECT_MENU_ID : undefined}
-                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 [@media(max-width:200px)]:gap-1 [@media(max-width:200px)]:px-2 transition min-w-0 max-w-full"
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 upto-200px:gap-1 upto-200px:px-2 transition min-w-0 max-w-full"
               >
                 <FolderOpen aria-hidden="true" className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
-                <span className="truncate">
+                <span className="truncate upto-200px:sr-only">
                   {currentProject ? currentProject.name : t('projectSwitcher.noProject')}
                 </span>
                 {/* DFLT-00163: WCAG 1.4.11 (3:1). The arrow is the only sign that this opens a menu.
@@ -1332,8 +1390,9 @@ export const App: React.FC = () => {
                       the content box, over the button; top: 100% plus mt-1.5
                       is where the static position put it while the wrapper
                       was a block. The popup is a size container
-                      (@container): where it is narrower than 8rem (a 160-
-                      200px window with a 24-32px root font, say), each item
+                      (@container): where it is narrower than 8rem
+                      (cq-below-8rem:, index.css; a 160-200px window with a
+                      24-32px root font, say), each item
                       pads less and puts the badge and the prefix on a
                       second line, so the name keeps the first line's width
                       after the check mark and never shrinks to nothing. The
@@ -1366,7 +1425,7 @@ export const App: React.FC = () => {
                           key={p.id}
                           onClick={() => switchToProject(p)}
                           aria-current={isCurrent ? 'true' : undefined}
-                          className="w-full text-left px-3 [@container(width<8rem)]:px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 flex [@container(width<8rem)]:flex-wrap items-center gap-2 text-slate-700 dark:text-slate-300"
+                          className="w-full text-left px-3 cq-below-8rem:px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 flex cq-below-8rem:flex-wrap items-center gap-2 text-slate-700 dark:text-slate-300"
                         >
                           <Check
                             aria-hidden="true"
@@ -1380,8 +1439,8 @@ export const App: React.FC = () => {
                               of the first line (flex-1 basis-0) and the group
                               on the right fills a line of its own
                               (basis-full), still right-aligned. */}
-                          <span className="min-w-0 wrap-anywhere [@container(width<8rem)]:flex-1 [@container(width<8rem)]:basis-0">{p.name}</span>
-                          <span className="ml-auto flex items-center gap-2 shrink-0 [@container(width<8rem)]:basis-full [@container(width<8rem)]:justify-end">
+                          <span className="min-w-0 wrap-anywhere cq-below-8rem:flex-1 cq-below-8rem:basis-0">{p.name}</span>
+                          <span className="ml-auto flex items-center gap-2 shrink-0 cq-below-8rem:basis-full cq-below-8rem:justify-end">
                             {pendingApprovalCounts[p.id] > 0 && (
                               <PendingApprovalBadge count={pendingApprovalCounts[p.id]} />
                             )}
@@ -1389,7 +1448,7 @@ export const App: React.FC = () => {
                                 4.76:1 on white and 4.55:1 on the slate-50 hover; slate-400 is 6.96:1
                                 on slate-900 and 5.71:1 on the slate-800 hover. The light hover margin
                                 is thin: recompute if the item backgrounds get darker. */}
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{p.prefix}</span>
+                            <span className="text-[0.625rem] text-slate-500 dark:text-slate-400 font-mono">{p.prefix}</span>
                           </span>
                         </button>
                       );
@@ -1415,13 +1474,18 @@ export const App: React.FC = () => {
               )}
             </div>
 
-            <button
+            <IconButton
+              nameFromContent
+              label={t('header.launchClaude')}
+              tooltipDisabled={!isTinyWindow}
+              longPressTooltip={isTinyWindow}
+              wrapperClassName="min-w-0 max-w-full"
               onClick={() => setIsClaudeGlobalOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-700 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 [@media(max-width:200px)]:flex-wrap [@media(max-width:200px)]:justify-center [@media(max-width:200px)]:px-2 transition min-w-0 max-w-full"
+              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-700 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 upto-200px:px-2 transition min-w-0 max-w-full"
             >
               <Terminal aria-hidden="true" className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-              <span className="min-w-0 wrap-anywhere">{t('header.launchClaude')}</span>
-            </button>
+              <span className="min-w-0 wrap-anywhere upto-200px:sr-only">{t('header.launchClaude')}</span>
+            </IconButton>
 
             {/* The language, theme and settings buttons name themselves
                 through IconButton's aria-label and show that name as a
@@ -1431,11 +1495,12 @@ export const App: React.FC = () => {
             <IconButton
               onClick={() => i18n.changeLanguage(currentLanguage === 'ja' ? 'en' : 'ja')}
               label={t('header.language.toggleTitle', { lang: t(`header.language.${currentLanguage}`) })}
+              longPressTooltip={isTinyWindow}
               wrapperClassName="min-w-0 max-w-full"
-              className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 transition flex items-center gap-1.5 [@media(max-width:200px)]:flex-wrap [@media(max-width:200px)]:justify-center min-w-0 max-w-full"
+              className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 transition flex items-center gap-1.5 min-w-0 max-w-full"
             >
               <Languages aria-hidden="true" className="w-4 h-4 shrink-0" />
-              <span className="text-xs font-semibold min-w-0 wrap-anywhere">{t(`header.language.${currentLanguage}`)}</span>
+              <span className="text-xs font-semibold min-w-0 wrap-anywhere upto-200px:sr-only">{t(`header.language.${currentLanguage}`)}</span>
             </IconButton>
 
             <IconButton
@@ -1454,8 +1519,42 @@ export const App: React.FC = () => {
               <SettingsIcon aria-hidden="true" className="w-4 h-4" />
             </IconButton>
 
-            <button
+            {/* DFLT-00293: IconButton so that in a window of 200px or less,
+                where the label is hidden, the visible tooltip shows it (on
+                hover and keyboard focus). Without a project the button is
+                natively disabled and explains why:
+                - Its description is the reason alone, at every width: the
+                  hidden span below, referenced by aria-describedby. With
+                  aria-describedby set, the title (below) is not used as the
+                  description, so the name is never repeated in it.
+                - Wider than 200px it keeps the native title tooltip, as
+                  before, and has no visible tooltip.
+                - At 200px or less it has no title (two tooltips would show),
+                  and the visible tooltip has two lines: the name and the
+                  reason. A natively disabled button cannot take keyboard
+                  focus, so that tooltip opens on hover only -- the same
+                  limit the title always had. aria-disabled (focusable)
+                  would add a stop to the header's Tab order at every width,
+                  so it is not used.
+                - DFLT-00307: at 200px or less a touch long press opens that
+                  tooltip too (longPressTooltip), and while the button is
+                  disabled there it takes pointer-events-none, so every
+                  pointer event lands on IconButton's wrapper <span>, which
+                  runs the long press. Browsers differ in which events a
+                  natively disabled button gets (iOS Safari, Android and
+                  Firefox could not all be checked), and this does not
+                  depend on any of them. Nothing is lost: a disabled button
+                  takes no click anyway, has no title at that width, and
+                  its hover is tracked on the wrapper as well. Wider, or
+                  with a project, the class is not added. */}
+            <IconButton
               ref={newTicketButtonRef}
+              nameFromContent
+              label={newTicketLabel}
+              tooltip={newTicketTooltip}
+              tooltipDisabled={!isTinyWindow}
+              longPressTooltip={isTinyWindow}
+              wrapperClassName="min-w-0 max-w-full"
               onClick={() => {
                 // Clear any leftover status message from a previous create
                 // attempt before the form reopens -- the form's own request
@@ -1466,12 +1565,16 @@ export const App: React.FC = () => {
                 setIsCreateOpen(true);
               }}
               disabled={!currentProject}
-              title={currentProject ? undefined : t('projectSwitcher.selectFirst')}
-              className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 [@media(max-width:200px)]:flex-wrap [@media(max-width:200px)]:justify-center [@media(max-width:200px)]:px-2 transition min-w-0 max-w-full"
+              title={isTinyWindow ? undefined : newTicketDisabledReason}
+              aria-describedby={newTicketDisabledReason === undefined ? undefined : newTicketDescriptionId}
+              className={`px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 upto-200px:px-2 transition min-w-0 max-w-full ${isTinyWindow && !currentProject ? 'pointer-events-none' : ''}`}
             >
               <Plus aria-hidden="true" className="w-4 h-4 shrink-0" />
-              <span className="min-w-0 wrap-anywhere">{t('header.newTicket')}</span>
-            </button>
+              <span className="min-w-0 wrap-anywhere upto-200px:sr-only">{newTicketLabel}</span>
+            </IconButton>
+            <span id={newTicketDescriptionId} hidden>
+              {newTicketDisabledReason}
+            </span>
           </div>
         </div>
 
@@ -1588,8 +1691,12 @@ export const App: React.FC = () => {
           at 320/360px the Send button's label broke onto several lines. The
           15rem query stays: with a very large default font (over about 267%)
           it still matches above 640px. From sm up, at a normal default font
-          size, nothing changes. */}
-      <main className="max-w-7xl mx-auto px-6 max-sm:px-3 upto-15rem:px-3 py-6 space-y-6">
+          size, nothing changes. DFLT-00290: from 7.5rem down (a 32px default
+          font in a 240px window or narrower, 120px or narrower at 16px) it
+          pads with px-1, so the expanded ticket's node rows keep room for
+          their status badges (see TicketItem.tsx). DFLT-00293 pads px-1 in a
+          window of 200px or less as well. */}
+      <main className="max-w-7xl mx-auto px-6 max-sm:px-3 upto-15rem:px-3 upto-200px:px-1 upto-7_5rem:px-1 py-6 space-y-6">
         {/* Simple Summary Metrics. DFLT-00251: both children are min-w-0
             max-w-full so neither can be wider than the card; the numbers
             already wrap between items (flex-wrap). Each item is min-w-0
@@ -1640,10 +1747,10 @@ export const App: React.FC = () => {
               container: its width comes from <main>, not from its content. */}
           <div
             data-testid="summary-heading"
-            className="flex upto-15rem:flex-wrap [@container(max-width:12rem)]:flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 max-w-full"
+            className="flex upto-15rem:flex-wrap cq-upto-12rem:flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 max-w-full"
           >
-            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm upto-15rem:min-w-0 upto-15rem:wrap-anywhere [@container(max-width:12rem)]:min-w-0 [@container(max-width:12rem)]:wrap-anywhere">{t('summary.title')}</span>
-            <span className="text-xs text-slate-500 dark:text-slate-400 upto-15rem:min-w-0 upto-15rem:wrap-anywhere [@container(max-width:12rem)]:min-w-0 [@container(max-width:12rem)]:wrap-anywhere">{t('summary.subtitle')}</span>
+            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm upto-15rem:min-w-0 upto-15rem:wrap-anywhere cq-upto-12rem:min-w-0 cq-upto-12rem:wrap-anywhere">{t('summary.title')}</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 upto-15rem:min-w-0 upto-15rem:wrap-anywhere cq-upto-12rem:min-w-0 cq-upto-12rem:wrap-anywhere">{t('summary.subtitle')}</span>
           </div>
 
           <div
@@ -1652,28 +1759,28 @@ export const App: React.FC = () => {
           >
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold wrap-anywhere text-slate-800 dark:text-slate-200">{totalCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:wrap-anywhere">{t('summary.total')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 upto-200px:wrap-anywhere">{t('summary.total')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold wrap-anywhere text-blue-600 dark:text-blue-400">{inProgressCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:wrap-anywhere">{t('summary.inProgress')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 upto-200px:wrap-anywhere">{t('summary.inProgress')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold wrap-anywhere text-purple-600 dark:text-purple-400">{inReviewCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:wrap-anywhere">{t('summary.inReview')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 upto-200px:wrap-anywhere">{t('summary.inReview')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold wrap-anywhere text-emerald-600 dark:text-emerald-400">{doneCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:wrap-anywhere">{t('summary.done')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 upto-200px:wrap-anywhere">{t('summary.done')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div
                 data-testid="summary-node-progress"
                 className="text-lg font-bold wrap-anywhere text-slate-800 dark:text-slate-200"
               >
-                <span className="whitespace-nowrap [@media(max-width:200px)]:whitespace-normal">{doneNodesCount}/</span><wbr /><span className="whitespace-nowrap [@media(max-width:200px)]:whitespace-normal">{totalNodesCount}</span>
+                <span className="whitespace-nowrap upto-200px:whitespace-normal">{doneNodesCount}/</span><wbr /><span className="whitespace-nowrap upto-200px:whitespace-normal">{totalNodesCount}</span>
               </div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:wrap-anywhere">{t('summary.nodeProgress')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 upto-200px:wrap-anywhere">{t('summary.nodeProgress')}</div>
             </div>
           </div>
         </div>

@@ -7,6 +7,16 @@ import { plainCopyProps } from '../lib/plainCopy';
 import { withBreaks } from '../lib/wbr';
 import { errorMessage } from '../lib/apiError';
 import { submittingProps, useSubmittingLabel } from './Submitting';
+import { fitPopupHorizontally, rootFontSizePx } from '../lib/popupPlacement';
+
+// The panel's own width: its w-56 (14rem). Keep the two in step --
+// LabelSelect.narrowPopup.test.tsx checks that the panel still has w-56.
+export const LABEL_PANEL_WIDTH_REM = 14;
+// The space kept between the panel and the edges it must stay inside.
+const LABEL_PANEL_MARGIN_REM = 0.25;
+// Sub-pixel slack for the narrow test, so rounding never turns a panel that
+// has its full 14rem into a narrow one.
+const NARROW_SLACK_PX = 0.5;
 
 interface Props {
   ticketId: string;
@@ -61,8 +71,8 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
   // 320px the panel kept its old left and ran past the card's left edge), on
   // window resizes, and when the button, the labels item or the clip changes
   // size (ResizeObserver, where there is one: that also catches a change of
-  // the browser's text size). Sets the panel's style directly, and only when
-  // it has to move or shrink; the panel unmounts on close.
+  // the browser's text size). placePanel sets the panel's style directly,
+  // and only the values that change; the panel unmounts on close.
   //
   // DFLT-00311: none of those fire when the button only moves -- an item
   // before the labels in the metadata bar gets wider (or appears), and the
@@ -91,7 +101,7 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
     const clip = clippingAncestor(anchor);
     let last = '';
     const place = () => {
-      placePanel(anchor, panel);
+      placePanel(anchor, panel, clip);
       if (clip) last = panelFrame(anchor, clip);
     };
     place();
@@ -106,9 +116,9 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
         if (el) observer.observe(el);
       }
     }
-    // Without a clip placePanel never sets anything, so there is nothing to
-    // follow. The panel is not among the compared values, so a fit never
-    // sets off another one.
+    // Without a clip the panel is fitted to the window alone, which the
+    // resize listener follows. The panel is not among the compared values,
+    // so a fit never sets off another one.
     let frame: number | undefined;
     if (clip && typeof requestAnimationFrame !== 'undefined') {
       const tick = () => {
@@ -201,7 +211,7 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
           // rounded rectangle rather than an ellipse; on one line its radius
           // (0.75rem) is at least half the button's height, so it looks the
           // same as rounded-full.
-          className="px-2 py-0.5 rounded-full upto-15rem:rounded-xl border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 text-[11px] font-semibold flex flex-wrap items-center gap-1 transition min-w-0 max-w-full wrap-break-word text-left"
+          className="px-2 py-0.5 rounded-full upto-15rem:rounded-xl border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 text-[0.6875rem] font-semibold flex flex-wrap items-center gap-1 transition min-w-0 max-w-full wrap-break-word text-left"
         >
           {saving ? <Loader2 className="w-3 h-3 shrink-0 animate-spin" aria-hidden="true" /> : <Tag className="w-3 h-3 shrink-0" aria-hidden="true" />}
           {/* ticket.labels.editVisible is ticket.labels.edit with its break
@@ -220,29 +230,31 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
         {isOpen && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
-            {/* DFLT-00295: placePanel may narrow the panel below w-56 and move
-                it left of left-0. Rows stay on one line; in a narrowed panel a
-                long name ends in an ellipsis (min-w-0 lets span.truncate shrink
-                below its text) and the checkbox keeps its size (shrink-0).
-                With large text on a narrow screen (upto-15rem, where the
-                panel is always narrowed) the rows pad with px-2 / gap-1.5:
-                at 160px / 200% that leaves a name 43px instead of 23px (one
-                letter and the ellipsis). */}
+            {/* DFLT-00295: placePanel fits the panel into the card and the
+                window: it sets the inline max-width (which wins over w-56) and
+                left (which wins over left-0), and data-narrow when the width
+                left is short of 14rem. */}
             <div
               ref={panelRef}
               id={panelId}
               role="group"
               aria-label={t('ticket.labels.groupLabel', { id: ticketId })}
               aria-busy={saving}
-              className="absolute left-0 top-full mt-1.5 w-56 max-h-80 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-xs"
+              className="group absolute left-0 top-full mt-1.5 w-56 max-h-80 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-xs"
             >
+              {/* DFLT-00293: every class for the narrow panel is behind
+                  group-data-narrow:, so at full width nothing changes. There
+                  a row wraps and pads less, the checkbox keeps its size
+                  (shrink-0, which changes nothing on a one-line row), and the
+                  name is shown in full, wrapped (breaking inside a word only
+                  where it has to), instead of truncated. */}
               {projectLabels.length === 0 ? (
-                <div className="px-3 upto-15rem:px-2 py-1.5 text-slate-500 dark:text-slate-400">{t('ticket.labels.noRegistered')}</div>
+                <div className="px-3 py-1.5 text-slate-500 dark:text-slate-400 group-data-narrow:px-2 group-data-narrow:wrap-anywhere">{t('ticket.labels.noRegistered')}</div>
               ) : (
                 projectLabels.map(l => (
                   <label
                     key={l.id}
-                    className="flex items-center gap-2 px-3 upto-15rem:gap-1.5 upto-15rem:px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap"
+                    className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap group-data-narrow:px-2 group-data-narrow:whitespace-normal"
                   >
                     <input
                       type="checkbox"
@@ -251,7 +263,7 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
                       onChange={() => toggle(l.id)}
                       className="shrink-0 rounded-sm border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0 aria-disabled:opacity-50"
                     />
-                    <span className="truncate min-w-0">{l.name}</span>
+                    <span className="truncate group-data-narrow:min-w-0 group-data-narrow:overflow-visible group-data-narrow:whitespace-normal group-data-narrow:text-clip group-data-narrow:wrap-anywhere">{l.name}</span>
                   </label>
                 ))
               )}
@@ -273,18 +285,13 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
           the rest of its line while there is an error (TicketItem), so the
           message is not squeezed to the width of the labels. */}
       {error && (
-        <span role="alert" className="text-red-600 dark:text-red-400 font-medium text-[11px] w-0 min-w-full max-w-full wrap-anywhere">
+        <span role="alert" className="text-red-600 dark:text-red-400 font-medium text-[0.6875rem] w-0 min-w-full max-w-full wrap-anywhere">
           {error}
         </span>
       )}
     </div>
   );
 };
-
-// The gap kept between a narrowed or moved panel and the card's clip.
-const PANEL_INSET_PX = 4;
-// The panel's own width, w-56.
-const PANEL_WIDTH_REM = 14;
 
 // The first ancestor of `el` that clips horizontally (overflow-x other than
 // visible), or null.
@@ -303,29 +310,58 @@ const panelFrame = (anchor: HTMLElement, clip: HTMLElement): string => {
   return `${anchor.getBoundingClientRect().left - inside} ${clip.clientWidth}`;
 };
 
-// DFLT-00295: fits `panel` (absolute, left-0 w-56 in `anchor`) into the first
-// ancestor of `anchor` that clips horizontally -- the ticket card's
+// DFLT-00293: the panel lines up with the button's left edge and is w-56
+// (14rem), as before, but it is kept inside the ticket card and the window:
+// it is never wider than they leave (less 0.25rem on each side), and moves
+// left when it would end past their right edge (see lib/popupPlacement.ts).
+// In a 160px window at a 200% text size the card is about 110px wide and the
+// card's overflow clip cut the panel off.
+//
+// Only when the width left is short of 14rem (by more than a sub-pixel) is
+// the panel narrow: it then carries data-narrow, and only then do the
+// group-data-narrow: classes let the rows wrap and the names wrap in full
+// instead of truncating. The switch is this computed width, not a container
+// query: a container query tests the content box, which in the bordered
+// w-56 panel is 14rem - 2px even at full width, so a 14rem threshold would
+// always match and change the normal-width look. w-56 stays for the same
+// reason: at full width the panel's look is fixed by it; when narrow, the
+// inline max-width (which wins over width) caps it and the inline left
+// (which wins over left-0) moves it.
+//
+// DFLT-00295: `clip` is the first ancestor of `anchor` (the span holding the
+// button and the panel) that clips horizontally -- the ticket card's
 // overflow-clip; if another clipping or scrolling element is ever put
-// between them, that one becomes the limit. The panel keeps its place and
-// width (no inline style) when it fits; otherwise it gets the width of the
-// clip's inside less an inset on both sides at most, moved left until its
-// right edge is inside, but never past the clip's left edge. Nothing happens
-// when there is nothing to measure (no clipping ancestor, or a zero width, as
-// in jsdom).
-const placePanel = (anchor: HTMLElement, panel: HTMLElement) => {
-  panel.style.removeProperty('width');
-  panel.style.removeProperty('left');
-  const clip = clippingAncestor(anchor);
-  if (!clip || clip.clientWidth <= 0) return;
-  // The clip's inside (within its borders), less the inset on both sides.
-  const min = clip.getBoundingClientRect().left + clip.clientLeft + PANEL_INSET_PX;
-  const max = min + clip.clientWidth - 2 * PANEL_INSET_PX;
-  const rootFont = parseFloat(getComputedStyle(document.documentElement).fontSize);
-  const natural = PANEL_WIDTH_REM * (rootFont > 0 ? rootFont : 16);
-  const width = Math.max(0, Math.min(natural, max - min));
-  const anchorLeft = anchor.getBoundingClientRect().left;
-  const left = Math.max(min, Math.min(anchorLeft, max - width));
-  if (width === natural && left === anchorLeft) return;
-  panel.style.width = `${width}px`;
-  panel.style.left = `${left - anchorLeft}px`;
+// between them, that one becomes the limit. Without one the window alone is
+// the limit. The styles are set directly on the panel, and only the ones
+// that change. When the clip measures 0 wide there is nothing to measure,
+// and the panel keeps its classes' place and width.
+const placePanel = (anchor: HTMLElement, panel: HTMLElement, clip: HTMLElement | null) => {
+  if (clip && clip.clientWidth <= 0) {
+    for (const prop of ['left', 'max-width']) if (panel.style.getPropertyValue(prop)) panel.style.removeProperty(prop);
+    panel.removeAttribute('data-narrow');
+    return;
+  }
+  const rem = rootFontSizePx();
+  const preferredWidth = LABEL_PANEL_WIDTH_REM * rem;
+  const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+  let boundsLeft = 0;
+  let boundsRight = viewportWidth;
+  if (clip) {
+    const inside = clip.getBoundingClientRect().left + clip.clientLeft;
+    boundsLeft = Math.max(boundsLeft, inside);
+    boundsRight = Math.min(boundsRight, inside + clip.clientWidth);
+  }
+  const { left, maxWidth } = fitPopupHorizontally({
+    viewportWidth,
+    anchorLeft: anchor.getBoundingClientRect().left,
+    preferredWidth,
+    margin: LABEL_PANEL_MARGIN_REM * rem,
+    boundsLeft,
+    boundsRight
+  });
+  const narrow = maxWidth < preferredWidth - NARROW_SLACK_PX;
+  for (const [prop, value] of [['left', `${left}px`], ['max-width', `${maxWidth}px`]]) {
+    if (panel.style.getPropertyValue(prop) !== value) panel.style.setProperty(prop, value);
+  }
+  panel.toggleAttribute('data-narrow', narrow);
 };

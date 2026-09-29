@@ -241,7 +241,7 @@ export const ProjectSetupModal: React.FC<Props> = ({
   // emits later and would win.) The monospace path in the project list below
   // keeps `break-all`: it is one path, so filling each line reads better.
   const errorBox = error && (
-    <div role="alert" className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900 wrap-anywhere">
+    <div role="alert" className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[0.6875rem] rounded-lg border border-red-200 dark:border-red-900 wrap-anywhere">
       {error}
     </div>
   );
@@ -252,7 +252,7 @@ export const ProjectSetupModal: React.FC<Props> = ({
     <div
       role="alert"
       data-testid="project-setup-partial-create"
-      className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[11px] rounded-lg border border-red-200 dark:border-red-900 wrap-anywhere"
+      className="p-2.5 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-[0.6875rem] rounded-lg border border-red-200 dark:border-red-900 wrap-anywhere"
     >
       {offerExisting
         ? t('projectSetupModal.createdButLocalPathNotSavedChooseExisting', { name: partialCreate.name })
@@ -322,7 +322,7 @@ export const ProjectSetupModal: React.FC<Props> = ({
               )}
             </div>
             {projects.length === 0 && (
-              <p id="project-setup-no-existing" className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+              <p id="project-setup-no-existing" className="mt-2 text-[0.6875rem] text-slate-500 dark:text-slate-400">
                 {t('projectSetupModal.noExistingProjects')}
               </p>
             )}
@@ -433,7 +433,7 @@ export const ProjectSetupModal: React.FC<Props> = ({
                 text often is not). */}
             <div role="status" data-testid="project-setup-overwrite-status">
               {willOverwrite && selected && (
-                <div className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[11px] rounded-lg border border-amber-200 dark:border-amber-800 wrap-anywhere">
+                <div className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[0.6875rem] rounded-lg border border-amber-200 dark:border-amber-800 wrap-anywhere">
                   {t('projectSetupModal.overwriteWarning', { current: selected.local_path, next: directory })}
                 </div>
               )}

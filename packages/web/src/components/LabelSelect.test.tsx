@@ -225,18 +225,20 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
   const expected = (box: Box, anchorLeft: number) => {
     const min = box.left + box.clientLeft + INSET;
     const max = min + box.clientWidth - 2 * INSET;
-    const width = Math.min(NATURAL, max - min);
+    const maxWidth = max - min;
+    const width = Math.min(NATURAL, maxWidth);
     const left = Math.max(min, Math.min(anchorLeft, max - width));
-    return { width, left: left - anchorLeft };
+    return { maxWidth, width, left: left - anchorLeft };
   };
 
   const WIDE: Box = { left: 0, clientLeft: 1, clientWidth: 1000 };
   const NARROW: Box = { left: 10, clientLeft: 1, clientWidth: 150 };
 
   const expectFitted = (panel: HTMLElement, box: Box, anchorLeft: number) => {
-    const { width, left } = expected(box, anchorLeft);
-    expect(panel.style.width).toBe(`${width}px`);
+    const { maxWidth, width, left } = expected(box, anchorLeft);
+    expect(panel.style.maxWidth).toBe(`${maxWidth}px`);
     expect(panel.style.left).toBe(`${left}px`);
+    expect(panel).toHaveAttribute('data-narrow');
     const min = box.left + box.clientLeft + INSET;
     const max = min + box.clientWidth - 2 * INSET;
     // Narrower than 14rem, inside the clip on both sides.
@@ -246,9 +248,19 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
     expect(anchorLeft + left + width).toBeLessThanOrEqual(max);
   };
 
-  const expectUntouched = (panel: HTMLElement) => {
-    expect(panel.style.width).toBe('');
+  // DFLT-00293: where it fits, the panel keeps its left edge at the button
+  // and its full 14rem (w-56); the max-width only caps it at the clip.
+  const expectAtButton = (panel: HTMLElement) => {
+    expect(panel.style.left).toBe('0px');
+    expect(parseFloat(panel.style.maxWidth)).toBeGreaterThanOrEqual(NATURAL);
+    expect(panel).not.toHaveAttribute('data-narrow');
+    expect(panel).toHaveClass('absolute', 'left-0', 'top-full', 'w-56');
+  };
+
+  const expectNoStyle = (panel: HTMLElement) => {
+    expect(panel.style.maxWidth).toBe('');
     expect(panel.style.left).toBe('');
+    expect(panel).not.toHaveAttribute('data-narrow');
     expect(panel).toHaveClass('absolute', 'left-0', 'top-full', 'w-56');
   };
 
@@ -286,7 +298,7 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
   it('leaves the panel at left-0 w-56 when the clip is wide enough', async () => {
     const { user } = setup(WIDE, 100);
     const panel = await openPanel(user);
-    expectUntouched(panel);
+    expectAtButton(panel);
   });
 
   it('narrows the panel and moves it left to fit into a narrow clip', async () => {
@@ -294,7 +306,7 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
     const panel = await openPanel(user);
     expectFitted(panel, NARROW, 60);
     // 150 - 2 * 4 wide, from the clip's inside left edge (10 + 1 + 4).
-    expect(panel.style.width).toBe('142px');
+    expect(panel.style.maxWidth).toBe('142px');
     expect(panel.style.left).toBe('-45px');
   });
 
@@ -302,21 +314,22 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
     const box: Box = { left: 0, clientLeft: 0, clientWidth: 400 };
     const { user } = setup(box, 300);
     const panel = await openPanel(user);
-    // 224px wide, its right edge at the clip's 396.
-    expect(panel.style.width).toBe(`${NATURAL}px`);
+    // 224px wide (capped at 392px only), its right edge at the clip's 396.
+    expect(panel.style.maxWidth).toBe('392px');
+    expect(panel).not.toHaveAttribute('data-narrow');
     expect(panel.style.left).toBe(`${396 - NATURAL - 300}px`);
   });
 
   it('sets no position when the clip measures 0 wide', async () => {
     const { user } = setup({ left: 0, clientLeft: 0, clientWidth: 0 }, 0);
     const panel = await openPanel(user);
-    expectUntouched(panel);
+    expectNoStyle(panel);
   });
 
   it('refits the open panel when the window is resized, both ways', async () => {
     const { user, setBox } = setup(WIDE, 60);
     const panel = await openPanel(user);
-    expectUntouched(panel);
+    expectAtButton(panel);
 
     setBox(NARROW);
     fireEvent(window, new Event('resize'));
@@ -324,7 +337,7 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
 
     setBox(WIDE);
     fireEvent(window, new Event('resize'));
-    expectUntouched(panel);
+    expectAtButton(panel);
   });
 
   it('stops measuring on resize once the panel is closed', async () => {
@@ -368,15 +381,16 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
     const box: Box = { left: 12, clientLeft: 1, clientWidth: 294 };
     const { user, setAnchorLeft, setLabels } = setup(box, 130);
     const panel = await openPanel(user);
-    expect(panel.style.width).toBe(`${NATURAL}px`);
+    expect(panel.style.maxWidth).toBe('286px');
+    expect(panel).not.toHaveAttribute('data-narrow');
     expect(panel.style.left).toBe(`${expected(box, 130).left}px`);
     expect(panel.style.left).toBe('-51px');
 
     setAnchorLeft(25);
     setLabels([BUG]);
-    // Fits from the button's new place: 224px wide from 25 ends at 249, so no
-    // style at all -- nothing of the old left is left behind.
-    expectUntouched(panel);
+    // Fits from the button's new place: 224px wide from 25 ends at 249, so
+    // back at the button -- nothing of the old left is left behind.
+    expectAtButton(panel);
 
     setAnchorLeft(200);
     setLabels([BUG, UI]);
@@ -431,7 +445,7 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
     it('watches the anchor, the row it sits in and the clip, and refits when they resize', async () => {
       const { user, clip, anchor, setBox, setAnchorLeft } = setup(WIDE, 60);
       const panel = await openPanel(user);
-      expectUntouched(panel);
+      expectAtButton(panel);
       expect(live()).toHaveLength(1);
       // The wrapper is display: contents, so its parent (the row) is watched.
       expect(live()[0].targets).toEqual([anchor, screen.getByTestId('row'), clip]);
@@ -464,20 +478,20 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
     it.each([
       // WIDE: from 100 the panel fits as it is; at 900 it keeps its 224px and
       // only moves left, its right edge at the clip's inside 997.
-      { name: 'WIDE', box: WIDE, from: 100, before: { width: '', left: '' }, to: 900, after: { width: '224px', left: '-127px' } },
-      { name: 'NARROW', box: NARROW, from: 60, before: { width: '142px', left: '-45px' }, to: 40, after: { width: '142px', left: '-25px' } }
+      { name: 'WIDE', box: WIDE, from: 100, before: { maxWidth: '992px', left: '0px' }, to: 900, after: { maxWidth: '992px', left: '-127px' } },
+      { name: 'NARROW', box: NARROW, from: 60, before: { maxWidth: '142px', left: '-45px' }, to: 40, after: { maxWidth: '142px', left: '-25px' } }
     ])('refits the panel on the next frame when only the button moves ($name, $from to $to)', async ({ box, from, before, to, after }) => {
       const { user, setAnchorLeft } = setup(box, from);
       const panel = await openPanel(user);
-      expect({ width: panel.style.width, left: panel.style.left }).toEqual(before);
+      expect({ maxWidth: panel.style.maxWidth, left: panel.style.left }).toEqual(before);
 
       setAnchorLeft(to);
       // Nothing but a frame refits it.
-      expect({ width: panel.style.width, left: panel.style.left }).toEqual(before);
+      expect({ maxWidth: panel.style.maxWidth, left: panel.style.left }).toEqual(before);
       step();
-      expect({ width: panel.style.width, left: panel.style.left }).toEqual(after);
-      const { width, left } = expected(box, to);
-      expect(panel.style.width).toBe(`${width}px`);
+      expect({ maxWidth: panel.style.maxWidth, left: panel.style.left }).toEqual(after);
+      const { maxWidth, left } = expected(box, to);
+      expect(panel.style.maxWidth).toBe(`${maxWidth}px`);
       expect(panel.style.left).toBe(`${left}px`);
     });
 
@@ -486,23 +500,25 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
       const panel = await openPanel(user);
       setAnchorLeft(900);
       step();
-      expect(panel.style.width).toBe('224px');
+      expect(panel.style.maxWidth).toBe('992px');
       expect(panel.style.left).toBe('-127px');
 
       setAnchorLeft(100);
       step();
-      expectUntouched(panel);
+      expectAtButton(panel);
     });
 
     it('rewrites nothing on frames where nothing changed', async () => {
       const { user } = setup(NARROW, 60);
       const panel = await openPanel(user);
       const remove = vi.spyOn(panel.style, 'removeProperty');
+      const set = vi.spyOn(panel.style, 'setProperty');
       step();
       step();
       step();
       expect(remove).not.toHaveBeenCalled();
-      expect(panel.style.width).toBe('142px');
+      expect(set).not.toHaveBeenCalled();
+      expect(panel.style.maxWidth).toBe('142px');
       expect(panel.style.left).toBe('-45px');
     });
 
@@ -514,11 +530,13 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
       expectFitted(panel, NARROW, 40);
 
       const remove = vi.spyOn(panel.style, 'removeProperty');
+      const set = vi.spyOn(panel.style, 'setProperty');
       step();
       step();
       step();
       expect(remove).not.toHaveBeenCalled();
-      expect(panel.style.width).toBe('142px');
+      expect(set).not.toHaveBeenCalled();
+      expect(panel.style.maxWidth).toBe('142px');
       expect(panel.style.left).toBe('-25px');
     });
 
@@ -530,8 +548,10 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
       expectFitted(panel, NARROW, 60);
 
       const remove = vi.spyOn(panel.style, 'removeProperty');
+      const set = vi.spyOn(panel.style, 'setProperty');
       step();
       expect(remove).not.toHaveBeenCalled();
+      expect(set).not.toHaveBeenCalled();
       expectFitted(panel, NARROW, 60);
     });
 
@@ -539,11 +559,13 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
       const { user, setBox, setAnchorLeft } = setup(NARROW, 60);
       const panel = await openPanel(user);
       const remove = vi.spyOn(panel.style, 'removeProperty');
+      const set = vi.spyOn(panel.style, 'setProperty');
       setBox({ ...NARROW, left: NARROW.left + 30 });
       setAnchorLeft(60 + 30);
       step();
       expect(remove).not.toHaveBeenCalled();
-      expect(panel.style.width).toBe('142px');
+      expect(set).not.toHaveBeenCalled();
+      expect(panel.style.maxWidth).toBe('142px');
       expect(panel.style.left).toBe('-45px');
     });
 
@@ -579,7 +601,7 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
       step();
       step();
       step();
-      expectUntouched(panel);
+      expectNoStyle(panel);
     });
   });
 
@@ -588,7 +610,7 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
     mockedSet.mockRejectedValue(new Error(i18n.t('errors.LABEL_NOT_FOUND')));
     const { user, button, anchor } = setup(NARROW, 60);
     const panel = await openPanel(user);
-    const before = { width: panel.style.width, left: panel.style.left };
+    const before = { maxWidth: panel.style.maxWidth, left: panel.style.left };
     await user.click(screen.getByRole('checkbox', { name: 'UI' }));
     const alert = await screen.findByRole('alert');
 
@@ -602,16 +624,18 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
     // button by the surrounding row and cannot move it.
     expect(anchor.parentElement).toHaveClass('contents');
     expect(anchor.nextElementSibling).toBe(alert);
-    expect({ width: panel.style.width, left: panel.style.left }).toEqual(before);
+    expect({ maxWidth: panel.style.maxWidth, left: panel.style.left }).toEqual(before);
   });
 
-  it('truncates a long name in a narrowed panel and keeps the checkbox size', async () => {
+  it('lets a long name wrap in a narrowed panel and keeps the checkbox size (DFLT-00293)', async () => {
     const { user } = setup(NARROW, 60);
-    await openPanel(user);
+    const panel = await openPanel(user);
+    expect(panel).toHaveAttribute('data-narrow');
+    expect(panel).toHaveClass('group');
     const box = screen.getByRole('checkbox', { name: 'バグ' });
     expect(box).toHaveClass('shrink-0');
     const name = box.nextElementSibling as HTMLElement;
-    expect(name).toHaveClass('truncate', 'min-w-0');
-    expect(box.parentElement).toHaveClass('flex', 'whitespace-nowrap', 'px-3', 'gap-2', 'upto-15rem:px-2', 'upto-15rem:gap-1.5');
+    expect(name).toHaveClass('truncate', 'group-data-narrow:min-w-0', 'group-data-narrow:whitespace-normal', 'group-data-narrow:wrap-anywhere');
+    expect(box.parentElement).toHaveClass('flex', 'whitespace-nowrap', 'px-3', 'group-data-narrow:px-2', 'group-data-narrow:whitespace-normal');
   });
 });
