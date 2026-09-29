@@ -146,6 +146,10 @@ Open Settings with the gear button in the header.
 
 Use the header buttons to switch the theme (light / dark / match system) and the Web UI language (English / 日本語).
 
+#### Supported window sizes
+
+The Web UI supports windows down to 320 CSS px wide with text enlarged up to 200% (WCAG 1.4.10 Reflow). Narrower windows or larger text sizes are not supported, and layout issues that only occur there are not fixed.
+
 ### Autopilot
 
 The autopilot runs the refine-ticket -> process-ticket flow to the end without waiting for anyone. The [autopilot reference](docs/autopilot.md) has the details, including the `graph-engine autopilot` CLI, its output, the error codes, and the HTTP API.
@@ -377,6 +381,10 @@ claude plugin update graph-ops@graph-ops
 #### テーマと言語
 
 ヘッダーのボタンで、テーマ（ライト／ダーク／システム設定に合わせる）と Web UI の表示言語（English／日本語）を切り替えます。
+
+#### 対応する画面の大きさ
+
+Web UI は、幅 320 CSS px まで、文字サイズ 200% までの表示に対応しています（WCAG 1.4.10 リフロー）。それより狭い幅や大きい文字サイズには対応しておらず、その条件でだけ起きる表示の崩れは修正しません。
 
 ### オートパイロット
 
