@@ -92,9 +92,15 @@ Save the reflection method and its result (the branch, the pull request URL, the
 Skip this step when the ticket ends `failed` or `blocked`: create no ticket under it and put the open items in the summary instead. Skip it also when the ticket already has an `autopilot-decision-handoff` artifact (a resumed session), and reuse that record for the summary.
 
 1. Collect the handoff items: the carry-over items under the last heading of the review artifacts, the remaining issues in the report, and the notes for later work in the implementation notes.
-2. Sort each item that is concrete and still open into one of two kinds (drop the rest, and anything already one of `get-ticket`'s `children`):
+2. Leave out items that are not concrete or no longer open, and anything already one of `get-ticket`'s `children`; they get no kind and no record. Sort every other item into one of three kinds. Check **Drop** first, and only an item that is not dropped goes on to **In scope** or **Out of scope**:
+   - **Drop**: an item not worth a ticket. It is dropped when it matches one of these five criteria, even if this ticket's own changes are involved, or when it is out of scope with no one-line reason worth working on (its Drop reason is then "no reason worth working on"). When unsure whether an item matches, do not drop it; sort it as in scope or out of scope. The criteria:
+     1. **Outside the supported range**: it only happens under conditions outside the project's supported range. Take that range from what the project states -- the `content` of `get-skill-context "autopilot-worker"` in step 0, the project's settings, or the repository's own description (README, docs, CLAUDE.md) -- for example a Web UI supported down to a 320 CSS px wide window with text up to 200% (DFLT-00319). When no supported range is stated, this criterion does not apply; never guess one.
+     2. **No real harm**: a difference in how something is written, or a wording-only mismatch between a spec's text and the code, with no effect on behaviour, appearance or maintainability.
+     3. **Needs a real device or environment**: a check that cannot be made without a real device or an external environment, and no defect has been found.
+     4. **Not reproduced**: a problem that does not reproduce or has not been observed (look into it the next time it happens). A defect that was actually observed or reproduced does not match.
+     5. **Accepted in the plan or a review**: something the plan or a review explicitly states as an accepted risk or an intended trade-off. Without such a statement it does not match.
    - **In scope**: a problem this ticket's own changes introduced or left unfinished, or one that stands in the way of the purpose of the run's root ticket (`root_ticket`; read its Why and completion criteria with `get-ticket`). Only these become child tickets, so only these are worked on in this run.
-   - **Out of scope**: anything else, typically a problem that was already there before this ticket (a pre-existing layout break found on a neighbouring screen, the same kind of issue in another component) or an improvement the root's purpose does not need. Being found while testing this ticket does not make an item in scope.
+   - **Out of scope**: anything else, typically a problem that was already there before this ticket (a pre-existing layout break found on a neighbouring screen, the same kind of issue in another component) or an improvement the root's purpose does not need. Being found while testing this ticket does not make an item in scope. An item goes into the backlog only if you can say in one line why it is worth working on; if you cannot, drop it with the reason "no reason worth working on".
 3. With `settings.autoCreateTickets` on:
    - Create each in-scope item as a child of this ticket:
      ```bash
@@ -105,20 +111,21 @@ Skip this step when the ticket ends `failed` or `blocked`: create no ticket unde
    - Put all out-of-scope items together into **one** backlog ticket, created **without** `--parent` so it stays out of the tree and the run never picks it up. Pass the project explicitly (`--project` with `get-ticket`'s `project_id` for this ticket):
      ```bash
      graph-engine create-ticket "Backlog: issues found while working on <ticketId>" - --project "<projectId>" --priority LOW <<'EOF'
-     <one section per item: what is wrong, where, how it was found, and why it was left out of the run>
+     <one section per item: what is wrong, where, how it was found, why it was left out of the run, and why it is worth working on (one line)>
      EOF
      ```
      Create no backlog ticket when there are no out-of-scope items.
+   - A dropped item creates no ticket, neither a child nor a backlog entry; it is only recorded in step 5. When every item is dropped, create no ticket at all.
    - If a child ticket fails with `PARENT_TICKET_UNSUPPORTED` (an HTTP data source still on protocol 1.0), do not retry without `--parent` -- a ticket without its parent silently falls out of the tree -- and create no further child tickets. Record each remaining in-scope item as not created because of `PARENT_TICKET_UNSUPPORTED`, with the title and description you would have used, keep the result `done`, and state in the summary how many items were left without a ticket. The backlog ticket is still created.
    - Treat any other `create-ticket` error the same way after one retry.
-4. With `settings.autoCreateTickets` off, run `graph-engine autopilot touch "<runId>" "<ticketId>" --awaiting-human "handoff: <n> items"`, present the items in plain text with the kind you gave each, end the turn, and create exactly the ones the person picks: in-scope ones as children, out-of-scope ones in the backlog ticket.
-5. Save every item with its kind, its decision (child ticket, backlog or not created), the reason and the created ticket id as a `text` artifact named `autopilot-decision-handoff` on the release node.
+4. With `settings.autoCreateTickets` off, run `graph-engine autopilot touch "<runId>" "<ticketId>" --awaiting-human "handoff: <n> items"` (`<n>` counts every sorted item, dropped ones included), present the items in plain text with the kind you gave each -- dropped items included, each with its kind and the reason (which Drop criterion it matches, or "no reason worth working on") -- end the turn, and create exactly the ones the person picks: in-scope ones as children, out-of-scope ones in the backlog ticket. A dropped item the person picks goes into the backlog ticket like an out-of-scope one, since the person's choice wins; its one line on why it is worth working on may simply be that the person picked it (for example "picked by the person at handoff").
+5. Save every item with its kind, its decision (child ticket, backlog, dropped or not created), the reason and the created ticket id as a `text` artifact named `autopilot-decision-handoff` on the release node. For a dropped item, always record the kind and the reason, naming the Drop criterion it matches or "no reason worth working on"; this record is the only place a dropped item is kept.
 
 ## 6. Report the result
 
 ```bash
 graph-engine autopilot report "<runId>" "<ticketId>" --result <done|failed|blocked> [--reason <code>] --summary - <<'EOF'
-<at most 3 lines: what was done, where the work is (branch or pull request), child tickets and the backlog ticket created, or items left open>
+<at most 3 lines: what was done, where the work is (branch or pull request), child tickets and the backlog ticket created, the number of dropped items (count only), or items left open>
 EOF
 ```
 
