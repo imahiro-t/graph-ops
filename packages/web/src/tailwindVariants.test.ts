@@ -186,8 +186,8 @@ describe('named rem media-query variants (index.css)', () => {
 });
 
 describe('named variants for the last arbitrary at-rule prefixes (DFLT-00294)', () => {
-  // The classes the app uses them with (App.tsx, AutopilotControls.tsx,
-  // TicketItem.tsx) and the other variants set on the same elements.
+  // Each named variant and the arbitrary prefix it replaced. cq-from-16rem:
+  // is only used inside sm: in the app, so the nesting test below covers it.
   const pairs: Array<[string, string]> = [
     [UPTO200, ARB_MAX200],
     [CQ_UPTO12, ARB_CQ_UPTO12],
@@ -245,6 +245,10 @@ describe('named variants for the last arbitrary at-rule prefixes (DFLT-00294)', 
   });
 
   it('orders them against the core screen variants, narrow:, the other named variants and one another exactly as the arbitrary prefixes did', async () => {
+    // In the app (App.tsx, AutopilotControls.tsx, TicketItem.tsx) the four
+    // sit on the same elements as sm:, lg:, max-sm: and upto-15rem:; the
+    // rest of the core screen variants, narrow: and the other named ones
+    // are here so the order is pinned against all of them.
     const common = ['sm', 'max-sm', 'lg', 'max-lg', 'narrow', BELOW, UPTO, BELOW64, FROM64, FROM80].map(n => v(n, 'p-1'));
     const before = await buildCss([...common, v(ARB_MAX200, 'p-1'), v(ARB_CQ_BELOW8, 'p-1'), v('sm', v(ARB_CQ_FROM16, 'p-1')), v(ARB_CQ_UPTO12, 'p-1')]);
     const after = await buildCss([...common, v(UPTO200, 'p-1'), v(CQ_BELOW8, 'p-1'), v('sm', v(CQ_FROM16, 'p-1')), v(CQ_UPTO12, 'p-1')]);
