@@ -41,8 +41,9 @@
    DFLT-00281, and from-64rem / from-80rem also moved ahead of
    [@media(max-width:200px)]: (below-64rem already was). No element sets
    the same property through one of these and an arbitrary variant at the
-   moment (@container is only used in App.tsx and AutopilotControls.tsx, and
-   max-width:200px only for padding), so nothing renders differently.
+   moment (below-64rem / from-64rem / from-80rem are only used in
+   TicketItem.tsx, which uses [@media(max-width:200px)]: only for p-2 and
+   no [@container(...)]: at all), so nothing renders differently.
    tailwindVariants.test.ts pins this order down. */
 @custom-variant below-80rem (@media not all and (min-width: 80rem));
 @custom-variant upto-15rem (@media (max-width: 15rem));

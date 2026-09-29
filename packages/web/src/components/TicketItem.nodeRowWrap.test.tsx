@@ -20,7 +20,7 @@
 //
 // DFLT-00253 moved that boundary from lg (1024px) to 80rem, a rem media
 // query (the rem form of max-xl:). DFLT-00260 named it `below-80rem:`
-// (`@media not all and (min-width: 80rem)`, tailwind.config.js); `upto-15rem:`
+// (`@media not all and (min-width: 80rem)`, index.css); `upto-15rem:`
 // is `@media (max-width: 15rem)`.
 // In English at 1024-1279px the one-line layout let the artifact badge run
 // over the status badge and the type badge over the approve button, and a
@@ -199,8 +199,8 @@ const rowParts = (n: GraphNode) => {
 // one of them is missing, so it would not catch the other slipping in.
 // DFLT-00253: the wrapping layout's boundary, and the query for a large
 // default font on a narrow screen (DFLT-00227). DFLT-00260 turned both into
-// named variants (tailwind.config.js) with the same media conditions.
-// DFLT-00281 did the same for the 80rem-and-up query (index.css).
+// named variants (index.css) with the same media conditions.
+// DFLT-00281 did the same for the 80rem-and-up query.
 const UNDER_80REM = 'below-80rem:';
 const FROM_80REM = 'from-80rem:';
 const NARROW_LARGE_TEXT = 'upto-15rem:';
