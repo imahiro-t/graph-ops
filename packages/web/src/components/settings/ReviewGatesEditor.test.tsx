@@ -1695,3 +1695,91 @@ describe('ReviewGatesEditor narrow reflow (DFLT-00261)', () => {
     }
   });
 });
+
+// DFLT-00350: a failed load shows the error and a retry button instead of
+// the gate form, so empty rows cannot be saved over the stored gates.
+describe('ReviewGatesEditor load failure', () => {
+  const retryButton = () => screen.getByRole('button', { name: i18n.t('settings.common.retry') });
+  const addGateButton = () => screen.queryByRole('button', { name: i18n.t('settings.reviewGates.addGate') });
+
+  beforeEach(async () => {
+    mockedFetchCatalog.mockReset();
+    mockedSaveCatalog.mockReset();
+    mockedSaveCatalog.mockResolvedValue(undefined);
+    await i18n.changeLanguage('ja');
+  });
+
+  it('shows the loading line as a status', () => {
+    mockedFetchCatalog.mockReturnValue(new Promise(() => {}));
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    expect(screen.getByRole('status')).toHaveTextContent(i18n.t('settings.common.loading'));
+  });
+
+  it('shows the error and a retry button, not the form, and loads the gates on retry', async () => {
+    const user = userEvent.setup();
+    let resolveRetry: (v: SettingsCatalogResponse) => void = () => {};
+    mockedFetchCatalog
+      .mockRejectedValueOnce(new Error('catalog failed'))
+      .mockReturnValueOnce(new Promise(r => { resolveRetry = r; }));
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('catalog failed');
+    expect(screen.getByText(i18n.t('settings.reviewGates.intro'))).toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
+    expect(addGateButton()).not.toBeInTheDocument();
+
+    const button = retryButton();
+    button.focus();
+    await user.keyboard('{Enter}');
+    expect(button).toHaveFocus();
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+
+    await act(async () => { resolveRetry(CATALOG_RESPONSE); });
+
+    expect(await screen.findByDisplayValue('Code Review')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toHaveAttribute('tabindex', '-1'));
+    expect(document.activeElement?.contains(screen.getByDisplayValue('Code Review'))).toBe(true);
+  });
+
+  it('keeps the error and the retry button when the retry fails again', async () => {
+    const user = userEvent.setup();
+    mockedFetchCatalog.mockRejectedValue(new Error('catalog failed'));
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    const first = await screen.findByRole('alert');
+
+    retryButton().focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(screen.getByRole('alert')).not.toBe(first));
+    expect(screen.getByRole('alert')).toHaveTextContent('catalog failed');
+    expect(retryButton()).toHaveFocus();
+    expect(retryButton()).not.toHaveAttribute('aria-busy');
+    expect(addGateButton()).not.toBeInTheDocument();
+  });
+
+  it('keeps the form and shows a non-blocking error when the re-fetch after a save fails', async () => {
+    const user = userEvent.setup();
+    // The first load, then the fetch handleSave builds the document from,
+    // then the re-fetch after the save, which fails.
+    mockedFetchCatalog
+      .mockResolvedValueOnce(CATALOG_RESPONSE)
+      .mockResolvedValueOnce(CATALOG_RESPONSE)
+      .mockRejectedValueOnce(new Error('refresh failed'));
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+
+    const criteria = screen.getAllByLabelText(i18n.t('settings.reviewGates.criteriaLabel'))[0];
+    await user.type(criteria, ' extra');
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('refresh failed');
+    expect(mockedSaveCatalog).toHaveBeenCalledTimes(1);
+    expect(screen.getByDisplayValue('Code Review')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('settings.common.save') })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.retry') })).not.toBeInTheDocument();
+  });
+});
