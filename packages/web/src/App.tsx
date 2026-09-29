@@ -944,7 +944,8 @@ export const App: React.FC = () => {
     if (el) {
       const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
       // block 'start' honours <html>'s scroll-padding-top, which holds the
-      // pinned header's height (useStickyHeaderScrollPadding, DFLT-00268).
+      // pinned header's height plus a 0.5rem gap
+      // (useStickyHeaderScrollPadding, DFLT-00268 / DFLT-00278).
       el.scrollIntoView?.({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' });
       el.focus({ preventScroll: true });
     }
@@ -1054,6 +1055,8 @@ export const App: React.FC = () => {
   // real height, so the element focused with Tab and the card opened by
   // handleOpenTicket's scrollIntoView stop below it rather than under it
   // (WCAG 2.4.11) -- in a low window the 114px header otherwise hid them.
+  // DFLT-00278: plus a 0.5rem gap, so the focus ring outside a focused button
+  // is not clipped by the header either.
   // Unpinned, the padding is 0 as before.
   const headerRef = useRef<HTMLElement>(null);
   const headerFitsSticky = useFitsSticky(headerRef, 0.25, 128);
