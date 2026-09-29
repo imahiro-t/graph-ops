@@ -97,7 +97,11 @@ describe('ticket parent/children in the Web UI', () => {
   it('moves to the page of the opened ticket', async () => {
     seed(2);
     const user = await renderApp();
-    // Page 1 holds ALP-00001/00002; the children are on page 2.
+    // Page 1 holds ALP-00001/00002; the children are on page 2. The page
+    // size comes from its own request (GET /api/settings/app), so the list
+    // can be on screen before it applies: wait for the pager to say two
+    // pages rather than assuming it already does (DFLT-00284).
+    await screen.findByText(i18n.t('pagination.pageOf', { page: 1, total: 2 }));
     expect(card('ALP-00003')).toBeNull();
     const family = await expand(user, 'ALP-00001');
     await user.click(within(family).getAllByTestId('ticket-family-child')[1]);
