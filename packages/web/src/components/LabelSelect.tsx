@@ -66,8 +66,9 @@ interface Props {
 // can be made again on top of them. DFLT-00351: if that reload fails, the
 // message says the latest version could not be loaded and asks to reload
 // after a moment instead -- the ticket on screen is still the stale one, so
-// trying again at once would only conflict again. The priority and the assignee are not
-// conditioned (TicketItem): each is a single value the click sets outright.
+// trying again at once would only conflict again. The priority and the
+// assignee are not conditioned (TicketItem): each is a single value the
+// click sets outright.
 export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, updatedAt, onSaved }) => {
   const { t } = useTranslation();
   // The trigger stays usable while labels save (it only toggles the panel),

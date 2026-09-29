@@ -27,6 +27,8 @@ let failListAfterConflict: boolean;
 let labelPatches: Record<string, unknown>[];
 
 const isListRequest = (url: string, method: string) => url.split('?')[0] === '/api/tickets' && method === 'GET';
+// How many times GET /api/tickets has been requested so far.
+const listCalls = () => fetchMock.mock.calls.filter(([input, init]) => isListRequest(String(input), init?.method ?? 'GET')).length;
 
 beforeEach(() => {
   backend = createFakeBackend({
@@ -90,14 +92,13 @@ async function conflictingLabelChange(user: ReturnType<typeof userEvent.setup>) 
   const labelsItem = await within(card).findByTestId('ticket-detail-labels');
   await user.click(within(labelsItem).getByRole('button', { name: `${i18n.t('ticket.labels.edit')}: ${TICKET}` }));
   const box = await within(labelsItem).findByRole('checkbox', { name: '機能追加' });
-  const listCallsBefore = fetchMock.mock.calls.filter(([input, init]) => isListRequest(String(input), init?.method ?? 'GET')).length;
+  const listCallsBefore = listCalls();
   await user.click(box);
   const alert = await within(labelsItem).findByRole('alert');
   // The reload has been made and answered once the checkboxes are usable again.
   await waitFor(() => {
     expect(within(labelsItem).getByRole('checkbox', { name: '機能追加' })).toHaveAttribute('aria-disabled', 'false');
-    const listCalls = fetchMock.mock.calls.filter(([input, init]) => isListRequest(String(input), init?.method ?? 'GET')).length;
-    expect(listCalls).toBeGreaterThan(listCallsBefore);
+    expect(listCalls()).toBeGreaterThan(listCallsBefore);
   });
   // The label save really was the conditioned PATCH the mock refuses, so the
   // 409 branch was taken.
@@ -140,7 +141,6 @@ describe('App label conflict reload (DFLT-00351)', () => {
     const refreshButton = screen.getByRole('button', { name: i18n.t('toolbar.refreshTitle') });
     await waitFor(() => expect(refreshButton).toBeEnabled());
     failList = true;
-    const listCalls = () => fetchMock.mock.calls.filter(([input, init]) => isListRequest(String(input), init?.method ?? 'GET')).length;
     const before = listCalls();
     await user.click(refreshButton);
     await waitFor(() => {

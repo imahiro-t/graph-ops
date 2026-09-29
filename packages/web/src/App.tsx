@@ -662,7 +662,7 @@ export const App: React.FC = () => {
   const expandedTicketIdsRef = useLatest(expandedTicketIds);
   const ticketFetchSeqRef = useRef(0);
   const ticketFetchesInFlightRef = useRef(new Map<string, number>());
-  //
+
   // DFLT-00351: the run resolves to whether the list could be fetched, and
   // never rejects -- every caller that ignores the result (the poll, the
   // toolbar's refresh button, the create-ticket launch, the settings modal)
