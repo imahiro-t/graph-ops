@@ -6,11 +6,16 @@
 import { TFunction } from 'i18next';
 import { Label, LabelColor, LabelUsage, Ticket } from '../types';
 import { apiFetch } from './apiFetch';
-import { localizedApiErrorMessage } from './apiError';
+import { ApiCodeError, parseApiError, translateErrorCode } from './apiError';
 
+// Throws an ApiCodeError: its message is the localized one, and its code
+// lets a caller tell TICKET_CHANGED apart (DFLT-00330).
 async function requestJSON<T>(t: TFunction, path: string, init?: RequestInit): Promise<T> {
   const res = await apiFetch(path, init);
-  if (!res.ok) throw new Error(await localizedApiErrorMessage(t, res));
+  if (!res.ok) {
+    const payload = await parseApiError(res);
+    throw new ApiCodeError(payload ? translateErrorCode(t, payload.code) : t('errors.UNKNOWN'), payload?.code ?? '');
+  }
   return res.json() as Promise<T>;
 }
 
@@ -46,6 +51,12 @@ export function deleteLabel(
 }
 
 // Replaces the ticket's labels with exactly labelIds ([] removes them all).
-export function setTicketLabels(t: TFunction, ticketId: string, labelIds: string[]): Promise<Ticket> {
-  return requestJSON<Ticket>(t, `/api/tickets/${encodeURIComponent(ticketId)}`, jsonBody('PATCH', { label_ids: labelIds }));
+// ifUpdatedAt (DFLT-00330) is the updated_at of the ticket the new set was
+// built from: the server writes nothing and answers 409 TICKET_CHANGED
+// (an ApiCodeError with that code) when the ticket has been written since.
+// Left out, the labels are replaced unconditionally.
+export function setTicketLabels(t: TFunction, ticketId: string, labelIds: string[], ifUpdatedAt?: string): Promise<Ticket> {
+  const payload: { label_ids: string[]; if_updated_at?: string } = { label_ids: labelIds };
+  if (ifUpdatedAt !== undefined) payload.if_updated_at = ifUpdatedAt;
+  return requestJSON<Ticket>(t, `/api/tickets/${encodeURIComponent(ticketId)}`, jsonBody('PATCH', payload));
 }

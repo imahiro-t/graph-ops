@@ -6,6 +6,7 @@ vi.mock('./apiFetch', () => ({ apiFetch: vi.fn() }));
 
 import { apiFetch } from './apiFetch';
 import { createLabel, deleteLabel, fetchLabels, setTicketLabels, updateLabel } from './labelsApi';
+import { ApiCodeError } from './apiError';
 
 const mockedApiFetch = apiFetch as unknown as ReturnType<typeof vi.fn>;
 
@@ -55,6 +56,22 @@ describe('labelsApi', () => {
     expect(lastCall().path).toBe('/api/tickets/TEST-00001');
     expect(lastCall().init?.method).toBe('PATCH');
     expect(JSON.parse(String(lastCall().init?.body))).toEqual({ label_ids: ['label-1', 'label-2'] });
+  });
+
+  // DFLT-00330
+  it('adds if_updated_at when given', async () => {
+    await setTicketLabels(i18n.t, 'TEST-00001', ['label-1'], '2026-09-30T00:00:00.5Z');
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ label_ids: ['label-1'], if_updated_at: '2026-09-30T00:00:00.5Z' });
+  });
+
+  it('throws an error carrying TICKET_CHANGED and its localized message on a 409', async () => {
+    mockedApiFetch.mockImplementationOnce(
+      async () => new Response(JSON.stringify({ error: { code: 'TICKET_CHANGED', message: 'x' } }), { status: 409 })
+    );
+    const err = await setTicketLabels(i18n.t, 'TEST-00001', ['label-1'], 'u').catch(e => e);
+    expect(err).toBeInstanceOf(ApiCodeError);
+    expect(err.code).toBe('TICKET_CHANGED');
+    expect(err.message).toBe(i18n.t('errors.TICKET_CHANGED'));
   });
 
   it('throws the localized message for an error code', async () => {

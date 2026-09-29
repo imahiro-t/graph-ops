@@ -1979,7 +1979,7 @@ export const TicketItem: React.FC<Props> = ({
                 // so it changes nothing drawn) rather than on the whole item.
                 ticketLabels.map(l => <LabelChip key={l.id} name={l.name} color={l.color} className="min-w-0 wrap-anywhere" />)
               )}
-              <LabelSelect ticketId={ticket.id} labels={ticketLabels} projectLabels={projectLabels} onSaved={onRefresh} />
+              <LabelSelect ticketId={ticket.id} labels={ticketLabels} projectLabels={projectLabels} updatedAt={ticket.updated_at} onSaved={onRefresh} />
             </div>
             {/* DFLT-00276: a closed reason with one long word (e.g.
                 "superseded-by-DFLT-00002") reached R304.9 at 320px / 200% in
