@@ -5,6 +5,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -359,6 +360,90 @@ func (e *GraphEngine) RefineTicketWithLabels(ticketID string, description string
 	return &updated, nil
 }
 
+// graphBatchFor turns planned into the store.GraphBatch that creates
+// whichever of its nodes are not already in dbIDByConfigID, with their
+// depends_on/loop_back_to edges -- the same rows persistPlan creates one at
+// a time. An edge to a node that already exists names it by ID, an edge to
+// a node the batch creates by its config ID. Edge IDs are minted here, as
+// persistPlan does for CreateEdge.
+func graphBatchFor(planned []plannedNode, dbIDByConfigID map[string]string) (store.GraphBatch, error) {
+	var b store.GraphBatch
+	inBatch := make(map[string]bool, len(planned))
+	for _, p := range planned {
+		if _, exists := dbIDByConfigID[p.ConfigID]; exists {
+			continue
+		}
+		inBatch[p.ConfigID] = true
+		configID := p.ConfigID
+		b.Nodes = append(b.Nodes, domain.GraphNode{
+			Name:          p.Name,
+			Type:          domain.NodeType(p.Type),
+			Status:        domain.NodeTODO,
+			MaxIterations: p.MaxIterations,
+			IsManual:      p.IsManual,
+			GateID:        p.GateID,
+			Criteria:      p.Criteria,
+			ConfigID:      &configID,
+		})
+	}
+	ref := func(configID string) (store.GraphBatchNodeRef, bool) {
+		if inBatch[configID] {
+			return store.GraphBatchNodeRef{ConfigID: configID}, true
+		}
+		if id, ok := dbIDByConfigID[configID]; ok {
+			return store.GraphBatchNodeRef{NodeID: id}, true
+		}
+		return store.GraphBatchNodeRef{}, false
+	}
+	for _, p := range planned {
+		if !inBatch[p.ConfigID] {
+			continue // this node's edges were already created in an earlier phase
+		}
+		to := store.GraphBatchNodeRef{ConfigID: p.ConfigID}
+		for _, dep := range p.DependsOn {
+			from, ok := ref(dep)
+			if !ok {
+				return store.GraphBatch{}, fmt.Errorf("node %q depends_on %q which is outside this plan", p.ConfigID, dep)
+			}
+			b.Edges = append(b.Edges, store.GraphBatchEdge{ID: newEdgeID(), From: from, To: to, Condition: domain.EdgeSuccess})
+		}
+		if p.LoopBackTo != "" {
+			target, ok := ref(p.LoopBackTo)
+			if !ok {
+				return store.GraphBatch{}, fmt.Errorf("node %q loop_back_to %q which is outside this plan", p.ConfigID, p.LoopBackTo)
+			}
+			b.Edges = append(b.Edges, store.GraphBatchEdge{ID: newEdgeID(), From: to, To: target, Condition: domain.EdgeLoop})
+		}
+	}
+	return b, nil
+}
+
+// writePlan creates planned's new nodes and edges (see persistPlan), in one
+// atomic store.GraphBatch when the repository can (DFLT-00328): only if the
+// ticket still has expectedNodeCount nodes and, when expandedAt is set, has
+// no graph_expanded_at yet, in which case expandedAt is written with them.
+// When the check fails nothing is written and the error is
+// store.ErrGraphChanged. batched reports whether the batch was used; when it
+// was not (a repository without store.GraphBatchCreator, or an HTTP data
+// source older than 1.2), the rows were created one at a time by
+// persistPlan, without the check and without expandedAt -- the caller then
+// writes expandedAt itself.
+func (e *GraphEngine) writePlan(ticketID string, planned []plannedNode, dbIDByConfigID map[string]string, expectedNodeCount int, expandedAt *string) (batched bool, err error) {
+	if creator, ok := e.repo.(store.GraphBatchCreator); ok {
+		b, err := graphBatchFor(planned, dbIDByConfigID)
+		if err != nil {
+			return false, err
+		}
+		b.ExpectedNodeCount = expectedNodeCount
+		b.GraphExpandedAt = expandedAt
+		err = creator.CreateGraphBatch(ticketID, b)
+		if !errors.Is(err, store.ErrGraphBatchUnsupported) {
+			return true, err
+		}
+	}
+	return false, e.persistPlan(ticketID, planned, dbIDByConfigID)
+}
+
 // persistPlan creates DB rows for whichever of planned's nodes aren't already
 // represented in dbIDByConfigID (keyed by plannedNode.ConfigID), then wires
 // up their depends_on/loop_back_to edges. dbIDByConfigID is both read and
@@ -489,8 +574,31 @@ func (e *GraphEngine) EnsureGraphStarted(ticketID string, catalog config.Catalog
 	if err != nil {
 		return fmt.Errorf("invalid seed plan: %w", err)
 	}
-	return e.persistPlan(ticketID, planned, map[string]string{})
+	// The check above took no lock, so another session may be seeding the
+	// same ticket right now. The batch re-checks "no nodes yet" under the
+	// ticket's lock; losing that race means the seed is already there, which
+	// is all this call wanted (DFLT-00328).
+	if _, err := e.writePlan(ticketID, planned, map[string]string{}, 0, nil); err != nil && !errors.Is(err, store.ErrGraphChanged) {
+		return err
+	}
+	return nil
 }
+
+// graphAlreadyExpandedError is ExpandGraph's answer when the ticket's graph
+// is already expanded -- found so before starting, or (cause
+// store.ErrGraphChanged) by another session winning the race to expand it
+// (DFLT-00328). Its text is fixed: process-ticket recognizes it by
+// "already been expanded", so both cases must read the same.
+type graphAlreadyExpandedError struct {
+	ticketID string
+	cause    error
+}
+
+func (e *graphAlreadyExpandedError) Error() string {
+	return fmt.Sprintf("ticket %s's graph has already been expanded", e.ticketID)
+}
+
+func (e *graphAlreadyExpandedError) Unwrap() error { return e.cause }
 
 // ExpandGraph builds the rest of a ticket's graph (everything beyond the
 // plan/plan_review seed) and attaches it to the existing seed nodes. It is
@@ -533,7 +641,7 @@ func (e *GraphEngine) ExpandGraph(ticketID string, catalog config.Catalog, patch
 				seedDone++
 			}
 		} else {
-			return fmt.Errorf("ticket %s's graph has already been expanded", ticketID)
+			return &graphAlreadyExpandedError{ticketID: ticketID}
 		}
 	}
 	if seedDone < len(seedSet) {
@@ -549,18 +657,28 @@ func (e *GraphEngine) ExpandGraph(ticketID string, catalog config.Catalog, patch
 	if err != nil {
 		return fmt.Errorf("invalid expansion plan: %w", err)
 	}
-	if err := e.persistPlan(ticketID, planned, dbIDByConfigID); err != nil {
-		return err
-	}
 	// Stamp GraphExpandedAt the moment expansion succeeds (same
 	// nullable-timestamp pattern as RefinedAt, see domain.Ticket's doc
 	// comment) -- the seed/non-seed distinction deriveTicketStatus needs to
 	// tell "only the plan/plan_review seed is DONE" apart from "the expanded
 	// graph is DONE" (DFLT-00046), without handing catalog through to every
-	// method that might need it.
+	// method that might need it. The batch writes it together with the new
+	// nodes and edges, and only if another session has not expanded the
+	// graph since the checks above (DFLT-00328); losing that race ends in
+	// the same error as finding the graph expanded to begin with, which
+	// process-ticket reads as "someone else expanded it, carry on".
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := e.repo.UpdateTicket(ticketID, store.TicketPatch{GraphExpandedAt: &now}); err != nil {
+	batched, err := e.writePlan(ticketID, planned, dbIDByConfigID, len(nodes), &now)
+	if errors.Is(err, store.ErrGraphChanged) {
+		return &graphAlreadyExpandedError{ticketID: ticketID, cause: err}
+	}
+	if err != nil {
 		return err
+	}
+	if !batched {
+		if _, err := e.repo.UpdateTicket(ticketID, store.TicketPatch{GraphExpandedAt: &now}); err != nil {
+			return err
+		}
 	}
 	// The ticket's status column still holds whatever syncTicketStatus last
 	// computed for the seed alone (typically DONE, since expansion only ever

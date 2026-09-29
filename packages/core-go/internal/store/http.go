@@ -307,6 +307,7 @@ var knownHTTPDataSourceErrorCodes = map[domain.ErrorCode]bool{
 	domain.ErrCodePrefixTaken:       true,
 	domain.ErrCodeValidation:        true,
 	domain.ErrCodeInternal:          true,
+	domain.ErrCodeGraphChanged:      true,
 }
 
 type httpErrorBody struct {

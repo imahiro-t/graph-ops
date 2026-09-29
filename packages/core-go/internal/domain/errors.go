@@ -187,6 +187,14 @@ const (
 	// person has made sure that nobody is working on the node. Returned
 	// with a 409.
 	ErrCodeNodeClaimedByOther ErrorCode = "NODE_CLAIMED_BY_OTHER"
+	// ErrCodeGraphChanged: an HTTP data source (protocol 1.2) refused a
+	// POST /tickets/{ticketId}/graph because the ticket's graph no longer
+	// matches what the batch was planned against -- another session created
+	// the seed or expanded the graph first (DFLT-00328). Nothing was
+	// written. Returned by the plugin with a 409; graph-engine absorbs it
+	// (the seed carries on with the existing graph, an expansion ends with
+	// "already been expanded"), so it never reaches the CLI or the Web UI.
+	ErrCodeGraphChanged ErrorCode = "GRAPH_CHANGED"
 )
 
 // APIError pairs a machine-readable Code with a developer-facing English

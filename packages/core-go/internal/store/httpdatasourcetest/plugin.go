@@ -157,6 +157,8 @@ func (p *Plugin) routes() {
 	h("PATCH /nodes/{nodeId}", p.updateNode)
 	h("DELETE /nodes/{nodeId}", p.deleteNode)
 
+	h("POST /tickets/{ticketId}/graph", p.createGraphBatch)
+
 	h("POST /tickets/{ticketId}/edges", p.createEdge)
 	h("GET /tickets/{ticketId}/edges", p.listEdges)
 	h("DELETE /tickets/{ticketId}/edges", p.clearEdges)
@@ -229,7 +231,7 @@ func writeAPIErr(w http.ResponseWriter, err error) {
 	case domain.ErrCodeTicketNotFound, domain.ErrCodeNodeNotFound, domain.ErrCodeArtifactNotFound,
 		domain.ErrCodeProjectNotFound, domain.ErrCodeLabelNotFound:
 		status = http.StatusNotFound
-	case domain.ErrCodeLabelNameTaken, domain.ErrCodePrefixTaken:
+	case domain.ErrCodeLabelNameTaken, domain.ErrCodePrefixTaken, domain.ErrCodeGraphChanged:
 		status = http.StatusConflict
 	}
 	writeErr(w, status, string(apiErr.Code), apiErr.Message)
@@ -1252,6 +1254,142 @@ func (p *Plugin) createEdge(w http.ResponseWriter, r *http.Request) {
 	e.CreatedAt = now()
 	p.edges = append(p.edges, &e)
 	writeJSON(w, http.StatusCreated, e)
+}
+
+// --- graph batch (protocol 1.2) ---
+
+// graphRef is one end of a graph batch edge: an existing node's ID or the
+// config_id of a node in the same batch.
+type graphRef struct {
+	NodeID   string `json:"node_id"`
+	ConfigID string `json:"config_id"`
+}
+
+type graphBatchEdge struct {
+	ID        string               `json:"id"`
+	From      graphRef             `json:"from"`
+	To        graphRef             `json:"to"`
+	Condition domain.EdgeCondition `json:"condition"`
+}
+
+type graphBatchRequest struct {
+	ExpectedNodeCount *int             `json:"expected_node_count"`
+	Nodes             []WireNode       `json:"nodes"`
+	Edges             []graphBatchEdge `json:"edges"`
+	GraphExpandedAt   *string          `json:"graph_expanded_at"`
+}
+
+// createGraphBatch is POST /tickets/{ticketId}/graph: every node and edge
+// of the batch, and graph_expanded_at, or nothing. Every handler runs under
+// p.mu, so the check and the writes are one step. Everything is validated
+// before anything is written, which is how this plugin keeps the request
+// atomic; a real plugin would typically use a transaction instead.
+func (p *Plugin) createGraphBatch(w http.ResponseWriter, r *http.Request) {
+	if !p.speaksAutopilotRuns() {
+		http.NotFound(w, r)
+		return
+	}
+	ticketID := r.PathValue("ticketId")
+	var in graphBatchRequest
+	if !decode(w, r, &in) {
+		return
+	}
+	t := p.findTicket(ticketID)
+	if t == nil {
+		writeAPIErr(w, notFound(domain.ErrCodeTicketNotFound, "ticket", ticketID))
+		return
+	}
+	if in.ExpectedNodeCount == nil {
+		writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "expected_node_count is required"))
+		return
+	}
+	existing := map[string]bool{}
+	for _, n := range p.nodes {
+		if n.TicketID == ticketID {
+			existing[n.ID] = true
+		}
+	}
+	if len(existing) != *in.ExpectedNodeCount || (in.GraphExpandedAt != nil && t.GraphExpandedAt != nil) {
+		writeAPIErr(w, domain.NewAPIError(domain.ErrCodeGraphChanged, "ticket %s's graph has changed since the batch was planned", ticketID))
+		return
+	}
+	if p.nodeSeq[ticketID]+len(in.Nodes) > 99 {
+		writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "ticket %s would exceed the maximum of 99 nodes", ticketID))
+		return
+	}
+
+	// Plan every row first; nothing is stored until all of them are valid.
+	seq := p.nodeSeq[ticketID]
+	idByConfigID := map[string]string{}
+	var newNodes []*domain.GraphNode
+	for i, wn := range in.Nodes {
+		n := wn.GraphNode
+		if n.ConfigID == nil || *n.ConfigID == "" {
+			writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "node %d has no config_id", i))
+			return
+		}
+		if _, dup := idByConfigID[*n.ConfigID]; dup {
+			writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "two nodes have config_id %q", *n.ConfigID))
+			return
+		}
+		seq++
+		n.ID = fmt.Sprintf("%s-%02d", ticketID, seq)
+		n.TicketID = ticketID
+		n.ClaimedByName, n.ClaimedByNameIsFallback, n.ClaimToken, n.ClaimSessionID, n.ClaimedAt = nil, nil, nil, nil, nil
+		if n.MaxIterations == 0 {
+			n.MaxIterations = 3
+		}
+		idByConfigID[*n.ConfigID] = n.ID
+		newNodes = append(newNodes, &n)
+	}
+	resolve := func(ref graphRef) (string, bool) {
+		switch {
+		case ref.NodeID != "" && ref.ConfigID == "":
+			return ref.NodeID, existing[ref.NodeID]
+		case ref.ConfigID != "" && ref.NodeID == "":
+			id, ok := idByConfigID[ref.ConfigID]
+			return id, ok
+		}
+		return "", false
+	}
+	var newEdges []*domain.GraphEdge
+	for j, ge := range in.Edges {
+		from, okFrom := resolve(ge.From)
+		to, okTo := resolve(ge.To)
+		if ge.ID == "" || !okFrom || !okTo {
+			writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "edge %d has no id or names a node that is neither this ticket's nor this batch's", j))
+			return
+		}
+		cond := ge.Condition
+		if cond == "" {
+			cond = domain.EdgeAlways
+		}
+		newEdges = append(newEdges, &domain.GraphEdge{ID: ge.ID, TicketID: ticketID, FromNodeID: from, ToNodeID: to, Condition: cond})
+	}
+
+	base := time.Now().UTC()
+	stamp := func(i int) string {
+		return base.Add(time.Duration(i) * time.Microsecond).Format("2006-01-02T15:04:05.000000000Z")
+	}
+	outNodes := []WireNode{}
+	for i, n := range newNodes {
+		n.CreatedAt, n.UpdatedAt = stamp(i), stamp(i)
+		p.nodes = append(p.nodes, n)
+		outNodes = append(outNodes, p.wire(n))
+	}
+	outEdges := []domain.GraphEdge{}
+	for j, e := range newEdges {
+		e.CreatedAt = stamp(len(newNodes) + j)
+		p.edges = append(p.edges, e)
+		outEdges = append(outEdges, *e)
+	}
+	p.nodeSeq[ticketID] = seq
+	if in.GraphExpandedAt != nil {
+		v := *in.GraphExpandedAt
+		t.GraphExpandedAt = &v
+	}
+	t.UpdatedAt = now()
+	writeJSON(w, http.StatusCreated, map[string]any{"nodes": outNodes, "edges": outEdges})
 }
 
 func (p *Plugin) listEdges(w http.ResponseWriter, r *http.Request) {
