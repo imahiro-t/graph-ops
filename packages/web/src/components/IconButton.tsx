@@ -320,13 +320,12 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     setFocused(false);
   }, [endHover]);
 
-  // On unmount only the timers are cleared: there is nothing left to render.
   useEffect(
     () => () => {
-      if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current);
-      if (openTimerRef.current !== null) clearTimeout(openTimerRef.current);
+      cancelClose();
+      cancelOpen();
     },
-    []
+    [cancelClose, cancelOpen]
   );
 
   const recordPointer = (e: React.PointerEvent) => {
