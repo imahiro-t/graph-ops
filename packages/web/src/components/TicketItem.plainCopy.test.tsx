@@ -265,13 +265,6 @@ describe('copying from the header row into a label (DFLT-00318)', () => {
     sheet.remove();
   });
 
-  // The copy read as text, with a <br> read as a line break.
-  const readText = (root: Node): string => {
-    if (root.nodeType === Node.TEXT_NODE) return root.nodeValue ?? '';
-    if (root.nodeName === 'BR') return '\n';
-    return Array.from(root.childNodes).map(readText).join('');
-  };
-
   it('sets the ticket ID and the title apart by one space in text/html', () => {
     renderTicket();
     const id = screen.getByTestId('ticket-header-id').firstChild as Text;
@@ -282,7 +275,7 @@ describe('copying from the header row into a label (DFLT-00318)', () => {
     expect(event.defaultPrevented).toBe(true);
     const html = document.createElement('div');
     html.innerHTML = written['text/html'];
-    const text = readText(html);
+    const text = html.textContent;
     expect(text).toContain('TEST-00310 タイトル');
     expect(text).not.toContain('TEST-00310タイトル');
     expect(text).toContain('作成日時:');

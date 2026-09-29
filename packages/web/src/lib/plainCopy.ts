@@ -68,8 +68,10 @@ const ranges = (selection: Selection): Range[] => {
 //   are written only where they differ from the parent, as they inherit.
 // - Inside an unselectable element kept only as the holder of selectable
 //   parts, a separator -- one space, SEPARATOR -- goes between each two
-//   neighbouring child copies, unless the text on either side of that point
-//   already ends or starts with white space (DFLT-00318). Losing the class
+//   neighbouring child copies that hold text, unless the text on either side
+//   of that point already ends or starts with white space (DFLT-00318). A
+//   child copy with no text (such as the ID's, when the selection starts at
+//   its end) counts as absent: no separator goes next to it. Losing the class
 //   loses the layout's spacing (flex gap), and JSX puts no white space
 //   between elements, so the header row's ticket ID and title had run
 //   together. A space, not a line break, as Chromium's own copy of the row
@@ -192,25 +194,22 @@ const rangeHtml = (doc: Document, range: Range, styleOf: StyleOf): Element | nul
   return wrap;
 };
 
-// The separator between two neighbouring child copies in a holder: a
-// space, since Chromium's own copy of the header row keeps the ticket ID and
-// the title apart on one line when pasted as rich text (DFLT-00318).
+// The separator between two neighbouring child copies in a holder (see the
+// rule above selectionHtml).
 const SEPARATOR = ' ';
 
 const WHITE_SPACE = /\s/;
 
 // Appends `copy` to `parent`, the copy of an element. In a holder -- an
 // unselectable element kept only for its selectable parts -- it is set apart
-// from the child copy before it by SEPARATOR, unless the text already has
-// white space at that point.
-const appendCopy = (parent: Node, copy: Node, holder: boolean): void => {
-  const before = parent.lastChild;
-  if (holder && before) {
-    const end = before.textContent?.slice(-1) ?? '';
+// from the text copied into the holder so far by SEPARATOR, unless either
+// side is empty or already has white space at that point.
+const appendCopy = (parent: Element, copy: Node, holder: boolean): void => {
+  if (holder) {
+    const end = parent.textContent.slice(-1);
     const start = copy.textContent?.charAt(0) ?? '';
-    if (!WHITE_SPACE.test(end) && !WHITE_SPACE.test(start)) {
-      const separator = parent.ownerDocument?.createTextNode(SEPARATOR);
-      if (separator) parent.appendChild(separator);
+    if (end && start && !WHITE_SPACE.test(end) && !WHITE_SPACE.test(start)) {
+      parent.appendChild(parent.ownerDocument.createTextNode(SEPARATOR));
     }
   }
   parent.appendChild(copy);

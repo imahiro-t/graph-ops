@@ -516,13 +516,6 @@ describe('plainCopy text/html (DFLT-00317)', () => {
   // DFLT-00318: in an unselectable holder, neighbouring child copies are set
   // apart by one space, so the header row's ID and title do not run together.
   describe('separators in an unselectable holder (DFLT-00318)', () => {
-    // The copy read as text, with a <br> read as a line break, which
-    // textContent would drop.
-    const readText = (root: Node): string => {
-      if (root.nodeType === Node.TEXT_NODE) return root.nodeValue ?? '';
-      if (root.nodeName === 'BR') return '\n';
-      return Array.from(root.childNodes).map(readText).join('');
-    };
     // The nodes between two copies that are siblings.
     const between = (first: Node, last: Node): Node[] => {
       expect(first.parentNode).toBe(last.parentNode);
@@ -565,7 +558,7 @@ describe('plainCopy text/html (DFLT-00317)', () => {
       const html = copyHtml();
       const root = parse(html);
       expectOneSeparator(copyOf(root, 'DFLT-00317'), copyOf(root, 'ラベルを含むコピー'));
-      const text = readText(root);
+      const text = root.textContent;
       expect(text).toContain('DFLT-00317 ラベルを含むコピー');
       expect(text).not.toContain('DFLT-00317ラベル');
       for (const left of ['▶', 'コピーしました', 'TODO', 'Medium', 'アーカイブ']) expect(text).not.toContain(left);
@@ -586,7 +579,7 @@ describe('plainCopy text/html (DFLT-00317)', () => {
       expectOneSeparator(b, c);
       expect(a.previousSibling).toBeNull();
       expect(c.nextSibling).toBeNull();
-      expect(readText(root)).toContain('一 二 三');
+      expect(root.textContent).toContain('一 二 三');
     });
 
     it.each([
@@ -597,7 +590,7 @@ describe('plainCopy text/html (DFLT-00317)', () => {
       select(textOf('id'), 0, textOf('label'));
       const root = parse(copyHtml());
       expect(between(copyOf(root, id), copyOf(root, title))).toHaveLength(0);
-      expect(readText(root)).toContain('DFLT-00317 タイトル');
+      expect(root.textContent).toContain('DFLT-00317 タイトル');
     });
 
     it('adds none around a child left alone in its holder', () => {
@@ -607,7 +600,34 @@ describe('plainCopy text/html (DFLT-00317)', () => {
       const title = copyOf(root, 'ラベルを含むコピー');
       expect(title.previousSibling).toBeNull();
       expect(title.nextSibling).toBeNull();
-      expect(readText(root)).not.toContain('ラベルを含むコピー ');
+      expect(root.textContent).not.toContain('ラベルを含むコピー ');
+    });
+
+    it('adds none before the title where the selection starts at the end of the ID', () => {
+      mount(header());
+      select(textOf('id'), 'DFLT-00317'.length, textOf('label'));
+      const root = parse(copyHtml());
+      const title = copyOf(root, 'ラベルを含むコピー');
+      const holder = title.parentNode as Element;
+      expect(Array.from(holder.childNodes).filter(node => node.nodeType === Node.TEXT_NODE)).toHaveLength(0);
+      expect(root.textContent).toBe('ラベルを含むコピー作成日時:');
+    });
+
+    it('adds one separator only, between the children holding text, around empty children', () => {
+      mount(
+        '<div id="holder" class="select-none"><span class="select-text"></span>' +
+          '<span id="a" class="select-text">一</span><span class="select-text"></span>' +
+          '<span id="b" class="select-text">二</span><span class="select-text"></span></div>' +
+          `<div><span id="label" ${PLAIN_COPY_ATTR}="">${LABEL}</span></div>`
+      );
+      select(byId('holder'), 0, textOf('label'));
+      const root = parse(copyHtml());
+      const holder = copyOf(root, '一').parentNode as Element;
+      const texts = Array.from(holder.childNodes).filter(node => node.nodeType === Node.TEXT_NODE);
+      expect(texts).toHaveLength(1);
+      expect(texts[0].nodeValue).toBe(' ');
+      expect(holder.childNodes).toHaveLength(6);
+      expect(holder.textContent).toBe('一 二');
     });
 
     it("sets the children apart where the holder is the range's common ancestor", () => {
@@ -620,7 +640,7 @@ describe('plainCopy text/html (DFLT-00317)', () => {
       const wrap = root.firstElementChild as Element;
       expect(wrap.childNodes).toHaveLength(3);
       expect(wrap.childNodes[1].nodeValue).toBe(' ');
-      expect(readText(root)).toBe('前 作成日時:');
+      expect(root.textContent).toBe('前 作成日時:');
     });
 
     it('keeps text/plain as the selection without the invisible characters', () => {
