@@ -57,8 +57,6 @@ async function renderApp() {
   const user = userEvent.setup();
   render(<App />);
   await screen.findByText('ALP-00001');
-  // Labels load right after the current project resolves.
-  await waitFor(() => expect(fetchMock.mock.calls.some(c => String(c[0]) === `/api/projects/${alpha.id}/labels`)).toBe(true));
   return user;
 }
 
@@ -72,16 +70,31 @@ async function toggleLabelInFilter(user: ReturnType<typeof userEvent.setup>, nam
   }
   const panel = screen.getByRole('group', { name: i18n.t('toolbar.labelGroupLabel') });
   for (const name of names) {
-    await user.click(within(panel).getByRole('checkbox', { name }));
+    // The options are the project's labels, which come from their own
+    // request (GET /api/projects/{id}/labels), not from the ticket list that
+    // renderApp waits for. Seeing a ticket, or that request having been
+    // made, does not mean its answer is on screen yet, so wait for the
+    // checkbox itself (DFLT-00284).
+    await user.click(await within(panel).findByRole('checkbox', { name }));
   }
 }
 
-let fetchMock: ReturnType<typeof vi.fn>;
+// Opens the settings modal's labels tab on Alpha. The project selector's
+// options are the project list (GET /api/projects), another request of its
+// own that seeing a ticket does not imply has been answered, so wait for
+// Alpha's option before selecting it (DFLT-00284).
+async function openLabelsSettings(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: i18n.t('header.settings') }));
+  await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.labels') }));
+  const projectSelect = screen.getByLabelText(i18n.t('settings.labels.projectLabel'));
+  await within(projectSelect).findByRole('option', { name: alpha.name });
+  await user.selectOptions(projectSelect, alpha.id);
+}
 
 describe('App label filter', () => {
   beforeEach(() => {
     seedBackground();
-    fetchMock = installFakeBackend(backend);
+    installFakeBackend(backend);
   });
 
   afterEach(() => {
@@ -182,9 +195,7 @@ describe('App label filter', () => {
     await user.keyboard('{Escape}');
     expect(labelFilterButton()).toHaveTextContent(i18n.t('toolbar.labelSelected', { count: 2 }));
 
-    await user.click(screen.getByRole('button', { name: i18n.t('header.settings') }));
-    await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.labels') }));
-    await user.selectOptions(screen.getByLabelText(i18n.t('settings.labels.projectLabel')), alpha.id);
+    await openLabelsSettings(user);
     const row = await screen.findByTestId('label-row-label-ui');
     await user.click(within(row).getByRole('button', { name: `${i18n.t('settings.labels.delete')}: UI` }));
     // The in-app confirmation (DFLT-00148) opens once the usage count is re-read.
@@ -204,7 +215,9 @@ describe('App label filter', () => {
     await user.keyboard('{Escape}');
 
     await user.click(screen.getByRole('button', { name: /Alpha/ }));
-    await user.click(screen.getByRole('button', { name: /Beta/ }));
+    // The switcher lists the project list's answer (GET /api/projects); see
+    // openLabelsSettings.
+    await user.click(await screen.findByRole('button', { name: /Beta/ }));
 
     await screen.findByText('BETA-00001');
     await waitFor(() => expect(labelFilterButton()).toHaveTextContent(i18n.t('toolbar.labelAll')));
@@ -221,9 +234,7 @@ describe('App label filter', () => {
         .find(c => c.textContent === 'バグ' || c.textContent === '不具合');
     expect(rowChip('ALP-00001')).toHaveAttribute('data-label-color', 'red');
 
-    await user.click(screen.getByRole('button', { name: i18n.t('header.settings') }));
-    await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.labels') }));
-    await user.selectOptions(screen.getByLabelText(i18n.t('settings.labels.projectLabel')), alpha.id);
+    await openLabelsSettings(user);
     const row = await screen.findByTestId('label-row-label-bug');
     await user.click(within(row).getByRole('button', { name: `${i18n.t('settings.labels.rename')}: バグ` }));
     const input = within(row).getByRole('textbox');
