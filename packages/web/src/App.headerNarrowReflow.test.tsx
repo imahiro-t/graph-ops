@@ -28,7 +28,7 @@
 // implementation notes.
 //
 // fetch is served by test/fakeBackend.ts, like App.largeTextReflow.test.tsx.
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
@@ -36,7 +36,7 @@ import App from './App';
 import { Project } from './types';
 import { createFakeBackend, installFakeBackend } from './test/fakeBackend';
 import { findPreviousPage } from './test/waitForAnswers';
-import { openIconButtonTooltips, waitForHoverOpenDelay } from './test/iconButtonTooltip';
+import { allIconButtonTooltips, openIconButtonTooltips, waitForHoverOpenDelay } from './test/iconButtonTooltip';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 
@@ -264,6 +264,13 @@ describe.each(['ja', 'en'] as const)('summary card figures (%s)', lng => {
 // described by the reason alone (a hidden span referenced by
 // aria-describedby), with the reason as its title and no visible tooltip;
 // with a project it has neither. The header's Tab order is unchanged.
+//
+// DFLT-00333: the no-tooltip case used to hover button.parentElement, which
+// was IconButton's wrapper span before DFLT-00319 but is now the header's
+// whole button group, so it no longer checked New Ticket itself. It now
+// checks the button on its own: no hover wrapper around it, a description
+// that is the hidden reason span and no tooltip element, and no tooltip
+// after pointer events aimed at the button and at the element holding it.
 describe.each(['ja', 'en'] as const)('New Ticket and the Tab order in a 320px window at 200%% (%s)', lng => {
   beforeEach(async () => {
     await i18n.changeLanguage(lng);
@@ -284,16 +291,45 @@ describe.each(['ja', 'en'] as const)('New Ticket and the Tab order in a 320px wi
     expect(description.textContent).toBe(reason);
   });
 
-  it('keeps the title with the reason without a project and opens no visible tooltip on hover', async () => {
+  it('keeps the title with the reason without a project and gives the button itself no tooltip', async () => {
     seed({ withProject: false });
     const user = userEvent.setup();
     const header = await renderAppWithoutProject();
     const button = within(header).getByRole('button', { name: i18n.t('header.newTicket') });
-    expect(button).toHaveAttribute('title', i18n.t('projectSwitcher.selectFirst'));
-    // A disabled button gets no pointer events: hover its row instead.
-    await user.hover(button.parentElement as HTMLElement);
+    const reason = i18n.t('projectSwitcher.selectFirst');
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', reason);
+
+    // No tooltip trigger: IconButton would wrap the button in its hover span,
+    // so the parent would be that span rather than the button group's div.
+    const group = button.parentElement as HTMLElement;
+    expect(group.tagName).toBe('DIV');
+
+    // The only description is the hidden reason span, not a tooltip element.
+    const describedBy = (button.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+    expect(describedBy).toHaveLength(1);
+    const description = document.getElementById(describedBy[0]) as HTMLElement;
+    expect(description).toHaveAttribute('hidden');
+    expect(description.textContent).toBe(reason);
+    expect(description.closest('[data-icon-button-tooltip]')).toBeNull();
+    expect(button).toHaveAccessibleDescription(reason);
+    // No header button uses describeWithTooltip, so no tooltip element is
+    // rendered while none is open.
+    expect(allIconButtonTooltips()).toHaveLength(0);
+
+    // Hover the group's child that holds the button (the button itself, or
+    // a wrapper around it if one came back), never the whole group.
+    const holder = Array.from(group.children).find(child => child.contains(button)) as HTMLElement;
+    await user.hover(holder);
+    // user-event sends no mouse events to a disabled element, while some
+    // browsers do. Send them to the button directly: React then calls no
+    // onMouseEnter of the disabled button itself, but does call those of the
+    // elements around it, where IconButton tracks hover.
+    fireEvent.pointerOver(button);
+    fireEvent.mouseOver(button);
     await waitForHoverOpenDelay();
     expect(openIconButtonTooltips()).toHaveLength(0);
+    expect(allIconButtonTooltips()).toHaveLength(0);
   });
 
   it('has no description and no title with a project', async () => {
