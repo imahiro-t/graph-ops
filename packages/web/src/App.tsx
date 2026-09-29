@@ -1582,8 +1582,11 @@ export const App: React.FC = () => {
           at 320/360px the Send button's label broke onto several lines. The
           15rem query stays: with a very large default font (over about 267%)
           it still matches above 640px. From sm up, at a normal default font
-          size, nothing changes. */}
-      <main className="max-w-7xl mx-auto px-6 max-sm:px-3 upto-15rem:px-3 py-6 space-y-6">
+          size, nothing changes. DFLT-00290: from 7.5rem down (a 32px default
+          font in a 240px window or narrower, 120px or narrower at 16px) it
+          pads with px-1, so the expanded ticket's node rows keep room for
+          their status badges (see TicketItem.tsx). */}
+      <main className="max-w-7xl mx-auto px-6 max-sm:px-3 upto-15rem:px-3 upto-7_5rem:px-1 py-6 space-y-6">
         {/* Simple Summary Metrics. DFLT-00251: both children are min-w-0
             max-w-full so neither can be wider than the card; the numbers
             already wrap between items (flex-wrap). Each item is min-w-0

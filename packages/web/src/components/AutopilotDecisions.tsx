@@ -37,11 +37,14 @@ export const AutopilotDecisions: React.FC<Props> = ({ artifacts, nodes }) => {
   if (items.length === 0) return null;
   const nodeName = new Map(nodes.map(n => [n.id, n.name]));
 
+  // DFLT-00290: from 7.5rem down (a 32px default font in a 240px window or
+  // narrower) the <section> card below pads 0.25rem (upto-7_5rem:p-1), so
+  // its labels and dates wrap inside it.
   return (
     <section
       data-testid="autopilot-decisions"
       aria-labelledby={headingId}
-      className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-xs"
+      className="bg-white dark:bg-slate-900 p-4 upto-7_5rem:p-1 rounded-xl border border-slate-200 dark:border-slate-800 text-xs"
     >
       <h3
         id={headingId}
