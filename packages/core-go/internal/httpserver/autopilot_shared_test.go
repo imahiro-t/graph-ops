@@ -116,8 +116,11 @@ func TestAutopilotShared_BrokenMachineIDListsButDoesNotLaunch(t *testing.T) {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
 	}
 	rec := doJSON(t, b, http.MethodPost, startAutopilotPath(r), map[string]any{"mode": "tree"})
-	if rec.Code < 400 {
+	if rec.Code != http.StatusConflict {
 		t.Fatalf("launch with a broken machine id: %d %s", rec.Code, rec.Body.String())
+	}
+	if apiErr := decodeError(t, rec); apiErr.Code != autopilot.ErrCodeMachineIDUnreadable || apiErr.Details["path"] != path {
+		t.Fatalf("error = %+v", apiErr)
 	}
 	if launcherB.count() != 0 || len(sharedRunIDs(t, e.repo, e.pid)) != 0 {
 		t.Fatal("something was launched or recorded")

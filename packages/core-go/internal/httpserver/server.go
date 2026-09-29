@@ -640,8 +640,11 @@ func statusForError(err error, fallback int) int {
 		// state, like INVALID_NODE_STATE; a project with no local path is
 		// the request's precondition not being met, a 400 like the
 		// validation errors above.
+		// A broken machine-id file (DFLT-00326) is, like an unreadable
+		// run file, local state that stands in the way of the start.
 		case autopilot.ErrCodeAlreadyRunning, autopilot.ErrCodeRootFinished,
-			autopilot.ErrCodeInvalidRunState, autopilot.ErrCodeRegistryLockTimed, autopilot.ErrCodeRegistryCorrupt:
+			autopilot.ErrCodeInvalidRunState, autopilot.ErrCodeRegistryLockTimed, autopilot.ErrCodeRegistryCorrupt,
+			autopilot.ErrCodeMachineIDUnreadable:
 			return http.StatusConflict
 		case autopilot.ErrCodeLocalPathNotSet:
 			return http.StatusBadRequest

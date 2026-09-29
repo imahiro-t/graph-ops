@@ -650,7 +650,7 @@ func (f failingShared) List(projectID string) ([]*autopilot.Run, error) {
 	return f.SharedRuns.List(projectID)
 }
 
-func (f failingShared) Begin(projectID string, decide func([]*autopilot.Run) (*autopilot.Run, error)) error {
+func (f failingShared) Begin(projectID string, decide func([]*autopilot.Run) (*autopilot.Run, []string, error)) error {
 	if f.beginErr != nil {
 		return f.beginErr
 	}
@@ -811,8 +811,10 @@ func TestSharedRuns_BrokenMachineID(t *testing.T) {
 		t.Fatalf("views = %+v", views)
 	}
 	before := len(sharedRecords(t, h.repo, h.projectID))
-	if _, err := b2.Start(tr.S, autopilot.ModeTicket, "", false); err == nil || !strings.Contains(err.Error(), "machine id") {
-		t.Fatalf("start = %v", err)
+	_, err = b2.Start(tr.S, autopilot.ModeTicket, "", false)
+	apiErr := wantAPIError(t, err, autopilot.ErrCodeMachineIDUnreadable)
+	if !strings.Contains(apiErr.Message, "machine id") || apiErr.Details["path"] != filepath.Join(b.HomeDir, ".graph-ops", "machine-id") {
+		t.Fatalf("start = %s %v", apiErr.Message, apiErr.Details)
 	}
 	if after := len(sharedRecords(t, h.repo, h.projectID)); after != before {
 		t.Fatalf("records %d -> %d", before, after)
@@ -907,5 +909,162 @@ func TestSharedRuns_HTTP11FallsBackToLocal(t *testing.T) {
 	}
 	if n := logs.count("older than 1.2"); n != 1 {
 		t.Fatalf("the warning was logged %d times: %v", n, logs.lines)
+	}
+}
+
+// --- review round 1 ---
+
+// QA review, round 1, finding 1: A's run comes back after its heartbeat
+// expired and B started the same tree meanwhile. A's next stops the run
+// (overtaken) without launching anything more; B goes on.
+func TestSharedRuns_RevivedRunIsOvertakenAtNext(t *testing.T) {
+	h, tr, a, b := newSharedHarness(t)
+	h.behave[tr.R] = func(w *workerCall) {} // A's session keeps running
+	resA := mustStart(t, a, tr.R, autopilot.ModeTree)
+	h.svc = a
+	act := h.next(resA.RunID)
+	h.launch1(resA.RunID, act.Ticket)
+	launched := len(h.launches)
+
+	h.clock.Advance(autopilot.ActiveThreshold + time.Minute) // A's machine sleeps
+	resB := mustStart(t, b, tr.X, autopilot.ModeTree)        // B starts inside A's tree
+	h.clock.Advance(time.Minute)                             // A wakes up
+
+	stopped := h.next(resA.RunID)
+	if stopped.Action.Action != autopilot.ActionStopped || stopped.Reason != autopilot.StopOvertaken ||
+		!strings.Contains(stopped.Detail, resB.RunID) || !strings.Contains(stopped.Detail, "Bob") {
+		t.Fatalf("A's next = %+v", stopped)
+	}
+	if len(h.launches) != launched {
+		t.Fatal("A launched a session after being overtaken")
+	}
+	run := localRun(t, a, h.projectID, resA.RunID)
+	if run.State != autopilot.RunStopped || run.StopReason != autopilot.StopOvertaken {
+		t.Fatalf("A's local run = %s/%s", run.State, run.StopReason)
+	}
+	if rec := sharedRecord(t, h.repo, h.projectID, resA.RunID); rec.State != autopilot.RunStopped || rec.Revision != run.Revision {
+		t.Fatalf("A's shared record = %+v", rec)
+	}
+
+	// B is not overtaken by A's revived (and now stopped) run.
+	h.svc = b
+	if next := h.next(resB.RunID); next.Action.Action == autopilot.ActionStopped {
+		t.Fatalf("B's next = %+v", next)
+	}
+	// And A cannot resume while B's run is active.
+	_, err := a.Start(tr.R, autopilot.ModeTree, "", false)
+	wantRefusedBy(t, err, "Bob")
+}
+
+// The same when the overtaking start falls between A's next and its launch:
+// the launch stops the run instead of opening a session, and next then
+// answers stopped.
+func TestSharedRuns_RevivedRunIsOvertakenAtLaunch(t *testing.T) {
+	h, tr, a, b := newSharedHarness(t)
+	resA := mustStart(t, a, tr.R, autopilot.ModeTree)
+	h.svc = a
+	act := h.next(resA.RunID)
+	if act.Action.Action != autopilot.ActionLaunch {
+		t.Fatalf("A's next = %+v", act)
+	}
+	h.clock.Advance(autopilot.ActiveThreshold + time.Minute)
+	mustStart(t, b, tr.R, autopilot.ModeTree)
+	h.clock.Advance(time.Minute)
+
+	_, err := a.Launch(resA.RunID, act.Ticket, act.Role)
+	apiErr := wantAPIError(t, err, autopilot.ErrCodeInvalidRunState)
+	if !strings.Contains(apiErr.Message, "autopilot next") {
+		t.Fatalf("launch error = %s", apiErr.Message)
+	}
+	if len(h.launches) != 0 {
+		t.Fatal("a session was launched")
+	}
+	if next := h.next(resA.RunID); next.Action.Action != autopilot.ActionStopped || next.Reason != autopilot.StopOvertaken {
+		t.Fatalf("A's next after the refused launch = %+v", next)
+	}
+}
+
+// A run that was never overtaken is not stopped by an overlapping run that
+// is inactive, nor by one that does not overlap; and a data source that
+// cannot be read does not stop it either.
+func TestSharedRuns_NotOvertakenWithoutAnActiveLaterOverlap(t *testing.T) {
+	h, tr, a, b := newSharedHarness(t)
+	resA := mustStart(t, a, tr.R, autopilot.ModeTree)
+	mustStart(t, b, tr.T, autopilot.ModeTree) // another tree
+	h.svc = a
+	if next := h.next(resA.RunID); next.Action.Action != autopilot.ActionLaunch {
+		t.Fatalf("A's next = %+v", next)
+	}
+	logs := &logSink{}
+	a.Logf = logs.logf
+	a.Registry.Shared = failingShared{SharedRuns: a.Registry.Shared, listErr: errors.New("db down")}
+	autopilot.ResetSharedErrorLog()
+	t.Cleanup(autopilot.ResetSharedErrorLog)
+	if next := h.next(resA.RunID); next.Action.Action != autopilot.ActionLaunch {
+		t.Fatalf("A's next with the DB down = %+v", next)
+	}
+	if logs.count("db down") != 1 {
+		t.Fatalf("logs = %v", logs.lines)
+	}
+}
+
+// Non-functional review, round 1, finding 1: a listing failure that comes
+// back after a successful listing is logged again.
+func TestSharedRuns_RunsLogsARecurringFailureAgain(t *testing.T) {
+	autopilot.ResetSharedErrorLog()
+	t.Cleanup(autopilot.ResetSharedErrorLog)
+	h, tr, _, b := newSharedHarness(t)
+	mustStart(t, b, tr.T, autopilot.ModeTree)
+	logs := &logSink{}
+	b.Logf = logs.logf
+	healthy := b.Registry.Shared
+	failing := failingShared{SharedRuns: healthy, listErr: errors.New("db down")}
+	for _, shared := range []autopilot.SharedRuns{failing, failing, healthy, failing} {
+		b.Registry.Shared = shared
+		if _, err := b.Runs(h.projectID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if logs.count("db down") != 2 || logs.count("reachable again") != 1 {
+		t.Fatalf("logs = %v", logs.lines)
+	}
+	for _, l := range logs.lines {
+		if strings.Contains(l, "db down") && (!strings.Contains(l, "showing this machine's runs only") || strings.Contains(l, "the run goes on")) {
+			t.Fatalf("listing failure logged as %q", l)
+		}
+	}
+}
+
+// Non-functional review, round 1, finding 3: another member's settled
+// records beyond KeepSharedSettledRuns are dropped by a start, while that
+// member's local runs stay and its listing still shows them.
+func TestSharedRuns_SettledRecordsAreKeptWithinTheRetention(t *testing.T) {
+	h, tr, a, b := newSharedHarness(t)
+	var bobs []string
+	for i := 0; i < autopilot.KeepSharedSettledRuns+3; i++ {
+		res := mustStart(t, b, tr.S, autopilot.ModeTicket)
+		modifyRun(t, b, h.projectID, res.RunID, func(run *autopilot.Run) { run.State = autopilot.RunFinished })
+		bobs = append(bobs, res.RunID)
+		h.clock.Advance(time.Second)
+	}
+	mustStart(t, a, tr.T, autopilot.ModeTree)
+	settled := 0
+	for _, rec := range sharedRecords(t, h.repo, h.projectID) {
+		if rec.State == autopilot.RunFinished {
+			settled++
+		}
+	}
+	if settled > autopilot.KeepSharedSettledRuns {
+		t.Fatalf("%d settled records kept, limit %d", settled, autopilot.KeepSharedSettledRuns)
+	}
+	if sharedRecord(t, h.repo, h.projectID, bobs[0]) != nil {
+		t.Fatal("the oldest settled record was kept")
+	}
+	if sharedRecord(t, h.repo, h.projectID, bobs[len(bobs)-1]) == nil {
+		t.Fatal("the newest settled record was dropped")
+	}
+	views, err := b.Runs(h.projectID)
+	if err != nil || len(views) == 0 {
+		t.Fatalf("B's listing = %+v, %v", views, err)
 	}
 }

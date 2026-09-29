@@ -746,6 +746,13 @@ paths:
       tags: [autopilot-runs]
       summary: "Since 1.2. Delete one autopilot run record. A missing record is a no-op."
       x-since: "1.2"
+      description: |
+        graph-engine deletes the records of its own cancelled or pruned
+        runs, and, after starting a run, the settled records (not active:
+        finished, stopped, or with a heartbeat more than 10 minutes old)
+        of any member beyond the 20 most recently updated in the project.
+        A record deleted this way may be saved again later by its run's
+        machine (a PUT of a record that does not exist creates it).
       responses:
         "204": { description: Deleted. }
         "200": { description: Deleted (any body is ignored). }

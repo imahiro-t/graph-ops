@@ -2,6 +2,8 @@ package runner
 
 import (
 	"errors"
+	"path/filepath"
+	"time"
 
 	"github.com/graph-ops/core-go/internal/autopilot"
 	"github.com/graph-ops/core-go/internal/domain"
@@ -56,17 +58,20 @@ func (s StoreSharedRuns) List(projectID string) ([]*autopilot.Run, error) {
 }
 
 // Begin implements autopilot.SharedRuns.
-func (s StoreSharedRuns) Begin(projectID string, decide func(shared []*autopilot.Run) (*autopilot.Run, error)) error {
-	err := s.Store.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, error) {
-		run, err := decide(s.runs(existing))
-		if err != nil || run == nil {
-			return nil, err
+func (s StoreSharedRuns) Begin(projectID string, decide func(shared []*autopilot.Run) (*autopilot.Run, []string, error)) error {
+	err := s.Store.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
+		run, drop, err := decide(s.runs(existing))
+		if err != nil {
+			return nil, nil, err
+		}
+		if run == nil {
+			return nil, drop, nil
 		}
 		rec, err := run.ToRecord()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return &rec, nil
+		return &rec, drop, nil
 	})
 	return sharedErr(err)
 }
@@ -81,7 +86,7 @@ func (s StoreSharedRuns) Save(run *autopilot.Run) error {
 }
 
 // Delete implements autopilot.SharedRuns.
-func (s StoreSharedRuns) Delete(projectID, runID string) error {
+func (s StoreSharedRuns) Delete(runID string) error {
 	return sharedErr(s.Store.DeleteAutopilotRun(runID))
 }
 
@@ -115,5 +120,48 @@ func (s *Service) shareRun(run *autopilot.Run) {
 	if shared == nil || run == nil {
 		return
 	}
-	autopilot.LogSharedError(s.logf, "sharing autopilot run "+run.ID, shared.Save(run))
+	autopilot.LogSharedError(s.logf, "sharing autopilot run "+run.ID,
+		"the run goes on; other members may see it as interrupted until the shared copy is written again",
+		shared.Save(run))
+}
+
+// otherRuns reads the project's shared runs for the overtaking check of
+// next and launch (autopilot.Overtaker), before the registry lock is
+// taken. nil when runs are not shared or cannot be read: the run then goes
+// on as it would without sharing, and the failure is logged (thinned out).
+func (s *Service) otherRuns(projectID string) []*autopilot.Run {
+	shared := s.registry().Shared
+	if shared == nil {
+		return nil
+	}
+	runs, err := shared.List(projectID)
+	autopilot.LogSharedError(s.logf, "listing the shared autopilot runs of project "+projectID,
+		"whether another member's run has overtaken this one cannot be told; the run goes on", err)
+	if err != nil {
+		return nil
+	}
+	return runs
+}
+
+// stopIfOvertaken stops run when another member's run has overtaken it
+// (autopilot.Overtaker) and reports whether it did.
+func stopIfOvertaken(run *autopilot.Run, others []*autopilot.Run, idx *projectIndex, now time.Time) (bool, error) {
+	if len(others) == 0 || run.IsFinal() || run.State == autopilot.RunStarting {
+		return false, nil
+	}
+	o, err := autopilot.Overtaker(run, others, func(id string) ([]string, error) { return idx.descendants(id), nil }, now)
+	if err != nil || o == nil {
+		return false, err
+	}
+	run.StopOvertakenBy(o, now)
+	return true, nil
+}
+
+// machineIDError is Start's error when who is starting cannot be told
+// (DFLT-00326): with shared runs, nothing is started without a machine ID.
+func machineIDError(homeDir string, err error) error {
+	path := filepath.Join(homeDir, filepath.FromSlash(identity.MachineIDFile))
+	return domain.NewAPIError(autopilot.ErrCodeMachineIDUnreadable,
+		"AUTOPILOT_MACHINE_ID_UNREADABLE: who is starting the run cannot be told, so nothing was started: %v", err).
+		WithDetails(map[string]any{"path": path})
 }

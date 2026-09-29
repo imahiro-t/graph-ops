@@ -726,7 +726,8 @@
     "AUTOPILOT_RUN_NOT_FOUND": "The autopilot run was not found.",
     "AUTOPILOT_INVALID_STATE": "The autopilot run is in a state that does not accept this operation. Reload the page and try again.",
     "AUTOPILOT_REGISTRY_LOCKED": "The autopilot's run records are busy. Wait a moment and try again.",
-    "AUTOPILOT_REGISTRY_CORRUPT": "An autopilot run record cannot be read, so whether this start would duplicate a running autopilot cannot be told. Fix or remove the file named in the server log (under ~/.graph-ops/autopilot) and try again."
+    "AUTOPILOT_REGISTRY_CORRUPT": "An autopilot run record cannot be read, so whether this start would duplicate a running autopilot cannot be told. Fix or remove the file named in the server log (under ~/.graph-ops/autopilot) and try again.",
+    "AUTOPILOT_MACHINE_ID_UNREADABLE": "This machine's ID file (~/.graph-ops/machine-id) cannot be read, so the autopilot cannot be started: runs shared with other members need to know which machine starts them. Restore the file from a backup, or remove it, and try again (removing it creates a new ID, and this machine can then no longer resume its interrupted runs)."
   },
   "labels": {
     "colors": {

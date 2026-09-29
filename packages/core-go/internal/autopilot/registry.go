@@ -68,11 +68,6 @@ type Registry struct {
 	// (DFLT-00326): Begin decides on the local runs and the shared ones
 	// together and records the run there too. nil keeps runs local.
 	Shared SharedRuns
-	// Actor is who is starting runs in this process; Begin stamps it on the
-	// run it starts, takes over or adopts. Its MachineID also limits what
-	// Begin takes over to this machine's runs. nil stamps nothing and takes
-	// over any local run (as before DFLT-00326).
-	Actor *StartedBy
 
 	// failSave, when set, makes Begin's local save fail with its error
 	// (tests of the compensation).
@@ -118,6 +113,11 @@ const (
 	ErrCodeParentDirty       domain.ErrorCode = "PARENT_WORKTREE_DIRTY"
 	ErrCodeInvalidRunState   domain.ErrorCode = "AUTOPILOT_INVALID_STATE"
 	ErrCodeRegistryLockTimed domain.ErrorCode = "AUTOPILOT_REGISTRY_LOCKED"
+	// ErrCodeMachineIDUnreadable: with runs shared through the data source
+	// (DFLT-00326), a start needs this machine's ID, and
+	// $HOME/.graph-ops/machine-id cannot be read or created (a broken file,
+	// say). Nothing is started until it is restored or removed.
+	ErrCodeMachineIDUnreadable domain.ErrorCode = "AUTOPILOT_MACHINE_ID_UNREADABLE"
 )
 
 func (g *Registry) now() time.Time {

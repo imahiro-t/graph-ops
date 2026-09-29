@@ -87,22 +87,42 @@ func exerciseAutopilotRunStore(t *testing.T, s AutopilotRunStore, projectID stri
 
 	// decide failing writes nothing; decide returning a record writes it.
 	boom := errors.New("boom")
-	if err := s.BeginAutopilotRun(projectID, func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, error) {
-		return nil, boom
+	if err := s.BeginAutopilotRun(projectID, func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
+		return nil, nil, boom
 	}); !errors.Is(err, boom) {
 		t.Fatalf("BeginAutopilotRun with a failing decide: %v", err)
 	}
 	if recs, _ := s.ListAutopilotRuns(projectID); len(recs) != 0 {
 		t.Fatalf("a failing decide wrote %d record(s)", len(recs))
 	}
-	if err := s.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, error) {
+	if err := s.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
 		r := runRecord(projectID, "run-2", "T-2", 1)
-		return &r, nil
+		return &r, nil, nil
 	}); err != nil {
 		t.Fatalf("BeginAutopilotRun: %v", err)
 	}
 	if findRecord(t, s, projectID, "run-2") == nil {
 		t.Fatal("the record decide returned was not stored")
+	}
+
+	// The records decide drops are deleted along with the save (the
+	// retention of settled records); the saved one is never dropped.
+	for _, id := range []string{"run-old-1", "run-old-2", "run-kept"} {
+		if err := s.SaveAutopilotRun(runRecord(projectID, id, "T-9", 1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
+		r := runRecord(projectID, "run-3", "T-3", 1)
+		return &r, []string{"run-old-1", "run-old-2", "run-3", "run-missing"}, nil
+	}); err != nil {
+		t.Fatalf("BeginAutopilotRun with drops: %v", err)
+	}
+	if findRecord(t, s, projectID, "run-old-1") != nil || findRecord(t, s, projectID, "run-old-2") != nil {
+		t.Fatal("a dropped record is still listed")
+	}
+	if findRecord(t, s, projectID, "run-3") == nil || findRecord(t, s, projectID, "run-kept") == nil {
+		t.Fatal("a record that was not to be dropped is gone")
 	}
 }
 
@@ -113,7 +133,9 @@ func TestSQLiteAutopilotRuns(t *testing.T) {
 
 func TestSQLiteBeginAutopilotRunUnknownProject(t *testing.T) {
 	repo := newTestRepo(t)
-	err := repo.BeginAutopilotRun("nope", func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, error) { return nil, nil })
+	err := repo.BeginAutopilotRun("nope", func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
+		return nil, nil, nil
+	})
 	var apiErr *domain.APIError
 	if !errors.As(err, &apiErr) || apiErr.Code != domain.ErrCodeProjectNotFound {
 		t.Fatalf("got %v, want PROJECT_NOT_FOUND", err)
@@ -178,16 +200,16 @@ func TestSQLiteInitAddsAutopilotRunsToAnExistingDB(t *testing.T) {
 // start only when no record of root exists yet.
 func startOverlapping(s AutopilotRunStore, projectID, runID, root string) (bool, error) {
 	started := false
-	err := s.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, error) {
+	err := s.BeginAutopilotRun(projectID, func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
 		for _, r := range existing {
 			if r.RootTicketID == root {
-				return nil, nil
+				return nil, nil, nil
 			}
 		}
 		time.Sleep(time.Millisecond) // widen the window a race would need
 		rec := runRecord(projectID, runID, root, 1)
 		started = true
-		return &rec, nil
+		return &rec, nil, nil
 	})
 	return started, err
 }
@@ -296,9 +318,9 @@ func TestHTTPAutopilotRunsUnsupportedBefore12(t *testing.T) {
 	called := false
 	errs := []error{
 		func() error { _, err := repo.ListAutopilotRuns("proj"); return err }(),
-		repo.BeginAutopilotRun("proj", func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, error) {
+		repo.BeginAutopilotRun("proj", func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error) {
 			called = true
-			return nil, nil
+			return nil, nil, nil
 		}),
 		repo.SaveAutopilotRun(runRecord("proj", "run-1", "T-1", 1)),
 		repo.DeleteAutopilotRun("run-1"),

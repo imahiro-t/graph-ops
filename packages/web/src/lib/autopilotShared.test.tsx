@@ -192,3 +192,19 @@ describe.each(['ja', 'en'] as const)('shared-run texts (%s)', lng => {
     expect(startErrorMessage(i18n.t, 'AUTOPILOT_ALREADY_RUNNING')).toBe(i18n.t('errors.AUTOPILOT_ALREADY_RUNNING'));
   });
 });
+
+// QA review, round 1, finding 2: a broken machine-id file is explained, with
+// what to do about it, in both languages -- not an unknown error.
+describe('a start refused for an unreadable machine id', () => {
+  afterEach(async () => {
+    await i18n.changeLanguage('ja');
+  });
+
+  it.each(['ja', 'en'])('names the file and the fix (%s)', async (lang) => {
+    await i18n.changeLanguage(lang);
+    const message = startErrorMessage(i18n.t, 'AUTOPILOT_MACHINE_ID_UNREADABLE', { path: '/home/u/.graph-ops/machine-id' });
+    expect(message).toBe(i18n.t('errors.AUTOPILOT_MACHINE_ID_UNREADABLE'));
+    expect(message).toContain('~/.graph-ops/machine-id');
+    expect(message).not.toBe(i18n.t('errors.UNKNOWN'));
+  });
+});

@@ -32,20 +32,26 @@ type AutopilotRunStore interface {
 	// particular order.
 	ListAutopilotRuns(projectID string) ([]domain.AutopilotRunRecord, error)
 	// BeginAutopilotRun serializes the starts of projectID's runs: it reads
-	// the project's run records, calls decide with them, and upserts the
-	// record decide returns (nothing when it returns nil) -- all under one
-	// lock on the SQL backends, so two members starting overlapping runs at
-	// the same moment cannot both pass. If decide fails nothing is written
-	// and its error is returned as is. A missing project is
-	// PROJECT_NOT_FOUND.
+	// the project's run records, calls decide with them, upserts the record
+	// decide returns (nothing when it returns nil) and deletes the
+	// project's records decide lists in drop (the retention of settled
+	// records) -- all under one lock on the SQL backends, so two members
+	// starting overlapping runs at the same moment cannot both pass, and a
+	// record is only dropped in the state decide saw. If decide fails
+	// nothing is written and its error is returned as is. A missing
+	// project is PROJECT_NOT_FOUND.
 	//
 	// decide must not call the repository: on SQLite the one connection is
 	// held by the transaction decide runs in, so such a call would wait for
 	// itself forever.
 	//
-	// On an HTTP data source this is a GET followed by a PUT, which is not
-	// atomic: two starts at the same moment may both pass there.
-	BeginAutopilotRun(projectID string, decide func(existing []domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, error)) error
+	// On an HTTP data source this is a GET, a PUT and a DELETE per dropped
+	// record, which is not atomic: two starts at the same moment may both
+	// pass there, and a record saved again between the GET and its DELETE
+	// is deleted anyway (its run's next save brings it back). A DELETE that
+	// fails is ignored -- the run is already saved, and the record is
+	// dropped by a later start.
+	BeginAutopilotRun(projectID string, decide func(existing []domain.AutopilotRunRecord) (save *domain.AutopilotRunRecord, drop []string, err error)) error
 	// SaveAutopilotRun upserts rec, unless the stored record's revision is
 	// already rec.Revision or more (then it does nothing and succeeds).
 	//
@@ -56,7 +62,9 @@ type AutopilotRunStore interface {
 	// old.
 	SaveAutopilotRun(rec domain.AutopilotRunRecord) error
 	// DeleteAutopilotRun removes a run record; a missing one is not an
-	// error.
+	// error. Run IDs are unique across projects, so the ID alone names it.
+	// On the SQL backends it deletes the one row by its primary key without
+	// taking the project's lock (see lockProjectForRuns).
 	DeleteAutopilotRun(id string) error
 }
 
@@ -94,10 +102,18 @@ func listAutopilotRuns(q sqlQuerier, projectID string) ([]domain.AutopilotRunRec
 	return out, rows.Err()
 }
 
-// lockProjectForRuns takes the lock every autopilot_runs write of a project
-// goes through: the project row, FOR UPDATE on MySQL (the same point
-// CreateTicket serializes on); SQLite's immediate transaction already holds
-// the database's write lock.
+// lockProjectForRuns takes the lock the autopilot_runs writes of a project
+// go through -- Begin (its upsert and its retention deletes) and Save: the
+// project row, FOR UPDATE on MySQL (the same point CreateTicket serializes
+// on); SQLite's immediate transaction already holds the database's write
+// lock. Taking the project row first keeps the lock order the same for
+// every write (no gap-lock deadlock on MySQL between an insert and a
+// Begin).
+//
+// DeleteAutopilotRun is the exception: a DELETE of one row by its primary
+// key, which takes no gap lock and cannot deadlock with the writes above,
+// so it does not take this lock. It is only used for the runs a machine
+// itself removes (a cancelled reservation, its pruned runs, a compensation).
 func lockProjectForRuns(tx *sql.Tx, d sqlDialect, projectID string) error {
 	var id string
 	err := tx.QueryRow(`SELECT id FROM projects WHERE id = ?`+d.forUpdate, projectID).Scan(&id)
@@ -144,7 +160,7 @@ func upsertAutopilotRun(tx *sql.Tx, d sqlDialect, rec domain.AutopilotRunRecord)
 	return nil
 }
 
-func beginAutopilotRun(db *sql.DB, d sqlDialect, projectID string, decide func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, error)) error {
+func beginAutopilotRun(db *sql.DB, d sqlDialect, projectID string, decide func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error)) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -157,7 +173,7 @@ func beginAutopilotRun(db *sql.DB, d sqlDialect, projectID string, decide func([
 	if err != nil {
 		return err
 	}
-	rec, err := decide(existing)
+	rec, drop, err := decide(existing)
 	if err != nil {
 		return err
 	}
@@ -167,6 +183,14 @@ func beginAutopilotRun(db *sql.DB, d sqlDialect, projectID string, decide func([
 		}
 		if err := upsertAutopilotRun(tx, d, *rec); err != nil {
 			return err
+		}
+	}
+	for _, id := range drop {
+		if rec != nil && id == rec.ID {
+			continue
+		}
+		if _, err := tx.Exec(`DELETE FROM autopilot_runs WHERE id = ? AND project_id = ?`, id, projectID); err != nil {
+			return fmt.Errorf("deleting settled autopilot run %s: %w", id, err)
 		}
 	}
 	return tx.Commit()
@@ -204,7 +228,7 @@ func (r *SQLiteRepository) ListAutopilotRuns(projectID string) ([]domain.Autopil
 // BeginAutopilotRun implements AutopilotRunStore. The immediate transaction
 // (see NewSQLiteRepository's _txlock) holds the database's write lock from
 // the read to the write, across processes too.
-func (r *SQLiteRepository) BeginAutopilotRun(projectID string, decide func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, error)) error {
+func (r *SQLiteRepository) BeginAutopilotRun(projectID string, decide func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error)) error {
 	return beginAutopilotRun(r.db, sqliteDialect, projectID, decide)
 }
 
@@ -225,7 +249,7 @@ func (r *MySQLRepository) ListAutopilotRuns(projectID string) ([]domain.Autopilo
 
 // BeginAutopilotRun implements AutopilotRunStore: the project row, locked
 // FOR UPDATE, serializes the starts of the project's runs.
-func (r *MySQLRepository) BeginAutopilotRun(projectID string, decide func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, error)) error {
+func (r *MySQLRepository) BeginAutopilotRun(projectID string, decide func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error)) error {
 	return beginAutopilotRun(r.db, mysqlDialect, projectID, decide)
 }
 
@@ -263,19 +287,32 @@ func (r *HTTPRepository) ListAutopilotRuns(projectID string) ([]domain.Autopilot
 	return out, nil
 }
 
-// BeginAutopilotRun implements AutopilotRunStore as a GET followed by a PUT.
-// The protocol has no cross-request transaction, so this is not atomic: two
-// members starting overlapping runs at the same moment may both pass.
-func (r *HTTPRepository) BeginAutopilotRun(projectID string, decide func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, error)) error {
+// BeginAutopilotRun implements AutopilotRunStore as a GET, a PUT, and a
+// DELETE per dropped record. The protocol has no cross-request
+// transaction, so this is not atomic: two members starting overlapping runs
+// at the same moment may both pass. A failed DELETE is ignored (see the
+// interface).
+func (r *HTTPRepository) BeginAutopilotRun(projectID string, decide func([]domain.AutopilotRunRecord) (*domain.AutopilotRunRecord, []string, error)) error {
 	existing, err := r.ListAutopilotRuns(projectID)
 	if err != nil {
 		return err
 	}
-	rec, err := decide(existing)
-	if err != nil || rec == nil {
+	rec, drop, err := decide(existing)
+	if err != nil {
 		return err
 	}
-	return r.SaveAutopilotRun(*rec)
+	if rec != nil {
+		if err := r.SaveAutopilotRun(*rec); err != nil {
+			return err
+		}
+	}
+	for _, id := range drop {
+		if rec != nil && id == rec.ID {
+			continue
+		}
+		_ = r.DeleteAutopilotRun(id) // best effort: a later start drops it
+	}
+	return nil
 }
 
 // SaveAutopilotRun implements AutopilotRunStore (PUT /autopilot-runs/{runId}).

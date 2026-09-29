@@ -63,6 +63,11 @@ const (
 
 	StopTicketFailed   = "ticket_failed"
 	StopFinalizeFailed = "finalize_failed"
+	// StopOvertaken: another run that overlaps this one was begun after it
+	// -- this run's heartbeat had expired (a sleeping machine, say), so
+	// another member could start the same tree -- and this run stopped
+	// rather than launch anything more alongside it (see Overtaker).
+	StopOvertaken = "overtaken"
 )
 
 // Merge states: how far a ticket's branch has been carried towards its
@@ -143,6 +148,12 @@ type Run struct {
 	// it out of order never roll it back. 0 in a run file written before
 	// DFLT-00326.
 	Revision int64 `json:"revision,omitempty"`
+	// BegunAt is when the run was last begun -- created, taken over or
+	// adopted (Registry.Begin). Of two active runs that overlap -- which
+	// only happens when one of them came back after its heartbeat had
+	// expired -- the one begun earlier yields (see Overtaker). Zero in a
+	// run file written before DFLT-00326, which then counts from CreatedAt.
+	BegunAt time.Time `json:"begun_at,omitempty"`
 }
 
 // StartedBy is who started a run (see identity.Actor, which it copies: this

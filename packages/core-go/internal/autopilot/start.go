@@ -37,6 +37,11 @@ type BeginRequest struct {
 	// Run.TerminalTTY), "" when it has none. Ignored with Reserve: the
 	// process reserving the run is not the orchestrator.
 	TerminalTTY string
+	// Actor is who is starting (DFLT-00326): stamped on the run started,
+	// taken over or adopted, and its MachineID limits what is taken over to
+	// this machine's runs. nil stamps nothing and takes over any local run
+	// (as before DFLT-00326).
+	Actor *StartedBy
 }
 
 // BeginResult says what Begin did.
@@ -74,8 +79,10 @@ type BeginResult struct {
 // With Shared set, steps 1-4 run inside SharedRuns.Begin, which saves the
 // run's shared record in the same data source transaction (so on the SQL
 // backends two members' overlapping starts cannot both pass), and the run
-// is saved locally afterwards with the same revision. If that local save
-// fails, the shared record is put back (after the lock is released). A data
+// is saved locally afterwards with the same revision. The same transaction
+// deletes the settled records beyond the project's retention
+// (SharedRetention). If the local save fails, the shared record is put back
+// (after the lock is released). A data
 // source that cannot share runs (ErrSharedRunsUnsupported) falls back to
 // the local runs alone, with a one-time warning; any other data source
 // error fails the start, since it could not be told whether it duplicates a
@@ -115,14 +122,14 @@ func (g *Registry) Begin(req BeginRequest) (BeginResult, error) {
 			// next one, or for Prune.
 			local := make([]*Run, 0, len(runs))
 			for _, r := range runs {
-				c := cloneRun(r)
-				if c == nil {
-					c = r // cannot happen (a Run always round-trips); never drop a run from the check
+				c, err := cloneRun(r)
+				if err != nil {
+					return nil, err
 				}
 				local = append(local, c)
 			}
 			res = BeginResult{}
-			run, orig, err := g.decideBegin(req, local, shared, now, &res)
+			run, orig, err := decideBegin(req, local, shared, now, &res)
 			original = orig
 			return run, err
 		}
@@ -130,10 +137,13 @@ func (g *Registry) Begin(req BeginRequest) (BeginResult, error) {
 		if g.Shared != nil {
 			// The only data source call made under the lock (see Registry).
 			// decide itself touches neither the data source nor any file.
-			err := g.Shared.Begin(req.ProjectID, func(shared []*Run) (*Run, error) {
+			err := g.Shared.Begin(req.ProjectID, func(shared []*Run) (*Run, []string, error) {
 				r, err := decide(shared)
+				if err != nil {
+					return nil, nil, err
+				}
 				run = r
-				return r, err
+				return r, SharedRetention(shared, r.ID, now), nil
 			})
 			switch {
 			case err == nil:
@@ -177,8 +187,9 @@ func (g *Registry) Begin(req BeginRequest) (BeginResult, error) {
 		return BeginResult{}, err
 	}
 	if sharedUsed {
+		LogSharedError(g.Logf, "starting a run in project "+req.ProjectID, "", nil)
 		for _, id := range pruned {
-			if derr := g.Shared.Delete(req.ProjectID, id); derr != nil {
+			if derr := g.Shared.Delete(id); derr != nil {
 				g.logf("deleting the shared record of pruned autopilot run %s: %v (it is inactive, so it blocks nobody)", id, derr)
 			}
 		}
@@ -198,11 +209,21 @@ func (g *Registry) Begin(req BeginRequest) (BeginResult, error) {
 // written (so it is not ignored as stale). Best effort: a failure is
 // logged, and the record left behind stops blocking anyone once its
 // heartbeat is ActiveThreshold old.
+//
+// The restored record's revision (run.Revision + 1) is ahead of the local
+// file, which still carries original's: typically by two. Until the next
+// start stamps the run above both copies (decideBegin takes the shared
+// revision into account), a local save of that run -- a wait's heartbeat,
+// a cancelled reservation -- produces a revision the data source ignores
+// as stale, so the record keeps showing the restored state. That is what
+// the run was in anyway: a run whose start failed is not being driven, and
+// its record stops counting as active once its heartbeat is
+// ActiveThreshold old.
 func (g *Registry) compensation(run, original *Run) func() {
 	return func() {
 		var err error
 		if original == nil {
-			err = g.Shared.Delete(run.ProjectID, run.ID)
+			err = g.Shared.Delete(run.ID)
 		} else {
 			original.Revision = run.Revision + 1
 			err = g.Shared.Save(original)
@@ -215,25 +236,23 @@ func (g *Registry) compensation(run, original *Run) func() {
 
 // decideBegin is Begin's decision (see Begin's steps 1-4) on the local runs
 // and the shared ones. It returns the run to save -- with its state, starter,
-// UpdatedAt and Revision set -- and, for a run that existed, a copy of it as
-// it was. It reads and writes nothing.
-func (g *Registry) decideBegin(req BeginRequest, local, shared []*Run, now time.Time, res *BeginResult) (*Run, *Run, error) {
+// UpdatedAt, BegunAt and Revision set -- and, for a run that existed, a copy
+// of it as it was. It reads and writes nothing.
+func decideBegin(req BeginRequest, local, shared []*Run, now time.Time, res *BeginResult) (*Run, *Run, error) {
 	machine := ""
-	if g.Actor != nil {
-		machine = g.Actor.MachineID
+	if req.Actor != nil {
+		machine = req.Actor.MachineID
 	}
 	localByID := map[string]*Run{}
 	for _, r := range local {
 		localByID[r.ID] = r
 	}
-	sharedRev := map[string]int64{}
 	// all is every run the overlap check looks at: the local ones, and the
 	// shared ones this machine does not hold (a run held in both is judged
 	// by the local copy, which is at least as recent).
 	all := append([]*Run(nil), local...)
-	var sharedByID = map[string]*Run{}
+	sharedByID := map[string]*Run{}
 	for _, r := range shared {
-		sharedRev[r.ID] = r.Revision
 		sharedByID[r.ID] = r
 		if localByID[r.ID] == nil {
 			all = append(all, r)
@@ -273,7 +292,10 @@ func (g *Registry) decideBegin(req BeginRequest, local, shared []*Run, now time.
 		}
 		switch {
 		case cand.State == RunStarting && cand.Reservation != nil && !cand.Interrupted(now):
-			original := cloneRun(cand)
+			original, err := cloneRun(cand)
+			if err != nil {
+				return nil, nil, err
+			}
 			cand.State = RunRunning
 			cand.Reservation = nil
 			cand.Heartbeat = now
@@ -281,7 +303,7 @@ func (g *Registry) decideBegin(req BeginRequest, local, shared []*Run, now time.
 			// whatever the reservation (or a run it took over) held.
 			cand.TerminalTTY, cand.TerminalTabDisabled = req.TerminalTTY, ""
 			res.Adopted = true
-			g.stamp(cand, now, sharedRev)
+			stamp(cand, req.Actor, now, sharedByID)
 			return cand, original, nil
 		case cand.State == RunStopped || cand.Interrupted(now):
 			// Taken over below, like an ordinary start would.
@@ -317,7 +339,10 @@ func (g *Registry) decideBegin(req BeginRequest, local, shared []*Run, now time.
 
 	var original *Run
 	if cand != nil {
-		original = cloneRun(cand)
+		var err error
+		if original, err = cloneRun(cand); err != nil {
+			return nil, nil, err
+		}
 		var previous []byte
 		if req.Reserve {
 			var err error
@@ -359,36 +384,25 @@ func (g *Registry) decideBegin(req BeginRequest, local, shared []*Run, now time.
 		cand.TerminalTTY = ""
 		cand.State = RunStarting
 	}
-	g.stamp(cand, now, sharedRev)
+	stamp(cand, req.Actor, now, sharedByID)
 	return cand, original, nil
 }
 
-// stamp marks run as started by this process's Actor at now and gives it
-// its next revision -- once, here, above both its local and its shared
-// copy's -- which the local file and the shared record then both carry.
-func (g *Registry) stamp(run *Run, now time.Time, sharedRev map[string]int64) {
-	if g.Actor != nil {
-		a := *g.Actor
+// stamp marks run as begun by actor at now and gives it its next revision
+// -- once, here, above both its local and its shared copy's -- which the
+// local file and the shared record then both carry.
+func stamp(run *Run, actor *StartedBy, now time.Time, sharedByID map[string]*Run) {
+	if actor != nil {
+		a := *actor
 		run.StartedBy = &a
 	}
 	rev := run.Revision
-	if s := sharedRev[run.ID]; s > rev {
-		rev = s
+	if s := sharedByID[run.ID]; s != nil && s.Revision > rev {
+		rev = s.Revision
 	}
 	run.Revision = rev + 1
 	run.UpdatedAt = now
-}
-
-func cloneRun(r *Run) *Run {
-	data, err := json.Marshal(r)
-	if err != nil {
-		return nil
-	}
-	var c Run
-	if err := json.Unmarshal(data, &c); err != nil {
-		return nil
-	}
-	return &c
+	run.BegunAt = now
 }
 
 func alreadyRunning(r *Run) error {
@@ -403,7 +417,6 @@ func alreadyRunning(r *Run) error {
 // this inside the data source's transaction) -- the runner's is a closure
 // over the ticket index it read before.
 func checkOverlap(runs []*Run, self *Run, req BeginRequest, now time.Time) error {
-	var mine map[string]bool
 	for _, r := range runs {
 		if self != nil && r.ID == self.ID {
 			continue
@@ -411,29 +424,9 @@ func checkOverlap(runs []*Run, self *Run, req BeginRequest, now time.Time) error
 		if !r.IsActive(now) {
 			continue
 		}
-		owned := map[string]bool{r.RootTicketID: true}
-		if r.Mode == ModeTree && req.Descendants != nil {
-			desc, err := req.Descendants(r.RootTicketID)
-			if err != nil {
-				return err
-			}
-			for _, id := range desc {
-				owned[id] = true
-			}
-		}
-		conflict := owned[req.RootID]
-		if !conflict && req.Mode == ModeTree && req.Descendants != nil {
-			if mine == nil {
-				desc, err := req.Descendants(req.RootID)
-				if err != nil {
-					return err
-				}
-				mine = map[string]bool{}
-				for _, id := range desc {
-					mine[id] = true
-				}
-			}
-			conflict = mine[r.RootTicketID]
+		conflict, err := overlaps(req.RootID, req.Mode, r.RootTicketID, r.Mode, req.Descendants)
+		if err != nil {
+			return err
 		}
 		if conflict {
 			return domain.NewAPIError(ErrCodeAlreadyRunning,
@@ -490,12 +483,11 @@ func (g *Registry) CancelReservation(projectID, runID string) error {
 	var serr error
 	switch {
 	case deleted:
-		serr = g.Shared.Delete(projectID, runID)
+		serr = g.Shared.Delete(runID)
 	case restored != nil:
 		serr = g.Shared.Save(restored)
 	}
-	if serr != nil {
-		LogSharedError(g.Logf, fmt.Sprintf("putting back the shared record of cancelled reservation %s", runID), serr)
-	}
+	LogSharedError(g.Logf, fmt.Sprintf("putting back the shared record of cancelled reservation %s", runID),
+		"the reservation is undone on this machine; other members may see it as starting until its heartbeat expires", serr)
 	return nil
 }

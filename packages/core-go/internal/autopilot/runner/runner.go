@@ -467,13 +467,12 @@ func (s *Service) Start(ticketID, mode, runID string, reserve bool) (StartResult
 	// $HOME/.graph-ops/machine-id, say).
 	actor, err := s.actor()
 	if err != nil && s.registry().Shared != nil {
-		return StartResult{}, fmt.Errorf("autopilot start: cannot tell who is starting the run: %w", err)
+		return StartResult{}, machineIDError(s.HomeDir, err)
 	}
-	s.registry().Actor = actor
 	res, err := s.registry().Begin(autopilot.BeginRequest{
 		RootID: root.ID, ProjectID: root.ProjectID, RootStatus: root.Status,
 		Mode: mode, RunID: runID, Reserve: reserve, Settings: settings, Descendants: descendants,
-		TerminalTTY: tty,
+		TerminalTTY: tty, Actor: actor,
 	})
 	if err != nil {
 		return StartResult{}, err
@@ -532,12 +531,20 @@ func (s *Service) Next(runID string) (NextResult, error) {
 		return NextResult{}, err
 	}
 	sample := s.sampleSession(projectID, runID, "")
+	// Other members' runs, for the overtaking check (DFLT-00326).
+	others := s.otherRuns(projectID)
 	var out NextResult
 	err = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
 		if run.State == autopilot.RunStarting {
 			return invalidState("run %s is reserved and not adopted yet; run `graph-engine autopilot start %s --mode %s --run %s` first", run.ID, run.RootTicketID, run.Mode, run.ID)
 		}
 		now := s.now()
+		// A run overtaken while its heartbeat had expired stops here,
+		// before it launches anything more; the planner then answers
+		// stopped.
+		if _, err := stopIfOvertaken(run, others, idx, now); err != nil {
+			return err
+		}
 		if !run.IsFinal() {
 			run.Heartbeat = now
 			sample.observe(run.ActiveSession(), now)
@@ -721,6 +728,16 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		defaultBranch = s.Git.DefaultBranch(repo)
 	}
 
+	// Other members' runs, for the overtaking check (DFLT-00326), and the
+	// tree it needs -- read only when there is something to check.
+	others := s.otherRuns(projectID)
+	var idx *projectIndex
+	if len(others) > 0 {
+		if idx, err = s.index(projectID); err != nil {
+			return LaunchResult{}, err
+		}
+	}
+
 	var (
 		snapshot                          autopilot.Run
 		prevTicket                        autopilot.TicketState
@@ -729,10 +746,20 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		terminalTTY                       string
 		skipTab                           bool
 		untrusted                         string
+		overtaken                         *autopilot.Run
 	)
 	err = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
 		if run.IsFinal() || run.State == autopilot.RunStarting {
 			return invalidState("run %s is %s", run.ID, run.State)
+		}
+		// Overtaken since next handed this launch out: stopped and saved
+		// instead of launching; the error sends the orchestrator back to
+		// next, which answers stopped.
+		if stopped, err := stopIfOvertaken(run, others, idx, s.now()); err != nil {
+			return err
+		} else if stopped {
+			overtaken = run
+			return nil
 		}
 		st, err := ticketState(run, ticketID)
 		if err != nil {
@@ -812,6 +839,10 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 	})
 	if err != nil {
 		return LaunchResult{}, err
+	}
+	if overtaken != nil {
+		return LaunchResult{}, invalidState("run %s stopped instead of launching %s: %s; run `graph-engine autopilot next %s`",
+			runID, ticketID, overtaken.StopDetail, runID)
 	}
 
 	// Outside the lock: git and the terminal can take seconds.
