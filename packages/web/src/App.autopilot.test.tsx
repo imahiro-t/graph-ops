@@ -3,7 +3,7 @@
 // errors and the "automatic decisions" section. fetch is served by
 // test/fakeBackend.ts. DFLT-00147: the start is confirmed in the in-app
 // dialog, never with window.confirm.
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
@@ -13,6 +13,7 @@ import { FakeAutopilotStart, FakeBackend, FakeTicket, createFakeBackend, install
 import { trackBodyReads } from './test/waitForAnswers';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
+const beta: Project = { id: 'p-beta', name: 'Beta', prefix: 'BETA', local_path: '/work/beta', created_at: '', updated_at: '' };
 
 // R -> (C, D), and P -> R: P is R's parent, so a tree start from P would
 // cover a run rooted at R. X is unrelated.
@@ -53,9 +54,9 @@ function run(overrides: Partial<AutopilotRun> = {}): AutopilotRun {
 let backend: FakeBackend;
 let fetchMock: ReturnType<typeof vi.fn>;
 
-function seed(opts: { runs?: AutopilotRun[]; start?: FakeAutopilotStart; tickets?: FakeTicket[] } = {}) {
+function seed(opts: { runs?: AutopilotRun[]; start?: FakeAutopilotStart; tickets?: FakeTicket[]; projects?: Project[] } = {}) {
   backend = createFakeBackend({
-    projects: [alpha],
+    projects: opts.projects ?? [alpha],
     currentProjectId: alpha.id,
     labels: [],
     tickets: opts.tickets ?? tickets(),
@@ -122,12 +123,77 @@ function holdStarts() {
 // ticket list, and nothing on screen always shows that their answers are in.
 // This tracks them with trackBodyReads; call it after seed() and before
 // rendering. The runsSettled() it returns waits until every runs request
-// made so far has been answered and applied. refreshAutopilotRuns
-// applies whichever answer arrives last, so a test that refreshes the runs
-// lets the startup ones settle first (DFLT-00296).
+// made so far has been answered and applied. refreshAutopilotRuns drops an
+// answer a later request has superseded (DFLT-00323), so a startup answer
+// arriving last no longer puts the startup runs back; runsSettled() is for
+// what nothing on screen shows: that the runs a check relies on are in, and
+// that no startup request is still to be made when a test starts holding or
+// counting the runs requests of its own.
 function trackRunReads() {
   return trackBodyReads(backend, url => url.startsWith('/api/autopilot/runs'));
 }
+
+// DFLT-00323: holds GET /api/autopilot/runs requests, to have their answers
+// arrive in a chosen order. Nothing is held until hold(n) is called; the
+// next n runs requests are then held, each in `held` in the order made (the
+// project_id is in its url). A held request's answer is built when it is
+// made, from the data at that time, and delivered only once release() is
+// called. Call it after seed() (and trackRunReads(), if both are used) and
+// before rendering.
+interface HeldRuns {
+  url: string;
+  // The number of start POSTs made before this request, to tell which
+  // request a start's refresh is.
+  startsBefore: number;
+  release: () => void;
+  // Set once the app has read the released answer's body.
+  read: boolean;
+}
+function holdRuns() {
+  const held: HeldRuns[] = [];
+  let toHold = 0;
+  fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (toHold === 0 || !url.startsWith('/api/autopilot/runs')) return backend.fetch(input, init);
+    toHold--;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => (release = resolve));
+    const entry: HeldRuns = { url, startsBefore: startRequests().length, release, read: false };
+    held.push(entry);
+    const answer = backend.fetch(input, init);
+    return (async () => {
+      const res = await answer;
+      await gate;
+      const json = res.json.bind(res);
+      res.json = async () => {
+        try {
+          return await json();
+        } finally {
+          entry.read = true;
+        }
+      };
+      return res;
+    })();
+  });
+  return {
+    held,
+    hold: (n = 1) => {
+      toHold += n;
+    }
+  };
+}
+
+// Releases a held runs request and waits until the app has read its answer
+// and whatever follows that has run.
+async function deliver(entry: HeldRuns) {
+  entry.release();
+  await waitFor(() => expect(entry.read).toBe(true));
+  await act(async () => {
+    await new Promise(r => setTimeout(r, 0));
+  });
+}
+
+const refreshButton = () => screen.getByRole('button', { name: i18n.t('toolbar.refreshTitle') });
 
 const startRequests = () =>
   fetchMock.mock.calls
@@ -368,8 +434,8 @@ describe('autopilot in the Web UI', () => {
     const runsSettled = trackRunReads();
     const user = await renderApp();
     const controls = await expand(user, X);
-    // Let the startup runs requests answer first, so neither lands after
-    // the refreshed runs below (see trackRunReads).
+    // Let the startup runs requests answer first, so what follows starts
+    // from the startup runs applied (see trackRunReads).
     await runsSettled();
     const tree = startButton(controls);
     await user.click(tree);
@@ -392,8 +458,8 @@ describe('autopilot in the Web UI', () => {
     const runsSettled = trackRunReads();
     const user = await renderApp();
     const controls = await expand(user, X);
-    // Let the startup runs requests answer first, so neither lands after
-    // the refreshed runs below (see trackRunReads).
+    // Let the startup runs requests answer first, so what follows starts
+    // from the startup runs applied (see trackRunReads).
     await runsSettled();
     const tree = startButton(controls);
     await waitFor(() => expect(tree).toBeEnabled());
@@ -436,8 +502,8 @@ describe('autopilot in the Web UI', () => {
     const runsSettled = trackRunReads();
     const user = await renderApp();
     const controls = await expand(user, X);
-    // Let the startup runs requests answer first, so neither lands after
-    // the refreshed runs below (see trackRunReads).
+    // Let the startup runs requests answer first, so what follows starts
+    // from the startup runs applied (see trackRunReads).
     await runsSettled();
     const tree = startButton(controls);
     await user.click(tree);
@@ -464,8 +530,8 @@ describe('autopilot in the Web UI', () => {
     const runsSettled = trackRunReads();
     const user = await renderApp();
     const controls = await expand(user, P);
-    // Let the startup runs requests answer first, so neither lands after
-    // the refreshed runs below (see trackRunReads).
+    // Let the startup runs requests answer first, so what follows starts
+    // from the startup runs applied (see trackRunReads).
     await runsSettled();
     const button = startButton(controls);
     await user.click(button);
@@ -492,10 +558,8 @@ describe('autopilot in the Web UI', () => {
     const runsSettled = trackRunReads();
     const user = await renderApp();
     const controls = await expand(user, P);
-    // Let the startup runs requests answer first: refreshAutopilotRuns
-    // applies whichever answer arrives last, so a startup answer (no runs)
-    // landing after the poll's would enable the tree choice again
-    // (DFLT-00296).
+    // Let the startup runs requests answer first, so what follows starts
+    // from the startup runs applied (see trackRunReads).
     await runsSettled();
     await user.click(startButton(controls));
     await user.click(screen.getByTestId('autopilot-mode-ticket'));
@@ -686,14 +750,167 @@ describe('autopilot in the Web UI', () => {
     const runsSettled = trackRunReads();
     const user = await renderApp();
     const controls = await expand(user, X);
-    // Let the startup runs requests answer first, so neither lands after
-    // the refreshed runs below (see trackRunReads).
+    // Let the startup runs requests answer first, so what follows starts
+    // from the startup runs applied (see trackRunReads).
     await runsSettled();
     backend.autopilotRuns = [run({ root: X, members: [X], current: undefined, tickets: {}, state: 'starting' })];
     await user.click(startButton(controls));
     await confirmStart(user);
     await waitFor(() => expect(within(card(X)).getByTestId('autopilot-badge-running')).toBeInTheDocument());
     expect(startButton(controls)).toBeDisabled();
+  });
+
+  // DFLT-00323: runs refreshes overlap (a poll, a switch, a start), and
+  // their answers may come back in any order. Only the latest request's
+  // answer is applied.
+  it('keeps the newer runs when an older runs request answers last', async () => {
+    seed();
+    const runsSettled = trackRunReads();
+    const { held, hold } = holdRuns();
+    await renderApp();
+    await runsSettled();
+    await waitFor(() => expect(refreshButton()).toBeEnabled());
+
+    // A: the runs request of this poll, answered with the runs as they are
+    // now (none) and held.
+    hold();
+    await poll();
+    expect(held).toHaveLength(1);
+
+    // B: a later poll's, not held, answered with a run.
+    backend.autopilotRuns = [run()];
+    await waitFor(() => expect(refreshButton()).toBeEnabled());
+    await poll();
+    await waitFor(() => expect(within(card(R)).getByTestId('autopilot-badge-running')).toBeInTheDocument());
+
+    // A's answer arrives last and is dropped.
+    await deliver(held[0]);
+    expect(within(card(R)).getByTestId('autopilot-badge-running')).toBeInTheDocument();
+    expect(within(card(C)).getByTestId('autopilot-badge-processing')).toBeInTheDocument();
+  });
+
+  describe('with a second project', () => {
+    const betaTicket: FakeTicket = { id: 'BETA-00001', project_id: beta.id, title: 'Beta のチケット', status: 'TODO', priority: 'MEDIUM', labelIds: [] };
+    const switchTo = async (user: ReturnType<typeof userEvent.setup>, from: Project, to: Project, ticketId: string) => {
+      await user.click(screen.getByRole('button', { name: new RegExp(`^${from.name}`) }));
+      await user.click(await screen.findByRole('button', { name: new RegExp(`^${to.name}`) }));
+      await screen.findByText(ticketId);
+    };
+
+    it('drops a runs answer for the project the user has switched away from', async () => {
+      const betaRun = run({ run_id: 'run-beta', project_id: beta.id, root: betaTicket.id, members: [betaTicket.id], current: undefined, tickets: {}, pending: [] });
+      seed({ projects: [alpha, beta], tickets: [...tickets(), betaTicket], runs: [betaRun] });
+      const runsSettled = trackRunReads();
+      const { held, hold } = holdRuns();
+      const user = await renderApp();
+      await runsSettled();
+      await waitFor(() => expect(refreshButton()).toBeEnabled());
+
+      // A: Alpha's runs, held.
+      hold();
+      await poll();
+      expect(held).toHaveLength(1);
+      expect(held[0].url).toContain(`project_id=${alpha.id}`);
+
+      await switchTo(user, alpha, beta, betaTicket.id);
+      await waitFor(() => expect(within(card(betaTicket.id)).getByTestId('autopilot-badge-running')).toBeInTheDocument());
+
+      // Alpha's answer arrives on Beta's screen and is dropped: Beta's runs
+      // stay.
+      await deliver(held[0]);
+      expect(within(card(betaTicket.id)).getByTestId('autopilot-badge-running')).toBeInTheDocument();
+    });
+
+    // The project is current again when the old answer arrives, so only the
+    // request order tells it apart from the newer one.
+    it('drops an older answer for the same project after a switch away and back', async () => {
+      seed({ projects: [alpha, beta], tickets: [...tickets(), betaTicket] });
+      const runsSettled = trackRunReads();
+      const { held, hold } = holdRuns();
+      const user = await renderApp();
+      await runsSettled();
+      await waitFor(() => expect(refreshButton()).toBeEnabled());
+
+      // A: Alpha's runs as they are now (none), held.
+      hold();
+      await poll();
+      expect(held).toHaveLength(1);
+      expect(held[0].url).toContain(`project_id=${alpha.id}`);
+
+      backend.autopilotRuns = [run()];
+      await switchTo(user, alpha, beta, betaTicket.id);
+      await switchTo(user, beta, alpha, P);
+      await waitFor(() => expect(within(card(R)).getByTestId('autopilot-badge-running')).toBeInTheDocument());
+
+      await deliver(held[0]);
+      expect(within(card(R)).getByTestId('autopilot-badge-running')).toBeInTheDocument();
+      expect(within(card(C)).getByTestId('autopilot-badge-processing')).toBeInTheDocument();
+    });
+  });
+
+  // DFLT-00323: a start's buttons wait for the refresh the start makes
+  // (onSettled) before they leave their "starting" state (DFLT-00147). When
+  // a poll's refresh overtakes it, the start's answer is dropped, and the
+  // wait lasts until the latest refresh's runs are applied -- through any
+  // number of refreshes overtaking one another -- so the button never comes
+  // back with the runs from before the start.
+  it('keeps a start going until the latest runs are in when polls overtake its refresh', async () => {
+    seed();
+    const runsSettled = trackRunReads();
+    const { held, hold } = holdRuns();
+    const user = await renderApp();
+    const controls = await expand(user, X);
+    // No runs request is on its way from here on but the ones this test
+    // makes: the startup ones have been made and answered, the refresh
+    // button is enabled (no ticket fetch, which would re-fetch the runs, is
+    // running), and the start's POST makes no ticket fetch.
+    await runsSettled();
+    await waitFor(() => expect(refreshButton()).toBeEnabled());
+    const tree = startButton(controls);
+    await user.click(tree);
+
+    // A: the start's refresh -- the next runs request, made after the POST --
+    // answered with the runs from before the start (none), and held.
+    hold();
+    await confirmStart(user);
+    await waitFor(() => expect(held).toHaveLength(1));
+    expect(held[0].startsBefore).toBe(1);
+    expect(startRequests()).toHaveLength(1);
+    expect(await within(controls).findByTestId('autopilot-message')).toHaveTextContent(
+      i18n.t('autopilot.started', { runId: 'run-1' })
+    );
+    await waitFor(() => expect(focusFallback(controls)).toHaveFocus());
+
+    // B and C: two polls' refreshes, made after A and held, answered with
+    // the new run.
+    backend.autopilotRuns = [run({ root: X, members: [X], current: undefined, tickets: {}, state: 'starting' })];
+    hold(2);
+    await poll();
+    await waitFor(() => expect(refreshButton()).toBeEnabled());
+    await poll();
+    expect(held).toHaveLength(3);
+
+    const isStarting = () => {
+      expect(tree).toBeDisabled();
+      expect(tree).toHaveAttribute('aria-busy', 'true');
+    };
+    isStarting();
+    // A is dropped (B superseded it), and the start keeps waiting.
+    await deliver(held[0]);
+    isStarting();
+    // B is dropped too (C superseded it): still waiting, on C.
+    await deliver(held[1]);
+    isStarting();
+    expect(within(card(X)).queryByTestId('autopilot-badges')).not.toBeInTheDocument();
+
+    // C brings the new run: the start settles with it, the button comes back
+    // disabled by it, and focus stays on the fallback.
+    await deliver(held[2]);
+    await waitFor(() => expect(tree).not.toHaveAttribute('aria-busy'));
+    expect(within(card(X)).getByTestId('autopilot-badge-running')).toBeInTheDocument();
+    expect(tree).toBeDisabled();
+    expect(focusFallback(controls)).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
   });
 
   it('offers only the resumable mode of a DONE ticket', async () => {
