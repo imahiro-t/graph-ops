@@ -21,6 +21,8 @@ If the returned `content` is non-empty, follow it as additional rules on top of 
 graph-engine get-ticket "<ticketId>"
 ```
 
+**Note the ticket's `updated_at` from this output** and keep it as it is (the exact string). Every write in step 4 passes it as `--if-updated-at`, so that if another member (or another session) changes the ticket while you are refining it, your write is refused instead of silently erasing their change. Nothing in steps 2-3b changes it: `get-ticket`, `list-labels` and `create-label` do not write the ticket.
+
 ## 2. Clarify the completion criteria and the Why with the user
 
 Based on the ticket's title and description, work with the user to clarify:
@@ -73,30 +75,40 @@ Keep in mind:
 Fold whatever from the current description (step 1) still applies together with the newly clarified completion criteria and why into one coherent piece of text -- this replaces the description outright, it does not get appended alongside the old text. Then write it, adding `--priority` only if step 3 concluded the priority should change:
 
 ```bash
-graph-engine refine-ticket "<ticketId>" "<full updated description, including completion criteria and why>"
-graph-engine refine-ticket "<ticketId>" "<full updated description, including completion criteria and why>" --priority <HIGH|MEDIUM|LOW>
+graph-engine refine-ticket "<ticketId>" "<full updated description, including completion criteria and why>" --if-updated-at "<updated_at from step 1>"
+graph-engine refine-ticket "<ticketId>" "<full updated description, including completion criteria and why>" --priority <HIGH|MEDIUM|LOW> --if-updated-at "<updated_at from step 1>"
 ```
 
-For longer text, you can also pipe it in via stdin (`--priority` still works the same way, placed after the `-`):
+For longer text, you can also pipe it in via stdin (`--priority` and `--if-updated-at` still work the same way, placed after the `-`):
 
 ```bash
-graph-engine refine-ticket "<ticketId>" - <<'EOF'
+graph-engine refine-ticket "<ticketId>" - --if-updated-at "<updated_at from step 1>" <<'EOF'
 <full updated description, including completion criteria and why>
 EOF
 ```
+
+**Always pass `--if-updated-at`** with the `updated_at` you noted in step 1. Without it the command overwrites the ticket unconditionally (the old behaviour), which silently erases anything another member wrote since you read it.
+
+**If the command fails with `TICKET_CHANGED`**, somebody else wrote the ticket after step 1 -- and **nothing on the ticket changed** (not the description, priority, labels or status; it did not become `REFINED`). Do not retry the same command and do not drop `--if-updated-at` to force it through. Instead:
+
+1. Run `graph-engine get-ticket "<ticketId>"` again and note the new `updated_at`.
+2. Compare the new title, description, priority and labels with what you read in step 1, and fold the other member's changes into your description (and your `--priority` / `--label` set -- the `--label` set replaces the whole set, so start from the labels the ticket has now). When you are working with the user, show them what the other member changed and confirm the merged result.
+3. Write again with the new `updated_at` as `--if-updated-at`. If it conflicts again, repeat.
+
+A refine you ran yourself also moves `updated_at` forward, so a second write in the same run needs the `updated_at` that write printed (or a fresh `get-ticket`). Adding nodes and the engine's own status/blocked updates move it too, which is why an old `updated_at` from much earlier can conflict even though no person edited the ticket -- the recovery is the same.
 
 `-` means "read stdin" only when it is the whole description argument, so use it only together with a pipe or heredoc (on its own in a terminal the command just waits for input). The text is saved byte for byte. If stdin is empty or only whitespace -- or cannot be read -- the command fails and **nothing on the ticket changes** (not the description, priority, labels or status; it does not become `REFINED`); fix the input and run it again. A description argument that is only whitespace (e.g. `"   "`) fails the same way.
 
 If only the priority needs to change and the description doesn't, omit the description positional entirely -- `graph-engine refine-ticket "<ticketId>" --priority <HIGH|MEDIUM|LOW>` leaves the description untouched.
 
-If the user only wants to correct the title, description or priority of a ticket that is already further along (e.g. `IN PROGRESS`) and does **not** want it to go back to `REFINED`, this skill is the wrong tool: `refine-ticket` always sets the status to `REFINED`. Use `graph-engine update-ticket "<ticketId>" [--title "<text>"] [--description "<text>"] [--priority <HIGH|MEDIUM|LOW>]` instead -- it changes only the fields given and never the status (`--description -` reads stdin, like above). It cannot change labels.
+If the user only wants to correct the title, description or priority of a ticket that is already further along (e.g. `IN PROGRESS`) and does **not** want it to go back to `REFINED`, this skill is the wrong tool: `refine-ticket` always sets the status to `REFINED`. Use `graph-engine update-ticket "<ticketId>" [--title "<text>"] [--description "<text>"] [--priority <HIGH|MEDIUM|LOW>] --if-updated-at "<updated_at from step 1>"` instead -- it changes only the fields given and never the status (`--description -` reads stdin, like above). It cannot change labels. `--if-updated-at` works the same way as for `refine-ticket`: pass it, and on `TICKET_CHANGED` read the ticket again, merge and retry with the new `updated_at`.
 
 A priority can be changed to another level but can never be emptied or cleared: any value other than `HIGH`/`MEDIUM`/`LOW` is an error that leaves the ticket unchanged.
 
 If step 3b concluded the labels should change, add one `--label <name>` per label the ticket should end up with (the full set, including existing labels to keep), in the same command:
 
 ```bash
-graph-engine refine-ticket "<ticketId>" "<full updated description>" --label "<kept label>" --label "<new label>"
+graph-engine refine-ticket "<ticketId>" "<full updated description>" --label "<kept label>" --label "<new label>" --if-updated-at "<updated_at from step 1>"
 ```
 
 ## 5. Report the result and suggest the next step

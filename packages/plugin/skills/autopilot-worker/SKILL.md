@@ -53,7 +53,7 @@ Run `graph-engine get-ticket "<ticketId>"`.
      <decision and reasoning>
      EOF
      ```
-  4. Only then write the refinement with `graph-engine refine-ticket`, as that skill's step 4 describes.
+  4. Only then write the refinement with `graph-engine refine-ticket`, as that skill's step 4 describes -- including `--if-updated-at` with the `updated_at` from the `get-ticket` above (`record-decision` does not change it). If it fails with `TICKET_CHANGED` (another member or session wrote the ticket meanwhile; nothing was written), follow that skill's recovery without asking anyone: `get-ticket` again, fold the other change into your completion criteria, Why, priority and labels, record the rebuilt decision again with `record-decision` (a second record is fine; the latest one is what you adopted), and write again with the new `updated_at`. If the re-read shows the ticket now has nodes or `refined_at`, stop refining and go to step 3 as above.
 
 ## 3. Process the graph (role `work`)
 
