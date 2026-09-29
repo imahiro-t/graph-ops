@@ -9,34 +9,33 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
-import { compile } from 'tailwindcss';
 import { Scanner } from '@tailwindcss/oxide';
+import { compileIndexCss } from './test/tailwindCompile';
 
 const SRC = __dirname;
-const INDEX_CSS = path.join(SRC, 'index.css');
-const require = createRequire(import.meta.url);
+// The Vite root: vite.config.ts sets no `root`, so it is packages/web, the
+// directory Vite is run from (the npm scripts run in it).
+const ROOT = path.resolve(SRC, '..');
 
 async function declaredSources() {
-  const compiler = await compile(fs.readFileSync(INDEX_CSS, 'utf8'), {
-    base: SRC,
-    async loadStylesheet(id: string, base: string) {
-      const file = id === 'tailwindcss' ? require.resolve('tailwindcss/index.css') : path.resolve(base, id);
-      return { path: file, base: path.dirname(file), content: fs.readFileSync(file, 'utf8') };
-    }
-  });
-  return compiler.sources;
+  return (await compileIndexCss()).sources;
 }
 
 async function scan() {
-  // What @tailwindcss/vite scans: the stylesheet's directory, automatically,
-  // minus the sources index.css leaves out.
-  const scanner = new Scanner({ sources: [{ base: SRC, pattern: '**/*', negated: false }, ...(await declaredSources())] });
+  // What @tailwindcss/vite scans: index.css does not set a source root, so
+  // it scans the whole Vite root (packages/web, not only src/)
+  // automatically, plus the sources index.css adds and minus the ones it
+  // leaves out. The scanner skips what .gitignore lists (node_modules,
+  // dist).
+  const scanner = new Scanner({ sources: [{ base: ROOT, pattern: '**/*', negated: false }, ...(await declaredSources())] });
   const candidates = new Set(scanner.scan());
-  return { files: scanner.files.map(f => path.relative(SRC, f)), candidates };
+  return { files: scanner.files.map(f => path.relative(ROOT, f)), candidates };
 }
 
-const isTestFile = (rel: string) => /\.test\.tsx?$/.test(rel) || rel.split(path.sep)[0] === 'test';
+// Paths relative to ROOT: any test or spec file wherever it is, and the
+// shared test helpers under src/test/.
+const isTestFile = (rel: string) =>
+  /\.(test|spec)\.[cm]?[jt]sx?$/.test(rel) || rel.startsWith(path.join('src', 'test') + path.sep);
 
 // Written only in test files (this one among them, and in the prose of
 // others: Tailwind takes candidates from any text), never in the app's code.
@@ -44,13 +43,13 @@ const TEST_ONLY_CLASSES = ['select-all', 'break-words'];
 
 describe('the files Tailwind scans for classes (DFLT-00323)', () => {
   it('index.css leaves the test files out', async () => {
-    const negated = (await declaredSources()).filter(s => s.negated).map(s => path.join(path.relative(SRC, s.base), s.pattern));
-    expect(negated).toEqual(expect.arrayContaining(['**/*.test.ts', '**/*.test.tsx', 'test']));
+    const negated = (await declaredSources()).filter(s => s.negated).map(s => path.join(path.relative(ROOT, s.base), s.pattern));
+    expect(negated).toEqual(expect.arrayContaining([path.join('src', '**/*.test.ts'), path.join('src', '**/*.test.tsx'), path.join('src', 'test')]));
   });
 
   it('scans the app code and no test file', async () => {
     const { files } = await scan();
-    for (const rel of ['App.tsx', path.join('components', 'TicketItem.tsx'), path.join('lib', 'autopilotApi.ts')]) {
+    for (const rel of ['index.html', path.join('src', 'App.tsx'), path.join('src', 'components', 'TicketItem.tsx'), path.join('src', 'lib', 'autopilotApi.ts')]) {
       expect(files).toContain(rel);
     }
     expect(files.filter(isTestFile)).toEqual([]);
@@ -69,7 +68,7 @@ describe('the files Tailwind scans for classes (DFLT-00323)', () => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
-        else if (isTestFile(path.relative(SRC, full)) && full !== __filename) testFiles.push(full);
+        else if (isTestFile(path.relative(ROOT, full)) && full !== __filename) testFiles.push(full);
       }
     };
     walk(SRC);

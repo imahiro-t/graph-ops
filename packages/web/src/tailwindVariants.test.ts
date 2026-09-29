@@ -2,8 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
-import { compile } from 'tailwindcss';
+import { compileIndexCss } from './test/tailwindCompile';
 
 // DFLT-00260: pins down the CSS output order of the named rem media-query
 // variants defined in index.css (below-80rem / upto-15rem), which decides
@@ -27,9 +26,6 @@ import { compile } from 'tailwindcss';
 // DFLT-00319: the supported range is a 320px window with up to 200% text,
 // so the variants that only applied below that were removed; the last
 // describe checks that they are gone.
-const INDEX_CSS = path.resolve(__dirname, 'index.css');
-const require = createRequire(import.meta.url);
-
 // Class names are assembled at run time on purpose: Tailwind used to scan the
 // test files too, so writing e.g. the upto-15rem gap class literally here
 // added an otherwise unused rule to the app's CSS. index.css now leaves the
@@ -81,14 +77,7 @@ function atRuleConditions(css: string): string[] {
 }
 
 async function buildCss(classes: string[]): Promise<string> {
-  const compiler = await compile(fs.readFileSync(INDEX_CSS, 'utf8'), {
-    base: path.dirname(INDEX_CSS),
-    async loadStylesheet(id: string, base: string) {
-      const file = id === 'tailwindcss' ? require.resolve('tailwindcss/index.css') : path.resolve(base, id);
-      return { path: file, base: path.dirname(file), content: fs.readFileSync(file, 'utf8') };
-    }
-  });
-  return compiler.build(classes);
+  return (await compileIndexCss()).build(classes);
 }
 
 describe('named rem media-query variants (index.css)', () => {
@@ -276,7 +265,9 @@ describe('src/ at-rule prefixes (DFLT-00293)', () => {
   // would be emitted after every named variant (see the Ordering caveat in
   // index.css) and so change which rule wins. Comments are stripped as in
   // remText.test.ts; the prefix is matched by a regular expression so that
-  // Tailwind's scan of src/ picks up no class from this file.
+  // no class could be picked up from this file (index.css leaves the test
+  // files out of Tailwind's scan since DFLT-00323; this stays as a second
+  // guard).
   const SRC = __dirname;
   const listSources = (dir: string): string[] =>
     fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {

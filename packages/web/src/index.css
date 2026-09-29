@@ -1,9 +1,12 @@
 @import 'tailwindcss';
 
-/* DFLT-00323: Tailwind picks class candidates out of every file under src/,
-   and the tests' strings (class lists a test asserts are absent, old class
-   names kept for comparison, ...) are not classes the app uses. Leave the
-   test files out, so none of them adds an unused rule to the app's CSS. */
+/* DFLT-00323: Tailwind picks class candidates out of every file under the
+   Vite root (packages/web, which @tailwindcss/vite scans automatically), and
+   the tests' strings (class lists a test asserts are absent, old class names
+   kept for comparison, ...) are not classes the app uses. Leave the test
+   files out, so none of them adds an unused rule to the app's CSS. The paths
+   below are relative to this file (src/); tailwindSources.test.ts fails if a
+   test file anywhere under the root is scanned. */
 @source not "./**/*.test.ts";
 @source not "./**/*.test.tsx";
 @source not "./test";
