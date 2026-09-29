@@ -252,8 +252,35 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
     expect(panel).toHaveClass('absolute', 'left-0', 'top-full', 'w-56');
   };
 
+  // DFLT-00311: animation frames only queue up and run when a test steps
+  // them. jsdom (pretendToBeVisual) would otherwise run them every 16ms, and
+  // a test of the events above could pass because a frame happened to refit
+  // the panel. None of those tests steps a frame, so they show the events
+  // alone refit it.
+  let frames = new Map<number, FrameRequestCallback>();
+  let nextFrame = 0;
+  const step = () => {
+    const due = [...frames.values()];
+    frames = new Map();
+    for (const callback of due) callback(0);
+  };
+  const pending = () => frames.size;
+
+  beforeEach(() => {
+    frames = new Map();
+    nextFrame = 0;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => {
+      frames.delete(id);
+    });
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('leaves the panel at left-0 w-56 when the clip is wide enough', async () => {
@@ -428,6 +455,131 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
       expect(live()).toHaveLength(1);
       view.unmount();
       expect(live()).toHaveLength(0);
+    });
+  });
+
+  // DFLT-00311: the button moving without any change of size (an item before
+  // the labels getting wider) fires none of the events above.
+  describe('while open, every animation frame (DFLT-00311)', () => {
+    it.each([
+      // WIDE: from 100 the panel fits as it is; at 900 it keeps its 224px and
+      // only moves left, its right edge at the clip's inside 997.
+      { name: 'WIDE', box: WIDE, from: 100, before: { width: '', left: '' }, to: 900, after: { width: '224px', left: '-127px' } },
+      { name: 'NARROW', box: NARROW, from: 60, before: { width: '142px', left: '-45px' }, to: 40, after: { width: '142px', left: '-25px' } }
+    ])('refits the panel on the next frame when only the button moves ($name, $from to $to)', async ({ box, from, before, to, after }) => {
+      const { user, setAnchorLeft } = setup(box, from);
+      const panel = await openPanel(user);
+      expect({ width: panel.style.width, left: panel.style.left }).toEqual(before);
+
+      setAnchorLeft(to);
+      // Nothing but a frame refits it.
+      expect({ width: panel.style.width, left: panel.style.left }).toEqual(before);
+      step();
+      expect({ width: panel.style.width, left: panel.style.left }).toEqual(after);
+      const { width, left } = expected(box, to);
+      expect(panel.style.width).toBe(`${width}px`);
+      expect(panel.style.left).toBe(`${left}px`);
+    });
+
+    it('drops the inline style on the next frame when the button moves back to where the panel fits', async () => {
+      const { user, setAnchorLeft } = setup(WIDE, 100);
+      const panel = await openPanel(user);
+      setAnchorLeft(900);
+      step();
+      expect(panel.style.width).toBe('224px');
+      expect(panel.style.left).toBe('-127px');
+
+      setAnchorLeft(100);
+      step();
+      expectUntouched(panel);
+    });
+
+    it('rewrites nothing on frames where nothing changed', async () => {
+      const { user } = setup(NARROW, 60);
+      const panel = await openPanel(user);
+      const remove = vi.spyOn(panel.style, 'removeProperty');
+      step();
+      step();
+      step();
+      expect(remove).not.toHaveBeenCalled();
+      expect(panel.style.width).toBe('142px');
+      expect(panel.style.left).toBe('-45px');
+    });
+
+    it('rewrites nothing on the frames after a frame refitted the panel', async () => {
+      const { user, setAnchorLeft } = setup(NARROW, 60);
+      const panel = await openPanel(user);
+      setAnchorLeft(40);
+      step();
+      expectFitted(panel, NARROW, 40);
+
+      const remove = vi.spyOn(panel.style, 'removeProperty');
+      step();
+      step();
+      step();
+      expect(remove).not.toHaveBeenCalled();
+      expect(panel.style.width).toBe('142px');
+      expect(panel.style.left).toBe('-25px');
+    });
+
+    it('rewrites nothing on the frame right after a resize refitted the panel', async () => {
+      const { user, setBox } = setup(WIDE, 60);
+      const panel = await openPanel(user);
+      setBox(NARROW);
+      fireEvent(window, new Event('resize'));
+      expectFitted(panel, NARROW, 60);
+
+      const remove = vi.spyOn(panel.style, 'removeProperty');
+      step();
+      expect(remove).not.toHaveBeenCalled();
+      expectFitted(panel, NARROW, 60);
+    });
+
+    it('rewrites nothing when the button and the clip move together (the page scrolls)', async () => {
+      const { user, setBox, setAnchorLeft } = setup(NARROW, 60);
+      const panel = await openPanel(user);
+      const remove = vi.spyOn(panel.style, 'removeProperty');
+      setBox({ ...NARROW, left: NARROW.left + 30 });
+      setAnchorLeft(60 + 30);
+      step();
+      expect(remove).not.toHaveBeenCalled();
+      expect(panel.style.width).toBe('142px');
+      expect(panel.style.left).toBe('-45px');
+    });
+
+    it('leaves no frame behind and measures nothing once the panel is closed', async () => {
+      const { user, button, clipRect, setAnchorLeft } = setup(NARROW, 60);
+      await openPanel(user);
+      expect(pending()).toBeGreaterThanOrEqual(1);
+
+      await user.click(button);
+      expect(screen.queryByRole('group')).not.toBeInTheDocument();
+      expect(pending()).toBe(0);
+
+      const calls = clipRect.mock.calls.length;
+      setAnchorLeft(40);
+      step();
+      step();
+      step();
+      expect(clipRect.mock.calls.length).toBe(calls);
+    });
+
+    it('leaves no frame behind when unmounted while open', async () => {
+      const { user, view } = setup(NARROW, 60);
+      await openPanel(user);
+      expect(pending()).toBeGreaterThanOrEqual(1);
+      view.unmount();
+      expect(pending()).toBe(0);
+    });
+
+    it('sets no position on any frame when the clip measures 0 wide', async () => {
+      const { user, setAnchorLeft } = setup({ left: 0, clientLeft: 0, clientWidth: 0 }, 0);
+      const panel = await openPanel(user);
+      setAnchorLeft(40);
+      step();
+      step();
+      step();
+      expectUntouched(panel);
     });
   });
 

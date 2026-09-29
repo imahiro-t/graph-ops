@@ -34,7 +34,9 @@ interface Props {
 // error never moves the button or the panel. placePanel fits the open panel
 // into the card (at 160px / 200% its 14rem, 448px, ran far past the card's
 // clip), and fits it again whenever the button may have moved while it is
-// open: see the layout effect below.
+// open: see the layout effect below. DFLT-00311: that includes a move with
+// no change of size (an item before the labels only getting wider), which
+// only the check on every animation frame catches.
 export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, onSaved }) => {
   const { t } = useTranslation();
   // The trigger stays usable while labels save (it only toggles the panel),
@@ -61,12 +63,37 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
   // size (ResizeObserver, where there is one: that also catches a change of
   // the browser's text size). Sets the panel's style directly, and only when
   // it has to move or shrink; the panel unmounts on close.
+  //
+  // DFLT-00311: none of those fire when the button only moves -- an item
+  // before the labels in the metadata bar gets wider (or appears), and the
+  // labels item slides right without changing size, so the panel kept its
+  // old left and could run past the card's clip. So while it is open, every
+  // animation frame compares where the button sits in the clip (the
+  // anchor's left edge less the clip's inside left edge) and the clip's
+  // inside width -- all that placePanel's result depends on, apart from the
+  // root font size -- with their values at the last fit, and fits the panel
+  // again only when one of them changed. They are relative, so the page
+  // scrolling (the anchor and the clip moving together) rewrites nothing.
+  // The root font size is not compared: a change of the text size resizes
+  // the button and its row, which the ResizeObserver catches. The fits
+  // above record the values too, so the frame after them does not fit a
+  // second time. Each frame reads two rects and the clip's clientLeft /
+  // clientWidth, no computed style; the loop is cancelled on close and
+  // unmount, and browsers pause it in hidden tabs.
   useLayoutEffect(() => {
     if (!isOpen) return;
     const anchor = anchorRef.current;
     const panel = panelRef.current;
     if (!anchor || !panel) return;
-    const place = () => placePanel(anchor, panel);
+    // Found once: the clip (the ticket card) is not expected to change while
+    // the panel is open, and looking it up takes a computed style per
+    // ancestor, too much for every frame. It is also the one observed below.
+    const clip = clippingAncestor(anchor);
+    let last = '';
+    const place = () => {
+      placePanel(anchor, panel);
+      if (clip) last = panelFrame(anchor, clip);
+    };
     place();
     window.addEventListener('resize', place);
     let observer: ResizeObserver | undefined;
@@ -75,13 +102,25 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
       // The button's anchor, the row it sits in (the wrapper is display:
       // contents, so its parent) and the clip. The panel is absolute, so
       // fitting it never resizes any of them.
-      for (const el of [anchor, wrapperRef.current?.parentElement, clippingAncestor(anchor)]) {
+      for (const el of [anchor, wrapperRef.current?.parentElement, clip]) {
         if (el) observer.observe(el);
       }
+    }
+    // Without a clip placePanel never sets anything, so there is nothing to
+    // follow. The panel is not among the compared values, so a fit never
+    // sets off another one.
+    let frame: number | undefined;
+    if (clip && typeof requestAnimationFrame !== 'undefined') {
+      const tick = () => {
+        if (panelFrame(anchor, clip) !== last) place();
+        frame = requestAnimationFrame(tick);
+      };
+      frame = requestAnimationFrame(tick);
     }
     return () => {
       window.removeEventListener('resize', place);
       observer?.disconnect();
+      if (frame !== undefined) cancelAnimationFrame(frame);
     };
   }, [isOpen, labelIdsKey, error]);
   const [selectedIds, setSelectedIds] = useState<string[]>(() => labels.map(l => l.id));
@@ -253,6 +292,15 @@ const clippingAncestor = (el: HTMLElement): HTMLElement | null => {
   let clip = el.parentElement;
   while (clip && ['', 'visible'].includes(getComputedStyle(clip).overflowX)) clip = clip.parentElement;
   return clip;
+};
+
+// DFLT-00311: what placePanel's result depends on, apart from the root font
+// size: the anchor's left edge relative to the clip's inside left edge, and
+// the clip's inside width. Compared exactly: the same layout gives the same
+// numbers.
+const panelFrame = (anchor: HTMLElement, clip: HTMLElement): string => {
+  const inside = clip.getBoundingClientRect().left + clip.clientLeft;
+  return `${anchor.getBoundingClientRect().left - inside} ${clip.clientWidth}`;
 };
 
 // DFLT-00295: fits `panel` (absolute, left-0 w-56 in `anchor`) into the first
