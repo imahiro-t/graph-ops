@@ -1,5 +1,5 @@
-// DFLT-00293: in a 160px window at a 200% text size the label picker's panel
-// (w-56, 14rem = 448px at a 32px root) ran past the ticket card, whose
+// DFLT-00293: in a 320px window at a 200% text size the label picker's panel
+// (w-56, 14rem = 448px at a 32px root) would run past the ticket card, whose
 // overflow clip cut it off. The panel now lines up with the button as before
 // but is kept inside the nearest horizontally clipping ancestor (the card)
 // and the window, less 0.25rem on each side (lib/popupPlacement.ts), and only
@@ -81,9 +81,9 @@ function setLayout(next: Layout) {
   document.documentElement.style.fontSize = `${next.rootFontSize}px`;
 }
 
-// 160px window, 32px root: the card's inside is 9..151 (as measured), the
-// button starts at 17.
-const TINY: Layout = { viewportWidth: 160, rootFontSize: 32, cardLeft: 8, cardWidth: 144, cardBorder: 1, anchorLeft: 17 };
+// 320px window, 32px default font: the card's inside is 25..295 and the
+// button starts at 49 (measured in Chromium, DFLT-00319).
+const NARROW_WINDOW: Layout = { viewportWidth: 320, rootFontSize: 32, cardLeft: 24, cardWidth: 272, cardBorder: 1, anchorLeft: 49 };
 // 1280px window, 16px root.
 const WIDE: Layout = { viewportWidth: 1280, rootFontSize: 16, cardLeft: 24, cardWidth: 1232, cardBorder: 1, anchorLeft: 700 };
 
@@ -111,19 +111,21 @@ describe('LabelSelect panel placement (DFLT-00293)', () => {
     expect(LABEL_PANEL_WIDTH_REM).toBe(14);
   });
 
-  it('in a 160px window at 32px keeps the panel inside the card and marks it narrow', async () => {
-    setLayout(TINY);
+  it('in a 320px window at 32px keeps the panel inside the card and marks it narrow', async () => {
+    setLayout(NARROW_WINDOW);
     const user = userEvent.setup();
     renderInCard();
     const panel = await openPanel(user);
     const left = px(panel.style.left);
     const maxWidth = px(panel.style.maxWidth);
-    // 142px inside the card less 8px (0.25rem) on each side.
-    expect(maxWidth).toBe(126);
-    const start = TINY.anchorLeft + left;
-    expect(start).toBeGreaterThanOrEqual(9 + 8);
-    expect(start + maxWidth).toBeLessThanOrEqual(151 - 8);
-    expect(start + maxWidth).toBeLessThanOrEqual(TINY.viewportWidth);
+    // 270px inside the card less 8px (0.25rem) on each side, moved 16px
+    // left so that it ends 8px inside the card (as in the browser).
+    expect(maxWidth).toBe(254);
+    expect(left).toBe(-16);
+    const start = NARROW_WINDOW.anchorLeft + left;
+    expect(start).toBeGreaterThanOrEqual(25 + 8);
+    expect(start + maxWidth).toBeLessThanOrEqual(295 - 8);
+    expect(start + maxWidth).toBeLessThanOrEqual(NARROW_WINDOW.viewportWidth);
     expect(panel).toHaveAttribute('data-narrow');
   });
 
@@ -172,12 +174,12 @@ describe('LabelSelect panel placement (DFLT-00293)', () => {
     renderInCard();
     const panel = await openPanel(user);
     expect(panel).not.toHaveAttribute('data-narrow');
-    setLayout(TINY);
+    setLayout(NARROW_WINDOW);
     act(() => {
       fireEvent(window, new Event('resize'));
     });
     expect(panel).toHaveAttribute('data-narrow');
-    expect(px(panel.style.maxWidth)).toBe(126);
+    expect(px(panel.style.maxWidth)).toBe(254);
     setLayout(WIDE);
     act(() => {
       fireEvent(window, new Event('resize'));
@@ -215,7 +217,7 @@ describe('LabelSelect panel placement (DFLT-00293)', () => {
   });
 
   it('lets the "no labels" text break only when narrow', async () => {
-    setLayout(TINY);
+    setLayout(NARROW_WINDOW);
     const user = userEvent.setup();
     renderInCard([]);
     const panel = await openPanel(user);
@@ -226,8 +228,8 @@ describe('LabelSelect panel placement (DFLT-00293)', () => {
     expect(panel).toHaveAttribute('data-narrow');
   });
 
-  it('in a 160px window every checkbox can still be found by its name and toggled', async () => {
-    setLayout(TINY);
+  it('in a 320px window at 32px every checkbox can still be found by its name and toggled', async () => {
+    setLayout(NARROW_WINDOW);
     const user = userEvent.setup();
     renderInCard();
     await openPanel(user);

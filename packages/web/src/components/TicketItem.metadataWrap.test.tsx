@@ -1,31 +1,30 @@
-// DFLT-00276: at 160px wide with a 200% text size, the details panel's
-// metadata bar let the creation date run to R171 (ja) / R185.5 (en), past the
-// ticket card's R136 edge, where the card's overflow-x clip cut it off. The
-// date's div is a flex item whose min-width: auto is the width of its longest
-// word, and a single mono word ("2026/9/28", "9/28/2026,") was already wider
-// than the card. The div now carries min-w-0 (so it can shrink) and
-// wrap-anywhere (inherited by the date span, breaking inside a word only when
-// the word cannot fit on a line), so nothing changes at any usable width.
-// Measuring the rest of the bar at 160px / 200% found two more items past
-// the card: the labels item (the "Edit labels" button's longest word, R139.5
-// in English; a long label chip, whose max-w-40 is 320px at a 32px root) and
-// the closed reason (one long word, up to R296.9). The labels item gets the
+// DFLT-00276: in a narrow card with large text, the details panel's metadata
+// bar let the creation date run past the ticket card's edge, where the card's
+// overflow-x clip cut it off. The date's div is a flex item whose min-width:
+// auto is the width of its longest word, and a single mono word
+// ("2026/9/28", "9/28/2026,") could be wider than the card. The div now
+// carries min-w-0 (so it can shrink) and wrap-anywhere (inherited by the date
+// span, breaking inside a word only when the word cannot fit on a line), so
+// nothing changes at any usable width. The rest of the bar had two more
+// items past the card: the labels item (the "Edit labels" button's longest
+// word; a long label chip, whose max-w-40 is 320px at a 32px root) and the
+// closed reason (one long word, R304.9 at 320px / 200% in English). The labels item gets the
 // same min-w-0 wrap-anywhere, and each chip min-w-0 so a long name truncates.
 // The closed reason item gets min-w-0 and flex-wrap, with wrap-anywhere on the
 // reason span only: on the whole item it was inherited by the "Closed reason:"
 // text, which the one-line row then broke mid-word even at 320px / 200%
 // ("Close / d / reaso / n:"). Its icon is shrink-0 so it is not squeezed.
 // DFLT-00292: with wrap-anywhere on the whole date item and the whole labels
-// item, the labels inherited it too and broke mid-word at 160px / 200%
+// item, the labels inherited it too and broke mid-word in a narrow card
 // ("Create / d:", "Edit / labe / ls"), and the closed reason's label could
 // break before its colon ("クローズ理由 / :"). wrap-anywhere now sits on the
 // values only (the date, the closed reason, each chip, and the label save
 // error). Each label was a MetaLabel -- break-keep, with its last character
 // and colon in a whitespace-nowrap span, and a <wbr> between the words of a
-// Japanese label ("クローズ<wbr>理由") -- and never broke inside a word: at
-// 160px / 200% a word wider than the bar ("Created:", "クローズ") still ended
-// inside the card's clip when left whole, so it got no overflow-wrap (QA
-// review R1 of DFLT-00292). The "Edit labels" button is flex-wrap
+// Japanese label ("クローズ<wbr>理由") -- and never broke inside a word: a
+// word wider than the bar ("Created:", "クローズ") still ended inside the
+// card's clip when left whole, so it got no overflow-wrap (QA review R1 of
+// DFLT-00292). The "Edit labels" button is flex-wrap
 // wrap-break-word with its name in a break-keep span ("ラベルを<wbr>編集" in
 // Japanese). LabelSelect's wrapper was flex-wrap so a save error went to its
 // own line instead of squeezing the button.
@@ -273,22 +272,18 @@ describe.each(['ja', 'en'])('TicketItem metadata bar wrapping (%s)', lng => {
     renderTicket();
     const details = screen.getByTestId('ticket-details');
     // The side padding is the variable; the top and bottom keep what p-*
-    // gave them (DFLT-00290 / DFLT-00293).
+    // gave them.
     expect(details).toHaveClass(
       'px-(--details-pad)',
       '[--details-pad:1.5rem]',
       'max-sm:[--details-pad:0.75rem]',
       'upto-15rem:[--details-pad:0.75rem]',
-      'upto-200px:[--details-pad:0.25rem]',
-      'upto-7_5rem:[--details-pad:0.25rem]',
       'py-6',
       'max-sm:py-3',
       'upto-15rem:py-3',
-      'upto-200px:py-2',
-      'upto-7_5rem:py-1',
       'space-y-6'
     );
-    for (const cls of ['p-6', 'max-sm:p-3', 'upto-15rem:p-3', 'upto-200px:p-2', 'upto-200px:px-1', 'upto-7_5rem:p-1']) expect(details).not.toHaveClass(cls);
+    for (const cls of ['p-6', 'max-sm:p-3', 'upto-15rem:p-3']) expect(details).not.toHaveClass(cls);
   });
 
   it('lets a label save error break inside a word on a line of its own (DFLT-00292)', async () => {

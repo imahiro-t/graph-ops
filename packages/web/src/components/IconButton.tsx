@@ -78,16 +78,6 @@
 // - `nameFromContent`: no aria-label; the accessible name comes from the
 //   button's content, like any text button. `label` is then optional and
 //   only serves as the default tooltip text.
-// - DFLT-00293: with `nameFromContent`, and only then, the button also
-//   takes `title`, passed through to the <button> as is. The name comes
-//   from the content, so a title can never become the name (the duplicate
-//   name the type otherwise guards against), and a caller that already
-//   shows a native title tooltip (the header's New Ticket button, disabled
-//   with no project, where it explains why) keeps it where the visible
-//   tooltip is disabled. Such a caller should point aria-describedby at
-//   its own description: when it is set, accessible name computation takes
-//   the description from it and not from the title, so the description
-//   stays the same whether a title is set or not.
 // - `tooltip` may be any node, so a tooltip can have more than one line
 //   (block-level spans inside it). Pass a stable reference (useMemo) when
 //   it is an element: the positioning effect re-runs whenever the content
@@ -108,49 +98,6 @@
 //   it goes back to false while the pointer is over the button or the
 //   button has keyboard focus, the tooltip opens again, as it would on any
 //   other IconButton that the pointer or focus comes back to.
-//
-// DFLT-00307: `longPressTooltip`, for a button whose label is hidden and
-// whose tooltip is the only place to read it (the header's buttons in a
-// window of 200px or less, DFLT-00293). A touch never hovers and never
-// moves keyboard focus, so there the tooltip also opens on a touch long
-// press. Off by default: without it nothing below applies and the button
-// behaves exactly as before.
-//
-// - A primary touch pointer held for LONG_PRESS_MS without moving more than
-//   LONG_PRESS_MOVE_TOLERANCE_PX opens the tooltip. Moving further (a
-//   scroll), lifting the finger earlier (a tap) or a pointercancel (the
-//   browser taking over a pan) cancels it; a tap's click goes through at
-//   once, as before. Mouse and pen presses are left alone. A tooltip that
-//   is disabled, or has nothing to show, does not start a long press at
-//   all, so the press stays an ordinary press.
-// - The press does not run the button's action: the click the browser may
-//   send after a long press is swallowed in the capture phase. Only that
-//   one click, though -- some browsers send none, and a flag left behind
-//   would swallow the next genuine click instead. So the flag is cleared
-//   when it has swallowed one, on every pointerdown of any pointer type (a
-//   tap, or a mouse click on a device with both), on any keydown in the
-//   wrapper (Enter and Space send a click with no pointerdown), and
-//   LONG_PRESS_CLICK_SUPPRESS_MS after the finger lifts. A browser that
-//   sends its click later than that runs the action -- the safe way to
-//   fail, as no later action is ever lost.
-// - While a long press is under way or its tooltip is open, the contextmenu
-//   it raises (Android) is cancelled, and the button takes select-none and
-//   -webkit-touch-callout: none (iOS's callout and text selection). Both
-//   only with the option, so nothing changes where it is off.
-// - The tooltip stays open after the finger lifts, and closes on a
-//   pointerdown anywhere but on the tooltip itself (a tap on the button
-//   closes it and then acts as a new press, running its action), on Escape
-//   (as any open tooltip), and LONG_PRESS_TOOLTIP_MS after the finger
-//   lifts. Closing it also clears the hover state: browsers may send a
-//   compatibility mouseenter after a long press, and the tooltip would
-//   otherwise stay open on that hover. Focus is left alone. A tooltip
-//   opened by hover or focus alone is never closed by the timer.
-// - Two-tap schemes (the first tap shows the tooltip) and short visible
-//   labels were not used: the first changes what a tap does, the second
-//   breaks words again at 160px with 200% text (the ticket's decision).
-// - When the option turns off (the window grows past 200px) every timer
-//   is cleared and the long-press state, its tooltip and the click flag are
-//   dropped, so nothing carries over to the wider layout.
 import React, { forwardRef, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { submittingProps, useSubmittingLabel } from './Submitting';
@@ -158,28 +105,12 @@ import { submittingProps, useSubmittingLabel } from './Submitting';
 const CLOSE_DELAY_MS = 100;
 const VIEWPORT_MARGIN = 4;
 const GAP = 6;
-// DFLT-00307: the touch long press (see the header comment).
-export const LONG_PRESS_MS = 500;
-export const LONG_PRESS_MOVE_TOLERANCE_PX = 10;
-export const LONG_PRESS_TOOLTIP_MS = 8000;
-export const LONG_PRESS_CLICK_SUPPRESS_MS = 500;
-const LONG_PRESS_BUTTON_CLASSES = 'select-none [-webkit-touch-callout:none]';
-
-type Timer = ReturnType<typeof setTimeout>;
-
-function clearTimer(ref: React.MutableRefObject<Timer | null>) {
-  if (ref.current !== null) {
-    clearTimeout(ref.current);
-    ref.current = null;
-  }
-}
 
 type ButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'title' | 'aria-label'>;
 
 // Either the accessible name is `label` (as aria-label), or, with
 // nameFromContent, the button's own content names it.
-// A title only with nameFromContent (see the header comment).
-type NameProps = { label: string; nameFromContent?: false; title?: never } | { label?: string; nameFromContent: true; title?: string };
+type NameProps = { label: string; nameFromContent?: false } | { label?: string; nameFromContent: true };
 
 export type IconButtonProps = ButtonProps & NameProps & {
   // The visible tooltip; defaults to `label`.
@@ -194,9 +125,6 @@ export type IconButtonProps = ButtonProps & NameProps & {
   // The user's own action is being sent (the button shows a spinner):
   // adds aria-busy and the "(submitting)" suffix to the accessible name.
   busy?: boolean;
-  // DFLT-00307: also open the tooltip on a touch long press (see the header
-  // comment). Off by default.
-  longPressTooltip?: boolean;
 };
 
 interface Position {
@@ -233,7 +161,6 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     tooltipSide = 'bottom',
     wrapperClassName,
     busy = false,
-    longPressTooltip = false,
     type,
     'aria-describedby': ariaDescribedBy,
     onClick,
@@ -247,10 +174,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
   const tooltipId = useId();
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  // Opened by a touch long press (DFLT-00307).
-  const [pressed, setPressed] = useState(false);
-  const canOpen = !tooltipDisabled && tooltipContent != null;
-  const open = canOpen && (hovered || focused || pressed);
+  const open = !tooltipDisabled && tooltipContent != null && (hovered || focused);
   const [position, setPosition] = useState<Position | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const tooltipRef = useRef<HTMLSpanElement | null>(null);
@@ -286,142 +210,14 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     }, CLOSE_DELAY_MS);
   }, [cancelClose]);
 
-  // DFLT-00307: the touch long press. Its progress lives in refs so that it
-  // never waits for a render.
-  const longPressTimerRef = useRef<Timer | null>(null);
-  const autoCloseTimerRef = useRef<Timer | null>(null);
-  const suppressResetTimerRef = useRef<Timer | null>(null);
-  const pressStartRef = useRef<{ x: number; y: number } | null>(null);
-  // The current touch gesture has become a long press.
-  const longPressFiredRef = useRef(false);
-  // Swallow the one click that follows a long press.
-  const suppressClickRef = useRef(false);
-  // Read by the long-press timer, which fires after the render it was set in.
-  const canOpenRef = useRef(canOpen);
-  canOpenRef.current = canOpen;
-
-  const clearSuppressClick = useCallback(() => {
-    clearTimer(suppressResetTimerRef);
-    suppressClickRef.current = false;
-  }, []);
-
-  const cancelPress = useCallback(() => {
-    clearTimer(longPressTimerRef);
-    pressStartRef.current = null;
-  }, []);
-
-  // Close a tooltip the long press opened: the timer, another pointerdown,
-  // the option turning off. Hover goes too (see the header comment).
-  const endLongPress = useCallback(() => {
-    clearTimer(autoCloseTimerRef);
-    setPressed(false);
-    cancelClose();
-    setHovered(false);
-  }, [cancelClose]);
-
-  const startAutoClose = useCallback(() => {
-    clearTimer(autoCloseTimerRef);
-    autoCloseTimerRef.current = setTimeout(() => {
-      autoCloseTimerRef.current = null;
-      endLongPress();
-    }, LONG_PRESS_TOOLTIP_MS);
-  }, [endLongPress]);
-
-  // Escape: close for both hover and focus, until each of them starts again
-  // (and a long-press tooltip, DFLT-00307).
+  // Escape: close for both hover and focus, until each of them starts again.
   const dismiss = useCallback(() => {
     cancelClose();
-    clearTimer(autoCloseTimerRef);
     setHovered(false);
     setFocused(false);
-    setPressed(false);
   }, [cancelClose]);
 
   useEffect(() => cancelClose, [cancelClose]);
-
-  // The option turning off (the window growing past 200px), and unmounting:
-  // nothing of a long press carries over.
-  const pressedRef = useRef(pressed);
-  pressedRef.current = pressed;
-  useEffect(() => {
-    if (!longPressTooltip) return;
-    return () => {
-      cancelPress();
-      clearSuppressClick();
-      longPressFiredRef.current = false;
-      clearTimer(autoCloseTimerRef);
-      if (pressedRef.current) endLongPress();
-    };
-  }, [longPressTooltip, cancelPress, clearSuppressClick, endLongPress]);
-
-  // A pointerdown anywhere but on the tooltip closes a long-press tooltip.
-  // In the capture phase, so a handler that stops propagation cannot keep
-  // it open; the tooltip's own stopPropagation is why this checks contains.
-  useEffect(() => {
-    if (!pressed) return;
-    const onDocumentPointerDown = (e: Event) => {
-      if (e.target instanceof Node && tooltipRef.current?.contains(e.target)) return;
-      endLongPress();
-    };
-    document.addEventListener('pointerdown', onDocumentPointerDown, true);
-    return () => document.removeEventListener('pointerdown', onDocumentPointerDown, true);
-  }, [pressed, endLongPress]);
-
-  const handlePointerDown = (e: React.PointerEvent<HTMLSpanElement>) => {
-    if (!longPressTooltip) return;
-    // Any new press, of any pointer type, ends the wait for a click after
-    // an earlier long press.
-    clearSuppressClick();
-    if (e.pointerType !== 'touch') return;
-    // A second finger (a pinch) is not a long press, and cancels one.
-    cancelPress();
-    longPressFiredRef.current = false;
-    if (!e.isPrimary || !canOpen) return;
-    pressStartRef.current = { x: e.clientX, y: e.clientY };
-    longPressTimerRef.current = setTimeout(() => {
-      longPressTimerRef.current = null;
-      if (!canOpenRef.current) return;
-      longPressFiredRef.current = true;
-      suppressClickRef.current = true;
-      setPressed(true);
-      startAutoClose();
-    }, LONG_PRESS_MS);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent<HTMLSpanElement>) => {
-    const start = pressStartRef.current;
-    if (!longPressTooltip || longPressTimerRef.current === null || !start || e.pointerType !== 'touch' || !e.isPrimary) return;
-    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > LONG_PRESS_MOVE_TOLERANCE_PX) cancelPress();
-  };
-
-  const handlePointerEnd = (e: React.PointerEvent<HTMLSpanElement>) => {
-    if (!longPressTooltip || e.pointerType !== 'touch' || !e.isPrimary) return;
-    // Lifted before the long press: a tap, whose click goes through.
-    cancelPress();
-    if (!longPressFiredRef.current) return;
-    longPressFiredRef.current = false;
-    // The click after a long press comes right after the finger lifts;
-    // stop waiting for it soon after.
-    clearTimer(suppressResetTimerRef);
-    suppressResetTimerRef.current = setTimeout(() => {
-      suppressResetTimerRef.current = null;
-      suppressClickRef.current = false;
-    }, LONG_PRESS_CLICK_SUPPRESS_MS);
-    // The tooltip stays; its time starts when the finger lifts.
-    if (pressedRef.current) startAutoClose();
-  };
-
-  const handleClickCapture = (e: React.MouseEvent<HTMLSpanElement>) => {
-    if (!suppressClickRef.current) return;
-    clearSuppressClick();
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
-  const handleContextMenu = (e: React.MouseEvent<HTMLSpanElement>) => {
-    if (!longPressTooltip) return;
-    if (longPressTimerRef.current !== null || longPressFiredRef.current || pressed) e.preventDefault();
-  };
 
   const updatePosition = useCallback(() => {
     const button = buttonRef.current;
@@ -503,13 +299,6 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       }}
       onBlur={() => setFocused(false)}
       onKeyDown={handleKeyDown}
-      onKeyDownCapture={longPressTooltip ? clearSuppressClick : undefined}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerEnd}
-      onPointerCancel={handlePointerEnd}
-      onClickCapture={handleClickCapture}
-      onContextMenu={handleContextMenu}
     >
       <button
         ref={setButtonRef}
@@ -518,16 +307,14 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
         aria-describedby={describedBy}
         {...submittingProps(busy)}
         {...buttonProps}
-        className={longPressTooltip ? `${buttonProps.className ?? ''} ${LONG_PRESS_BUTTON_CLASSES}`.trim() : buttonProps.className}
         onClick={handleClick}
       >
         {children}
       </button>
       {/* The tooltip's text size is in rem (0.6875rem = 11px at a 16px root,
-          DFLT-00294) so it follows the root and browser font size. The
-          header relies on that: in a window of 200px or less the tooltip
-          stands in for labels the header hides, and a 200% text size must
-          enlarge it as it did those labels (DFLT-00293). */}
+          DFLT-00294 / DFLT-00293) so it follows the root and browser font
+          size: a 200% text size enlarges it as it does the rest of the
+          page. */}
       {renderTooltip &&
         createPortal(
           <span

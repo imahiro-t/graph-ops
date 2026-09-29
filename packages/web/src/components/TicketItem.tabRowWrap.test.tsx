@@ -12,7 +12,7 @@
 // between lg and xl the link drops below the tabs when it does not fit, and
 // the tab icons keep their 16px at every width (shrink-0). jsdom does no
 // layout (nor media queries), so this checks the classes; the geometry at
-// 160-1440px, with a 200% default font and 3-digit counts, was measured in a
+// 320-1440px, with a 200% default font and 3-digit counts, was measured in a
 // real browser (see the tickets' implementation notes).
 //
 // DFLT-00253 turned the lg / xl boundaries into rem media queries (64rem /

@@ -18,9 +18,9 @@
 // on each wrapped item, and unchanged measurements at 100% -- was measured
 // in a real browser (see the ticket's implementation notes).
 //
-// DFLT-00251 continues this for a 160px window (320px at 200% zoom). There
-// the English summary card heading ("All Tickets Overview (Click to
-// expand...)") kept the min-content width of its longest words and ran 5px
+// DFLT-00251 continues this for large text in a narrow window. There the
+// English summary card heading ("All Tickets Overview (Click to
+// expand...)") kept the min-content width of its longest words and ran
 // past the window, and the pagination buttons with a two-digit page number
 // ("10 / 25") ended past <main>'s padding. Under 15rem (the rem query of
 // DFLT-00227) <main> now pads with px-3, the heading wraps and may break
@@ -42,10 +42,6 @@ import { createFakeBackend, installFakeBackend } from './test/fakeBackend';
 import { findPreviousPage } from './test/waitForAnswers';
 import { allIconButtonTooltips, openIconButtonTooltip } from './test/iconButtonTooltip';
 import { PROJECT_MENU_WIDTH_REM } from './lib/popupPlacement';
-
-// The container-query variant for a popup narrower than 8rem (DFLT-00285).
-// Assembled at run time so Tailwind does not pick up extra classes from here.
-const BELOW_8REM = ['cq-below-8rem', ''].join(':');
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 
@@ -174,7 +170,7 @@ describe.each(['ja', 'en'] as const)('pagination row with large text (%s)', lng 
   });
 });
 
-describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 160px window (%s)', lng => {
+describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 320px window at 200%% (%s)', lng => {
   const NARROW = 'upto-15rem:';
 
   beforeEach(async () => {
@@ -194,15 +190,12 @@ describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 1
     expect(main).not.toHaveClass('sm:px-3');
   });
 
-  // DFLT-00290: from 7.5rem down (a 32px default font in a 160px window) it
-  // pads with px-1, so the expanded ticket's node rows have room for their
-  // status badges; with the default font that is 120px and below.
-  it('pads <main> with px-1 only from 7.5rem down', async () => {
+  // DFLT-00319: nothing narrower than that is padded less any more (px-3
+  // is the least at every width).
+  it('has no side padding for <main> other than px-6, max-sm:px-3 and under-15rem px-3', async () => {
     await renderApp();
     const main = screen.getByRole('main');
-    expect(main).toHaveClass('px-6', 'max-sm:px-3', `${NARROW}px-3`, 'upto-7_5rem:px-1');
-    expect(main).not.toHaveClass('px-1');
-    expect(main).not.toHaveClass(`${NARROW}px-1`);
+    expect(Array.from(main.classList).filter(c => /(^|:)px-/.test(c))).toEqual(['px-6', 'max-sm:px-3', `${NARROW}px-3`]);
   });
 
   it('keeps the summary card\'s children inside the card and the numbers wrapping between items', async () => {
@@ -236,8 +229,8 @@ describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 1
   });
 
   // DFLT-00258: gap-1 (was gap-2) and no side padding on the row under
-  // 15rem, so a three-digit page number ("100 / 123", a 137px group before)
-  // fits the 136px row of a 160px window. From 15rem up nothing changes.
+  // 15rem, so a three-digit page number ("100 / 123") needs less room.
+  // From 15rem up nothing changes.
   it('closes up the pagination buttons under 15rem and lets the count break', async () => {
     await renderApp();
     const previous = await findPreviousPage();
@@ -347,9 +340,8 @@ describe.each(['ja', 'en'] as const)('summary card with a root font size set on 
   });
 
   // Each side of the slash is whitespace-nowrap, so the only break left is
-  // the <wbr> after the slash: never "9997" / "2/". DFLT-00259: except in a
-  // window of 200 CSS px or less, where the item has no room for any number
-  // (see App.headerNarrowReflow.test.tsx).
+  // the <wbr> after the slash: never "9997" / "2/", at any width (see also
+  // App.headerNarrowReflow.test.tsx).
   it('breaks the node progress only after the slash, never inside a number', async () => {
     await renderApp();
     const progress = screen.getByTestId('summary-node-progress');
@@ -379,8 +371,7 @@ describe.each(['ja', 'en'] as const)('summary card with a root font size set on 
 // itself, and its min-content width was that cap: with a 32px root font the
 // button stayed 14rem (448px) wide however narrow the header got, so a long
 // project name ("Selection Manipulator") made the page 404px wide in a 320px
-// window, and "Graph Ops" made it 283px wide in a 160px one (the scrollWidth
-// DFLT-00258 recorded). The 14rem cap now sits on the wrapper, which is a
+// window. The 14rem cap now sits on the wrapper, which is a
 // flex item that may shrink (min-w-0), and the button is never wider than
 // the wrapper (max-w-full), so the name truncates inside the header's width.
 // Where the button already fitted (the default font at 320-1440px) the
@@ -418,8 +409,7 @@ describe.each(['ja', 'en'] as const)('project switcher in a narrow header (%s)',
   });
 });
 
-// DFLT-00277: with the name truncated in the button (or not shown at all in a
-// 160px window with a 32px root font), sighted users read the full name in
+// DFLT-00277: with the name truncated in the button, sighted users read the full name in
 // the button's tooltip -- the name on the first line, the local path (or
 // "not set") on the second -- and in the popup, whose items now wrap the
 // name instead of truncating it. The prefix and the pending-approval badge
@@ -430,8 +420,9 @@ describe.each(['ja', 'en'] as const)('project switcher in a narrow header (%s)',
 // focus, aria-hidden) instead of a title attribute, so a screen reader no
 // longer reads the name a second time as the description: the description
 // is the local path (or "not set") alone. The popup's width and position are
-// set from the window (App.projectMenuPlacement.test.tsx), and below 8rem of
-// popup width each item puts the badge and the prefix on a second line.
+// set from the window (App.projectMenuPlacement.test.tsx). DFLT-00319: at
+// 320px with 200% text the popup is 9rem wide, so its items keep one layout
+// at every supported width (the second-line layout below 8rem was removed).
 // jsdom computes no layout, so the wrapping itself, the unchanged look at
 // the default font and the absence of sideways scroll at 320px / 32px were
 // measured in a real browser (see the ticket's implementation notes).
@@ -554,27 +545,28 @@ describe.each(['ja', 'en'] as const)('full project name in the switcher\'s toolt
     }
   });
 
-  it('keeps w-64 (PROJECT_MENU_WIDTH_REM) and puts the popup under the button as a size container, with no cap from the window\'s width alone', async () => {
+  it('keeps w-64 (PROJECT_MENU_WIDTH_REM) and puts the popup under the button, with no cap from the window\'s width alone', async () => {
     const user = await renderWith(alpha.id);
     const popup = await openPopup(user);
-    expect(popup).toHaveClass('absolute', 'left-0', 'top-full', 'mt-1.5', 'w-64', '@container');
+    expect(popup).toHaveClass('absolute', 'left-0', 'top-full', 'mt-1.5', 'w-64');
+    expect(popup).not.toHaveClass('@container');
     expect(popup).not.toHaveClass('max-w-[max(calc(100vw-2rem),8rem)]');
     expect(popup.className).not.toMatch(/(^|\s)max-w-/);
     // w-64 is 16rem: the width the placement is worked out from.
     expect(PROJECT_MENU_WIDTH_REM).toBe(16);
   });
 
-  it('puts an item\'s badge and prefix on a line of their own only below 8rem of popup width', async () => {
+  it('keeps an item\'s badge and prefix on the name\'s line at every width', async () => {
     const user = await renderWith(alpha.id);
     const popup = await openPopup(user);
     for (const p of [alpha, beta, long, noSpace]) {
       const name = itemName(popup, p.name);
       const item = name.closest('button') as HTMLElement;
       const right = name.nextElementSibling as HTMLElement;
-      expect(item).toHaveClass('flex', 'px-3', `${BELOW_8REM}flex-wrap`, `${BELOW_8REM}px-2`);
-      expect(item).not.toHaveClass('flex-wrap');
-      expect(name).toHaveClass(`${BELOW_8REM}flex-1`, `${BELOW_8REM}basis-0`);
-      expect(right).toHaveClass(`${BELOW_8REM}basis-full`, `${BELOW_8REM}justify-end`);
+      expect(item).toHaveClass('flex', 'items-center', 'px-3');
+      for (const el of [item, name, right]) expect(Array.from(el.classList).filter(c => c.startsWith('cq-'))).toEqual([]);
+      expect(item.className).not.toMatch(/flex-wrap/);
+      expect(right).toHaveClass('ml-auto', 'shrink-0');
     }
   });
 

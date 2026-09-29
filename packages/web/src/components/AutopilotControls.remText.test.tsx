@@ -136,19 +136,13 @@ describe.each(['ja', 'en'] as const)('AutopilotControls sizes its small lines in
     expect(screen.queryByTestId('autopilot-untrusted')).not.toBeInTheDocument();
   });
 
-  // DFLT-00259: in a 160px window at a 200% text size the notice had 0px of
-  // content width and the dismiss button's frame ran 31px past it (17px even
-  // without min-w-6). In a window of 200 CSS px or less (a px query: the 15rem
-  // one also matches 320-336px with a 32px default font, which must not
-  // change) the notice pads with p-1 and the button with px-0.5; together
-  // with the detail panel and the Action Footer padding with p-2 there
-  // (TicketItem.narrowPadding.test.tsx) the frame ended 9px inside the notice
-  // and the label inside the frame (Japanese and English, 32px root and 32px
-  // default font), while 320-336px at 200% and 100% at 360/1024px measured
-  // the same as before. jsdom does no layout, so this checks the classes;
-  // the geometry and the computed padding (p-1 over p-2, px-0.5 over px-2)
-  // were measured in a real browser.
-  it('narrows the notice and its dismiss button only in a window of 200px or less', async () => {
+  // DFLT-00259: the dismiss button's minimum width is capped at the
+  // notice's content width (min(1.5rem,100%)), so its frame never runs past
+  // a notice narrower than 1.5rem. DFLT-00319: the notice and the button pad
+  // the same at every width (p-2 / px-2); the smaller padding they took in a
+  // window of 200 CSS px or less was removed with that range. jsdom does no
+  // layout, so this checks the classes.
+  it('pads the notice and its dismiss button the same at every width', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -169,10 +163,10 @@ describe.each(['ja', 'en'] as const)('AutopilotControls sizes its small lines in
     await user.click(screen.getByRole('button', { name: i18n.t('autopilot.confirm.start') }));
     const dismiss = await screen.findByTestId('autopilot-untrusted-dismiss');
     const notice = screen.getByTestId('autopilot-untrusted');
-    expect(notice).toHaveClass('p-2', 'upto-200px:p-1');
-    expect(notice).not.toHaveClass('upto-15rem:p-1');
-    expect(dismiss).toHaveClass('px-2', 'upto-200px:px-0.5');
-    expect(dismiss).not.toHaveClass('upto-15rem:px-0.5');
+    expect(notice).toHaveClass('p-2');
+    expect(Array.from(notice.classList).filter(c => /(^|:)p-/.test(c))).toEqual(['p-2']);
+    expect(dismiss).toHaveClass('px-2', 'min-w-[min(1.5rem,100%)]');
+    expect(Array.from(dismiss.classList).filter(c => /(^|:)px-/.test(c))).toEqual(['px-2']);
     expect(dismiss).toHaveClass('min-h-6', 'max-w-full', 'shrink-0');
     expect(dismiss).toHaveClass('focus-visible:ring-2', 'focus-visible:ring-violet-500', 'dark:focus-visible:ring-violet-400');
     expect(dismiss).toHaveAccessibleName(i18n.t('autopilot.untrustedDismiss'));

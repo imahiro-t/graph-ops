@@ -17,9 +17,8 @@
 // App.largeTextReflow.test.tsx checks that the popup still has w-64.
 export const PROJECT_MENU_WIDTH_REM = 16;
 
-// 0.5rem: the header's padding in its narrowest layout
-// (upto-200px:px-2, max-width: 200px), so a 160px window with a 32px root font
-// still leaves the popup 128px.
+// 0.5rem on each side of the window: a 320px window with a 32px root font
+// still leaves the popup 288px (9rem).
 export const POPUP_VIEWPORT_MARGIN_REM = 0.5;
 
 export interface PopupPlacementInput {

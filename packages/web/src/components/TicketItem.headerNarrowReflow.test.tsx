@@ -1,5 +1,4 @@
-// DFLT-00251: a ticket's header row at 320px with a 200% text size and in a
-// 160px window (320px at 200% zoom). The ID, the status (e.g. "AWAITING
+// DFLT-00251: a ticket's header row at 320px with a 200% text size. The ID, the status (e.g. "AWAITING
 // FIX", "リファイン済み") and a long assignee name ran past the card, whose
 // overflow-clip cut them off. Now:
 // - the ID chip stays on one line wherever it fits and, under 15rem (the rem

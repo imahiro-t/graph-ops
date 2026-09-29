@@ -721,10 +721,10 @@ describe('IconButton text-named options', () => {
     expect(tooltip).not.toHaveClass('max-w-xs', 'wrap-break-word');
   });
 
-  // DFLT-00293: in a window of 200px or less the tooltip is where the header's
-  // hidden labels are read, so its text size is in rem and grows with a 200%
-  // root or browser font size (a px size would stay 11px). 0.6875rem is 11px
-  // at a 16px root, so the look at 100% is unchanged.
+  // DFLT-00293: the tooltip's text size is in rem, so it grows with a 200%
+  // root or browser font size like the rest of the page (a px size would
+  // stay 11px). 0.6875rem is 11px at a 16px root, so the look at 100% is
+  // unchanged.
   it('sizes the tooltip text in rem, not px', async () => {
     const user = userEvent.setup();
     render(

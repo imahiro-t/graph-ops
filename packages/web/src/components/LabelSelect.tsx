@@ -42,7 +42,7 @@ interface Props {
 // DFLT-00295: the panel is positioned from an anchor that wraps the button
 // only, and a save error goes on a line of its own below the labels, so the
 // error never moves the button or the panel. placePanel fits the open panel
-// into the card (at 160px / 200% its 14rem, 448px, ran far past the card's
+// into the card (at 320px / 200% its 14rem, 448px, runs far past the card's
 // clip), and fits it again whenever the button may have moved while it is
 // open: see the layout effect below. DFLT-00311: that includes a move with
 // no change of size (an item before the labels only getting wider), which
@@ -167,8 +167,7 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
     // and the save error are flex items of the metadata bar's labels item
     // (flex-wrap) on their own. When the wrapper was one inline-flex item,
     // an error widened it, and the whole wrapper -- button included --
-    // wrapped to the next line, taking the open panel with it (from 12px to
-    // 212px down at 160px / 200%). An item added after the button never
+    // wrapped to the next line, taking the open panel with it. An item added after the button never
     // moves it. The wrapper only keeps its event handlers (they work
     // through contents).
     <div
@@ -199,13 +198,12 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
           {...submittingProps(saving)}
           // DFLT-00292: the name wraps between words only ("Edit / labels",
           // "ラベルを / 編集"). wrap-break-word breaks inside a word only when
-          // that one word is wider than the button can be (160px / 200%);
+          // that one word is wider than the button can be;
           // unlike wrap-anywhere it leaves the min-content width alone, so the
           // flex row cannot squeeze the name into "Edit / labe / ls". The icons
           // are shrink-0 so they keep their size, and flex-wrap moves the name
-          // below the icon when the two do not fit on one line: at 160px / 200%
-          // the padding and the (rem-sized) icon leave the name about 12px
-          // beside the icon, which broke it into single letters. Whenever they
+          // below the icon when the two do not fit on one line, rather than
+          // breaking it into single letters beside the icon. Whenever they
           // fit on one line nothing changes. upto-15rem:rounded-xl (as the
           // status chip does below 80rem) keeps a two- or three-line button a
           // rounded rectangle rather than an ellipse; on one line its radius
@@ -314,8 +312,8 @@ const panelFrame = (anchor: HTMLElement, clip: HTMLElement): string => {
 // (14rem), as before, but it is kept inside the ticket card and the window:
 // it is never wider than they leave (less 0.25rem on each side), and moves
 // left when it would end past their right edge (see lib/popupPlacement.ts).
-// In a 160px window at a 200% text size the card is about 110px wide and the
-// card's overflow clip cut the panel off.
+// In a 320px window at a 200% text size the card is far narrower than 14rem
+// (448px), and the card's overflow clip would cut the panel off.
 //
 // Only when the width left is short of 14rem (by more than a sub-pixel) is
 // the panel narrow: it then carries data-narrow, and only then do the
