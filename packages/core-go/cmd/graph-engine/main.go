@@ -161,20 +161,36 @@ func run(cmd string, args []string) error {
 // what is failing.
 func openStore(rc runtimeConfig) (store.GraphRepository, error) {
 	repo, err := store.Open(storeConfigFromRuntimeConfig(rc))
-	if err != nil && rc.DBBackend == "mysql" {
-		configPath := runtimeconfig.HomeConfigPathForMessage(rc.HomeDir)
-		return nil, fmt.Errorf(
-			"%w\n\nThis MySQL connection could not be established with its configured TLS settings "+
-				"(mysqlTls %q). There is no plaintext fallback -- see this ticket's (DFLT-00037) README "+
-				"section on MySQL TLS for why. To recover:\n"+
-				"  - If the server does not support TLS, set mysqlTls to \"disabled\" explicitly.\n"+
-				"  - If the server uses a self-signed or auto-generated certificate (e.g. a fresh MySQL "+
-				"8 install), set mysqlTls to \"verify-ca\" and mysqlTlsCa to that CA's PEM file.\n"+
-				"Edit %s directly, or set GRAPH_MYSQL_TLS / GRAPH_MYSQL_TLS_CA -- the web settings UI "+
-				"cannot help here, because opening the store is exactly the step that is failing.",
-			err, rc.MySQLTLSMode, configPath)
+	if err != nil {
+		return nil, explainOpenStoreError(rc, err)
 	}
-	return repo, err
+	return repo, nil
+}
+
+// explainOpenStoreError adds the MySQL TLS recovery steps to a failure to
+// open a MySQL store. CLIENT_TOO_OLD (DFLT-00331) is the exception: it means
+// the connection worked and the DB said this graph-engine is out of date, so
+// the TLS advice would send the reader after the wrong fix and the error is
+// returned as is.
+func explainOpenStoreError(rc runtimeConfig, err error) error {
+	var apiErr *domain.APIError
+	if errors.As(err, &apiErr) && apiErr.Code == domain.ErrCodeClientTooOld {
+		return err
+	}
+	if rc.DBBackend != "mysql" {
+		return err
+	}
+	configPath := runtimeconfig.HomeConfigPathForMessage(rc.HomeDir)
+	return fmt.Errorf(
+		"%w\n\nThis MySQL connection could not be established with its configured TLS settings "+
+			"(mysqlTls %q). There is no plaintext fallback -- see this ticket's (DFLT-00037) README "+
+			"section on MySQL TLS for why. To recover:\n"+
+			"  - If the server does not support TLS, set mysqlTls to \"disabled\" explicitly.\n"+
+			"  - If the server uses a self-signed or auto-generated certificate (e.g. a fresh MySQL "+
+			"8 install), set mysqlTls to \"verify-ca\" and mysqlTlsCa to that CA's PEM file.\n"+
+			"Edit %s directly, or set GRAPH_MYSQL_TLS / GRAPH_MYSQL_TLS_CA -- the web settings UI "+
+			"cannot help here, because opening the store is exactly the step that is failing.",
+		err, rc.MySQLTLSMode, configPath)
 }
 
 // isHelpRequest reports whether args (the arguments after the binary name) ask

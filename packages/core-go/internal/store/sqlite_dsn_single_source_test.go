@@ -25,6 +25,13 @@ func TestSQLiteDSNIsBuiltInExactlyOnePlace(t *testing.T) {
 	// the only exception: anything that writes has to go through
 	// NewSQLiteRepository so it inherits busy_timeout.
 	const schemaProbeFile = "internal/httpserver/project_local_path_isolation_test.go"
+	// schemaRecordFixtureFile writes the one graphops_schema row a newer
+	// graph-engine would have written (DFLT-00331), which no API of the
+	// store can do from outside the package. It writes once, before any CLI
+	// process under test is started, so there is no other writer for
+	// busy_timeout to wait for; it opens the driver with no pragmas and is
+	// the only writing exception.
+	const schemaRecordFixtureFile = "cmd/graph-engine/client_too_old_cli_test.go"
 
 	// scannerFile is this file. It necessarily spells out both patterns it
 	// looks for, so it has to exclude itself.
@@ -78,7 +85,7 @@ func TestSQLiteDSNIsBuiltInExactlyOnePlace(t *testing.T) {
 
 	for _, site := range openSites {
 		file := site[:strings.LastIndex(site, ":")]
-		if file != dsnFile && file != schemaProbeFile {
+		if file != dsnFile && file != schemaProbeFile && file != schemaRecordFixtureFile {
 			t.Errorf("%s opens the sqlite driver directly; every writer must go through NewSQLiteRepository so it inherits busy_timeout (DFLT-00100 / BUG-01)", site)
 		}
 	}

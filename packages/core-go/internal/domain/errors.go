@@ -219,6 +219,17 @@ const (
 	// state has changed and the same call will be refused again. Returned
 	// with a 409.
 	ErrCodeConcurrentWriteConflict ErrorCode = "CONCURRENT_WRITE_CONFLICT"
+	// ErrCodeClientTooOld: the SQLite/MySQL database records a minimum
+	// client schema version this graph-engine does not meet -- a newer
+	// graph-engine has migrated it (DFLT-00331; see internal/store's
+	// schema_version.go). Nothing was written: Init stops before it touches
+	// the schema. The fix is to update graph-engine (the GraphOps plugin)
+	// and, for the Web UI, restart its server. The CLI exits non-zero; a
+	// running Web UI server answers its /api/ requests (except health and
+	// settings) with a 503, since the server itself is what is out of date.
+	// Details carries db_schema_version, min_client_schema_version and
+	// client_schema_version.
+	ErrCodeClientTooOld ErrorCode = "CLIENT_TOO_OLD"
 )
 
 // APIError pairs a machine-readable Code with a developer-facing English

@@ -183,6 +183,17 @@ CREATE TABLE IF NOT EXISTS processing_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_processing_sessions_ticket ON processing_sessions(ticket_id);
+
+-- The schema record (DFLT-00331; see schema_version.go): one row, id 1,
+-- holding the schema version this DB has been migrated to and the lowest
+-- client schema version that may use it. Written last by Init, and only
+-- ever raised.
+CREATE TABLE IF NOT EXISTS graphops_schema (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	schema_version INTEGER NOT NULL,
+	min_client_schema_version INTEGER NOT NULL,
+	updated_at TEXT NOT NULL
+);
 `
 
 // sqliteDialect is the shared label/ticket-update code's view of SQLite: no
@@ -205,6 +216,10 @@ var sqliteDialect = sqlDialect{
 // stealing the connection in between.
 type SQLiteRepository struct {
 	db *sql.DB
+	// clientSchema overrides the schema versions this client acts with;
+	// nil (always, outside tests) means CurrentSchemaVersion and
+	// MinClientSchemaVersion (see schema_version.go).
+	clientSchema *clientSchema
 }
 
 func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
@@ -280,7 +295,60 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 	return &SQLiteRepository{db: db}, nil
 }
 
+// Init checks the DB's schema record before anything else and stops with
+// CLIENT_TOO_OLD, writing nothing, when this client is older than the record
+// allows; otherwise it applies schemaDDL and the migrations, then raises the
+// record if this client is ahead of it (see schema_version.go).
 func (r *SQLiteRepository) Init() error {
+	return initWithSchemaRecord("sqlite", clientSchemaOrDefault(r.clientSchema), r.readSchemaRecord, r.migrate, r.writeSchemaRecord)
+}
+
+// CheckClientSchema re-reads the schema record and answers CLIENT_TOO_OLD
+// if this client no longer meets it. It writes nothing.
+func (r *SQLiteRepository) CheckClientSchema() error {
+	return checkClientSchemaWith("sqlite", clientSchemaOrDefault(r.clientSchema), r.readSchemaRecord)
+}
+
+var _ ClientSchemaChecker = (*SQLiteRepository)(nil)
+
+// readSchemaRecord reads graphops_schema's row, nil when the table or the
+// row is not there yet. Read-only: the table's existence is looked up in
+// sqlite_master rather than created.
+func (r *SQLiteRepository) readSchemaRecord() (*schemaRecord, error) {
+	var tables int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'graphops_schema'`).Scan(&tables); err != nil {
+		return nil, err
+	}
+	if tables == 0 {
+		return nil, nil
+	}
+	var rec schemaRecord
+	err := r.db.QueryRow(`SELECT schema_version, min_client_schema_version FROM graphops_schema WHERE id = 1`).
+		Scan(&rec.SchemaVersion, &rec.MinClientSchemaVersion)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+// writeSchemaRecord upserts graphops_schema's row, keeping the larger of
+// each value so that a record is never lowered, whichever Init runs last.
+func (r *SQLiteRepository) writeSchemaRecord(schemaVersion, minClient int, updatedAt string) error {
+	_, err := r.db.Exec(
+		`INSERT INTO graphops_schema (id, schema_version, min_client_schema_version, updated_at) VALUES (1, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		   schema_version = MAX(schema_version, excluded.schema_version),
+		   min_client_schema_version = MAX(min_client_schema_version, excluded.min_client_schema_version),
+		   updated_at = excluded.updated_at`,
+		schemaVersion, minClient, updatedAt)
+	return err
+}
+
+// migrate is Init's schema work proper: schemaDDL, then each migration.
+func (r *SQLiteRepository) migrate() error {
 	if _, err := r.db.Exec(schemaDDL); err != nil {
 		return fmt.Errorf("applying schema: %w", err)
 	}

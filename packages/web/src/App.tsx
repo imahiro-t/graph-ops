@@ -38,7 +38,7 @@ import { useTheme, ThemePreference } from './hooks/useTheme';
 import { useFitsSticky } from './hooks/useFitsSticky';
 import { useStickyHeaderScrollPadding } from './hooks/useStickyHeaderScrollPadding';
 import { formatTime } from './i18n/formatDate';
-import { localizedApiErrorMessage } from './lib/apiError';
+import { localizedApiErrorMessage, parseApiError } from './lib/apiError';
 import { apiFetch } from './lib/apiFetch';
 import { fetchPendingApprovalCounts } from './lib/pendingApprovals';
 import { fetchAppSettings } from './lib/settingsApi';
@@ -128,6 +128,11 @@ export const App: React.FC = () => {
   // is empty unless the tag matches the header's project.
   const [ticketList, setTicketList] = useState<ProjectScoped<TicketDetail[]> | null>(null);
   const [loading, setLoading] = useState(false);
+  // DFLT-00331: the server answered CLIENT_TOO_OLD -- its graph-engine is
+  // older than the database now requires, so it serves nothing until it is
+  // updated and restarted. Without this the ticket list would just stay
+  // empty (its failures only go to the console), leaving the cause unsaid.
+  const [clientTooOld, setClientTooOld] = useState(false);
   const [expandedTicketIds, setExpandedTicketIds] = useState<Set<string>>(new Set());
 
   // The viewer's own display name (GET/PUT /api/settings/app's "myName"),
@@ -690,7 +695,11 @@ export const App: React.FC = () => {
     setLoading(true);
     try {
       const res = await fetch(`/api/tickets?project_id=${encodeURIComponent(projectId)}`);
-      if (!res.ok) throw new Error(`GET /api/tickets: ${res.status}`);
+      if (!res.ok) {
+        if ((await parseApiError(res))?.code === 'CLIENT_TOO_OLD') setClientTooOld(true);
+        throw new Error(`GET /api/tickets: ${res.status}`);
+      }
+      setClientTooOld(false);
       const summaries: TicketGraph[] = await res.json();
 
       if (isSuperseded()) return true;
@@ -772,7 +781,10 @@ export const App: React.FC = () => {
     let next: CurrentProjectState;
     try {
       const res = await fetch('/api/current-project');
-      if (!res.ok) throw new Error(`GET /api/current-project: ${res.status}`);
+      if (!res.ok) {
+        if ((await parseApiError(res))?.code === 'CLIENT_TOO_OLD') setClientTooOld(true);
+        throw new Error(`GET /api/current-project: ${res.status}`);
+      }
       const data = await res.json();
       next = { kind: 'resolved', project: data ?? null };
     } catch (e) {
@@ -1709,6 +1721,14 @@ export const App: React.FC = () => {
               not the empty state, and never the previous project's list. */}
           <StatusLiveRegion message={openNotice} />
           <StatusLiveRegion message={ticketDeleteNotice} />
+          {clientTooOld && (
+            <div
+              role="alert"
+              className="mb-4 p-4 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-sm rounded-xl border border-red-200 dark:border-red-900 wrap-anywhere"
+            >
+              {t('errors.CLIENT_TOO_OLD')}
+            </div>
+          )}
           {!isCurrentProjectResolved ? (
             <div
               className="text-center py-16 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-sm"

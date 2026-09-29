@@ -14,3 +14,18 @@ func CloseForTest(repo any) error {
 	}
 	return nil
 }
+
+// SetClientSchemaForTest makes a SQL repository act as a client that knows
+// schema version current and records minClient as the minimum (see
+// schema_version.go), so that tests can play an older or a newer
+// graph-engine against the same database. Production code has no way to do
+// this.
+func SetClientSchemaForTest(repo any, current, minClient int) {
+	c := &clientSchema{Current: current, MinClient: minClient}
+	switch r := repo.(type) {
+	case *MySQLRepository:
+		r.clientSchema = c
+	case *SQLiteRepository:
+		r.clientSchema = c
+	}
+}

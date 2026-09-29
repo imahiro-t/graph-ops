@@ -705,6 +705,7 @@
     "NODE_NOT_FOUND": "That node could not be found.",
     "INVALID_NODE_STATE": "This node cannot be completed while it is in its current state - another member may have approved or rejected it first, it may already be finished, or it may not have started yet. Reload the page to see where it stands now.",
     "CONCURRENT_WRITE_CONFLICT": "This could not be saved because it collided with other changes to the same ticket. Nothing was changed, so please try again.",
+    "CLIENT_TOO_OLD": "This Web UI server's graph-engine is older than the database now requires. Update graph-engine (the GraphOps plugin) and restart the UI server.",
     "TICKET_STATUS_CHANGED": "The ticket's status was changed by another action, so this was not saved. Reload the page to see where it stands now.",
     "TICKET_CHANGED": "Another member changed this ticket first, so the labels were not saved. The latest version has been loaded; please try again.",
     "VALIDATION_ERROR": "The request was invalid. Please check your input and try again.",

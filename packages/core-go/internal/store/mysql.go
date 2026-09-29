@@ -229,6 +229,16 @@ var mysqlSchemaStatements = []string{
 	CONSTRAINT fk_processing_sessions_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
 	CONSTRAINT fk_processing_sessions_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
+
+	// The schema record (DFLT-00331), see schemaDDL's graphops_schema. As
+	// with app_state, the one row is always id 1 by convention of the code
+	// that writes it, without SQLite's CHECK.
+	`CREATE TABLE IF NOT EXISTS graphops_schema (
+	id TINYINT PRIMARY KEY,
+	schema_version INT NOT NULL,
+	min_client_schema_version INT NOT NULL,
+	updated_at VARCHAR(64) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
 }
 
 // mysqlErDupEntry is MySQL's ER_DUP_ENTRY: a UNIQUE/PRIMARY KEY violation.
@@ -335,6 +345,10 @@ var mysqlDialect = sqlDialect{
 // earn explicitly.
 type MySQLRepository struct {
 	db *sql.DB
+	// clientSchema overrides the schema versions this client acts with;
+	// nil (always, outside tests) means CurrentSchemaVersion and
+	// MinClientSchemaVersion (see schema_version.go).
+	clientSchema *clientSchema
 }
 
 // MySQL TLS mode values accepted by NormalizeMySQLTLSMode/
@@ -602,10 +616,66 @@ func PingMySQL(ctx context.Context, cfg Config) error {
 	return db.PingContext(ctx)
 }
 
-// Init applies mysqlSchemaStatements (idempotent: CREATE TABLE IF NOT
-// EXISTS, one statement per Exec call -- see mysqlSchemaStatements' doc
-// comment for why it isn't one Exec call for the whole DDL).
+// Init checks the DB's schema record before anything else and stops with
+// CLIENT_TOO_OLD, writing nothing, when this client is older than the record
+// allows; otherwise it applies the schema and the migrations (migrate), then
+// raises the record if this client is ahead of it (see schema_version.go).
 func (r *MySQLRepository) Init() error {
+	return initWithSchemaRecord("mysql", clientSchemaOrDefault(r.clientSchema), r.readSchemaRecord, r.migrate, r.writeSchemaRecord)
+}
+
+// CheckClientSchema re-reads the schema record and answers CLIENT_TOO_OLD
+// if this client no longer meets it. It writes nothing.
+func (r *MySQLRepository) CheckClientSchema() error {
+	return checkClientSchemaWith("mysql", clientSchemaOrDefault(r.clientSchema), r.readSchemaRecord)
+}
+
+var _ ClientSchemaChecker = (*MySQLRepository)(nil)
+
+// readSchemaRecord reads graphops_schema's row, nil when the table or the
+// row is not there yet. Read-only: the table's existence is looked up in
+// INFORMATION_SCHEMA rather than created.
+func (r *MySQLRepository) readSchemaRecord() (*schemaRecord, error) {
+	var tables int
+	if err := r.db.QueryRow(
+		`SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'graphops_schema'`,
+	).Scan(&tables); err != nil {
+		return nil, err
+	}
+	if tables == 0 {
+		return nil, nil
+	}
+	var rec schemaRecord
+	err := r.db.QueryRow(`SELECT schema_version, min_client_schema_version FROM graphops_schema WHERE id = 1`).
+		Scan(&rec.SchemaVersion, &rec.MinClientSchemaVersion)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+// writeSchemaRecord upserts graphops_schema's row, keeping the larger of
+// each value so that a record is never lowered, whichever Init runs last.
+// VALUES() is written the way SetCurrentProjectID's upsert writes it.
+func (r *MySQLRepository) writeSchemaRecord(schemaVersion, minClient int, updatedAt string) error {
+	_, err := r.db.Exec(
+		`INSERT INTO graphops_schema (id, schema_version, min_client_schema_version, updated_at) VALUES (1, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE
+		   schema_version = GREATEST(schema_version, VALUES(schema_version)),
+		   min_client_schema_version = GREATEST(min_client_schema_version, VALUES(min_client_schema_version)),
+		   updated_at = VALUES(updated_at)`,
+		schemaVersion, minClient, updatedAt)
+	return err
+}
+
+// migrate applies mysqlSchemaStatements (idempotent: CREATE TABLE IF NOT
+// EXISTS, one statement per Exec call -- see mysqlSchemaStatements' doc
+// comment for why it isn't one Exec call for the whole DDL) and the
+// migrations.
+func (r *MySQLRepository) migrate() error {
 	for _, stmt := range mysqlSchemaStatements {
 		if _, err := r.db.Exec(stmt); err != nil {
 			return fmt.Errorf("applying mysql schema: %w", err)

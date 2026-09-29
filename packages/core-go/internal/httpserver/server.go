@@ -85,6 +85,9 @@ type Server struct {
 	// other operational warnings (e.g. a best-effort home config
 	// cleanup that failed -- see handleDeleteProject).
 	logger *slog.Logger
+	// schemaGuard stops the API once the DB needs a newer graph-engine than
+	// this server's (DFLT-00331; see client_schema_guard.go).
+	schemaGuard *clientSchemaGuard
 }
 
 func New(repo store.GraphRepository, eng *engine.GraphEngine, cfg Config) *Server {
@@ -108,7 +111,8 @@ func New(repo store.GraphRepository, eng *engine.GraphEngine, cfg Config) *Serve
 			logger.Warn(fmt.Sprintf(format, args...), slog.String("event", "data_source"))
 		})
 	}
-	return &Server{repo: repo, engine: eng, cfg: cfg, rejectLog: newRejectLogger(logger), logger: logger}
+	return &Server{repo: repo, engine: eng, cfg: cfg, rejectLog: newRejectLogger(logger), logger: logger,
+		schemaGuard: newClientSchemaGuard(repo, logger)}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -221,10 +225,16 @@ func (s *Server) Routes() http.Handler {
 	//  2. withAllowedHost -- a request whose Host header does not name this
 	//     server is answered before any other layer looks at it.
 	//  3. withCORS -- answers preflights and enforces the CSRF header.
-	//  4. withRequestBodyLimit -- innermost, wrapping only the mux: a
+	//  4. withRequestBodyLimit -- wrapping the schema guard and the mux: a
 	//     request rejected by 2 or 3 never has its body read at all, so
 	//     capping it any further out would buy nothing.
-	return withSecurityHeaders(withAllowedHost(s.cfg.Host, s.rejectLog, withCORS(s.rejectLog, withRequestBodyLimit(s.rejectLog, mux))))
+	//  5. withClientSchemaGuard -- innermost, right before the mux: once
+	//     the DB records a minimum graph-engine newer than this server's,
+	//     /api/ requests (but health and settings) get 503 CLIENT_TOO_OLD
+	//     instead of reaching a handler (DFLT-00331). It sits inside the
+	//     host and CSRF checks so a rejected request never costs a DB read.
+	return withSecurityHeaders(withAllowedHost(s.cfg.Host, s.rejectLog, withCORS(s.rejectLog,
+		withRequestBodyLimit(s.rejectLog, withClientSchemaGuard(s.schemaGuard, mux)))))
 }
 
 // csrfHeaderName is the header every state-changing request to this API must
@@ -668,6 +678,11 @@ func statusForError(err error, fallback int) int {
 			return http.StatusBadRequest
 		case autopilot.ErrCodeRunNotFound:
 			return http.StatusNotFound
+		// This server's graph-engine is older than the DB allows
+		// (DFLT-00331): nothing the client can change, and nothing this
+		// server can serve until it is updated and restarted.
+		case domain.ErrCodeClientTooOld:
+			return http.StatusServiceUnavailable
 		}
 	}
 	return fallback
