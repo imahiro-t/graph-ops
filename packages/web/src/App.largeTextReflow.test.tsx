@@ -187,6 +187,17 @@ describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 1
     expect(main).not.toHaveClass('sm:px-3');
   });
 
+  // DFLT-00290: from 7.5rem down (a 32px default font in a 160px window) it
+  // pads with px-1, so the expanded ticket's node rows have room for their
+  // status badges; with the default font that is 120px and below.
+  it('pads <main> with px-1 only from 7.5rem down', async () => {
+    await renderApp();
+    const main = screen.getByRole('main');
+    expect(main).toHaveClass('px-6', 'max-sm:px-3', `${NARROW}px-3`, 'upto-7_5rem:px-1');
+    expect(main).not.toHaveClass('px-1');
+    expect(main).not.toHaveClass(`${NARROW}px-1`);
+  });
+
   it('keeps the summary card\'s children inside the card and the numbers wrapping between items', async () => {
     await renderApp();
     const metrics = screen.getByTestId('summary-metrics');

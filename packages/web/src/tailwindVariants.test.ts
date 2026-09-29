@@ -18,6 +18,14 @@ import { compile } from 'tailwindcss';
 // arbitrary variants that stay ([@container(...)]:,
 // [@media(max-width:200px)]:) is not: they now come out before those. That
 // intended change is pinned down separately.
+// DFLT-00290 added upto-200px, which replaces TicketItem.tsx's
+// [@media(max-width:200px)]: prefix on p-2 with the same (px) condition, and
+// upto-7_5rem, a 7.5rem max-width query for a large default font in a very
+// narrow window ("." is not allowed in a variant name). Both are declared
+// last, upto-7_5rem after upto-200px, so that on the same property
+// upto-7_5rem wins over upto-15rem and upto-200px -- which the arbitrary
+// [@media(max-width:200px)]: it replaced, emitted after every named variant,
+// would not have let it do.
 const INDEX_CSS = path.resolve(__dirname, 'index.css');
 const require = createRequire(import.meta.url);
 
@@ -37,6 +45,11 @@ const FROM80 = 'from-80rem';
 const BELOW64_MEDIA = '@media not all and (min-width: 64rem)';
 const FROM64_MEDIA = '@media (min-width: 64rem)';
 const FROM80_MEDIA = '@media (min-width: 80rem)';
+
+const UPTO200PX = 'upto-200px';
+const UPTO7_5 = 'upto-7_5rem';
+const UPTO200PX_MEDIA = '@media (max-width: 200px)';
+const UPTO7_5_MEDIA = '@media (max-width: 7.5rem)';
 
 // The arbitrary variants DFLT-00281 replaced, and the ones that stay, also
 // assembled at run time.
@@ -148,5 +161,61 @@ describe('named rem media-query variants (index.css)', () => {
       expect(idx(c)).toBeLessThan(container);
       expect(idx(c)).toBeLessThan(max200);
     }
+  });
+
+  it('keeps the media condition of the arbitrary [@media(max-width:200px)]: that upto-200px replaced (DFLT-00290)', async () => {
+    const named = await buildCss([v(UPTO200PX, 'p-2')]);
+    expect(named).toContain(UPTO200PX_MEDIA);
+    const arbitrary = await buildCss([v(ARB_MAX200, 'p-2')]);
+    expect(atRuleConditions(named)).toEqual(atRuleConditions(arbitrary));
+    expect(atRuleConditions(named)).toContain('@media(max-width:200px)');
+  });
+
+  it('gives upto-7_5rem a 7.5rem max-width condition (DFLT-00290)', async () => {
+    const css = await buildCss([v(UPTO7_5, 'p-1')]);
+    expect(css).toContain(UPTO7_5_MEDIA);
+    expect(atRuleConditions(css)).toContain('@media(max-width:7.5rem)');
+    // The rule really is generated for the class (the variant name is valid).
+    expect(css).toMatch(/\.upto-7_5rem\\:p-1\s*\{/);
+  });
+
+  it('emits the named variants in declaration order, upto-200px and upto-7_5rem last (DFLT-00290)', async () => {
+    const css = await buildCss([
+      v(UPTO7_5, 'p-1'),
+      v(UPTO200PX, 'p-1'),
+      v(FROM80, 'p-1'),
+      v(FROM64, 'p-1'),
+      v(BELOW64, 'p-1'),
+      v(UPTO, 'p-1'),
+      v(BELOW, 'p-1')
+    ]);
+    const at = [BELOW_MEDIA, UPTO_MEDIA, BELOW64_MEDIA, FROM64_MEDIA, FROM80_MEDIA, UPTO200PX_MEDIA, UPTO7_5_MEDIA].map(m => css.indexOf(m));
+    expect(at.every(i => i >= 0)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+  });
+
+  it('lets upto-7_5rem win over upto-15rem and upto-200px on the same property, and upto-200px over upto-15rem (DFLT-00290)', async () => {
+    // The classes TicketItem.tsx puts on the expanded details and the Action
+    // Footer card: the one emitted last is the one that applies.
+    const css = await buildCss([v(UPTO, 'p-3'), v(UPTO200PX, 'p-2'), v(UPTO7_5, 'p-1'), v('max-sm', 'p-3')]);
+    const conditions = atRuleConditions(css);
+    const idx = (c: string) => conditions.indexOf(c);
+    expect(idx('@media(width<640px)')).toBeLessThan(idx('@media(max-width:15rem)'));
+    expect(idx('@media(max-width:15rem)')).toBeLessThan(idx('@media(max-width:200px)'));
+    expect(idx('@media(max-width:200px)')).toBeLessThan(idx('@media(max-width:7.5rem)'));
+  });
+
+  it('would have lost to the arbitrary [@media(max-width:200px)]: it replaced, which is why that became upto-200px (DFLT-00290)', async () => {
+    const conditions = atRuleConditions(await buildCss([v(ARB_MAX200, 'p-2'), v(UPTO7_5, 'p-1')]));
+    expect(conditions.indexOf('@media(max-width:7.5rem)')).toBeGreaterThanOrEqual(0);
+    expect(conditions.indexOf('@media(max-width:7.5rem)')).toBeLessThan(conditions.indexOf('@media(max-width:200px)'));
+  });
+
+  it('emits upto-200px / upto-7_5rem before the arbitrary @container variants (DFLT-00290, see index.css)', async () => {
+    const conditions = atRuleConditions(await buildCss([v(ARB_CONTAINER, 'p-1'), v(UPTO200PX, 'p-1'), v(UPTO7_5, 'p-1')]));
+    const container = conditions.indexOf('@container(min-width:20rem)');
+    expect(container).toBeGreaterThanOrEqual(0);
+    expect(conditions.indexOf('@media(max-width:200px)')).toBeLessThan(container);
+    expect(conditions.indexOf('@media(max-width:7.5rem)')).toBeLessThan(container);
   });
 });
