@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -176,6 +178,30 @@ func initWithSchemaRecord(backend string, client clientSchema, read func() (*sch
 		return fmt.Errorf("recording %s schema version: %w", backend, err)
 	}
 	return nil
+}
+
+// readSchemaRecordFrom is each backend's readSchemaRecord: tableExistsQuery
+// (the backend's own catalog lookup, returning a count) says whether
+// graphops_schema is there, then its one row is read. nil when the table
+// or the row is not there yet. Read-only, so it can run before any DDL.
+func readSchemaRecordFrom(db *sql.DB, tableExistsQuery string) (*schemaRecord, error) {
+	var tables int
+	if err := db.QueryRow(tableExistsQuery).Scan(&tables); err != nil {
+		return nil, err
+	}
+	if tables == 0 {
+		return nil, nil
+	}
+	var rec schemaRecord
+	err := db.QueryRow(`SELECT schema_version, min_client_schema_version FROM graphops_schema WHERE id = 1`).
+		Scan(&rec.SchemaVersion, &rec.MinClientSchemaVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
 }
 
 // checkClientSchemaWith is CheckClientSchema's shared body: read, then

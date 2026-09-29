@@ -161,6 +161,43 @@ func TestClientSchemaGuard_OtherCheckFailureDoesNotBlock(t *testing.T) {
 	}
 }
 
+// Once found out of date, the server stays stopped through a check that
+// fails for another reason: the record never goes down, so a transient DB
+// error must not reopen the API for a clientSchemaCheckInterval. The
+// CLIENT_TOO_OLD is logged once, not again when a later check finds it anew.
+func TestClientSchemaGuard_OtherCheckFailureKeepsTooOld(t *testing.T) {
+	s, repo, now, logBuf := newSchemaGuardServer(t)
+	repo.set(clientTooOldErr())
+	if rec := doJSON(t, s, http.MethodGet, "/api/projects", nil); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("GET /api/projects = %d, want 503", rec.Code)
+	}
+
+	repo.set(errors.New("reading sqlite schema version: disk I/O error"))
+	*now = now.Add(clientSchemaCheckInterval + time.Second)
+	rec := doJSON(t, s, http.MethodGet, "/api/projects", nil)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("after a failed check, GET /api/projects = %d, want 503 still (body %s)", rec.Code, rec.Body.String())
+	}
+	if body := decodeError(t, rec); body.Code != domain.ErrCodeClientTooOld {
+		t.Errorf("after a failed check, code = %q, want CLIENT_TOO_OLD", body.Code)
+	}
+	if got := repo.calls.Load(); got != 2 {
+		t.Fatalf("checks = %d, want 2 (the failed one re-checked)", got)
+	}
+
+	repo.set(clientTooOldErr())
+	*now = now.Add(clientSchemaCheckInterval + time.Second)
+	if rec := doJSON(t, s, http.MethodGet, "/api/projects", nil); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("GET /api/projects = %d, want 503", rec.Code)
+	}
+	if got := strings.Count(logBuf.String(), "code=CLIENT_TOO_OLD"); got != 1 {
+		t.Errorf("CLIENT_TOO_OLD logged %d times, want once:\n%s", got, logBuf.String())
+	}
+	if !strings.Contains(logBuf.String(), "disk I/O error") {
+		t.Errorf("the failed check was not logged:\n%s", logBuf.String())
+	}
+}
+
 // A repository without a schema record (the HTTP data source, a test fake)
 // has no guard at all.
 func TestClientSchemaGuard_RepositoryWithoutCheckerIsNotGuarded(t *testing.T) {

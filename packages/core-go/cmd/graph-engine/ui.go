@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -290,7 +291,7 @@ func fetchProjectsViaAPI(baseURL string) ([]uiProject, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET /api/projects: unexpected status %d", resp.StatusCode)
+		return nil, uiServerStatusError(baseURL, "GET /api/projects", resp)
 	}
 	var projects []uiProject
 	if err := json.NewDecoder(resp.Body).Decode(&projects); err != nil {
@@ -332,7 +333,44 @@ func switchCurrentProjectViaAPI(baseURL, projectID string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("PUT /api/current-project: unexpected status %d", resp.StatusCode)
+		return uiServerStatusError(baseURL, "PUT /api/current-project", resp)
 	}
 	return nil
+}
+
+// uiServerErrorBody is the running server's error response,
+// {"error": {"code": "...", "message": "..."}} (httpserver's writeError).
+type uiServerErrorBody struct {
+	Error struct {
+		Code    domain.ErrorCode `json:"code"`
+		Message string           `json:"message"`
+	} `json:"error"`
+}
+
+// uiServerStatusError turns a non-200 answer of the running server into
+// this command's error, keeping the server's code and message rather than
+// only the status: `ui` reuses whatever server answers /api/health, so the
+// server's own explanation is the only one the person sees.
+//
+// CLIENT_TOO_OLD is the case that matters (DFLT-00331): the server that is
+// already running was started by a graph-engine older than the database,
+// and answers 503 to every DB request while its health check still says ok.
+// This process has itself passed the same check (openStore), so updating is
+// not the fix here -- stopping that server so `ui` starts this graph-engine's
+// own is. The error keeps the code first, like every CLIENT_TOO_OLD the CLI
+// prints, and exits non-zero through main.
+func uiServerStatusError(baseURL, call string, resp *http.Response) error {
+	var body uiServerErrorBody
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err := json.Unmarshal(raw, &body); err != nil || body.Error.Code == "" {
+		return fmt.Errorf("%s: unexpected status %d", call, resp.StatusCode)
+	}
+	if body.Error.Code == domain.ErrCodeClientTooOld {
+		return domain.NewAPIError(domain.ErrCodeClientTooOld,
+			"CLIENT_TOO_OLD: the UI server already running at %s was started by a graph-engine older than the database, "+
+				"so it answers every database request with CLIENT_TOO_OLD. Stop that server (see \"Updating to a new release\" in the README "+
+				"for how) and run this command again from an updated graph-engine to start a new one. The server said: %s",
+			baseURL, body.Error.Message)
+	}
+	return fmt.Errorf("%s: unexpected status %d: %s: %s", call, resp.StatusCode, body.Error.Code, body.Error.Message)
 }

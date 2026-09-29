@@ -43,8 +43,9 @@ func newClientSchemaGuard(repo store.GraphRepository, logger *slog.Logger) *clie
 // tooOldError returns CLIENT_TOO_OLD when the latest check (at most
 // clientSchemaCheckInterval old) found this server out of date, nil
 // otherwise. A check that fails for any other reason -- the DB cannot be
-// reached, say -- stops nothing: the handler runs and meets the same failure
-// with its own error. Holding mu across the read makes concurrent requests
+// reached, say -- keeps the previous answer: before any CLIENT_TOO_OLD it
+// stops nothing (the handler runs and meets the same failure with its own
+// error); after one, the server stays stopped. Holding mu across the read makes concurrent requests
 // share one check.
 func (g *clientSchemaGuard) tooOldError() error {
 	if g == nil || g.checker == nil {
@@ -58,18 +59,23 @@ func (g *clientSchemaGuard) tooOldError() error {
 	}
 	err := g.checker.CheckClientSchema()
 	var apiErr *domain.APIError
-	var tooOld error
+	tooOld := g.tooOld
 	switch {
 	case err == nil:
+		tooOld = nil
 	case errors.As(err, &apiErr) && apiErr.Code == domain.ErrCodeClientTooOld:
-		tooOld = err
 		if g.tooOld == nil {
 			// Once per change, not per request: the operator reading the
 			// UI server's log learns why the pages stopped working.
 			g.logger.Error(err.Error(), slog.String("event", "client_schema"),
 				slog.String("code", string(domain.ErrCodeClientTooOld)))
 		}
+		tooOld = err
 	default:
+		// A failed check keeps the previous answer: the record never goes
+		// down and this server's own version does not change until it is
+		// restarted, so a transient DB error must not reopen the API of a
+		// server already found out of date.
 		g.logger.Warn("checking the database's schema record failed: "+err.Error(),
 			slog.String("event", "client_schema"))
 	}

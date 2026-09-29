@@ -3,10 +3,14 @@ package main
 import (
 	"database/sql"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/graph-ops/core-go/internal/domain"
+	"github.com/graph-ops/core-go/internal/engine"
+	"github.com/graph-ops/core-go/internal/httpserver"
 	"github.com/graph-ops/core-go/internal/store"
 )
 
@@ -95,5 +99,70 @@ func TestExplainOpenStoreError_ClientTooOldHasNoTLSAdvice(t *testing.T) {
 	rc.DBBackend = "sqlite"
 	if got := explainOpenStoreError(rc, other); got != other {
 		t.Errorf("a SQLite failure was rewrapped: %v", got)
+	}
+}
+
+// `ui` reuses whatever server answers /api/health, which an out-of-date
+// server still does. Once the database has moved past that server, its 503
+// CLIENT_TOO_OLD must reach the person running `ui` -- with the code and the
+// advice to stop that server -- rather than a bare "unexpected status 503"
+// (DFLT-00331). The server here is a real one, started while the record
+// still matched it, as a server left running across another member's
+// update would be; its first DB request is what finds it out of date.
+func TestUI_ReusedServerOlderThanTheDBReportsClientTooOld(t *testing.T) {
+	repo, _, dbPath := newSubprocessSQLiteRepo(t)
+	proj, err := repo.CreateProject("P", "TEST")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	stale := httptest.NewServer(httpserver.New(repo, engine.New(repo), httpserver.Config{ArtifactsDir: t.TempDir(), HomeDir: t.TempDir()}).Routes())
+	defer stale.Close()
+	raiseMinClientSchema(t, dbPath)
+
+	if !uiHealthCheck(stale.URL) {
+		t.Fatal("an out-of-date server's health check must still pass (that is why `ui` reuses it)")
+	}
+
+	for name, call := range map[string]func() error{
+		"GET /api/projects":        func() error { _, err := fetchProjectsViaAPI(stale.URL); return err },
+		"PUT /api/current-project": func() error { return switchCurrentProjectViaAPI(stale.URL, proj.ID) },
+	} {
+		err := call()
+		var apiErr *domain.APIError
+		if !errors.As(err, &apiErr) || apiErr.Code != domain.ErrCodeClientTooOld {
+			t.Errorf("%s: err = %v, want CLIENT_TOO_OLD", name, err)
+			continue
+		}
+		msg := err.Error()
+		for _, want := range []string{"CLIENT_TOO_OLD: the UI server already running at " + stale.URL, "Stop that server", "Updating to a new release", "The server said: CLIENT_TOO_OLD"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("%s: message does not contain %q:\n%s", name, want, msg)
+			}
+		}
+	}
+}
+
+// Other failures keep the server's code and message; an answer without the
+// error body falls back to the status alone.
+func TestUIServerStatusError_OtherAnswers(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/projects" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":{"code":"INTERNAL_ERROR","message":"disk I/O error"}}`))
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("<html>bad gateway</html>"))
+	}))
+	defer ts.Close()
+
+	_, err := fetchProjectsViaAPI(ts.URL)
+	if err == nil || err.Error() != "GET /api/projects: unexpected status 500: INTERNAL_ERROR: disk I/O error" {
+		t.Errorf("GET /api/projects: err = %v", err)
+	}
+	err = switchCurrentProjectViaAPI(ts.URL, "p")
+	if err == nil || err.Error() != "PUT /api/current-project: unexpected status 502" {
+		t.Errorf("PUT /api/current-project: err = %v", err)
 	}
 }

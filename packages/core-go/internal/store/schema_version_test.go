@@ -141,7 +141,9 @@ func schemaBackends() []schemaBackend {
 			}
 			// The test database is shared with every other MySQL test, so
 			// "no record" is made by dropping the record's table, and the
-			// test leaves the record at (1, 1) behind it, whatever it did.
+			// test leaves the default record behind it, whatever it did --
+			// the tests below rely on this cleanup rather than resetting
+			// the record themselves.
 			admin := open()
 			if err := admin.Init(); err != nil {
 				t.Fatalf("Init before the test: %v", err)
@@ -157,7 +159,8 @@ func schemaBackends() []schemaBackend {
 }
 
 // restoreDefaultSchemaRecord leaves repo's database with the record a
-// default client writes, (1, 1), and every table in place: a default Init
+// default client writes (defaultSchema, defaultMinClient), and every table in
+// place: a default Init
 // (re)creates anything missing, and the record is reset in case a test
 // raised it.
 func restoreDefaultSchemaRecord(t *testing.T, repo schemaTestRepo) {
@@ -167,7 +170,7 @@ func restoreDefaultSchemaRecord(t *testing.T, repo schemaTestRepo) {
 		t.Errorf("restoring graphops_schema: %v", err)
 		return
 	}
-	if _, err := db.Exec(`UPDATE graphops_schema SET schema_version = ?, min_client_schema_version = ? WHERE id = 1`, CurrentSchemaVersion, MinClientSchemaVersion); err != nil {
+	if _, err := db.Exec(`UPDATE graphops_schema SET schema_version = ?, min_client_schema_version = ? WHERE id = 1`, defaultSchema, defaultMinClient); err != nil {
 		t.Errorf("resetting the schema record: %v", err)
 		return
 	}
@@ -176,17 +179,23 @@ func restoreDefaultSchemaRecord(t *testing.T, repo schemaTestRepo) {
 		return
 	}
 	rec, err := repo.readSchemaRecord()
-	if err != nil || rec == nil || *rec != (schemaRecord{SchemaVersion: CurrentSchemaVersion, MinClientSchemaVersion: MinClientSchemaVersion}) {
-		t.Errorf("after restoring, record = %+v (%v), want (%d, %d)", rec, err, CurrentSchemaVersion, MinClientSchemaVersion)
+	if err != nil || rec == nil || *rec != (schemaRecord{SchemaVersion: defaultSchema, MinClientSchemaVersion: defaultMinClient}) {
+		t.Errorf("after restoring, record = %+v (%v), want (%d, %d)", rec, err, defaultSchema, defaultMinClient)
 	}
 }
 
-func setRecord(t *testing.T, repo schemaTestRepo, schemaVersion, minClient int) {
-	t.Helper()
-	if _, err := rawDB(repo).Exec(`UPDATE graphops_schema SET schema_version = ?, min_client_schema_version = ? WHERE id = 1`, schemaVersion, minClient); err != nil {
-		t.Fatalf("setting the schema record: %v", err)
-	}
-}
+// The versions the tests use, derived from the constants so that raising
+// CurrentSchemaVersion / MinClientSchemaVersion (as schema_version.go's rules
+// require for every schema change) keeps these tests meaningful.
+const (
+	// defaultSchema / defaultMinClient are what a default client records.
+	defaultSchema    = CurrentSchemaVersion
+	defaultMinClient = MinClientSchemaVersion
+	// newerSchema is a client one schema version ahead of this build.
+	newerSchema = CurrentSchemaVersion + 1
+	// tooOldClient is a client just below this build's minimum.
+	tooOldClient = MinClientSchemaVersion - 1
+)
 
 func wantRecord(t *testing.T, repo schemaTestRepo, schemaVersion, minClient int) {
 	t.Helper()
@@ -227,7 +236,7 @@ func tableExists(t *testing.T, repo schemaTestRepo, table string) bool {
 	return n > 0
 }
 
-// A database without a record gets (1, 1) from the first Init; a second
+// A database without a record gets the default record from the first Init; a second
 // Init leaves the record untouched (nothing is written on an ordinary call).
 func TestSchemaRecord_FirstInitWritesAndSecondDoesNot(t *testing.T) {
 	for _, b := range schemaBackends() {
@@ -240,12 +249,12 @@ func TestSchemaRecord_FirstInitWritesAndSecondDoesNot(t *testing.T) {
 			if err := repo.Init(); err != nil {
 				t.Fatalf("Init: %v", err)
 			}
-			wantRecord(t, repo, 1, 1)
+			wantRecord(t, repo, defaultSchema, defaultMinClient)
 			before := recordUpdatedAt(t, repo)
 			if err := open().Init(); err != nil {
 				t.Fatalf("second Init: %v", err)
 			}
-			wantRecord(t, repo, 1, 1)
+			wantRecord(t, repo, defaultSchema, defaultMinClient)
 			if after := recordUpdatedAt(t, repo); after != before {
 				t.Errorf("the second Init rewrote the record: updated_at %q -> %q", before, after)
 			}
@@ -278,7 +287,7 @@ func TestSchemaRecord_ExistingDBWithoutRecordIsMigrated(t *testing.T) {
 			if err := again.Init(); err != nil {
 				t.Fatalf("Init on a DB without a record: %v", err)
 			}
-			wantRecord(t, again, 1, 1)
+			wantRecord(t, again, defaultSchema, defaultMinClient)
 			if got, err := again.GetProject(proj.ID); err != nil || got == nil {
 				t.Errorf("the existing project is gone after Init: %+v (%v)", got, err)
 			}
@@ -305,39 +314,25 @@ func TestSchemaRecord_OldClientStopsWithoutWriting(t *testing.T) {
 			// next on a shared MySQL database.
 			t.Cleanup(func() {
 				fixer := open()
-				if err := fixer.Init(); err != nil {
-					t.Errorf("default Init in cleanup: %v", err)
-					return
-				}
+				restoreDefaultSchemaRecord(t, fixer)
 				if !tableExists(t, fixer, "processing_sessions") {
 					t.Errorf("processing_sessions was not recreated in cleanup")
 				}
-				wantRecordOrError(t, fixer, 1, 1)
 			})
 
 			old := open()
-			SetClientSchemaForTest(old, 0, 0)
-			assertClientTooOld(t, old.Init(), 1, 1, 0)
+			SetClientSchemaForTest(old, tooOldClient, tooOldClient)
+			assertClientTooOld(t, old.Init(), defaultSchema, defaultMinClient, tooOldClient)
 			if tableExists(t, repo, "processing_sessions") {
 				t.Errorf("the old client's Init created processing_sessions; it must not touch the schema")
 			}
-			wantRecord(t, repo, 1, 1)
+			wantRecord(t, repo, defaultSchema, defaultMinClient)
 
-			assertClientTooOld(t, old.CheckClientSchema(), 1, 1, 0)
+			assertClientTooOld(t, old.CheckClientSchema(), defaultSchema, defaultMinClient, tooOldClient)
 			if err := repo.CheckClientSchema(); err != nil {
 				t.Errorf("CheckClientSchema of a default client = %v, want nil", err)
 			}
 		})
-	}
-}
-
-// wantRecordOrError is wantRecord for cleanups, where a failure must not
-// stop the remaining cleanups.
-func wantRecordOrError(t *testing.T, repo schemaTestRepo, schemaVersion, minClient int) {
-	t.Helper()
-	rec, err := repo.readSchemaRecord()
-	if err != nil || rec == nil || rec.SchemaVersion != schemaVersion || rec.MinClientSchemaVersion != minClient {
-		t.Errorf("schema record = %+v (%v), want (%d, %d)", rec, err, schemaVersion, minClient)
 	}
 }
 
@@ -350,25 +345,16 @@ func TestSchemaRecord_NewerClientRaisesTheRecord(t *testing.T) {
 			if err := repo.Init(); err != nil {
 				t.Fatalf("Init: %v", err)
 			}
-			t.Cleanup(func() { setRecordOrError(t, repo, 1, 1) })
-
 			newer := open()
-			SetClientSchemaForTest(newer, 2, 2)
+			SetClientSchemaForTest(newer, newerSchema, newerSchema)
 			if err := newer.Init(); err != nil {
 				t.Fatalf("newer client's Init: %v", err)
 			}
-			wantRecord(t, repo, 2, 2)
+			wantRecord(t, repo, newerSchema, newerSchema)
 
-			assertClientTooOld(t, open().Init(), 2, 2, CurrentSchemaVersion)
-			wantRecord(t, repo, 2, 2)
+			assertClientTooOld(t, open().Init(), newerSchema, newerSchema, CurrentSchemaVersion)
+			wantRecord(t, repo, newerSchema, newerSchema)
 		})
-	}
-}
-
-func setRecordOrError(t *testing.T, repo schemaTestRepo, schemaVersion, minClient int) {
-	t.Helper()
-	if _, err := rawDB(repo).Exec(`UPDATE graphops_schema SET schema_version = ?, min_client_schema_version = ? WHERE id = 1`, schemaVersion, minClient); err != nil {
-		t.Errorf("resetting the schema record: %v", err)
 	}
 }
 
@@ -382,19 +368,17 @@ func TestSchemaRecord_OlderClientDoesNotLowerTheRecord(t *testing.T) {
 			if err := repo.Init(); err != nil {
 				t.Fatalf("Init: %v", err)
 			}
-			t.Cleanup(func() { setRecordOrError(t, repo, 1, 1) })
-
 			newer := open()
-			SetClientSchemaForTest(newer, 2, 1)
+			SetClientSchemaForTest(newer, newerSchema, defaultMinClient)
 			if err := newer.Init(); err != nil {
 				t.Fatalf("newer client's Init: %v", err)
 			}
-			wantRecord(t, repo, 2, 1)
+			wantRecord(t, repo, newerSchema, defaultMinClient)
 
 			if err := open().Init(); err != nil {
 				t.Fatalf("an older client meeting the minimum was refused: %v", err)
 			}
-			wantRecord(t, repo, 2, 1)
+			wantRecord(t, repo, newerSchema, defaultMinClient)
 			if err := repo.CheckClientSchema(); err != nil {
 				t.Errorf("CheckClientSchema = %v, want nil", err)
 			}
@@ -404,23 +388,30 @@ func TestSchemaRecord_OlderClientDoesNotLowerTheRecord(t *testing.T) {
 
 // Concurrent Inits on a database without a record all succeed and leave
 // the highest record; mixing clients of different versions is no
-// different.
+// different. The database is an existing one whose record was dropped (as
+// before DFLT-00331): concurrent first opens of a brand-new SQLite file race
+// on switching it to WAL, which returns SQLITE_BUSY without waiting -- an
+// older, separate matter this test is not about.
 func TestSchemaRecord_ConcurrentInit(t *testing.T) {
 	for _, b := range schemaBackends() {
 		t.Run(b.name, func(t *testing.T) {
 			for _, mixed := range []bool{false, true} {
 				t.Run(fmt.Sprintf("mixed=%v", mixed), func(t *testing.T) {
 					open := b.newDB(t)
+					seed := open()
+					if err := seed.Init(); err != nil {
+						t.Fatalf("seeding Init: %v", err)
+					}
+					if _, err := rawDB(seed).Exec(`DROP TABLE graphops_schema`); err != nil {
+						t.Fatalf("dropping graphops_schema: %v", err)
+					}
 					const n = 6
 					repos := make([]schemaTestRepo, n)
 					for i := range repos {
 						repos[i] = open()
 						if mixed && i%2 == 1 {
-							SetClientSchemaForTest(repos[i], 2, 1)
+							SetClientSchemaForTest(repos[i], newerSchema, defaultMinClient)
 						}
-					}
-					if mixed {
-						t.Cleanup(func() { setRecordOrError(t, repos[0], 1, 1) })
 					}
 					var wg sync.WaitGroup
 					errs := make([]error, n)
@@ -438,9 +429,9 @@ func TestSchemaRecord_ConcurrentInit(t *testing.T) {
 						}
 					}
 					if mixed {
-						wantRecord(t, repos[0], 2, 1)
+						wantRecord(t, repos[0], newerSchema, defaultMinClient)
 					} else {
-						wantRecord(t, repos[0], 1, 1)
+						wantRecord(t, repos[0], defaultSchema, defaultMinClient)
 					}
 				})
 			}

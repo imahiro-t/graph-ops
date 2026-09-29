@@ -311,27 +311,10 @@ func (r *SQLiteRepository) CheckClientSchema() error {
 
 var _ ClientSchemaChecker = (*SQLiteRepository)(nil)
 
-// readSchemaRecord reads graphops_schema's row, nil when the table or the
-// row is not there yet. Read-only: the table's existence is looked up in
-// sqlite_master rather than created.
+// readSchemaRecord reads graphops_schema's row (readSchemaRecordFrom),
+// looking the table up in sqlite_master rather than creating it.
 func (r *SQLiteRepository) readSchemaRecord() (*schemaRecord, error) {
-	var tables int
-	if err := r.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'graphops_schema'`).Scan(&tables); err != nil {
-		return nil, err
-	}
-	if tables == 0 {
-		return nil, nil
-	}
-	var rec schemaRecord
-	err := r.db.QueryRow(`SELECT schema_version, min_client_schema_version FROM graphops_schema WHERE id = 1`).
-		Scan(&rec.SchemaVersion, &rec.MinClientSchemaVersion)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &rec, nil
+	return readSchemaRecordFrom(r.db, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'graphops_schema'`)
 }
 
 // writeSchemaRecord upserts graphops_schema's row, keeping the larger of
