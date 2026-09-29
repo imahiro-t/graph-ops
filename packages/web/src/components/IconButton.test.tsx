@@ -648,6 +648,21 @@ describe('IconButton text-named options', () => {
     expect(button).toHaveAccessibleName('Alpha');
   });
 
+  it('sets no aria-label with nameFromContent even when label is given, and shows label as the tooltip', async () => {
+    const user = userEvent.setup();
+    render(
+      <IconButton nameFromContent label="Switch project">
+        <Icon />
+        <span>Alpha</span>
+      </IconButton>
+    );
+    const button = screen.getByRole('button', { name: 'Alpha' });
+    expect(button).not.toHaveAttribute('aria-label');
+    expect(button).toHaveAccessibleName('Alpha');
+    await user.hover(button);
+    expect(openIconButtonTooltip()).toHaveTextContent(/^Switch project$/);
+  });
+
   it('opens no tooltip with neither label nor tooltip', async () => {
     const user = userEvent.setup();
     render(

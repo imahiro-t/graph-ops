@@ -153,7 +153,8 @@ function isDismissKey(e: KeyboardEvent): boolean {
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
   {
     label,
-    nameFromContent = false,
+    // No default: one would stop nameFromContent from narrowing NameProps, leaving label possibly undefined.
+    nameFromContent,
     tooltip,
     tooltipDisabled = false,
     describeWithTooltip = false,
@@ -302,7 +303,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       <button
         ref={setButtonRef}
         type={type ?? 'button'}
-        aria-label={nameFromContent || label === undefined ? undefined : submittingLabel(label, busy)}
+        aria-label={nameFromContent ? undefined : submittingLabel(label, busy)}
         aria-describedby={describedBy}
         {...submittingProps(busy)}
         {...buttonProps}
