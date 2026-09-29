@@ -60,6 +60,19 @@ info:
       reads the claim fields and never calls these endpoints: nodes are
       handed out and released as before, without a record of who holds them
       (`begin-session` and `unstick-node` say so).
+    - 1.2 also adds graph batch creation (`createGraphBatch`, tag `graph`):
+      one request that creates a ticket's seed nodes, or the rest of its
+      graph, together with their edges -- only if the ticket's graph is still
+      what graph-engine planned against, and atomically. It is what keeps two
+      members who start the same ticket at once from both creating the
+      graph. It was added to 1.2 before any release shipped it, so the
+      version stayed 1.2, and it is not part of `GraphRepository`'s 32
+      methods either. A plugin reporting 1.2 must implement it (graph-engine
+      does not fall back when it answers 404). Against 1.1 or 1.0
+      graph-engine never sends it and creates the graph one `createNode` /
+      `createEdge` at a time, as before -- which is not atomic: two sessions
+      starting the same ticket at once can both create nodes, and a failure
+      halfway leaves a partial graph.
 
     ## Transport and authentication
 
@@ -147,8 +160,8 @@ info:
        graph-engine raises its own domain error with that code and message,
        regardless of the HTTP status (so `500` with `INTERNAL_ERROR` is still
        read as `INTERNAL_ERROR`). Use the status the code suggests anyway
-       (404 for `*_NOT_FOUND`, 409 for `*_TAKEN`, 400 for validation codes,
-       500 for `INTERNAL_ERROR`).
+       (404 for `*_NOT_FOUND`, 409 for `*_TAKEN` and `GRAPH_CHANGED`, 400 for
+       validation codes, 500 for `INTERNAL_ERROR`).
     3. Anything else (an unknown code, a body that is not this JSON, an empty
        body) becomes a generic error naming the method, path and status.
 
@@ -180,6 +193,7 @@ tags:
   - name: current-project
   - name: autopilot-runs
   - name: processing-sessions
+  - name: graph
 
 paths:
   /protocol:
@@ -443,6 +457,74 @@ paths:
       responses:
         "204": { description: Cleared. }
         "200": { description: Cleared (any body is ignored). }
+        default: { $ref: "#/components/responses/Error" }
+
+  /tickets/{ticketId}/graph:
+    parameters: [{ $ref: "#/components/parameters/ticketId" }]
+    post:
+      operationId: createGraphBatch
+      tags: [graph]
+      summary: "Since 1.2. Create a ticket's seed or expanded graph in one atomic step."
+      x-since: "1.2"
+      description: |
+        graph-engine sends this instead of one `createNode` / `createEdge`
+        per row when it creates a ticket's seed nodes (the first
+        `get-executable`, `expected_node_count` 0) or the rest of its graph
+        (`expand-graph`, `expected_node_count` the seed's size, with
+        `graph_expanded_at`).
+
+        The request must be processed atomically, and serialized with every
+        other request that creates nodes for the same ticket (including
+        `createNode` and another `createGraphBatch`):
+
+        1. If the ticket does not exist, answer `TICKET_NOT_FOUND`.
+        2. Check that the ticket has exactly `expected_node_count` nodes and,
+           when the body has `graph_expanded_at`, that the ticket's
+           `graph_expanded_at` is still unset. If not, someone else created
+           the graph first: write nothing and answer 409 `GRAPH_CHANGED`.
+           graph-engine absorbs this code (the seed carries on with the
+           nodes that are there; an expansion ends with "already been
+           expanded"), so it never reaches a user.
+        3. Create `nodes` in order, minting their IDs exactly as
+           `createNode` does (recommended `<ticket id>-<seq:02d>`) and
+           ignoring `id` in the body. Every node carries a `config_id`,
+           unique within the batch, which the edges use to refer to it. A
+           `max_iterations` of 0 means 3.
+        4. Create `edges` in order, using each edge's `id` exactly as sent
+           (graph-engine mints it, as for `createEdge`). Each end is either
+           `{"node_id": ...}`, a node the ticket already has, or
+           `{"config_id": ...}`, a node of this batch. An empty `condition`
+           means `always`.
+        5. When the body has `graph_expanded_at`, set the ticket's
+           `graph_expanded_at` to it.
+
+        Give each created node and edge a `created_at` that lists them in
+        the order they were sent (for example one microsecond apart, written
+        with a fixed number of fractional digits). An edge naming a node
+        that is neither the ticket's nor the batch's, a node without a
+        `config_id`, or an edge without an `id` is `VALIDATION_ERROR`; in
+        every error case nothing may have been written.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GraphBatchRequest" }
+      responses:
+        "201":
+          description: Everything was created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraphBatchResponse" }
+        "200":
+          description: Same as 201 (any body is ignored).
+        "204":
+          description: Created (no body).
+        "409":
+          description: "`GRAPH_CHANGED`: the check in step 2 failed; nothing was written."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
         default: { $ref: "#/components/responses/Error" }
 
   /tickets/{ticketId}/artifacts:
@@ -1037,6 +1119,7 @@ components:
         - PREFIX_TAKEN
         - VALIDATION_ERROR
         - INTERNAL_ERROR
+        - GRAPH_CHANGED
 
     ErrorResponse:
       type: object
@@ -1243,6 +1326,51 @@ components:
         to_node_id: { type: string }
         condition: { $ref: "#/components/schemas/EdgeCondition" }
         created_at: { $ref: "#/components/schemas/Timestamp" }
+
+    GraphBatchNodeRef:
+      type: object
+      description: One end of a batch edge. Exactly one of the two is set.
+      properties:
+        node_id: { type: string, description: "A node the ticket already has." }
+        config_id: { type: string, description: "The config_id of a node in the same batch." }
+
+    GraphBatchEdge:
+      type: object
+      required: [id, from, to, condition]
+      properties:
+        id: { type: string, description: "Minted by graph-engine (edge-...). Store it as sent." }
+        from: { $ref: "#/components/schemas/GraphBatchNodeRef" }
+        to: { $ref: "#/components/schemas/GraphBatchNodeRef" }
+        condition: { $ref: "#/components/schemas/EdgeCondition" }
+
+    GraphBatchRequest:
+      type: object
+      required: [expected_node_count, nodes, edges]
+      properties:
+        expected_node_count:
+          type: integer
+          description: How many nodes the ticket must have for the batch to be written.
+        nodes:
+          type: array
+          description: |
+            Nodes to create, as for `createNode` (`id` and `ticket_id` are
+            ignored); `config_id` is required.
+          items: { $ref: "#/components/schemas/GraphNode" }
+        edges:
+          type: array
+          items: { $ref: "#/components/schemas/GraphBatchEdge" }
+        graph_expanded_at:
+          $ref: "#/components/schemas/Timestamp"
+          description: |
+            Present only when the graph is being expanded: set the ticket's
+            `graph_expanded_at` to it, and write the batch only if that field
+            is still unset.
+
+    GraphBatchResponse:
+      type: object
+      properties:
+        nodes: { type: array, items: { $ref: "#/components/schemas/GraphNode" } }
+        edges: { type: array, items: { $ref: "#/components/schemas/GraphEdge" } }
 
     Artifact:
       type: object

@@ -124,6 +124,7 @@ Once both seed nodes (`plan`, `plan_review`) pass, `get-executable` returns an e
      ```bash
      graph-engine expand-graph "<ticketId>" --patch /tmp/patch.json [--language <code>]
      ```
+   - If `expand-graph` fails with `ticket <ticketId>'s graph has already been expanded`, another member or session expanded this ticket first (two sessions can start the same ticket at the same moment). Nothing of yours was written, and this is not an error to fix: do not rework the patch or run `expand-graph` again. Run `get-ticket "<ticketId>"` to read the graph that is there, and carry on with it in the execution loop (step 3). The first `get-executable` needs no such handling: when two sessions seed the same ticket at once, the engine creates the seed once and both carry on with it.
    - Always include a `release` node in the patch, with `depends_on` pointing at a `release_approval` (`approval_gate`) node whose own `depends_on` correctly points at whichever node(s) are actually last in that ticket's flow. Invalid references or cycles will error out on the engine side. An `approval_gate` node needs no `is_manual: true` of its own -- the engine forces it regardless of what the patch says.
 
 ## 3. Execution loop (parallel execution via subagents)
