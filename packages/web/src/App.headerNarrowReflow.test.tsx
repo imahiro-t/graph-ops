@@ -19,12 +19,12 @@
 //   not wrap, so its time keeps shrinking next to the refresh button as it
 //   already did in English at 320-328px with a 32px root;
 // - on top of that, only for looks, in a window of 200 CSS px or less (at any
-//   text size, so the header also changes there at 100%) it pads with px-2, the Launch
-//   Claude, language and New Ticket buttons may put their label on a line
-//   under the icon (flex-wrap, centred), and the project switcher and those
-//   buttons pad less, so a label breaks between words instead of letter by
-//   letter and the switcher's arrow stays inside its frame. A px query, not
-//   the 15rem one, which also matches 320-336px with a 32px default font;
+//   text size, so the header also changes there at 100%) it pads with px-2
+//   and the project switcher and the buttons pad less, so the switcher's
+//   arrow stays inside its frame. A px query, not the 15rem one, which also
+//   matches 320-336px with a 32px default font. DFLT-00293 replaced the
+//   labels wrapping under the icons there with icons only: the texts are
+//   sr-only at 200px or less (see App.headerIconOnly.test.tsx);
 // - under 15rem the pagination group may wrap (DOM order kept), right-aligned
 //   so "next" stays at the right end, is no wider than the row, and the page
 //   number may break inside its digits. It only wraps once it is as wide as
@@ -137,17 +137,23 @@ describe.each(['ja', 'en'] as const)('top header in a 160px window at 200%% (%s)
   it.each([
     ['header.launchClaude'],
     ['header.newTicket']
-  ])('lets the %s button wrap its label in a span of its own, keeping its name', async key => {
+  ])('keeps the %s label in a span of its own, keeping its name; the label is visually hidden at 200px or less', async key => {
     await renderApp();
     const header = screen.getByRole('banner');
     const button = within(header).getByRole('button', { name: i18n.t(key) });
     expect(button).toHaveClass('min-w-0', 'max-w-full');
-    expect(button).toHaveClass(`${TINY}flex-wrap`, `${TINY}justify-center`, `${TINY}px-2`);
+    expect(button).toHaveClass(`${TINY}px-2`);
+    // DFLT-00293: the label is sr-only at 200px or less (icon only), so the
+    // label no longer goes on a line of its own there.
+    expect(button).not.toHaveClass(`${TINY}flex-wrap`, `${TINY}justify-center`);
     expect(button).not.toHaveClass('flex-wrap');
     expect(button).not.toHaveClass(`${NARROW}flex-wrap`);
+    // An IconButton (DFLT-00293): its hover wrapper is the header row's flex item.
+    expect(button.parentElement?.tagName).toBe('SPAN');
+    expect(button.parentElement).toHaveClass('inline-flex', 'min-w-0', 'max-w-full');
     const label = within(button).getByText(i18n.t(key));
     expect(label.tagName).toBe('SPAN');
-    expect(label).toHaveClass('min-w-0', BREAKS_ANYWHERE);
+    expect(label).toHaveClass('min-w-0', BREAKS_ANYWHERE, `${TINY}sr-only`);
     const icon = button.querySelector('svg') as SVGElement;
     expect(icon).toHaveClass('shrink-0');
     expect(icon).toHaveAttribute('aria-hidden', 'true');
@@ -161,12 +167,13 @@ describe.each(['ja', 'en'] as const)('top header in a 160px window at 200%% (%s)
       name: i18n.t('header.language.toggleTitle', { lang: i18n.t(`header.language.${current}`) })
     });
     expect(button).toHaveClass('min-w-0', 'max-w-full');
-    expect(button).toHaveClass(`${TINY}flex-wrap`, `${TINY}justify-center`);
+    // DFLT-00293: the text is sr-only at 200px or less, so it no longer wraps under the icon there.
+    expect(button).not.toHaveClass(`${TINY}flex-wrap`, `${TINY}justify-center`);
     expect(button).not.toHaveClass('flex-wrap');
     // IconButton's hover wrapper is the flex item of the header row.
     expect(button.parentElement).toHaveClass('inline-flex', 'min-w-0', 'max-w-full');
     const text = within(button).getByText(i18n.t(`header.language.${current}`));
-    expect(text).toHaveClass('min-w-0', BREAKS_ANYWHERE);
+    expect(text).toHaveClass('min-w-0', BREAKS_ANYWHERE, `${TINY}sr-only`);
     expect(button.querySelector('svg')).toHaveClass('shrink-0');
   });
 

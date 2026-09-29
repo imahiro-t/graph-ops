@@ -64,6 +64,13 @@
    DFLT-00294 variants sit after the other named ones, where the arbitrary
    prefixes were, so no element renders differently. An arbitrary at-rule
    variant added later comes out after all the named ones.
+   DFLT-00293 relies on upto-200px coming after the core and the other
+   named variants: in a window of 200px or less the detail panel's
+   sections pad and wrap through upto-200px: on elements that also set
+   the same property through one of those (upto-15rem:p-3 /
+   upto-15rem:px-2 with upto-200px:px-1, from-64rem:px-4 on the artifact
+   tabs, max-lg:wrap-anywhere with upto-200px:wrap-break-word), and
+   upto-200px: is meant to win there.
    tailwindVariants.test.ts pins this order down. */
 @custom-variant cq-upto-12rem (@container (max-width: 12rem));
 @custom-variant cq-from-16rem (@container (min-width: 16rem));

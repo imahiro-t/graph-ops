@@ -237,6 +237,8 @@ const rowParts = (n: GraphNode) => {
 const UNDER_80REM = 'below-80rem:';
 const FROM_80REM = 'from-80rem:';
 const NARROW_LARGE_TEXT = 'upto-15rem:';
+// DFLT-00293: a window of 200 CSS px or less (160px at 200% text).
+const TINY_WINDOW = 'upto-200px:';
 // DFLT-00290: a 32px default font in a 160px window (7.5rem and below).
 const EXTREME = 'upto-7_5rem:';
 
@@ -267,6 +269,9 @@ const ADDED = {
   // sides (DFLT-00280; 0.5rem all round before), so the status badge has
   // room for one word per line at 200% x 320px and 16px x 160px. From
   // 7.5rem down it pads 0.125rem at the sides (DFLT-00290).
+  // DFLT-00293: 0.125rem at the sides in a window of 200px or less, so at
+  // 160px / 200% the badges and the status keep at least three characters
+  // a line.
   row: [
     'flex-wrap',
     'gap-x-1',
@@ -274,6 +279,7 @@ const ADDED = {
     `${UNDER_80REM}gap-x-3`,
     `${NARROW_LARGE_TEXT}px-1`,
     `${NARROW_LARGE_TEXT}py-2`,
+    `${TINY_WINDOW}px-0.5`,
     `${EXTREME}px-0.5`
   ],
   // Without basis-auto the left group keeps flex-1's 0% basis and the right
@@ -333,7 +339,7 @@ const ADDED = {
   ]
 };
 // A prefix is allowed for an added class only if it is one of these.
-const ALLOWED_PREFIXES = [UNDER_80REM, FROM_80REM, NARROW_LARGE_TEXT, EXTREME];
+const ALLOWED_PREFIXES = [UNDER_80REM, FROM_80REM, NARROW_LARGE_TEXT, TINY_WINDOW, EXTREME];
 // px breakpoints, which do not follow the browser's default font size; none
 // of them may come back on a node row (DFLT-00253).
 const PX_PREFIXES = ['max-lg:', 'max-xl:', 'lg:', 'xl:', 'max-2xl:', '2xl:'];

@@ -194,6 +194,34 @@ describe('named rem media-query variants (index.css)', () => {
     }
   });
 
+  // DFLT-00293: in a window of 200px or less the detail panel's sections
+  // set padding and overflow-wrap through upto-200px: (named in DFLT-00294)
+  // on elements that also set them through upto-15rem:, from-64rem: or the
+  // core max-lg:, and LabelSelect's narrow panel overrides unprefixed
+  // utilities through group-data-narrow:. Both overrides depend on the later
+  // rule.
+  it('emits upto-200px after upto-15rem, from-64rem and max-lg (DFLT-00293 relies on it)', async () => {
+    const classes = [v(UPTO, 'px-2'), v(FROM64, 'px-4'), v('max-lg', 'wrap-anywhere'), v(UPTO200, 'px-1'), v(UPTO200, 'wrap-break-word')];
+    const conditions = atRuleConditions(await buildCss(classes));
+    const idx = (c: string) => conditions.indexOf(c);
+    const max200 = idx('@media(max-width:200px)');
+    expect(max200).toBeGreaterThanOrEqual(0);
+    for (const c of ['@media(max-width:15rem)', '@media(min-width:64rem)', '@media(width<1024px)']) {
+      expect(idx(c)).toBeGreaterThanOrEqual(0);
+      expect(idx(c)).toBeLessThan(max200);
+    }
+  });
+
+  it('emits group-data-narrow: rules after the plain utilities they override (DFLT-00293)', async () => {
+    const narrow = (u: string) => v(['group', 'data', 'narrow'].join('-'), u);
+    const css = await buildCss(['px-3', 'whitespace-nowrap', 'truncate', narrow('px-2'), narrow('whitespace-normal'), narrow('overflow-visible')]);
+    const at = (needle: string) => css.indexOf(needle);
+    expect(at('[data-narrow]')).toBeGreaterThan(at('.px-3'));
+    expect(at('[data-narrow]')).toBeGreaterThan(at('.whitespace-nowrap'));
+    expect(at('[data-narrow]')).toBeGreaterThan(at('.truncate'));
+    expect(css).toMatch(/:where\(\.group\)\[data-narrow\]/);
+  });
+
   it('gives upto-7_5rem a 7.5rem max-width condition (DFLT-00290)', async () => {
     const css = await buildCss([v(UPTO7_5, 'p-1')]);
     expect(css).toContain(UPTO7_5_MEDIA);
@@ -305,7 +333,9 @@ describe('named variants for the last arbitrary at-rule prefixes (DFLT-00294)', 
   it('orders them against the core screen variants, narrow:, the other named variants and one another exactly as the arbitrary prefixes did', async () => {
     // In the app:
     // - upto-200px: shares elements with lg: (App.tsx), max-sm:
-    //   (TicketItem.tsx, AutopilotControls.tsx) and upto-15rem: (TicketItem.tsx).
+    //   (TicketItem.tsx, AutopilotControls.tsx), upto-15rem: (App.tsx,
+    //   TicketItem.tsx) and, since DFLT-00293, from-64rem: and max-lg:
+    //   (TicketItem.tsx).
     // - cq-upto-12rem: shares elements with upto-15rem: (App.tsx).
     // - cq-below-8rem: shares no element with lg:, max-sm:, upto-15rem:,
     //   upto-200px: or cq-upto-12rem:.
@@ -336,5 +366,39 @@ describe('named variants for the last arbitrary at-rule prefixes (DFLT-00294)', 
     const rules = (css: string) =>
       css.slice(css.indexOf('@layer utilities')).replace(/\.[^\s{]+\s*\{/g, '.x{').replace(/\s+/g, '');
     expect(rules(after)).toEqual(rules(before));
+  });
+});
+
+describe('src/ at-rule prefixes (DFLT-00293)', () => {
+  // DFLT-00294 named the last arbitrary @media / @container prefixes, and
+  // DFLT-00293, merged after it, wrote its 200px-and-below classes with
+  // upto-200px: too. This keeps it that way: an arbitrary at-rule prefix
+  // would be emitted after every named variant (see the Ordering caveat in
+  // index.css) and so change which rule wins. Comments are stripped as in
+  // remText.test.ts; the prefix is matched by a regular expression so that
+  // Tailwind's scan of src/ picks up no class from this file.
+  const SRC = __dirname;
+  const listSources = (dir: string): string[] =>
+    fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) return full === path.join(SRC, 'test') ? [] : listSources(full);
+      return /\.(tsx?|jsx?)$/.test(entry.name) && !/\.test\.(tsx?|jsx?)$/.test(entry.name) ? [path.relative(SRC, full)] : [];
+    });
+  const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/[^\n]*/g, '$1');
+  const ARBITRARY_AT_RULE = /\[@(?:media|container)[^\]\s]*\]:/g;
+  const sources = listSources(SRC);
+
+  it('finds the source files to check', () => {
+    expect(sources).toEqual(expect.arrayContaining(['App.tsx', path.join('components', 'TicketItem.tsx')]));
+  });
+
+  it.each(sources)('%s uses no arbitrary @media / @container prefix outside comments', name => {
+    expect(stripComments(fs.readFileSync(path.join(SRC, name), 'utf8')).match(ARBITRARY_AT_RULE) ?? []).toEqual([]);
+  });
+
+  it('uses upto-200px: for the 200px-and-below classes', () => {
+    const count = (name: string) => stripComments(fs.readFileSync(path.join(SRC, name), 'utf8')).split(`${UPTO200}:`).length - 1;
+    expect(count('App.tsx')).toBeGreaterThanOrEqual(10);
+    expect(count(path.join('components', 'TicketItem.tsx'))).toBeGreaterThanOrEqual(20);
   });
 });
