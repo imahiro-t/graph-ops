@@ -18,6 +18,7 @@ import { submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
 import { LoadFailure, useFocusAfterRetry } from './LoadFailure';
 import { LoadingLine } from './LoadingLine';
+import { useSelectedTextLoader } from './useSelectedTextLoader';
 import { LIST_HEADING_CLASS, LIST_ITEM_FOCUS_CLASS, LIST_LAYOUT_CLASS, LIST_PANE_CLASS } from './listPane';
 import { Spinner } from '../Spinner';
 
@@ -41,7 +42,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const { t } = useTranslation();
   // In-app confirmation (DFLT-00148), on top of the settings modal.
   const { confirm, confirmDialog } = useConfirmDialog();
-  // See src/hooks/useLatest.ts -- keeps loadSkills/loadSelected below
+  // See src/hooks/useLatest.ts -- keeps loadSkills below
   // insensitive to language changes (F-1).
   const tRef = useLatest(t);
   const tierTextId = useId();
@@ -52,7 +53,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const [savedTierText, setSavedTierText] = useState('');
   const [mergedText, setMergedText] = useState('');
   // What the right-hand pane shows is derived at render time from the state
-  // below, the same way as NodeTypesEditor's (DFLT-00343, DFLT-00350): no
+  // below and useSelectedTextLoader's, the same way as NodeTypesEditor's (DFLT-00343, DFLT-00350): no
   // frame shows an empty editor, or the previous skill's text or error.
   //
   // Whether the skill list has been fetched once; a fetch that fails while
@@ -64,16 +65,6 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const [listLoadError, setListLoadError] = useState('');
   const [listFailures, setListFailures] = useState(0);
   const [listRetrying, setListRetrying] = useState(false);
-  // The skill whose text is in tierText/mergedText, '' while none is (see
-  // NodeTypesEditor's loadedKey).
-  const [loadedKey, setLoadedKey] = useState('');
-  // Why the selected skill's text could not be loaded, with the skill it
-  // belongs to (shown only while that skill is selected).
-  const [selectedLoadError, setSelectedLoadError] = useState<{ key: string; message: string } | null>(null);
-  const [selectedFailures, setSelectedFailures] = useState(0);
-  const [selectedRetryingKey, setSelectedRetryingKey] = useState<string | null>(null);
-  // Numbers loadSelected's requests; only the latest one's answer is used.
-  const selectedRequestRef = useRef(0);
   const [saving, setSaving] = useState(false);
   // A failed save, and a failed list re-fetch once the list has been
   // loaded: shown above the editor without hiding it.
@@ -83,7 +74,19 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const editorPaneRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const focusPaneAfterRetry = useFocusAfterRetry(() => editorPaneRef.current);
-  const focusTextareaAfterRetry = useFocusAfterRetry(() => textareaRef.current);
+  // The selected skill's text, loaded the same way as NodeTypesEditor's
+  // (see useSelectedTextLoader).
+  const selectedText = useSelectedTextLoader({
+    selected,
+    fetchText: fetchSettingsSkill,
+    onLoaded: res => {
+      setTierText(res.tier_text);
+      setSavedTierText(res.tier_text);
+      setMergedText(res.merged_text);
+    },
+    onLoadStart: () => setError(''),
+    getFocusTarget: () => textareaRef.current
+  });
 
   const isDirty = tierText !== savedTierText;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
@@ -115,47 +118,13 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
     }
   }, [tRef]);
 
-  // Resolves to whether the text was loaded (and is the latest request's).
-  // retry: see NodeTypesEditor's loadSelected.
-  const loadSelected = useCallback(async (name: string, retry = false): Promise<boolean> => {
-    if (!name) return false;
-    const request = ++selectedRequestRef.current;
-    setLoadedKey('');
-    if (!retry) setSelectedLoadError(null);
-    setError('');
-    try {
-      const res = await fetchSettingsSkill(tRef.current, name);
-      if (request !== selectedRequestRef.current) return false;
-      setTierText(res.tier_text);
-      setSavedTierText(res.tier_text);
-      setMergedText(res.merged_text);
-      setLoadedKey(name);
-      setSelectedLoadError(null);
-      return true;
-    } catch (e) {
-      if (request !== selectedRequestRef.current) return false;
-      setSelectedLoadError({ key: name, message: errorMessage(e, tRef.current('errors.UNKNOWN')) });
-      setSelectedFailures(n => n + 1);
-      return false;
-    }
-  }, [tRef]);
-
   useEffect(() => { loadSkills(); }, [loadSkills]);
-  useEffect(() => { if (selected) loadSelected(selected); }, [selected, loadSelected]);
 
   const retryList = async () => {
     setListRetrying(true);
     const ok = await loadSkills();
     setListRetrying(false);
     if (ok) focusPaneAfterRetry();
-  };
-
-  const retrySelected = async () => {
-    const name = selected;
-    setSelectedRetryingKey(name);
-    const ok = await loadSelected(name, true);
-    setSelectedRetryingKey(prev => (prev === name ? null : prev));
-    if (ok) focusTextareaAfterRetry();
   };
 
   // Switches the selected skill, asking first when the current one has
@@ -172,7 +141,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
     // next skill loads (see NodeTypesEditor's select for why).
     setTierText(savedTierText);
     onDirtyChange(false);
-    setSelectedLoadError(null);
+    selectedText.clearFailure();
     setSelected(next);
     return true;
   };
@@ -249,14 +218,14 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
           />
         ) : !listLoaded ? (
           <LoadingLine />
-        ) : selected !== '' && selectedLoadError?.key === selected ? (
+        ) : selectedText.failure ? (
           <LoadFailure
-            message={t('settings.common.loadFailed', { message: selectedLoadError.message })}
-            retrying={selectedRetryingKey === selected}
-            onRetry={() => void retrySelected()}
-            failureKey={selectedFailures}
+            message={t('settings.common.loadFailed', { message: selectedText.failure.message })}
+            retrying={selectedText.failure.retrying}
+            onRetry={selectedText.failure.onRetry}
+            failureKey={selectedText.failure.failureKey}
           />
-        ) : selected !== '' && selected !== loadedKey ? (
+        ) : selectedText.pane === 'loading' ? (
           <LoadingLine />
         ) : (
           <>
