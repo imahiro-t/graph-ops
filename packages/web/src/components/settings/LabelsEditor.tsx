@@ -153,7 +153,13 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [labels, setLabels] = useState<LabelUsage[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Starts as canEdit, i.e. true whenever there is a project whose labels
+  // load() is about to fetch -- the resolved projectId above, which falls
+  // back to the first project, not initialProjectId. The first render then
+  // already shows the loading line instead of the "no labels" empty state for
+  // a frame (DFLT-00323, DFLT-00343). With no project nothing is loaded and
+  // the loading line is not shown anyway (it is gated on canEdit).
+  const [loading, setLoading] = useState(canEdit);
   // Errors are kept apart by what raised them (DFLT-00214), so that starting
   // one action never silently removes the report of another one's failure:
   // - loadError: the list could not be fetched. Cleared only by the next
