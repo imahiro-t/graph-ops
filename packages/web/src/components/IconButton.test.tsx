@@ -618,6 +618,165 @@ describe('IconButton', () => {
   });
 });
 
+// DFLT-00285: options for a button that shows its own name as text (the
+// header's project switcher).
+describe('IconButton text-named options', () => {
+  it('leaves an existing call unchanged: named by aria-label, one-line tooltip', async () => {
+    const user = userEvent.setup();
+    render(
+      <IconButton label="Settings">
+        <Icon />
+      </IconButton>
+    );
+    const button = screen.getByRole('button', { name: 'Settings' });
+    expect(button).toHaveAttribute('aria-label', 'Settings');
+    await user.hover(button);
+    const tooltip = openIconButtonTooltip();
+    expect(tooltip).toHaveTextContent(/^Settings$/);
+    expect(tooltip.children).toHaveLength(0);
+  });
+
+  it('takes the accessible name from the content with nameFromContent', () => {
+    render(
+      <IconButton nameFromContent>
+        <Icon />
+        <span>Alpha</span>
+      </IconButton>
+    );
+    const button = screen.getByRole('button', { name: 'Alpha' });
+    expect(button).not.toHaveAttribute('aria-label');
+    expect(button).toHaveAccessibleName('Alpha');
+  });
+
+  it('sets no aria-label with nameFromContent even when label is given, and shows label as the tooltip', async () => {
+    const user = userEvent.setup();
+    render(
+      <IconButton nameFromContent label="Switch project">
+        <Icon />
+        <span>Alpha</span>
+      </IconButton>
+    );
+    const button = screen.getByRole('button', { name: 'Alpha' });
+    expect(button).not.toHaveAttribute('aria-label');
+    expect(button).toHaveAccessibleName('Alpha');
+    await user.hover(button);
+    expect(openIconButtonTooltip()).toHaveTextContent(/^Switch project$/);
+  });
+
+  it('opens no tooltip with neither label nor tooltip', async () => {
+    const user = userEvent.setup();
+    render(
+      <IconButton nameFromContent>
+        <span>Alpha</span>
+      </IconButton>
+    );
+    await user.hover(screen.getByRole('button', { name: 'Alpha' }));
+    await user.tab();
+    expect(allIconButtonTooltips()).toHaveLength(0);
+  });
+
+  it('shows a tooltip of two lines', async () => {
+    const user = userEvent.setup();
+    render(
+      <IconButton
+        nameFromContent
+        tooltip={
+          <>
+            <span className="block">Alpha</span>
+            <span className="block">/work/alpha</span>
+          </>
+        }
+      >
+        <span>Alpha</span>
+      </IconButton>
+    );
+    await user.hover(screen.getByRole('button', { name: 'Alpha' }));
+    const tooltip = openIconButtonTooltip();
+    const lines = Array.from(tooltip.children);
+    expect(lines.map(l => l.textContent)).toEqual(['Alpha', '/work/alpha']);
+    for (const line of lines) expect(line).toHaveClass('block');
+    expect(tooltip).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  // A long unbroken name ('A' x 80) or path in a narrow window: the tooltip
+  // is at most 20rem and never wider than the viewport less the 4px margin
+  // on each side (a fixed element's % resolves against the viewport, which
+  // excludes a classic scrollbar, unlike 100vw), and it breaks anywhere so
+  // its min-content width cannot push it past that cap. overflow-wrap:
+  // break-word would not lower min-content, so the unbroken word would widen
+  // the tooltip to 20rem and clip it off-screen. For text that already fits
+  // the look is unchanged. jsdom computes no layout, so the classes are
+  // pinned; the real-browser measurements are in the implementation notes.
+  it('caps the tooltip width by the viewport and lets it break anywhere', async () => {
+    const user = userEvent.setup();
+    const longName = 'A'.repeat(80);
+    render(
+      <IconButton nameFromContent tooltip={<span className="block">{longName}</span>}>
+        <span>{longName}</span>
+      </IconButton>
+    );
+    await user.hover(screen.getByRole('button', { name: longName }));
+    const tooltip = openIconButtonTooltip();
+    expect(tooltip).toHaveClass('max-w-[min(20rem,calc(100%-8px))]', 'wrap-anywhere', 'whitespace-normal', 'fixed');
+    expect(tooltip).not.toHaveClass('max-w-xs', 'wrap-break-word');
+  });
+
+  it('gives an existing one-line tooltip the same width cap and wrapping', async () => {
+    const user = userEvent.setup();
+    render(
+      <IconButton label="Settings">
+        <Icon />
+      </IconButton>
+    );
+    await user.hover(screen.getByRole('button', { name: 'Settings' }));
+    expect(openIconButtonTooltip()).toHaveClass('max-w-[min(20rem,calc(100%-8px))]', 'wrap-anywhere');
+  });
+
+  it('opens no tooltip with tooltipDisabled, even on keyboard focus, and leaves Escape alone', async () => {
+    const user = userEvent.setup();
+    const seen: boolean[] = [];
+    const listener = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') seen.push(e.defaultPrevented);
+    };
+    document.addEventListener('keydown', listener);
+    try {
+      render(
+        <IconButton label="Settings" tooltipDisabled>
+          <Icon />
+        </IconButton>
+      );
+      await user.tab();
+      const button = screen.getByRole('button', { name: 'Settings' });
+      expect(button).toHaveFocus();
+      expect(button.matches(':focus-visible')).toBe(true);
+      expect(allIconButtonTooltips()).toHaveLength(0);
+      await user.hover(button);
+      expect(allIconButtonTooltips()).toHaveLength(0);
+      await user.keyboard('{Escape}');
+      expect(seen).toEqual([false]);
+    } finally {
+      document.removeEventListener('keydown', listener);
+    }
+  });
+
+  it('opens the tooltip again once tooltipDisabled is cleared while focus stays', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <IconButton label="Settings" tooltipDisabled>
+        <Icon />
+      </IconButton>
+    );
+    await user.tab();
+    expect(allIconButtonTooltips()).toHaveLength(0);
+    rerender(
+      <IconButton label="Settings" tooltipDisabled={false}>
+        <Icon />
+      </IconButton>
+    );
+    expect(openIconButtonTooltip()).toHaveTextContent('Settings');
+  });
+});
+
 // DFLT-00206: `busy` marks the button as sending the user's own action.
 describe('IconButton busy', () => {
   it('adds aria-busy and the "(submitting)" suffix to the name while busy, keeping the tooltip text', async () => {
