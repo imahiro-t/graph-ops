@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Trans, useTranslation } from 'react-i18next';
+import { useTranslation } from 'react-i18next';
 import { Loader2, Tag } from 'lucide-react';
 import { Label } from '../types';
 import { setTicketLabels } from '../lib/labelsApi';
+import { renderWbr, splitWbr } from '../lib/wbr';
 import { errorMessage } from '../lib/apiError';
 import { submittingProps, useSubmittingLabel } from './Submitting';
 
@@ -112,12 +113,10 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
             opportunities marked: "ラベルを<wbr/>編集" in Japanese, where
             break-keep (word-break: keep-all) otherwise allows no break
             between the characters, so it wraps at "ラベルを / 編集" only.
-            It contains markup, so it is only ever rendered through Trans,
-            never with t() (escapeValue is off). The aria-label above still
-            comes from ticket.labels.edit. */}
-        <span className="min-w-0 break-keep">
-          <Trans i18nKey="ticket.labels.editVisible" components={{ wbr: <wbr /> }} />
-        </span>
+            The mark is drawn by lib/wbr, as the metadata bar's labels are,
+            never rendered as is. The aria-label above still comes from
+            ticket.labels.edit. */}
+        <span className="min-w-0 break-keep">{renderWbr(splitWbr(t('ticket.labels.editVisible')))}</span>
       </button>
 
       {/* DFLT-00292: the error is a value -- its message comes from the

@@ -46,6 +46,7 @@ import { localizedApiErrorMessage, errorMessage } from '../lib/apiError';
 import { apiFetch } from '../lib/apiFetch';
 import { isSubmitShortcut } from '../lib/keyboardShortcuts';
 import { focusIfLost } from '../lib/focusAfterRemoval';
+import { renderWbr, splitWbr } from '../lib/wbr';
 
 interface Props {
   ticket: TicketDetail;
@@ -368,33 +369,28 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
 // character and the colon sit in a whitespace-nowrap span, so the line never
 // breaks just before the colon ("クローズ理由 / :"). A Japanese label marks
 // where it may break between its words with "<wbr/>" in its *Visible
-// translation ("クローズ<wbr/>理由", "作成<wbr/>日時"): with a 200% text size
-// "クローズ理由:" is about 147px, wider than the card at 200-240px (118 /
-// 142px), and without the mark keep-all could only break it mid-word at the
-// line's end ("クローズ理 / 由:"). Only when one word is wider than the line
-// itself ("Created:" is 88px against 78px at 160px / 200%) does
-// wrap-break-word break it at the line's end rather than letting it run past
-// the card's clip. Unlike wrap-anywhere, break-word leaves the min-content
-// width alone, so a flex row cannot squeeze the label into mid-word breaks
-// (DFLT-00276's "Close / d / reaso / n:"). Never put wrap-anywhere on a label
+// translation ("クローズ<wbr/>理由", "作成<wbr/>日時"; see lib/wbr): with a
+// 200% text size "クローズ理由:" is about 147px, wider than the card at
+// 200-240px (118 / 142px), and without the mark keep-all could only break it
+// mid-word at the line's end ("クローズ理 / 由:").
+// A label never breaks inside a word, not even when one word is wider than
+// the metadata bar: at 160px / 200% "Created:" is 88px and "クローズ" 93px
+// against a 78px bar, but the bar sits inside the details panel's padding and
+// the card's clip is 17px further right, so the unbroken word runs into that
+// padding and still ends inside the clip (about R129 / R134 against R136).
+// Breaking it there ("Create / d:", "クロー / ズ理由:") only traded a readable
+// label for nothing. So there is no overflow-wrap here, and no min-w-0: as a
+// flex item the label keeps its longest word's width, and the bar's
+// measurements show where it really ends. Never put wrap-anywhere on a label
 // or its ancestors.
-// `text` is plain text apart from those "<wbr/>" marks, which come from this
-// app's own translation files; it is split on them rather than parsed as
-// markup (escapeValue is off, so it must never be rendered as is).
-const WBR = '<wbr/>';
 const MetaLabel: React.FC<{ text: string }> = ({ text }) => {
-  const words = text.split(WBR);
+  const words = splitWbr(text);
   const lastWord = Array.from(words.pop() ?? '');
   const last = lastWord.pop() ?? '';
   words.push(lastWord.join(''));
   return (
-    <span className="min-w-0 break-keep wrap-break-word">
-      {words.map((w, i) => (
-        <React.Fragment key={i}>
-          {i > 0 && <wbr />}
-          {w}
-        </React.Fragment>
-      ))}
+    <span className="break-keep">
+      {renderWbr(words)}
       <span className="whitespace-nowrap">{last}:</span>
     </span>
   );

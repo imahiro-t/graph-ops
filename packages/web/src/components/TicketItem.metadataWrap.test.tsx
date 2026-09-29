@@ -20,12 +20,18 @@
 // ("Create / d:", "Edit / labe / ls"), and the closed reason's label could
 // break before its colon ("クローズ理由 / :"). wrap-anywhere now sits on the
 // values only (the date, the closed reason, each chip, and the label save
-// error). Each label is a MetaLabel -- break-keep wrap-break-word, with its
-// last character and colon in a whitespace-nowrap span, and a <wbr> between
-// the words of a Japanese label ("クローズ<wbr>理由") -- and the "Edit labels"
+// error). Each label is a MetaLabel -- break-keep, with its last character
+// and colon in a whitespace-nowrap span, and a <wbr> between the words of a
+// Japanese label ("クローズ<wbr>理由") -- and never breaks inside a word: at
+// 160px / 200% a word wider than the bar ("Created:", "クローズ") still ends
+// inside the card's clip when left whole, so it gets no overflow-wrap (QA
+// review R1 of DFLT-00292). The "Edit labels"
 // button is flex-wrap wrap-break-word with its name in a break-keep span
 // ("ラベルを<wbr>編集" in Japanese). LabelSelect's wrapper is flex-wrap so a
 // save error goes to its own line instead of squeezing the button.
+// The plain keys (ticketItem.createdAt, ticketItem.close.reasonLabel,
+// ticket.labels.edit) are the baseline the drawn *Visible text is compared
+// with here, so keep them even where the UI draws the *Visible key instead.
 // jsdom does no layout, so this checks the classes; the widths themselves
 // were measured in a real browser (see the ticket's implementation notes).
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -85,8 +91,9 @@ const expectMetaLabel = (label: HTMLElement, text: string, words: string[] = [te
     expect(wbr.previousSibling?.textContent).toBe(words[i]);
   });
   expect(label.textContent).not.toContain('<wbr');
-  expect(label).toHaveClass('min-w-0', 'break-keep', 'wrap-break-word');
-  expect(label).not.toHaveClass('wrap-anywhere');
+  expect(label).toHaveClass('break-keep');
+  // Never broken inside a word, and keeps its longest word's width as a flex item.
+  for (const cls of ['wrap-anywhere', 'wrap-break-word', 'min-w-0']) expect(label).not.toHaveClass(cls);
   const tails = label.querySelectorAll('.whitespace-nowrap');
   expect(tails).toHaveLength(1);
   expect(tails[0].textContent).toBe(`${Array.from(text).pop()}:`);
@@ -117,7 +124,7 @@ afterEach(async () => {
   await i18n.changeLanguage('ja');
 });
 
-describe.each(['ja', 'en'])('TicketItem metadata bar creation date (%s)', lng => {
+describe.each(['ja', 'en'])('TicketItem metadata bar wrapping (%s)', lng => {
   it('breaks only the date itself inside a word and keeps the label whole (DFLT-00276, DFLT-00292)', async () => {
     await i18n.changeLanguage(lng);
     renderTicket();
