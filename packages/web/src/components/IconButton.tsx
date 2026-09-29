@@ -59,7 +59,8 @@
 //   for (at some header widths the tooltip lands right on top of it, and a
 //   pointer stopping on the tooltip would keep it open by the rule above).
 //   Moving from the button onto an open tooltip, and keyboard focus, open
-//   (or keep open) without delay.
+//   (or keep open) without delay. An Escape during the delay cancels the
+//   open (see Escape below).
 // - A pointerdown on the tooltip ends its hover-opened state (DFLT-00322),
 //   so a tooltip that does end up covering something can be pushed away
 //   with one press. It does not close a focus-opened tooltip, and the press
@@ -95,12 +96,23 @@
 //     defaultPrevented key, leaves a surrounding modal open for that press.
 //   - With focus elsewhere (the tooltip was opened by hover alone, which is
 //     the only way to open one on a natively disabled button), a document
-//     listener registered only while the tooltip is open closes it without
-//     preventDefault, so the press still does whatever it does where focus
-//     is -- cancelling an input's edit, closing a modal. It listens in the
+//     listener registered only while the tooltip is open (or an open is
+//     scheduled, see the next item) closes it without preventDefault, so
+//     the press still does whatever it does where focus is -- cancelling an
+//     input's edit, closing a modal. It listens in the
 //     capture phase so a handler that stops propagation cannot keep the
 //     tooltip from being dismissed.
-//   With the tooltip closed, Escape is left alone as before.
+// - Escape pressed during the open delay, before the tooltip appears,
+//   cancels the scheduled open (DFLT-00340): the tooltip does not open for
+//   that hover, and opens again after the delay once the pointer has left
+//   and come back. This works with focus inside the button (the wrapper's
+//   keydown handler) and outside it (the same capture-phase document
+//   listener, registered while an open is scheduled as well). Nothing is on
+//   screen yet, so neither calls preventDefault and the press still does
+//   whatever it does -- closing a surrounding modal, cancelling an input's
+//   edit. An Escape during composition cancels nothing, and with
+//   `tooltipDisabled` Escape is not handled at all (see below). Any other
+//   Escape with the tooltip closed is left alone as before.
 //
 // - `busy` marks the button as sending the user's own action (DFLT-00206,
 //   see Submitting.tsx): aria-busy="true" and the shared "(submitting)"
@@ -212,7 +224,14 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
   const tooltipId = useId();
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const open = !tooltipDisabled && tooltipContent != null && (hovered || focused);
+  // Whether a hover open is scheduled (openTimerRef is set), kept as state so
+  // the document Escape listener can be registered for it (see the header
+  // comment on Escape).
+  const [openPending, setOpenPending] = useState(false);
+  const canOpen = !tooltipDisabled && tooltipContent != null;
+  const open = canOpen && (hovered || focused);
+  // A scheduled open that an Escape cancels.
+  const openPendingActive = canOpen && openPending && !open;
   const [position, setPosition] = useState<Position | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const tooltipRef = useRef<HTMLSpanElement | null>(null);
@@ -246,6 +265,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     if (openTimerRef.current !== null) {
       clearTimeout(openTimerRef.current);
       openTimerRef.current = null;
+      setOpenPending(false);
     }
   }, []);
 
@@ -269,8 +289,10 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       if (openTimerRef.current !== null) return;
       openTimerRef.current = setTimeout(() => {
         openTimerRef.current = null;
+        setOpenPending(false);
         setHover(true);
       }, OPEN_DELAY_MS);
+      setOpenPending(true);
     },
     [cancelClose, cancelOpen, setHover]
   );
@@ -298,12 +320,13 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     setFocused(false);
   }, [endHover]);
 
+  // On unmount only the timers are cleared: there is nothing left to render.
   useEffect(
     () => () => {
-      cancelClose();
-      cancelOpen();
+      if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current);
+      if (openTimerRef.current !== null) clearTimeout(openTimerRef.current);
     },
-    [cancelClose, cancelOpen]
+    []
   );
 
   const recordPointer = (e: React.PointerEvent) => {
@@ -384,15 +407,25 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
   }, [open, tooltipContent, updatePosition]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLSpanElement>) => {
-    if (!open || !isDismissKey(e.nativeEvent)) return;
-    e.preventDefault();
-    dismiss();
+    if (!isDismissKey(e.nativeEvent)) return;
+    if (open) {
+      e.preventDefault();
+      dismiss();
+    } else if (openPendingActive) {
+      // Nothing is on screen yet, so the press is not marked as handled.
+      cancelOpen();
+    }
   };
 
-  // Escape pressed with focus outside the button (a tooltip opened by hover
-  // alone). A press inside the button is handleKeyDown's.
+  // Escape pressed with focus outside the button (a tooltip opened, or about
+  // to be opened, by hover alone). A press inside the button is
+  // handleKeyDown's. Neither case calls preventDefault. With focus outside,
+  // `focused` is false, so for a scheduled open dismiss() only cancels the
+  // timer; one listener therefore serves both, and it stays registered
+  // across the scheduled open turning into an open tooltip.
+  const listenForEscape = open || openPendingActive;
   useEffect(() => {
-    if (!open) return;
+    if (!listenForEscape) return;
     const onDocumentKeyDown = (e: KeyboardEvent) => {
       if (!isDismissKey(e)) return;
       if (e.target instanceof Node && wrapperRef.current?.contains(e.target)) return;
@@ -400,7 +433,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     };
     document.addEventListener('keydown', onDocumentKeyDown, true);
     return () => document.removeEventListener('keydown', onDocumentKeyDown, true);
-  }, [open, dismiss]);
+  }, [listenForEscape, dismiss]);
 
   const ariaDisabled = buttonProps['aria-disabled'] === true || buttonProps['aria-disabled'] === 'true';
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {

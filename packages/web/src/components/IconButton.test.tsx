@@ -1236,6 +1236,179 @@ describe('IconButton hover tooltip after touch and crossing pointers', () => {
     });
   });
 
+  // DFLT-00340: an Escape pressed during the open delay cancels the
+  // scheduled open, without marking the press as handled.
+  describe('Escape during the open delay', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const escape = (el: Element, init: KeyboardEventInit = {}) => fireEvent.keyDown(el, { key: 'Escape', ...init });
+
+    function startHovering(button: HTMLElement) {
+      pointerIn(button, 'mouse');
+      mouseIn(button);
+      advance(OPEN_DELAY_MS - 200);
+      expect(allIconButtonTooltips()).toHaveLength(0);
+    }
+
+    // A focus that is not :focus-visible (a mouse click's), which jsdom
+    // would otherwise match.
+    function focusWithoutFocusVisible(button: HTMLElement) {
+      const matches = vi.spyOn(button, 'matches').mockImplementation(sel => sel !== ':focus-visible');
+      act(() => button.focus());
+      matches.mockRestore();
+      expect(button).toHaveFocus();
+    }
+
+    function keydownCaptureListeners(spy: { mock: { calls: unknown[][] } }) {
+      return spy.mock.calls.filter(([type, , capture]) => type === 'keydown' && capture === true);
+    }
+
+    it('does not open for that hover with focus on the body, and leaves the press unhandled', () => {
+      const { button } = renderButton();
+      startHovering(button);
+      expect(escape(document.body)).toBe(true);
+      advance(OPEN_DELAY_MS + 200);
+      expect(allIconButtonTooltips()).toHaveLength(0);
+    });
+
+    it('does not open with focus in another input, whose own Escape handling still sees an unhandled press', () => {
+      const seen: boolean[] = [];
+      render(
+        <>
+          <input aria-label="field" onKeyDown={e => seen.push(e.defaultPrevented)} />
+          <IconButton label="Language">
+            <Icon />
+          </IconButton>
+        </>
+      );
+      const input = screen.getByRole('textbox', { name: 'field' });
+      act(() => input.focus());
+      startHovering(screen.getByRole('button', { name: 'Language' }));
+      expect(escape(input)).toBe(true);
+      expect(seen).toEqual([false]);
+      advance(OPEN_DELAY_MS + 200);
+      expect(allIconButtonTooltips()).toHaveLength(0);
+    });
+
+    it('does not open with focus inside the button, and the press still reaches its ancestors unhandled', () => {
+      const seen: boolean[] = [];
+      render(
+        <div onKeyDown={e => seen.push(e.defaultPrevented)}>
+          <IconButton label="Language">
+            <Icon />
+          </IconButton>
+        </div>
+      );
+      const button = screen.getByRole('button', { name: 'Language' });
+      focusWithoutFocusVisible(button);
+      startHovering(button);
+      expect(escape(button)).toBe(true);
+      expect(seen).toEqual([false]);
+      advance(OPEN_DELAY_MS + 200);
+      expect(allIconButtonTooltips()).toHaveLength(0);
+    });
+
+    it('stays closed while the pointer keeps resting on the button, and opens after the delay once it leaves and comes back', () => {
+      const { button, outside } = renderButton();
+      startHovering(button);
+      escape(document.body);
+      firePointer(button, 'pointermove', 'mouse');
+      fireMouse(button, 'mousemove');
+      // Moving within the wrapper (onto the icon) is no new mouseenter.
+      const icon = screen.getAllByTestId('icon')[0];
+      act(() => {
+        icon.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, relatedTarget: button }));
+      });
+      advance(OPEN_DELAY_MS + 200);
+      expect(allIconButtonTooltips()).toHaveLength(0);
+
+      mouseOut(button, outside);
+      pointerIn(button, 'mouse');
+      mouseIn(button);
+      advance(OPEN_DELAY_MS - 1);
+      expect(allIconButtonTooltips()).toHaveLength(0);
+      advance(1);
+      expect(openIconButtonTooltip()).toHaveTextContent('Language');
+    });
+
+    it.each([
+      ['isComposing', { isComposing: true }],
+      ['keyCode 229', { keyCode: 229 }]
+    ] as const)('cancels nothing on an Escape during IME composition (%s), with focus outside or inside', (_name, init) => {
+      const { button, outside } = renderButton();
+      startHovering(button);
+      escape(document.body, init);
+      advance(200);
+      expect(openIconButtonTooltip()).toHaveTextContent('Language');
+
+      mouseOut(button, outside);
+      advance(150);
+      expect(openIconButtonTooltips()).toHaveLength(0);
+      focusWithoutFocusVisible(button);
+      startHovering(button);
+      expect(escape(button, init)).toBe(true);
+      advance(200);
+      expect(openIconButtonTooltip()).toHaveTextContent('Language');
+    });
+
+    it('still opens at once on a :focus-visible focus after the cancel', () => {
+      const { button } = renderButton();
+      startHovering(button);
+      escape(document.body);
+      act(() => button.focus());
+      expect(openIconButtonTooltip()).toHaveTextContent('Language');
+    });
+
+    it('listens on the document only while an open is scheduled or the tooltip is open', () => {
+      const add = vi.spyOn(document, 'addEventListener');
+      const remove = vi.spyOn(document, 'removeEventListener');
+      try {
+        const { button, outside } = renderButton();
+        expect(keydownCaptureListeners(add)).toHaveLength(0);
+        startHovering(button);
+        const [first] = keydownCaptureListeners(add);
+        expect(first).toBeDefined();
+        escape(document.body);
+        expect(remove).toHaveBeenCalledWith('keydown', first[1], true);
+
+        // A scheduled open that turns into an open tooltip keeps one listener.
+        mouseOut(button, outside);
+        pointerIn(button, 'mouse');
+        mouseIn(button);
+        advance(OPEN_DELAY_MS);
+        expect(openIconButtonTooltips()).toHaveLength(1);
+        const registered = keydownCaptureListeners(add);
+        expect(registered).toHaveLength(2);
+        mouseOut(button, outside);
+        advance(150);
+        expect(remove).toHaveBeenCalledWith('keydown', registered[1][1], true);
+        expect(keydownCaptureListeners(remove)).toHaveLength(2);
+      } finally {
+        add.mockRestore();
+        remove.mockRestore();
+      }
+    });
+
+    it('leaves Escape alone with tooltipDisabled', () => {
+      const add = vi.spyOn(document, 'addEventListener');
+      try {
+        const { button } = renderButton({ tooltipDisabled: true });
+        focusWithoutFocusVisible(button);
+        pointerIn(button, 'mouse');
+        mouseIn(button);
+        expect(escape(button)).toBe(true);
+        expect(keydownCaptureListeners(add)).toHaveLength(0);
+      } finally {
+        add.mockRestore();
+      }
+    });
+  });
+
   describe('keyboard focus', () => {
     it('opens on :focus-visible focus after a tap, without delay', async () => {
       const user = userEvent.setup();
