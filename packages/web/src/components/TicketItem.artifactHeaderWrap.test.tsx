@@ -19,7 +19,7 @@ import i18n from '../i18n';
 import { Artifact, ArtifactType, GraphNode, TicketDetail } from '../types';
 import { TicketItem } from './TicketItem';
 
-const art = (id: string, name: string, type: ArtifactType, content: string): Artifact => ({
+const art = (id: string, name: string, type: ArtifactType, content: string | null): Artifact => ({
   id,
   ticket_id: 'TEST-00334',
   node_id: 'TEST-00334-01',
@@ -33,8 +33,16 @@ const ARTIFACTS: Artifact[] = [
   art('a-plan', '実行計画（成果物見出し行の折り返し）', 'text', '# 計画\n'),
   art('a-gherkin', 'Gherkin 仕様（見出し行の折り返し）', 'gherkin', 'Feature: 仕様\n'),
   art('a-html', 'test-report-cmp-320-200-node06-clip', 'html', '<p>report</p>'),
-  art('a-short', '計画', 'text', '短い\n')
+  art('a-short', '計画', 'text', '短い\n'),
+  // Types the node detail shows no icon for, and an artifact with no stored
+  // bytes (no Download link, so its right group holds only the badge).
+  art('a-image', 'screenshot-320-200-node-detail', 'image', 'iVBORw0KGgo='),
+  art('a-json', '計測結果（JSON）', 'json', '{"clip":0}'),
+  art('a-empty', '内容のない成果物', 'text', null)
 ];
+const WITH_CONTENT = ARTIFACTS.filter(a => a.content);
+// The types the node detail header shows an icon for.
+const TYPES_WITH_NODE_ICON: ArtifactType[] = ['gherkin', 'html', 'text'];
 
 const NODE: GraphNode = {
   id: 'TEST-00334-01',
@@ -115,12 +123,10 @@ function headerParts(name: string, scope: HTMLElement = document.body) {
   const row = nameGroup.parentElement!;
   const card = row.parentElement!;
   const rightGroup = row.children[1] as HTMLElement;
-  const link = within(rightGroup).getByRole('link', { name: i18n.t('ticketItem.download') });
-  const label = within(link).getByText(i18n.t('ticketItem.download'));
-  const linkIcon = link.querySelector('svg')!;
+  const link = within(rightGroup).queryByRole('link', { name: i18n.t('ticketItem.download') });
   const badge = rightGroup.lastElementChild as HTMLElement;
   const icon = nameGroup.querySelector('svg');
-  return { nameEl, nameGroup, row, card, rightGroup, link, label, linkIcon, badge, icon };
+  return { nameEl, nameGroup, row, card, rightGroup, link, badge, icon };
 }
 
 // The expanded node's accordion body (other places on the page, such as the
@@ -152,22 +158,37 @@ describe('DFLT-00334 node artifact header rows wrap under 80rem', () => {
       expect(classes(p.rightGroup).some(c => c === 'below-80rem:justify-end' || c === 'below-80rem:justify-end-safe')).toBe(true);
       expectClasses(p.badge, ['below-80rem:min-w-0', 'below-80rem:wrap-break-word']);
       expect(p.badge).toHaveTextContent(a.type);
-      for (const el of [p.row, p.nameGroup, p.nameEl, p.rightGroup, p.badge, p.link]) expectNoClasses(el, TRUNCATING);
+      for (const el of [p.row, p.nameGroup, p.nameEl, p.rightGroup, p.badge]) expectNoClasses(el, TRUNCATING);
       // Card and accordion padding are left alone (the fix is in the row).
       expectClasses(p.card, ['p-2.5']);
       expectClasses(p.card.parentElement!, ['p-3']);
     }
   });
 
-  it('keeps the type icon from shrinking', () => {
+  it('keeps the type icon from shrinking, and shows none for image or json', () => {
     renderTicket();
     openNodeDetail();
 
-    for (const a of ARTIFACTS.filter(x => x.type !== 'image' && x.type !== 'json')) {
+    for (const a of ARTIFACTS) {
       const { icon } = headerParts(a.name, nodePanel());
-      expect(icon).not.toBeNull();
-      expectClasses(icon!, ['shrink-0', 'w-3.5', 'h-3.5']);
+      if (TYPES_WITH_NODE_ICON.includes(a.type)) {
+        expect(icon, a.name).not.toBeNull();
+        expectClasses(icon!, ['shrink-0', 'w-3.5', 'h-3.5']);
+      } else {
+        expect(icon, a.name).toBeNull();
+      }
     }
+  });
+
+  it('leaves only the badge in the right group when there is nothing to download', () => {
+    renderTicket();
+    openNodeDetail();
+
+    const p = headerParts('内容のない成果物', nodePanel());
+    expect(p.link).toBeNull();
+    expect(p.rightGroup.children).toHaveLength(1);
+    expect(p.badge).toHaveTextContent('text');
+    expectClasses(p.rightGroup, ['below-80rem:flex-wrap', 'below-80rem:ml-auto', 'below-80rem:min-w-0', 'below-80rem:max-w-full']);
   });
 });
 
@@ -195,28 +216,29 @@ describe('DFLT-00334 Artifacts tab header rows wrap under 80rem', () => {
 
 describe('DFLT-00334 the Download link may shrink to its row', () => {
   const checkLink = (p: ReturnType<typeof headerParts>, id: string) => {
-    expectClasses(p.link, ['flex', 'items-center', 'gap-1', 'below-80rem:min-w-0']);
-    expect(p.label).not.toBe(p.link);
-    expectClasses(p.label, ['below-80rem:min-w-0', 'below-80rem:wrap-break-word']);
-    for (const el of [p.link, p.label]) expectNoClasses(el, [...TRUNCATING, 'wrap-anywhere']);
-    if (classes(p.label).includes('break-keep') || classes(p.label).includes('below-80rem:break-keep')) {
-      expectClasses(p.label, ['below-80rem:wrap-break-word']);
-    }
-    expectClasses(p.linkIcon, ['shrink-0']);
-    expect(p.link).toHaveAttribute('href', `/api/artifacts/${id}/content?download=1`);
+    const link = p.link!;
+    expect(link, id).not.toBeNull();
+    const label = within(link).getByText(i18n.t('ticketItem.download'));
+    expectClasses(link, ['flex', 'items-center', 'gap-1', 'below-80rem:min-w-0']);
+    expect(label).not.toBe(link);
+    expectClasses(label, ['below-80rem:min-w-0', 'below-80rem:wrap-break-word']);
+    // break-keep would keep 「ダウンロード」 (164px) on one line in an 80px row.
+    for (const el of [link, label]) expectNoClasses(el, [...TRUNCATING, 'wrap-anywhere', 'break-keep', 'below-80rem:break-keep']);
+    expectClasses(link.querySelector('svg')!, ['shrink-0']);
+    expect(link).toHaveAttribute('href', `/api/artifacts/${id}/content?download=1`);
   };
 
   it('in the node detail', () => {
     renderTicket();
     openNodeDetail();
-    for (const a of ARTIFACTS) checkLink(headerParts(a.name, nodePanel()), a.id);
+    for (const a of WITH_CONTENT) checkLink(headerParts(a.name, nodePanel()), a.id);
   });
 
   it('in the Artifacts tab', () => {
     renderTicket();
     openArtifactsTab();
     const panel = artifactsPanel();
-    for (const a of ARTIFACTS) checkLink(headerParts(a.name, panel), a.id);
+    for (const a of WITH_CONTENT) checkLink(headerParts(a.name, panel), a.id);
   });
 
   it('keeps its accessible name in English', async () => {
@@ -225,7 +247,7 @@ describe('DFLT-00334 the Download link may shrink to its row', () => {
     try {
       renderTicket();
       openNodeDetail();
-      expect(screen.getAllByRole('link', { name: 'Download' })).toHaveLength(ARTIFACTS.length);
+      expect(screen.getAllByRole('link', { name: 'Download' })).toHaveLength(WITH_CONTENT.length);
     } finally {
       await i18n.changeLanguage(previous);
     }
