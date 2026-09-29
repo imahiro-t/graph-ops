@@ -80,8 +80,8 @@ describe('App header layout on narrow screens', () => {
     expect(classesOf(logoGroup)).toEqual(expect.arrayContaining(['flex-wrap', 'min-w-0']));
 
     const newTicket = within(header).getByRole('button', { name: i18n.t('header.newTicket') });
-    // New Ticket is an IconButton (DFLT-00293): its hover wrapper span sits between.
-    const buttonGroup = newTicket.parentElement!.parentElement as HTMLElement;
+    // New Ticket is a plain <button> (DFLT-00319), a flex item of the group itself.
+    const buttonGroup = newTicket.parentElement as HTMLElement;
     expect(buttonGroup.parentElement).toBe(firstRow);
     expect(classesOf(buttonGroup)).toEqual(expect.arrayContaining(['flex', 'flex-wrap', 'min-w-0']));
   });

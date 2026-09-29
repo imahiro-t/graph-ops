@@ -101,7 +101,7 @@ const MAX_HEADER_LABELS = 3;
 // 2048px at 32px), so large text gets the wrapping layout instead of a
 // single line that ran up to 480px past the panel (see the tab row below).
 const artifactTabClass = (active: boolean) =>
-  `below-64rem:min-w-0 py-3 px-3 from-64rem:px-4 upto-15rem:px-2 upto-15rem:py-2 upto-200px:px-1 text-xs font-bold border-b-2 flex upto-15rem:flex-wrap items-center gap-x-2 gap-y-1 transition ${
+  `below-64rem:min-w-0 py-3 px-3 from-64rem:px-4 upto-15rem:px-2 upto-15rem:py-2 text-xs font-bold border-b-2 flex upto-15rem:flex-wrap items-center gap-x-2 gap-y-1 transition ${
     active
       ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
       : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
@@ -379,16 +379,14 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
 // exposed it as several texts ("作成" "日" "時:", "Create" "d:"). Keep it a
 // single template literal -- adjacent JSX children ({a}{b}:) are separate
 // text nodes.
-// One word may be wider than the metadata bar (at 160px / 200% "Created:" is
-// 88px and "クローズ" 93px against a 78px bar). The bar sits inside the
+// One word may be wider than the metadata bar in a narrow window with large
+// text. The bar sits inside the
 // details panel's padding (--details-pad), and the card's clip is the
 // panel's outer edge, so the word may run into that padding: max-width is
 // the item's width plus the padding, and the label ends inside the clip.
 // Only a word wider than that breaks inside itself (wrap-break-word, which
 // unlike wrap-anywhere leaves the min-content width alone, so a word that fits
-// is never broken): a font whose kana are 1em wide makes "クローズ" 96px at
-// 160px / 200%, and a narrower window or a larger text size makes any word
-// too wide. inline-block lets max-width apply in the date item, where the
+// is never broken). inline-block lets max-width apply in the date item, where the
 // label is inline; in the other items it is a flex item. No min-w-0 and never
 // wrap-anywhere, on the label or its ancestors: the label's box then matches
 // its text, so measurements show where it really ends.
@@ -485,8 +483,8 @@ export const TicketItem: React.FC<Props> = ({
 
   // DFLT-00241: below lg the graph keeps a floor width (max-lg:min-w-[180px]
   // on the <svg>) and its box scrolls sideways inside the panel when the
-  // panel is narrower than that -- 160px wide, or 320px with a 200% default
-  // font. Only while it actually scrolls does the box become a named,
+  // panel is narrower than that -- 320px with a 200% default font, say.
+  // Only while it actually scrolls does the box become a named,
   // focusable region, so keyboard users can scroll it; from lg up (where it
   // never scrolls) and on ordinary phones it adds no tab stop.
   const graphScrollRef = useRef<HTMLDivElement>(null);
@@ -1505,8 +1503,8 @@ export const TicketItem: React.FC<Props> = ({
               up the chevron or the badges. handleHeaderClick keeps such a
               selection from toggling the row.
               DFLT-00251: it stays on one line (whitespace-nowrap) wherever
-              it fits; under 15rem (a 160px window at 200% zoom, or a large
-              default font on a narrow screen) it may break inside the ID
+              it fits; under 15rem (a large default font on a narrow
+              screen, such as 320px at 200%) it may break inside the ID
               instead of running past the card's overflow-clip, and it is
               never wider than the row (max-w-full). */}
           <span
@@ -1550,7 +1548,7 @@ export const TicketItem: React.FC<Props> = ({
               DFLT-00251: no whitespace-nowrap. As a shrink-0 item it is
               still laid out at its full one-line width wherever that fits,
               but "AWAITING FIX" / "リファイン済み" were wider than the row
-              at 320px with a 32px root font and at 160px, and the card's
+              at 320px with a 32px root font, and the card's
               overflow-clip cut them off. Now it is never wider than the row
               and wraps inside itself there. Not only under 15rem: a larger
               root font size set on the page does not move the rem query
@@ -1690,7 +1688,7 @@ export const TicketItem: React.FC<Props> = ({
               (assign button on an unassigned ticket). */}
           {(ticket.assignee || myName) && (
             // DFLT-00251: the chips, the button and the error text may wrap
-            // (a long name ran out of the card at 160px), and none of them
+            // (a long name could run out of the card), and none of them
             // is wider than the row. Nothing changes while they fit.
             <span
               data-testid="ticket-header-assignee"
@@ -1899,32 +1897,7 @@ export const TicketItem: React.FC<Props> = ({
           follow) still leaves the Send button room for a one-line label at
           320/360px. The 15rem query stays for a very large default font
           (over about 267%), where it matches above 640px too. From sm up, at
-          a normal default font size, nothing changes. DFLT-00259: in a window
-          of 200 CSS px or less (160px at a 200% text size) the detail panel
-          and the Action Footer pad with p-2, which gives the autopilot
-          column's untrusted-folder notice room for its dismiss button (it
-          had 0px of content width, see AutopilotControls.tsx). A px query:
-          the 15rem one also matches 320-336px with a 32px default font.
-          DFLT-00290: that is the named upto-200px: now (same condition; the
-          arbitrary [@media(max-width:200px)]: came out after every named
-          variant and would have beaten upto-7_5rem:p-1), and from 7.5rem down
-          (a 32px default font in a 240px window or narrower, 120px or
-          narrower at 16px) both pad with p-1, like the page, the node list's
-          panel body and the node rows, so a node row keeps room for its
-          status badge (at 32px x 160px it had 0px of content width).
-          DFLT-00293: there the sections below (parent/children, autopilot
-          decisions, description, graph, nodes/artifacts, Action Footer)
-          showed their text one or two characters a line: their rem
-          paddings, nested four deep, left a 14-46px column at a 32px root.
-          In a window of 200px or less (and only there) this panel pads
-          0.25rem at the sides (px-1), the cards inside it px-1, the
-          Markdown box, the tab panel and the node rows px-0.5, and the
-          buttons and badges inside them less; rows of an icon or label and
-          a value may wrap (or stack), and headings break inside a word only
-          when the word is wider than the line (wrap-break-word). With the
-          page's own px-1 (App.tsx) every text keeps at least three
-          characters a line at 160px / 200%, measured in Japanese and
-          English. The graph keeps scrolling sideways in its own box.
+          a normal default font size, nothing changes.
           DFLT-00295: the side padding is the --details-pad variable, set
           with the same variants in the same order (so the same one wins),
           because MetaLabel lets a label run into the right padding: its
@@ -1933,18 +1906,17 @@ export const TicketItem: React.FC<Props> = ({
       {isExpanded && (
         <div
           data-testid="ticket-details"
-          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 [--details-pad:1.5rem] max-sm:[--details-pad:0.75rem] upto-15rem:[--details-pad:0.75rem] upto-200px:[--details-pad:0.25rem] upto-7_5rem:[--details-pad:0.25rem] px-(--details-pad) py-6 max-sm:py-3 upto-15rem:py-3 upto-200px:py-2 upto-7_5rem:py-1 space-y-6"
+          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 [--details-pad:1.5rem] max-sm:[--details-pad:0.75rem] upto-15rem:[--details-pad:0.75rem] px-(--details-pad) py-6 max-sm:py-3 upto-15rem:py-3 space-y-6"
         >
           {/* Metadata Bar */}
           <div className="flex flex-wrap items-center gap-y-2 gap-x-6 text-xs text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800 pb-3">
             {/* DFLT-00295: the label and its colon are one string, so one
                 text node (and one text in the accessibility tree), not
                 "ノード数" and ": " as two. This item and the loop-back line
-                are min-w-0 wrap-break-word: under 160px or over 200% text
-                one word ("Nodes:", "Loop-back") was wider than the bar and
-                ran past the card's clip (R114.5 against R95 at 120px / 200%);
-                it now breaks inside itself only then. Whenever a word fits
-                nothing changes. */}
+                are min-w-0 wrap-break-word: a word ("Nodes:", "Loop-back")
+                wider than the bar breaks inside itself instead of running
+                past the card's clip. Whenever a word fits nothing
+                changes. */}
             <div className="min-w-0 wrap-break-word">
               {`${t('ticketItem.nodeCount')}: `}<span className="font-semibold text-slate-800 dark:text-slate-200">{totalNodes}</span>
             </div>
@@ -1953,11 +1925,10 @@ export const TicketItem: React.FC<Props> = ({
                 {t('ticketItem.loopEdges', { count: loopEdges.length })}
               </div>
             )}
-            {/* DFLT-00276: at 160px wide with a 200% font the mono date's
-                longest word ("2026/9/28", "9/28/2026,") alone is wider than
-                the card, so this flex item (min-width: auto) ran out to
-                R171 (ja) / R185.5 (en) and was cut by the card's R136
-                overflow-x clip. min-w-0 lets it shrink.
+            {/* DFLT-00276: the mono date's longest word ("2026/9/28",
+                "9/28/2026,") can be wider than a narrow card, where this
+                flex item (min-width: auto) ran out and was cut by the
+                card's overflow-x clip. min-w-0 lets it shrink.
                 DFLT-00292: wrap-anywhere is on the date span only -- on the
                 whole item it was inherited by the label too, which then broke
                 mid-word ("Create / d:"). The date breaks inside a word only
@@ -1966,17 +1937,17 @@ export const TicketItem: React.FC<Props> = ({
                 usable width nothing changes.
                 DFLT-00295: the label breaks inside a word only when that
                 word is wider than this item plus the details panel's right
-                padding (a 1em-kana font, under 160px or over 200%); it is
-                inline-block so that max-width applies here. */}
+                padding; it is inline-block so that max-width applies
+                here. */}
             <div className="min-w-0">
               <MetaLabel text={t('ticketItem.createdAtVisible')} />{' '}
               <span className="font-mono text-slate-700 dark:text-slate-300 wrap-anywhere">{formatDateTime(ticket.created_at, i18n.language)}</span>
             </div>
             {/* Labels (DFLT-00084): every label, plus the picker.
                 DFLT-00276: min-w-0 wrap-anywhere for the same reason as the
-                date above -- at 160px / 200% in English the "Edit labels"
-                button's longest word held this item at R139.5, 3.5px past
-                the card's R136 clip. The picker's panel is placed by
+                date above -- in a narrow card the "Edit labels" button's
+                longest word could hold this item past the card's clip. The
+                picker's panel is placed by
                 LabelSelect itself (DFLT-00293: kept inside the card), so
                 it is unaffected.
                 DFLT-00292: wrap-anywhere is no longer on this item: inherited,
@@ -2000,7 +1971,7 @@ export const TicketItem: React.FC<Props> = ({
               ) : (
                 // DFLT-00276: min-w-0 lets a chip shrink below its max-w-40
                 // (320px at a 32px root) so a long name truncates inside the
-                // card instead of running past it at 160-320px / 200%.
+                // card instead of running past it at 320px / 200%.
                 // DFLT-00292: wrap-anywhere belongs to the values, so it sits on
                 // the chips themselves (they are whitespace-nowrap / truncate,
                 // so it changes nothing drawn) rather than on the whole item.
@@ -2009,18 +1980,17 @@ export const TicketItem: React.FC<Props> = ({
               <LabelSelect ticketId={ticket.id} labels={ticketLabels} projectLabels={projectLabels} onSaved={onRefresh} />
             </div>
             {/* DFLT-00276: a closed reason with one long word (e.g.
-                "superseded-by-DFLT-00002") reached R251 (ja) / R296.9 (en) at
-                160px / 200%, and R304.9 at 320px / 200% in English, past the
-                card's clip. min-w-0 lets this item shrink, and only the
-                reason span gets wrap-anywhere: put on the whole item it was
-                inherited by the "Closed reason:" text too, whose share of
-                the one-line flex row then broke it mid-word ("Close / d /
-                reaso / n:" at 320px). flex-wrap moves the reason onto its
-                own line when it does not fit beside the label (on one line
-                with the label it was left about 0px at 160px), the label
-                text keeps min-width: auto so it breaks between words only,
-                and the icon is shrink-0 so it is not squeezed to a dot. When
-                everything fits on one line nothing changes.
+                "superseded-by-DFLT-00002") reached R304.9 at 320px / 200% in
+                English, past the card's clip. min-w-0 lets this item
+                shrink, and only the reason span gets wrap-anywhere: put on
+                the whole item it was inherited by the "Closed reason:" text
+                too, whose share of the one-line flex row then broke it
+                mid-word ("Close / d / reaso / n:" at 320px). flex-wrap moves
+                the reason onto its own line when it does not fit beside the
+                label, the label text keeps min-width: auto so it breaks
+                between words only, and the icon is shrink-0 so it is not
+                squeezed to a dot. When everything fits on one line nothing
+                changes.
                 DFLT-00292: the label is a flex item of its own (MetaLabel), so
                 when the icon and the label do not fit on one line the label
                 moves to the next line whole instead of breaking ("クローズ理 /
@@ -2052,7 +2022,7 @@ export const TicketItem: React.FC<Props> = ({
               padding is p-3 instead of p-4 -- the same pair as the detail
               panel and the artifact card -- so at 200% text on a 320px
               screen the header row and the body get 16px more width. */}
-          <div className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 upto-200px:px-1 upto-200px:py-2 rounded-xl border border-slate-200 dark:border-slate-800">
+          <div className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 rounded-xl border border-slate-200 dark:border-slate-800">
             {/* DFLT-00239: the header row and its right-hand group wrap on a
                 narrow line (200% text size on a 320px screen) instead of
                 squeezing or pushing the refined time and the expand button
@@ -2067,18 +2037,18 @@ export const TicketItem: React.FC<Props> = ({
                 time wrap instead of the FileText and History icons being
                 squeezed (to 0px for History at 200% on 320px). */}
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mb-2">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 min-w-0 wrap-anywhere upto-200px:flex-wrap upto-200px:wrap-break-word">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 min-w-0 wrap-anywhere">
                 <FileText aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
-                <span className="min-w-0 wrap-anywhere upto-200px:wrap-break-word">{t('ticketItem.description.title')}</span>
+                <span className="min-w-0 wrap-anywhere">{t('ticketItem.description.title')}</span>
               </span>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
                 {/* DFLT-00262: text-[0.625rem] rather than text-[10px] -- the
                     same 10px at a 16px root, but it follows the browser's
                     default font size (WCAG 1.4.4). */}
                 {ticket.refined_at && (
-                  <span className="text-[0.625rem] text-slate-500 dark:text-slate-400 flex items-center gap-1 min-w-0 upto-200px:flex-wrap">
+                  <span className="text-[0.625rem] text-slate-500 dark:text-slate-400 flex items-center gap-1 min-w-0">
                     <History aria-hidden="true" className="w-3 h-3 shrink-0" />
-                    <span className="min-w-0 wrap-anywhere upto-200px:wrap-break-word">
+                    <span className="min-w-0 wrap-anywhere">
                       {t('ticketItem.description.refinedAt', { time: formatDateTime(ticket.refined_at, i18n.language) })}
                     </span>
                   </span>
@@ -2118,7 +2088,7 @@ export const TicketItem: React.FC<Props> = ({
                       aria-hidden="true"
                       className={`w-3 h-3 shrink-0 motion-safe:transition-transform ${isDescriptionExpanded ? 'rotate-180' : ''}`}
                     />
-                    <span className="min-w-0 wrap-anywhere upto-200px:wrap-break-word">{t('ticketItem.description.fullText')}</span>
+                    <span className="min-w-0 wrap-anywhere">{t('ticketItem.description.fullText')}</span>
                   </button>
                 )}
               </div>
@@ -2184,8 +2154,8 @@ export const TicketItem: React.FC<Props> = ({
                 inside the panel instead of the page. mx-auto rather than
                 the container's items-center keeps the graph's left edge
                 reachable in that case. */}
-            <div ref={graphPanelRef} className="lg:col-span-4 min-w-0 bg-white dark:bg-slate-900 p-4 upto-200px:px-1 upto-200px:py-2 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col min-h-128">
-              <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 w-full text-left flex items-center justify-between shrink-0 max-lg:flex-wrap max-lg:gap-x-2 max-lg:wrap-anywhere upto-200px:wrap-break-word">
+            <div ref={graphPanelRef} className="lg:col-span-4 min-w-0 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col min-h-128">
+              <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 w-full text-left flex items-center justify-between shrink-0 max-lg:flex-wrap max-lg:gap-x-2 max-lg:wrap-anywhere">
                 <span id={graphTitleId} className="max-lg:min-w-0">{t('ticketItem.graphTitle')}</span>
                 <span className="text-[0.625rem] text-indigo-600 dark:text-indigo-400 font-semibold">{t('ticketItem.progress', { percent: progressPercent })}</span>
               </div>
@@ -2336,7 +2306,7 @@ export const TicketItem: React.FC<Props> = ({
                 </div>
               )}
               </div>
-              <div className="w-full mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.6875rem] text-slate-500 dark:text-slate-400 shrink-0 max-lg:wrap-anywhere upto-200px:wrap-break-word">
+              <div className="w-full mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.6875rem] text-slate-500 dark:text-slate-400 shrink-0 max-lg:wrap-anywhere">
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> {t('ticketItem.legend.done')}</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> {t('ticketItem.legend.inProgress')}</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500" /> {t('ticketItem.legend.review')}</span>
@@ -2397,7 +2367,7 @@ export const TicketItem: React.FC<Props> = ({
                   a real browser (see the tickets' implementation notes). */}
               <div
                 data-testid="ticket-artifact-tabs"
-                className="flex flex-wrap from-80rem:flex-nowrap items-center justify-between gap-y-1 border-b border-slate-200 dark:border-slate-800 px-4 upto-15rem:px-2 upto-200px:px-1 pb-2 from-80rem:pb-0 bg-slate-50 dark:bg-slate-800 shrink-0"
+                className="flex flex-wrap from-80rem:flex-nowrap items-center justify-between gap-y-1 border-b border-slate-200 dark:border-slate-800 px-4 upto-15rem:px-2 pb-2 from-80rem:pb-0 bg-slate-50 dark:bg-slate-800 shrink-0"
               >
               <div
                 role="tablist"
@@ -2451,7 +2421,7 @@ export const TicketItem: React.FC<Props> = ({
               {ticket.artifacts.length > 0 && (
                 <a
                   href={`/api/tickets/${ticket.id}/artifacts/download`}
-                  className="ml-auto min-w-0 from-64rem:shrink-0 flex upto-15rem:flex-wrap items-center gap-1.5 px-3 upto-15rem:px-2 upto-200px:px-1 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:border-indigo-400 dark:hover:border-indigo-500 transition"
+                  className="ml-auto min-w-0 from-64rem:shrink-0 flex upto-15rem:flex-wrap items-center gap-1.5 px-3 upto-15rem:px-2 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:border-indigo-400 dark:hover:border-indigo-500 transition"
                   title={t('ticketItem.downloadAllArtifacts')}
                 >
                   <Download aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />
@@ -2470,15 +2440,13 @@ export const TicketItem: React.FC<Props> = ({
                   screen) it pads with p-3, and the node rows below with p-2,
                   so a node row keeps enough width for its approve/reject
                   buttons and type badge; at 100% (320px is 20rem) the query
-                  never matches. DFLT-00290: from 7.5rem down (a 32px default
-                  font in a 160px window) it pads with p-1, see the detail
-                  panel. */}
+                  never matches. */}
               <div
                 role="tabpanel"
                 id={artifactPanelId}
                 aria-labelledby={artifactTabId(activeTab)}
                 tabIndex={0}
-                className="p-4 upto-15rem:p-3 upto-200px:px-0.5 upto-200px:py-2 upto-7_5rem:p-1 flex-1 min-h-0 overflow-y-auto focus:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+                className="p-4 upto-15rem:p-3 flex-1 min-h-0 overflow-y-auto focus:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
               >
                 {/* 1. Nodes with Expandable Artifacts */}
                 {activeTab === 'nodes' && (
@@ -2549,18 +2517,12 @@ export const TicketItem: React.FC<Props> = ({
                               DFLT-00280: under 15rem the row pads 0.25rem
                               at the sides (0.5rem above and below, as
                               before), so with a 200% default font at
-                              320-336px, or at 16px in a 160px window, the
-                              status badge has room for "PROGRESS" and
-                              "AWAITING" on a line of their own.
-                              DFLT-00290: from 7.5rem down (a 32px default
-                              font in a 160px window) it pads 0.125rem at the
-                              sides, which with the page, detail panel and
-                              panel body padding less there leaves the row
-                              106px wide instead of 26px, so its status badge
-                              and the IN PROGRESS dot stay inside it. */}
+                              320-336px the status badge has room for
+                              "PROGRESS" and "AWAITING" on a line of their
+                              own. */}
                           <div
                             onClick={() => toggleNodeExpand(node.id)}
-                            className="flex flex-wrap items-center justify-between gap-x-1 gap-y-2 p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none below-80rem:gap-x-3 upto-15rem:px-1 upto-15rem:py-2 upto-200px:px-0.5 upto-7_5rem:px-0.5"
+                            className="flex flex-wrap items-center justify-between gap-x-1 gap-y-2 p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none below-80rem:gap-x-3 upto-15rem:px-1 upto-15rem:py-2"
                           >
                             {/* From 80rem up, flex-1 min-w-0 lets node.name
                                 (below) shrink and truncate first --
@@ -2581,8 +2543,8 @@ export const TicketItem: React.FC<Props> = ({
                                 The retry, manual and artifact badges shrink
                                 and wrap under 80rem the same way
                                 (DFLT-00260): while they stayed shrink-0
-                                whitespace-nowrap they ran 3-26px past the card
-                                in a 160px window. The artifact badge's icon stays
+                                whitespace-nowrap they could run past the card
+                                in a narrow window. The artifact badge's icon stays
                                 shrink-0. Their font sizes are rem (0.625rem /
                                 0.6875rem, 10px / 11px at the default 16px),
                                 so they follow the browser's default font
@@ -2633,7 +2595,7 @@ export const TicketItem: React.FC<Props> = ({
                               <NodeTypeBadge
                                 type={node.type}
                                 theme="light"
-                                className="shrink-0 below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full upto-200px:flex-wrap upto-200px:px-1"
+                                className="shrink-0 below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full"
                                 labelClassName="below-80rem:whitespace-normal below-80rem:wrap-anywhere"
                               />
                               <span className="font-semibold text-slate-800 dark:text-slate-200 truncate min-w-0 from-80rem:w-0 from-80rem:basis-[content] below-80rem:whitespace-normal below-80rem:wrap-anywhere">
@@ -2655,7 +2617,7 @@ export const TicketItem: React.FC<Props> = ({
                                 </span>
                               )}
                               {nodeArtifacts.length > 0 && (
-                                <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold border border-indigo-200 dark:border-indigo-800 flex items-center gap-1 shrink-0 whitespace-nowrap below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:wrap-anywhere upto-200px:flex-wrap upto-200px:px-1">
+                                <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold border border-indigo-200 dark:border-indigo-800 flex items-center gap-1 shrink-0 whitespace-nowrap below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:wrap-anywhere">
                                   <Layers aria-hidden="true" className="w-3 h-3 shrink-0" />
                                   {t('ticketItem.artifactsCount', { count: nodeArtifacts.length })}
                                 </span>
@@ -2724,10 +2686,8 @@ export const TicketItem: React.FC<Props> = ({
                                 </div>
                               )}
                               {getNodeBadge(getDisplayStatus(node))}
-                              {/* slate-600 / slate-300 for the hover background (DFLT-00162, see the sequence number above).
-                                  DFLT-00290: from 7.5rem down it may wrap at its space ("06:59" / "AM"): with a
-                                  32px default font in a 160px window it is wider than the row's content. */}
-                              <span className="text-[0.6875rem] text-slate-600 dark:text-slate-300 font-mono whitespace-nowrap upto-7_5rem:whitespace-normal">
+                              {/* slate-600 / slate-300 for the hover background (DFLT-00162, see the sequence number above). */}
+                              <span className="text-[0.6875rem] text-slate-600 dark:text-slate-300 font-mono whitespace-nowrap">
                                 {formatTime(node.updated_at, i18n.language)}
                               </span>
                             </div>
@@ -2983,15 +2943,13 @@ export const TicketItem: React.FC<Props> = ({
 
           {/* Action Footer: Claude Execution Panel. p-3 with large text on
               a narrow screen, like the details around it (DFLT-00227), and
-              below sm whatever the text size (DFLT-00252). p-2 in a window
-              of 200 CSS px or less (DFLT-00259, see the detail panel), p-1
-              from 7.5rem down (DFLT-00290, likewise). The
+              below sm whatever the text size (DFLT-00252). The
               prompt box's border turns indigo on focus in dark mode as well
               (dark:focus:border-indigo-500, DFLT-00259): without it
               dark:border-slate-700 won over focus:border-indigo-500. */}
           <div
             data-testid="ticket-action-footer"
-            className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 upto-200px:p-2 upto-200px:px-1 upto-7_5rem:p-1 rounded-xl border border-slate-200 dark:border-slate-800"
+            className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 rounded-xl border border-slate-200 dark:border-slate-800"
           >
             {/* The action row (DFLT-00181): the regular actions (refine, then
                 run) on the left, and at its right end, set apart from them,
@@ -3016,7 +2974,7 @@ export const TicketItem: React.FC<Props> = ({
                       onClick={() => handleRunClaude(t('claudePrompts.refineTicket', { ticketId: ticket.id }), ticket.id)}
                       disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
                       {...submittingProps(isRunning)}
-                      className="px-3 upto-200px:px-1.5 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
+                      className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
                     >
                       {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-600" />}
                       {t('ticketItem.actions.refine')}
@@ -3026,7 +2984,7 @@ export const TicketItem: React.FC<Props> = ({
                       onClick={() => handleRunClaude(t('claudePrompts.processTicket', { ticketId: ticket.id }), ticket.id)}
                       disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
                       {...submittingProps(isRunning)}
-                      className="px-3 upto-200px:px-1.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition"
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition"
                     >
                       {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />}
                       {t('ticketItem.actions.run')}
@@ -3072,7 +3030,7 @@ export const TicketItem: React.FC<Props> = ({
                 onClick={handleSendPrompt}
                 disabled={isRunning || !promptText.trim()}
                 {...submittingProps(isRunning)}
-                className="px-4 max-sm:px-3 upto-200px:px-1.5 max-sm:py-2 max-sm:ml-auto max-w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center justify-center gap-1.5 transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
+                className="px-4 max-sm:px-3 max-sm:py-2 max-sm:ml-auto max-w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center justify-center gap-1.5 transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
               >
                 {isRunning ? <Loader2 aria-hidden="true" className="w-4 h-4 shrink-0 animate-spin" /> : <Send aria-hidden="true" className="w-4 h-4 shrink-0" />}
                 {t('ticketItem.send')}

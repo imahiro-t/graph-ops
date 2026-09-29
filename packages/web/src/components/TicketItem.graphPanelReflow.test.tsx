@@ -3,13 +3,13 @@
 // (max-lg:h-auto overrides the height attribute) instead of staying at the
 // fixed svgHeight, so a narrow panel shows the whole graph scaled down in
 // proportion instead of a thin strip in a tall empty box. It never gets
-// narrower than 180px; when the panel is narrower than that (160px wide, or
-// 320px with a 200% default font) the graph's box scrolls sideways inside
+// narrower than 180px; when the panel is narrower than that (320px with a
+// 200% default font, say) the graph's box scrolls sideways inside
 // the panel -- and only then becomes a named, focusable region -- rather
 // than the page. From lg up the svg keeps its height attribute, its
 // w-full/max-w-[340px]/shrink-0 and its viewBox, so it renders exactly as
 // before. jsdom does no layout (nor media queries), so this checks the
-// classes and attributes; the geometry at 160-1440px, with a 200% default
+// classes and attributes; the geometry at 320-1440px, with a 200% default
 // font, was measured in a real browser (see the ticket's implementation
 // notes).
 import { render, screen } from '@testing-library/react';

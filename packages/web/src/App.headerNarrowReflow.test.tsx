@@ -1,13 +1,8 @@
-// DFLT-00259: in a 160px window at a 200% text size (a 32px root font on the
-// page, or a 32px default font) the ticket list page was 283px wide. The top
-// header's "GraphOps" name, subtitle, project switcher, Launch Claude,
-// language and New Ticket buttons and the "updated" time each kept the width
-// of their longest word, and the pagination group (previous, page number,
-// next: 54px buttons at 200%) was 211-254px wide in a 112px row. Once those
-// fitted, the summary card's node progress ("2394/", whitespace-nowrap since
-// DFLT-00258) and the English figure labels ("Progress") still ran 5-25px
-// past the window: in a 160px window the card's items have no content width
-// left at 200%.
+// DFLT-00259: with large text in a narrow window the ticket list page could
+// be wider than the window. The top header's "GraphOps" name, subtitle,
+// project switcher, Launch Claude, language and New Ticket buttons and the
+// "updated" time each kept the width of their longest word, and the
+// pagination group (previous, page number, next) could be wider than its row.
 //
 // Now:
 // - each header item is min-w-0 and no wider than its row, and its text may
@@ -18,58 +13,46 @@
 //   spans of their own so the icons keep their size; the "updated" row does
 //   not wrap, so its time keeps shrinking next to the refresh button as it
 //   already did in English at 320-328px with a 32px root;
-// - on top of that, only for looks, in a window of 200 CSS px or less (at any
-//   text size, so the header also changes there at 100%) it pads with px-2
-//   and the project switcher and the buttons pad less, so the switcher's
-//   arrow stays inside its frame. A px query, not the 15rem one, which also
-//   matches 320-336px with a 32px default font. DFLT-00293 replaced the
-//   labels wrapping under the icons there with icons only: the texts are
-//   sr-only at 200px or less (see App.headerIconOnly.test.tsx);
-// - under 15rem the pagination group may wrap (DOM order kept), right-aligned
-//   so "next" stays at the right end, is no wider than the row, and the page
-//   number may break inside its digits. It only wraps once it is as wide as
-//   the row, so the DFLT-00258 case (a 160px window at 200% browser zoom,
-//   "100 / 123", 129px in a 136px row) stays on one line;
-// - in a window of 200 CSS px or less the node progress may break inside a
-//   number and the figure labels inside a word. A px query, not the 15rem
-//   one: that one also matches 320-336px with a 32px default font.
+// - under 15rem (a 320px window at 200%) the pagination group may wrap (DOM
+//   order kept), right-aligned so "next" stays at the right end, is no wider
+//   than the row, and the page number may break inside its digits. It only
+//   wraps once it is as wide as the row.
 //
-// Measured in a real browser (vite + Playwright Chromium, see the ticket's
-// implementation notes): at 160px with a 32px root and with a 32px default
-// font, Japanese and English, with and without the detail panel, scrollWidth
-// is 160 and nothing ends past the window; every header button and the
-// pagination buttons can be hit at their centre after scrolling to them; with
-// "1 / 26", "10 / 26" and "100 / 129" the wrapped group's lines share their
-// right edge. At 320/328/336px (both 200% methods) and at 100% from 320 to
-// 1280px every header item, the pagination group, the detail padding and the
-// untrusted-folder notice measured the same as before (within 0.5px), and
-// the header stays on one line at 1024/1280px. jsdom computes no layout, so
-// these tests pin the classes that produce that behaviour and the names.
+// DFLT-00319: the supported range is a 320px window with up to 200% text.
+// The header's padding, labels and summary figures no longer change in a
+// window of 200 CSS px or less (the icon-only header and the breaks inside
+// the node progress there were removed), so these tests also check that the
+// labels stay visible and the node progress unbreakable at every width.
+// jsdom computes no layout, so these tests pin the classes that produce that
+// behaviour and the names; the real-browser measurements are in the
+// implementation notes.
 //
 // fetch is served by test/fakeBackend.ts, like App.largeTextReflow.test.tsx.
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
 import App from './App';
 import { Project } from './types';
 import { createFakeBackend, installFakeBackend } from './test/fakeBackend';
 import { findPreviousPage } from './test/waitForAnswers';
+import { openIconButtonTooltips } from './test/iconButtonTooltip';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 
 const BREAKS_ANYWHERE = 'wrap-anywhere';
 const NARROW = 'upto-15rem:';
-const TINY = 'upto-200px:';
 
-// Six tickets on pages of five, so the pagination row is drawn.
-function seed() {
+// Six tickets on pages of five, so the pagination row is drawn. Without a
+// project there are no tickets.
+function seed({ withProject = true }: { withProject?: boolean } = {}) {
   installFakeBackend(
     createFakeBackend({
       projects: [alpha],
-      currentProjectId: alpha.id,
+      currentProjectId: withProject ? alpha.id : '',
       paginationPageSize: 5,
       labels: [],
-      tickets: Array.from({ length: 6 }, (_, i) => ({
+      tickets: (withProject ? Array.from({ length: 6 }) : []).map((_, i) => ({
         id: `ALP-0000${i + 1}`,
         project_id: alpha.id,
         title: `チケット ${i + 1}`,
@@ -86,23 +69,37 @@ async function renderApp() {
   await screen.findByText('ALP-00001');
 }
 
+// Without a project there is no ticket to wait for: wait for the switcher's
+// "Select a project" label instead.
+async function renderAppWithoutProject() {
+  render(<App />);
+  const header = screen.getByRole('banner');
+  await within(header).findByRole('button', { name: i18n.t('projectSwitcher.noProject') });
+  return header;
+}
+
+function languageName(lng: 'ja' | 'en') {
+  return i18n.t('header.language.toggleTitle', { lang: i18n.t(`header.language.${lng}`) });
+}
+
 afterEach(async () => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   await i18n.changeLanguage('ja');
 });
 
-describe.each(['ja', 'en'] as const)('top header in a 160px window at 200%% (%s)', lng => {
+describe.each(['ja', 'en'] as const)('top header in a 320px window at 200%% (%s)', lng => {
   beforeEach(async () => {
     seed();
     await i18n.changeLanguage(lng);
   });
 
-  it('pads the header less only in a window of 200px or less', async () => {
+  it('pads the header with px-4 below lg at every width', async () => {
     await renderApp();
     const header = screen.getByRole('banner');
-    expect(header).toHaveClass('px-4', `${TINY}px-2`, 'lg:px-6');
+    expect(header).toHaveClass('px-4', 'lg:px-6');
     expect(header).not.toHaveClass(`${NARROW}px-2`);
+    expect(Array.from(header.classList).filter(c => c.startsWith('px-') || c.includes(':px-'))).toEqual(['px-4', 'lg:px-6']);
   });
 
   it('lets the app name and the subtitle break inside a word', async () => {
@@ -123,7 +120,8 @@ describe.each(['ja', 'en'] as const)('top header in a 160px window at 200%% (%s)
     // DFLT-00268: the 14rem cap sits on the wrapper; the button follows it.
     expect(switcher).toHaveClass('min-w-0', 'max-w-full');
     expect(switcher).not.toHaveClass('max-w-[14rem]');
-    expect(switcher).toHaveClass('gap-1.5', `${TINY}gap-1`, 'px-3', `${TINY}px-2`);
+    expect(switcher).toHaveClass('gap-1.5', 'px-3');
+    expect(Array.from(switcher.classList).filter(c => c.includes(':gap-') || c.includes(':px-'))).toEqual([]);
     // DFLT-00285: the button is an IconButton, so its wrapper span comes in
     // between; it shrinks with the outer div, which is flex so the span is a
     // flex item rather than inline content.
@@ -131,29 +129,30 @@ describe.each(['ja', 'en'] as const)('top header in a 160px window at 200%% (%s)
     expect(span.tagName).toBe('SPAN');
     expect(span).toHaveClass('min-w-0', 'max-w-full');
     expect(span.parentElement).toHaveClass('relative', 'flex', 'min-w-0', 'max-w-56');
-    expect(within(switcher).getByText('Alpha')).toHaveClass('truncate');
+    const name = within(switcher).getByText('Alpha');
+    expect(name).toHaveClass('truncate');
+    expect(name.className).not.toMatch(/sr-only/);
   });
 
   it.each([
     ['header.launchClaude'],
     ['header.newTicket']
-  ])('keeps the %s label in a span of its own, keeping its name; the label is visually hidden at 200px or less', async key => {
+  ])('keeps the %s label in a span of its own, visible and naming the button', async key => {
     await renderApp();
     const header = screen.getByRole('banner');
     const button = within(header).getByRole('button', { name: i18n.t(key) });
-    expect(button).toHaveClass('min-w-0', 'max-w-full');
-    expect(button).toHaveClass(`${TINY}px-2`);
-    // DFLT-00293: the label is sr-only at 200px or less (icon only), so the
-    // label no longer goes on a line of its own there.
-    expect(button).not.toHaveClass(`${TINY}flex-wrap`, `${TINY}justify-center`);
+    expect(button).toHaveClass('min-w-0', 'max-w-full', 'flex', 'items-center', 'gap-1.5');
     expect(button).not.toHaveClass('flex-wrap');
     expect(button).not.toHaveClass(`${NARROW}flex-wrap`);
-    // An IconButton (DFLT-00293): its hover wrapper is the header row's flex item.
-    expect(button.parentElement?.tagName).toBe('SPAN');
-    expect(button.parentElement).toHaveClass('inline-flex', 'min-w-0', 'max-w-full');
+    expect(Array.from(button.classList).filter(c => c.includes(':px-'))).toEqual([]);
+    // DFLT-00319: a plain <button> again (as before DFLT-00293), so it is the
+    // header row's flex item itself, with no hover wrapper around it.
+    expect(button.parentElement?.tagName).toBe('DIV');
+    expect(button.parentElement).toHaveClass('flex', 'flex-wrap', 'min-w-0');
     const label = within(button).getByText(i18n.t(key));
     expect(label.tagName).toBe('SPAN');
-    expect(label).toHaveClass('min-w-0', BREAKS_ANYWHERE, `${TINY}sr-only`);
+    expect(label).toHaveClass('min-w-0', BREAKS_ANYWHERE);
+    expect(label.className).not.toMatch(/sr-only/);
     const icon = button.querySelector('svg') as SVGElement;
     expect(icon).toHaveClass('shrink-0');
     expect(icon).toHaveAttribute('aria-hidden', 'true');
@@ -167,13 +166,12 @@ describe.each(['ja', 'en'] as const)('top header in a 160px window at 200%% (%s)
       name: i18n.t('header.language.toggleTitle', { lang: i18n.t(`header.language.${current}`) })
     });
     expect(button).toHaveClass('min-w-0', 'max-w-full');
-    // DFLT-00293: the text is sr-only at 200px or less, so it no longer wraps under the icon there.
-    expect(button).not.toHaveClass(`${TINY}flex-wrap`, `${TINY}justify-center`);
     expect(button).not.toHaveClass('flex-wrap');
     // IconButton's hover wrapper is the flex item of the header row.
     expect(button.parentElement).toHaveClass('inline-flex', 'min-w-0', 'max-w-full');
     const text = within(button).getByText(i18n.t(`header.language.${current}`));
-    expect(text).toHaveClass('min-w-0', BREAKS_ANYWHERE, `${TINY}sr-only`);
+    expect(text).toHaveClass('min-w-0', BREAKS_ANYWHERE);
+    expect(text.className).not.toMatch(/sr-only/);
     expect(button.querySelector('svg')).toHaveClass('shrink-0');
   });
 
@@ -191,7 +189,7 @@ describe.each(['ja', 'en'] as const)('top header in a 160px window at 200%% (%s)
   });
 });
 
-describe.each(['ja', 'en'] as const)('pagination in a 160px window at 200%% (%s)', lng => {
+describe.each(['ja', 'en'] as const)('pagination in a 320px window at 200%% (%s)', lng => {
   beforeEach(async () => {
     seed();
     await i18n.changeLanguage(lng);
@@ -230,33 +228,102 @@ describe.each(['ja', 'en'] as const)('pagination in a 160px window at 200%% (%s)
   });
 });
 
-describe.each(['ja', 'en'] as const)('summary card in a window of 200px or less (%s)', lng => {
+describe.each(['ja', 'en'] as const)('summary card figures (%s)', lng => {
   beforeEach(async () => {
     seed();
     await i18n.changeLanguage(lng);
   });
 
-  it('lets the node progress break inside a number only there', async () => {
+  it('breaks the node progress after the slash only, never inside a number', async () => {
     await renderApp();
     const progress = screen.getByTestId('summary-node-progress');
     const sides = Array.from(progress.querySelectorAll('span'));
     expect(sides).toHaveLength(2);
     for (const side of sides) {
-      // Still unbreakable elsewhere (DFLT-00258), breakable in a tiny window.
-      expect(side).toHaveClass('whitespace-nowrap', `${TINY}whitespace-normal`);
-      expect(side).not.toHaveClass('whitespace-normal');
-      expect(side).not.toHaveClass(`${NARROW}whitespace-normal`);
+      // Unbreakable at every width (DFLT-00258).
+      expect(side).toHaveClass('whitespace-nowrap');
+      expect(Array.from(side.classList).filter(c => c.includes('whitespace-normal'))).toEqual([]);
     }
   });
 
-  it('lets the five figure labels break inside a word only there', async () => {
+  it('keeps the five figure labels in rem text, breaking between words only', async () => {
     await renderApp();
     const items = Array.from(screen.getByTestId('summary-metrics').children) as HTMLElement[];
     expect(items).toHaveLength(5);
     for (const item of items) {
       const label = item.children[1] as HTMLElement;
-      expect(label).toHaveClass('text-[0.6875rem]', `${TINY}${BREAKS_ANYWHERE}`);
-      expect(label).not.toHaveClass(BREAKS_ANYWHERE);
+      expect(label).toHaveClass('text-[0.6875rem]');
+      expect(Array.from(label.classList).filter(c => c.includes(BREAKS_ANYWHERE))).toEqual([]);
+    }
+  });
+});
+
+// DFLT-00319: moved from App.headerIconOnly.test.tsx (removed with the
+// icon-only header of a window of 200px or less), keeping the cases that
+// hold at every width. Without a project New Ticket is natively disabled and
+// described by the reason alone (a hidden span referenced by
+// aria-describedby), with the reason as its title and no visible tooltip;
+// with a project it has neither. The header's Tab order is unchanged.
+describe.each(['ja', 'en'] as const)('New Ticket and the Tab order in a 320px window at 200%% (%s)', lng => {
+  beforeEach(async () => {
+    await i18n.changeLanguage(lng);
+  });
+
+  it('is disabled without a project and described by the reason alone, through a hidden element', async () => {
+    seed({ withProject: false });
+    const header = await renderAppWithoutProject();
+    const button = within(header).getByRole('button', { name: i18n.t('header.newTicket') });
+    expect(button).toBeDisabled();
+    const reason = i18n.t('projectSwitcher.selectFirst');
+    expect(button).toHaveAccessibleDescription(reason);
+    expect(button).not.toHaveAccessibleDescription(new RegExp(i18n.t('header.newTicket')));
+    const describedBy = button.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    const description = document.getElementById(describedBy as string) as HTMLElement;
+    expect(description).toHaveAttribute('hidden');
+    expect(description.textContent).toBe(reason);
+  });
+
+  it('keeps the title with the reason without a project and opens no visible tooltip on hover', async () => {
+    seed({ withProject: false });
+    const user = userEvent.setup();
+    const header = await renderAppWithoutProject();
+    const button = within(header).getByRole('button', { name: i18n.t('header.newTicket') });
+    expect(button).toHaveAttribute('title', i18n.t('projectSwitcher.selectFirst'));
+    // A disabled button gets no pointer events: hover its row instead.
+    await user.hover(button.parentElement as HTMLElement);
+    expect(openIconButtonTooltips()).toHaveLength(0);
+  });
+
+  it('has no description and no title with a project', async () => {
+    seed();
+    await renderApp();
+    const header = screen.getByRole('banner');
+    const button = within(header).getByRole('button', { name: i18n.t('header.newTicket') });
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(button).not.toHaveAttribute('aria-describedby');
+    expect(button).not.toHaveAttribute('title');
+    expect(button).toHaveAccessibleDescription('');
+  });
+
+  it('keeps the Tab order of the header controls', async () => {
+    seed();
+    const user = userEvent.setup();
+    await renderApp();
+    const header = screen.getByRole('banner');
+    const expected = [
+      'Alpha',
+      i18n.t('header.launchClaude'),
+      languageName(lng),
+      new RegExp(`^${i18n.t('header.theme.toggleTitle', { mode: '' }).split(':')[0]}`),
+      i18n.t('header.settings'),
+      i18n.t('header.newTicket')
+    ];
+    const buttons = expected.map(name => within(header).getByRole('button', { name }));
+    await user.tab();
+    for (const button of buttons) {
+      expect(button).toHaveFocus();
+      await user.tab();
     }
   });
 });

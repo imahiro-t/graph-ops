@@ -353,7 +353,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
               {...submittingProps(starting !== null)}
               title={distinctReasons.length > 0 ? distinctReasons.join('\n') : undefined}
               aria-describedby={reasonIds.length > 0 ? reasonIds.join(' ') : undefined}
-              className="px-3 upto-200px:px-1.5 py-1.5 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-slate-700 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 rounded-lg text-xs font-semibold sm:whitespace-nowrap flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
+              className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-slate-700 text-violet-800 dark:text-violet-200 border border-violet-300 dark:border-violet-700 rounded-lg text-xs font-semibold sm:whitespace-nowrap flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
             >
               {starting !== null ? (
                 <Loader2 className="w-3.5 h-3.5 shrink-0 motion-safe:animate-spin" aria-hidden="true" />
@@ -411,20 +411,13 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
             // button is at least 1.5rem (24px at 100%) each way, a target
             // large enough to press, with its label centred, and shows its
             // focus ring in dark mode too (DFLT-00252, WCAG 2.5.8 / 2.4.7).
-            // DFLT-00259: in a 160px window at 200% the notice had no content
-            // width left (0px) and the button's frame ran 31px past it. The
-            // minimum width is now capped at the notice's content width
-            // (min(1.5rem,100%): 1.5rem wherever that fits, so nothing changes
-            // at normal widths), and in a window of 200 CSS px or less the
-            // notice pads with p-1 and the button with px-0.5; with the
-            // narrower Action Footer and detail padding (TicketItem.tsx) the
-            // frame and its label then fit inside the notice. A px query, not
-            // the 15rem one, which with a 32px default font also matches
-            // 320-336px, where the notice and the button must stay as they
-            // are.
+            // DFLT-00259: the minimum width is capped at the notice's
+            // content width (min(1.5rem,100%): 1.5rem wherever that fits, so
+            // nothing changes at normal widths), so the button's frame never
+            // runs past a notice narrower than that.
             <div
               data-testid="autopilot-untrusted"
-              className="self-stretch flex flex-wrap items-start gap-2 p-2 upto-200px:p-1 rounded-lg border text-[0.6875rem] bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100"
+              className="self-stretch flex flex-wrap items-start gap-2 p-2 rounded-lg border text-[0.6875rem] bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100"
             >
               <p aria-hidden="true" className="flex-1 basis-24 min-w-0 wrap-anywhere">
                 {t('autopilot.untrustedFolder', { path: untrustedFolder })}
@@ -434,7 +427,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
                 data-testid="autopilot-untrusted-dismiss"
                 onClick={dismissUntrusted}
                 aria-describedby={untrustedId}
-                className="shrink-0 max-w-full max-sm:wrap-anywhere min-h-6 min-w-[min(1.5rem,100%)] inline-flex items-center justify-center px-2 upto-200px:px-0.5 py-0.5 rounded-sm border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 font-semibold hover:bg-amber-100 dark:hover:bg-slate-700 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-violet-500 dark:focus-visible:ring-violet-400"
+                className="shrink-0 max-w-full max-sm:wrap-anywhere min-h-6 min-w-[min(1.5rem,100%)] inline-flex items-center justify-center px-2 py-0.5 rounded-sm border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 font-semibold hover:bg-amber-100 dark:hover:bg-slate-700 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-violet-500 dark:focus-visible:ring-violet-400"
               >
                 {t('autopilot.untrustedDismiss')}
               </button>

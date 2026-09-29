@@ -133,16 +133,20 @@ describe('project switcher popup placement', () => {
     expect(anchorLeft + left).toBeGreaterThanOrEqual(8);
   });
 
+  // A 320px window with a 32px root font: the 16rem (512px) popup is capped
+  // at 320 - 2 x 16 = 288px (9rem), and gets its width back when the window
+  // is widened.
   it('gives the width back when the window is widened while it is open', async () => {
-    viewportWidth = 200;
+    viewportWidth = 320;
+    rootFontSize = 32;
     anchorLeft = 16;
     const { popup } = await renderAndOpen();
-    expect(styleOf(popup)).toEqual({ left: '-8px', maxWidth: '184px' });
+    expect(styleOf(popup)).toEqual({ left: '0px', maxWidth: '288px' });
     viewportWidth = 1024;
     act(() => {
       fireEvent(window, new Event('resize'));
     });
-    expect(styleOf(popup)).toEqual({ left: '0px', maxWidth: '1008px' });
+    expect(styleOf(popup)).toEqual({ left: '0px', maxWidth: '992px' });
   });
 
   it('follows a root font size change reported by ResizeObserver while it is open', async () => {
