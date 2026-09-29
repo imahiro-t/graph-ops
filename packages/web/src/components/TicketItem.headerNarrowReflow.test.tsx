@@ -159,6 +159,11 @@ describe.each(['ja', 'en'] as const)('TicketItem header row in a narrow window (
   });
 
   it('sizes the expanded description\'s expand button in rem', () => {
+    // DFLT-00288: the button is shown only while the collapsed body
+    // overflows; jsdom reports 0 for both, so make it overflow for this test
+    // (restored by the file's vi.restoreAllMocks in afterEach).
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(600);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(224);
     renderTicket(makeTicket(), { isExpanded: true });
     const expand = screen.getByRole('button', { name: i18n.t('ticketItem.description.fullText') });
     expect(expand).toHaveClass('text-[0.6875rem]');
