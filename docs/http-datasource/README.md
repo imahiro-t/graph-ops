@@ -29,6 +29,13 @@ operations becomes one HTTP request to a server you provide, the **plugin**.
 Nothing else changes: the engine, the CLI commands, the `process-ticket`
 skill and the Web UI behave exactly as they do with SQLite.
 
+Since protocol 1.2 there are also three endpoints outside those 32 operations,
+for the records of autopilot runs shared between members. They are optional:
+a plugin that does not implement them reports protocol 1.1, and graph-engine
+then keeps run records on each machine only. See the `Autopilot runs (1.2)`
+row of [Endpoints](#endpoints) and the 1.2 row of
+[Handshake and versioning](#handshake-and-versioning).
+
 ```
  Claude Code agents ──> graph-engine CLI ─┐
                                           ├──> HTTP (JSON) ──> your plugin ──> your storage
