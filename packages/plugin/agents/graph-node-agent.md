@@ -79,3 +79,7 @@ The engine refuses to complete a node that is not in a state it can be completed
 4. In any other case, treat it as a situation you were not given the context to resolve. Do not try to force the completion, and do not run recovery commands (`unstick-node`, `reopen-nodes`, `grant-iterations`) yourself -- those belong to the session driving the ticket.
 
 Either way, finish by reporting what happened: what work you did, that `complete-node` was refused, and the node's actual status. **Never report the node as completed when the call was refused** -- that is exactly the mismatch between the record and reality that this check exists to prevent. Note that anything you already saved with `add-artifact` in step 4 stays on the node regardless: `add-artifact` does not look at the node's status, so in the rewind case your superseded write-up sits there next to whatever the re-run produces later. Say so in your report rather than trying to remove it.
+
+### If `complete-node` fails with `CONCURRENT_WRITE_CONFLICT`
+
+This one is the exception to "do not retry": the completion kept colliding with other writes to the same ticket (for example another agent adding an artifact at the same moment on a shared MySQL database), and the engine says nothing at all was written -- no status, no artifacts. Run the same `complete-node` command once more. If it is refused again with `INVALID_NODE_STATE`, follow the section above; if `CONCURRENT_WRITE_CONFLICT` keeps coming back, stop and report it rather than looping.
