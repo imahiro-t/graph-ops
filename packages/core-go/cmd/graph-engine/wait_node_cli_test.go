@@ -111,7 +111,7 @@ func TestCmdWaitNode_RejectedIncludesLatestReason(t *testing.T) {
 		t.Helper()
 		var cerr error
 		captureStdout(t, func() {
-			cerr = cmdCompleteNode(eng, repo, []string{gateID, "false", "--reason", reason})
+			cerr = cmdCompleteNode(eng, repo, runtimeConfig{HomeDir: t.TempDir()}, []string{gateID, "false", "--reason", reason})
 		})
 		if cerr != nil {
 			t.Fatalf("cmdCompleteNode: %v", cerr)

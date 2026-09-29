@@ -15,6 +15,7 @@ import (
 	"github.com/graph-ops/core-go/internal/config"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
+	"github.com/graph-ops/core-go/internal/identity"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
 )
@@ -616,7 +617,16 @@ func (s *Server) handleCompleteNode(w http.ResponseWriter, r *http.Request) {
 	// the caller's fix is to change the node's state, not the call -- and a
 	// node that does not exist with NODE_NOT_FOUND, which is a 404. Calling
 	// both of those "bad request" told the Web UI nothing it could act on.
-	result, err := s.engine.CompleteNode(id, passed, artifacts)
+	//
+	// The decider is resolved here, by this server process, from its own
+	// home config (DFLT-00329) -- never from the request: a body that
+	// carries a name (or anything like one) is decoded into the struct
+	// above, which has no such field, so it is ignored. No session: a
+	// decision made in the Web UI is a person's.
+	name, fallback := identity.DisplayName(s.cfg.HomeDir)
+	result, err := s.engine.CompleteNodeWith(id, passed, artifacts, engine.CompleteNodeOptions{
+		Decider: &engine.Decider{Name: name, NameIsFallback: fallback},
+	})
 	if err != nil {
 		writeError(w, statusForError(err, http.StatusBadRequest), err)
 		return

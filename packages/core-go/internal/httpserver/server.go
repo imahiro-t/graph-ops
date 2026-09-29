@@ -643,7 +643,8 @@ func statusForError(err error, fallback int) int {
 		// valid and the row exists -- what stands in the way is the
 		// state the row is in right now, which is what 409 means
 		// (DFLT-00102).
-		case domain.ErrCodeInvalidNodeState, domain.ErrCodeNodeClaimedByOther:
+		case domain.ErrCodeInvalidNodeState, domain.ErrCodeNodeClaimedByOther,
+			domain.ErrCodeTicketStatusChanged, domain.ErrCodeConcurrentWriteConflict:
 			return http.StatusConflict
 		// The autopilot (DFLT-00142): a start that collides with another
 		// run or with the root's state is a conflict with the current

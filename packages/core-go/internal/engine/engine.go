@@ -1175,6 +1175,8 @@ type CompleteNodeResult struct {
 // INVALID_NODE_STATE *domain.APIError before this method writes anything at
 // all -- artifacts included (DFLT-00102 / BUG-04). See checkCompletable for
 // which statuses pass and why manual nodes are allowed to complete from TODO.
+// Since DFLT-00329 that check and every write this method makes are one
+// atomic step on a repository that supports it: see CompleteNodeWith.
 //
 // artifacts is persisted as-is via e.repo.CreateArtifact, with no validation
 // of its own -- this package is deliberately DB-/HTTP-independent pure graph
@@ -1202,12 +1204,75 @@ type CompleteNodeOptions struct {
 	// refused with INVALID_NODE_STATE, before anything is written, unless
 	// the node still carries exactly that token -- i.e. unless it is still
 	// the same claim: not released and handed to somebody else meanwhile.
-	// The check and the write are not one atomic step yet (DFLT-00329).
-	// Empty skips the check, as before.
+	// Empty skips that check, for compatibility; the atomic path still
+	// compares the token it read (see CompleteNodeWith), but only a caller
+	// passing the token it was handed can tell "rewound and handed out
+	// again before I even read it".
 	ClaimToken string
+	// Decider is who is completing the node, resolved by this process
+	// (identity.DisplayName) -- never taken from a client (DFLT-00329). It
+	// is recorded on a manual node (approval_gate, release, is_manual)
+	// together with the status the decision sets; nil records nothing.
+	Decider *Decider
+	// SessionID is the processing session the call is made in
+	// (--session), "" for none. A decision made in a session that belongs
+	// to an autopilot run (ProcessingSession.RunID) is recorded as the
+	// autopilot's.
+	SessionID string
+	// WarnWithoutClaim makes a completion of a claimed node without
+	// ClaimToken say, as a warning, that --claim is what tells a node
+	// rewound and handed out again before this call read it (the CLI sets
+	// it; the Web UI, which judges manual nodes nobody claims, does not).
+	WarnWithoutClaim bool
+}
+
+// Decider is the person (or autopilot) completing a manual node, as
+// identity.DisplayName resolves it.
+type Decider struct {
+	Name           string
+	NameIsFallback bool
+}
+
+// decisionFor is the decision CompleteNodeWith records on node: nil for an
+// automatic node and for a call without a Decider.
+func (e *GraphEngine) decisionFor(node *domain.GraphNode, opts CompleteNodeOptions) *domain.NodeDecision {
+	if !node.IsManual || opts.Decider == nil {
+		return nil
+	}
+	d := &domain.NodeDecision{
+		Name: opts.Decider.Name, NameIsFallback: opts.Decider.NameIsFallback,
+		DecidedAt: e.now().UTC().Format(time.RFC3339Nano),
+	}
+	if opts.SessionID != "" {
+		if ss := e.sessionStore(); ss != nil {
+			if s, err := ss.GetProcessingSession(opts.SessionID); err == nil && s != nil && s.RunID != "" {
+				d.Autopilot = true
+			}
+		}
+	}
+	return d
 }
 
 // CompleteNodeWith is CompleteNode with options (see CompleteNodeOptions).
+//
+// Everything is decided on one read of the node and its ticket, and the
+// writes that decision implies -- the artifacts, the node's own status (with
+// the decision on a manual node), the loop target, the rewound nodes and the
+// ticket's blocked flag -- are applied as one store.NodeTransition
+// (DFLT-00329). The node's own step is required and carries the status and
+// the claim token that were read: when either has changed by the time the
+// write happens -- another member approved the gate this call is rejecting,
+// a loop-back rewound this node and get-executable handed it out again --
+// nothing at all is written and the call is refused with
+// INVALID_NODE_STATE, so the first decision wins and the loser's artifacts
+// (a rejection_reason, say) never reach the node. A ticket CLOSED in the
+// meantime is refused the same way.
+//
+// On a repository that can apply the transition atomically (SQLite, MySQL,
+// an HTTP data source speaking protocol 1.2) that is the whole story. On
+// one that cannot -- an HTTP data source older than 1.2 -- the same writes
+// are made one at a time, as before this ticket, and the windows between
+// them stay open; see applyNodeTransitionSequential.
 func (e *GraphEngine) CompleteNodeWith(nodeID string, passed bool, artifacts []domain.Artifact, opts CompleteNodeOptions) (CompleteNodeResult, error) {
 	node, err := e.repo.GetNode(nodeID)
 	if err != nil {
@@ -1223,11 +1288,11 @@ func (e *GraphEngine) CompleteNodeWith(nodeID string, passed bool, artifacts []d
 	if detail == nil {
 		return CompleteNodeResult{}, fmt.Errorf("ticket %s not found", node.TicketID)
 	}
-	// Before the artifact loop below, not after it: a rejected completion
-	// has to leave the graph exactly as it found it, and this check used to
-	// not exist at all, so a call that should never have been accepted still
-	// wrote its artifacts onto the node (BUG-04). Everything above this point
-	// is a read.
+	// Before anything is written, not after: a rejected completion has to
+	// leave the graph exactly as it found it, and this check used to not
+	// exist at all, so a call that should never have been accepted still
+	// wrote its artifacts onto the node (BUG-04). Everything above this
+	// point is a read.
 	if err := checkCompletable(node, detail); err != nil {
 		return CompleteNodeResult{}, err
 	}
@@ -1236,18 +1301,79 @@ func (e *GraphEngine) CompleteNodeWith(nodeID string, passed bool, artifacts []d
 			"node %s no longer carries the claim token passed with --claim: it has been released (unstick-node, a loop-back rewind) and claimed again since this run took it, so this run's verdict is not recorded. Go back to get-executable", node.ID)
 	}
 
+	if opts.ClaimToken == "" && node.ClaimToken != nil && opts.WarnWithoutClaim {
+		e.warnf("node %s was claimed with a claim token, but complete-node was called without --claim; pass the token get-executable handed out (--claim <token>) so that a verdict on work that has since been rewound and handed out again is refused", node.ID)
+	}
+
+	arts := make([]domain.Artifact, 0, len(artifacts))
 	for _, art := range artifacts {
 		art.ID = newArtifactID()
 		art.TicketID = node.TicketID
 		art.NodeID = node.ID
-		if _, err := e.repo.CreateArtifact(art); err != nil {
+		arts = append(arts, art)
+	}
+	// The node's own step, the same in every branch: the status and the
+	// claim token this decision was made on. Comparing the token read here
+	// -- not only one passed with --claim -- is what closes the ABA window
+	// between this read and the write for a call without --claim too.
+	main := store.NodeStep{
+		NodeID:          node.ID,
+		Required:        true,
+		IfStatusIn:      []domain.NodeStatus{node.Status},
+		CheckClaimToken: true,
+		IfClaimToken:    node.ClaimToken,
+	}
+	// A manual node is judged where it sits, unclaimed, and one of its
+	// outcomes -- a "reject" of a release or a custom manual node, which
+	// blocks the ticket -- leaves its status as it was. The status alone
+	// then cannot tell that somebody else decided first, so for a manual
+	// node the step also requires the node to be unwritten since the read
+	// (its updated_at), and the blocking branch touches it (below): of
+	// two people approving and rejecting the same manual node at once,
+	// exactly one gets through, whichever the outcome.
+	if node.IsManual {
+		readAt := node.UpdatedAt
+		main.IfUpdatedAt = &readAt
+	}
+	decision := e.decisionFor(node, opts)
+	transition := store.NodeTransition{RequireTicketOpen: true, Artifacts: arts}
+	apply := func(t store.NodeTransition) error {
+		if _, err := e.applyTransition(node.TicketID, t); err != nil {
+			return e.transitionConflictError(err, "completing node "+node.ID, node.ID, node.Status, node.TicketID)
+		}
+		return nil
+	}
+	// block is the two branches that stop the ticket without the node's own
+	// status changing (a round limit reached, no loop edge to take): the
+	// node's step writes nothing -- it only checks that the node is still
+	// as it was read -- so the node stays claimed (a manual one stays at
+	// TODO), exactly as before, and the unstick-node recovery that
+	// GrantIterations documents still applies. No decision is recorded on a
+	// manual node that ends up here: a decision is only ever written
+	// together with the status it set (store.decisionFieldsFor), and there
+	// is no status write. Its artifacts still are.
+	block := func() (CompleteNodeResult, error) {
+		blocked := true
+		// Touched (updated_at only) on a manual node, so that a concurrent
+		// decision on the same node conflicts -- see IfUpdatedAt above. An
+		// automatic node's row is left exactly as it was.
+		main.Touch = node.IsManual
+		transition.Steps = []store.NodeStep{main}
+		transition.SetBlocked = &blocked
+		if err := apply(transition); err != nil {
 			return CompleteNodeResult{}, err
 		}
+		if err := e.syncTicketStatus(node.TicketID); err != nil {
+			return CompleteNodeResult{}, err
+		}
+		return CompleteNodeResult{NextStatus: "BLOCKED", LoopedBack: false}, nil
 	}
 
 	if passed {
 		done := domain.NodeDone
-		if _, err := e.repo.UpdateNode(node.ID, store.NodePatch{Status: &done}); err != nil {
+		main.SetStatus, main.Decision = &done, decision
+		transition.Steps = []store.NodeStep{main}
+		if err := apply(transition); err != nil {
 			return CompleteNodeResult{}, err
 		}
 		if err := e.syncTicketStatus(node.TicketID); err != nil {
@@ -1280,10 +1406,14 @@ func (e *GraphEngine) CompleteNodeWith(nodeID string, passed bool, artifacts []d
 	// affected are this package's own tests.
 	if node.Type == domain.NodeTypeApprovalGate {
 		rejected := domain.NodeRejected
-		if _, err := e.repo.UpdateNode(node.ID, store.NodePatch{Status: &rejected}); err != nil {
+		blocked := true
+		main.SetStatus, main.Decision = &rejected, decision
+		transition.Steps = []store.NodeStep{main}
+		transition.SetBlocked = &blocked
+		if err := apply(transition); err != nil {
 			return CompleteNodeResult{}, err
 		}
-		if err := e.blockTicket(node.TicketID); err != nil {
+		if err := e.syncTicketStatus(node.TicketID); err != nil {
 			return CompleteNodeResult{}, err
 		}
 		return CompleteNodeResult{NextStatus: "REJECTED", LoopedBack: false}, nil
@@ -1334,17 +1464,21 @@ func (e *GraphEngine) CompleteNodeWith(nodeID string, passed bool, artifacts []d
 		// and a failure in the last allowed round blocks rather than opening
 		// round N+1. (The comparison used to be `>`, which let a limit of 3
 		// run a fourth review.)
+		//
+		// The check is made against the snapshot. The loop target's count
+		// is bumped by the store itself (iteration_count + 1), so the write
+		// cannot revert a bump that landed in between; for the count to
+		// have moved since, the target must have been redone in between,
+		// which means the check is simply one round late -- the next
+		// failure blocks.
 		if newIteration && target.IterationCount+1 >= target.MaxIterations {
-			if err := e.blockTicket(node.TicketID); err != nil {
-				return CompleteNodeResult{}, err
-			}
-			return CompleteNodeResult{NextStatus: "BLOCKED", LoopedBack: false}, nil
+			return block()
 		}
-		// Computed before the first write and only once the budget check
-		// above has passed: a loop-back that blocks the ticket must leave the
-		// graph byte-for-byte as it found it, never half-rewound
-		// (DFLT-00101 completion criterion 2 -- no partial application, the
-		// same guarantee ReopenNodes gives).
+		// Computed before any write and only once the budget check above has
+		// passed: a loop-back that blocks the ticket must leave the graph
+		// byte-for-byte as it found it, never half-rewound (DFLT-00101
+		// completion criterion 2 -- no partial application, the same
+		// guarantee ReopenNodes gives).
 		byID := make(map[string]domain.GraphNode, len(detail.Nodes))
 		for _, n := range detail.Nodes {
 			byID[n.ID] = n
@@ -1352,75 +1486,54 @@ func (e *GraphEngine) CompleteNodeWith(nodeID string, passed bool, artifacts []d
 		rewind := loopBackRewindSet(target.ID, node.ID, byID, detail.Edges)
 
 		todo := domain.NodeTODO
+		steps := make([]store.NodeStep, 0, len(rewind)+2)
 		switch {
 		case !newIteration:
-			// Nothing to write: the target is already TODO and this round's
-			// iteration is already on its counter.
+			// Nothing to write on the target: it is already TODO and this
+			// round's iteration is already on its counter.
 		case rewindsFailedNode:
-			// ClaimNode, not UpdateNode, for the same reason
-			// GetExecutableNodes uses it: `target` is a snapshot, and the
-			// parallel gates this case is about can call CompleteNode at the
-			// same moment. Read-then-write would let two of them both see the
-			// target at DONE and both bump the count -- the very double
-			// counting above. The CAS makes "move the target out of a
-			// non-TODO status" the thing exactly one caller can win, and
-			// losing it means a sibling opened the round first, so this
-			// failure counts nothing after all. (HTTPRepository cannot
-			// express a CAS and composes a GET and a PATCH instead, so
-			// against that backend this race is not closed at all. Do not
-			// read "narrow" into it there: the window is two network round
-			// trips wide -- milliseconds to hundreds of milliseconds against
-			// the single UPDATE this relies on -- and gates that finish
-			// together can still each count a round. See GraphRepository.
-			// ClaimNode, and the known limitation in
-			// docs/release-notes/v0.7.0.md.)
-			//
-			// The count written is read back by the claim itself rather than
-			// taken from the snapshot, so it cannot revert a bump that landed
-			// in between. The budget was still checked against the snapshot:
-			// for the count to have moved since, the target must have been
-			// redone in between, which means the check is simply one round
-			// late -- the next failure blocks.
-			claimed, err := e.repo.ClaimNode(target.ID, todo, []domain.NodeStatus{todo}, nil)
-			if err != nil {
-				return CompleteNodeResult{}, err
-			}
-			if claimed == nil {
-				// A sibling opened this round between the read above and
-				// this write. Its bump is the round's; this failure adds
-				// nothing and has nothing left to write on the target.
-				break
-			}
-			nextIteration := claimed.IterationCount + 1
-			if _, err := e.repo.UpdateNode(target.ID, store.NodePatch{IterationCount: &nextIteration}); err != nil {
-				return CompleteNodeResult{}, err
-			}
+			// A compare-and-set, not a plain write: `target` is a
+			// snapshot, and the parallel gates this case is about can
+			// complete at the same moment. Read-then-write would let two of
+			// them both see the target at DONE and both bump the count --
+			// the very double counting above. The condition makes "move the
+			// target out of a non-TODO status" the thing exactly one caller
+			// can win; the step is not required, because losing it means a
+			// sibling opened the round first, so this failure counts
+			// nothing after all and has nothing left to write on the
+			// target. (Before DFLT-00329 this was a ClaimNode followed by a
+			// separate UpdateNode of the count; it is now one step, and on
+			// the sequential path still that ClaimNode.)
+			steps = append(steps, store.NodeStep{
+				NodeID: target.ID, IfStatusNotIn: []domain.NodeStatus{todo},
+				SetStatus: &todo, IncrementIteration: true,
+			})
 		default:
 			// Sideways loop-back: this failure always opens a round of its
 			// own (see above), so there is no claim to race for -- the target
 			// may legitimately already be TODO and still owe a bump.
-			nextIteration := target.IterationCount + 1
-			if _, err := e.repo.UpdateNode(target.ID, store.NodePatch{Status: &todo, IterationCount: &nextIteration}); err != nil {
-				return CompleteNodeResult{}, err
-			}
+			steps = append(steps, store.NodeStep{NodeID: target.ID, SetStatus: &todo, IncrementIteration: true})
 		}
-		// Status only, no IterationCount in the patch: the loop target's
-		// count is the loop's counter ("how many times has the target been
-		// redone"), so bumping the nodes swept along with it would burn the
-		// budget of whichever of them happens to be a loop target of its own
-		// and shrink the retries left for no reason.
+		// Status only, no iteration bump: the loop target's count is the
+		// loop's counter ("how many times has the target been redone"), so
+		// bumping the nodes swept along with it would burn the budget of
+		// whichever of them happens to be a loop target of its own and
+		// shrink the retries left for no reason. Unconditional, as before:
+		// the rewind resets them whatever state they are in.
 		for _, id := range rewind {
-			if _, err := e.repo.UpdateNode(id, store.NodePatch{Status: &todo}); err != nil {
-				return CompleteNodeResult{}, err
-			}
+			steps = append(steps, store.NodeStep{NodeID: id, SetStatus: &todo})
 		}
 		// The failing node itself is marked NodeAwaitingFix rather than reset
 		// to NodeTODO, so "sent back, waiting on the loop target's rework" is
 		// distinguishable from "never run" by status alone (DFLT-00042).
 		// Deliberately not branched on node type: any node that reaches this
-		// loop-back branch has already judged its target's output.
+		// loop-back branch has already judged its target's output. Last, so
+		// the sequential path keeps the old write order.
 		awaitingFix := domain.NodeAwaitingFix
-		if _, err := e.repo.UpdateNode(node.ID, store.NodePatch{Status: &awaitingFix}); err != nil {
+		main.SetStatus, main.Decision = &awaitingFix, decision
+		steps = append(steps, main)
+		transition.Steps = steps
+		if err := apply(transition); err != nil {
 			return CompleteNodeResult{}, err
 		}
 		// Resync (this branch did not use to, because it only ever moved one
@@ -1428,17 +1541,15 @@ func (e *GraphEngine) CompleteNodeWith(nodeID string, passed bool, artifacts []d
 		// out at once, and a manual approval_gate among them turns the ticket
 		// into one waiting on a human again, which deriveTicketStatus reports
 		// as IN REVIEW. Every other status-changing path -- the passing
-		// branch, blockTicket, ReopenNodes, UnstickNode -- already resyncs.
+		// branch, the blocking branches, ReopenNodes, UnstickNode -- already
+		// resyncs.
 		if err := e.syncTicketStatus(node.TicketID); err != nil {
 			return CompleteNodeResult{}, err
 		}
 		return CompleteNodeResult{NextStatus: string(domain.NodeAwaitingFix), LoopedBack: true}, nil
 	}
 
-	if err := e.blockTicket(node.TicketID); err != nil {
-		return CompleteNodeResult{}, err
-	}
-	return CompleteNodeResult{NextStatus: "BLOCKED", LoopedBack: false}, nil
+	return block()
 }
 
 // ReopenNodes is the mechanical primitive behind rejection triage
@@ -1606,22 +1717,33 @@ func (e *GraphEngine) ReopenNodes(ticketID string, nodeIDs []string) (domain.Tic
 		}
 	}
 
+	// One transition (DFLT-00329): every node is reset only if it still has
+	// the status and the iteration count this call read, and the ticket
+	// only if it is still blocked and not CLOSED. A second reopen-nodes run
+	// at the same moment therefore finds the first one's writes and is
+	// refused as a whole, instead of resetting the nodes again and
+	// spending a second iteration on each (the counts used to be written
+	// back as read+1, so both runs wrote the same value and one bump was
+	// lost -- or, run one after the other on a stale read, both counted).
 	todo := domain.NodeTODO
+	unblocked, wasBlocked := false, true
+	transition := store.NodeTransition{RequireTicketOpen: true, IfBlocked: &wasBlocked, SetBlocked: &unblocked}
+	resetIDs := make([]string, 0, len(toReset))
 	for id := range toReset {
-		n := byID[id]
-		patch := store.NodePatch{Status: &todo}
-		if spendsIteration(n.Status) {
-			nextIteration := n.IterationCount + 1
-			patch.IterationCount = &nextIteration
-		}
-		if _, err := e.repo.UpdateNode(id, patch); err != nil {
-			return domain.TicketDetail{}, err
-		}
+		resetIDs = append(resetIDs, id)
 	}
-
-	unblocked := false
-	if _, err := e.repo.UpdateTicket(ticketID, store.TicketPatch{Blocked: &unblocked}); err != nil {
-		return domain.TicketDetail{}, err
+	sort.Strings(resetIDs)
+	for _, id := range resetIDs {
+		n := byID[id]
+		count := n.IterationCount
+		transition.Steps = append(transition.Steps, store.NodeStep{
+			NodeID: id, Required: true,
+			IfStatusIn: []domain.NodeStatus{n.Status}, IfIterationCount: &count,
+			SetStatus: &todo, IncrementIteration: spendsIteration(n.Status),
+		})
+	}
+	if _, err := e.applyTransition(ticketID, transition); err != nil {
+		return domain.TicketDetail{}, e.transitionConflictError(err, "reopening nodes of ticket "+ticketID, "", "", ticketID)
 	}
 	if err := e.syncTicketStatus(ticketID); err != nil {
 		return domain.TicketDetail{}, err
@@ -1733,14 +1855,23 @@ func (e *GraphEngine) GrantIterations(ticketID string, nodeIDs []string, extra i
 	}
 	sort.Strings(ids)
 
+	// Added by the store (max_iterations + extra), not written back as the
+	// value read plus extra (DFLT-00329): two grants at once both count.
+	transition := store.NodeTransition{}
+	for _, id := range ids {
+		transition.Steps = append(transition.Steps, store.NodeStep{NodeID: id, Required: true, AddMaxIterations: extra})
+	}
+	res, err := e.applyTransition(ticketID, transition)
+	if err != nil {
+		return nil, e.transitionConflictError(err, "granting iterations on ticket "+ticketID, "", "", ticketID)
+	}
 	updated := make([]domain.GraphNode, 0, len(ids))
 	for _, id := range ids {
-		newMax := byID[id].MaxIterations + extra
-		n, err := e.repo.UpdateNode(id, store.NodePatch{MaxIterations: &newMax})
-		if err != nil {
-			return nil, err
+		n := res.Node(id)
+		if n == nil {
+			return nil, fmt.Errorf("node %s not found after granting iterations", id)
 		}
-		updated = append(updated, n)
+		updated = append(updated, *n)
 	}
 	return updated, nil
 }
@@ -1802,8 +1933,12 @@ func (e *GraphEngine) UnstickNode(nodeID string) (domain.GraphNode, error) {
 //     (nothing written), unless opts.Force, which releases it with a
 //     warning.
 //
-// The check reads the node and then writes it, as before: it is not atomic
-// (DFLT-00329 adds the compare-and-set).
+// The release is a compare-and-set on what the check read (DFLT-00329): the
+// node must still have the status and the claim token it was checked with.
+// A node completed, rewound or claimed again between the check and the
+// write is refused with INVALID_NODE_STATE and nothing is released. (On an
+// HTTP data source older than protocol 1.2 the write is still a separate
+// call after a fresh read, not atomic.)
 func (e *GraphEngine) UnstickNodeWith(nodeID string, opts UnstickOptions) (UnstickResult, error) {
 	node, err := e.repo.GetNode(nodeID)
 	if err != nil {
@@ -1821,14 +1956,22 @@ func (e *GraphEngine) UnstickNodeWith(nodeID string, opts UnstickOptions) (Unsti
 	}
 
 	todo := domain.NodeTODO
-	updated, err := e.repo.UpdateNode(nodeID, store.NodePatch{Status: &todo})
+	res, err := e.applyTransition(node.TicketID, store.NodeTransition{Steps: []store.NodeStep{{
+		NodeID: nodeID, Required: true,
+		IfStatusIn: []domain.NodeStatus{node.Status}, CheckClaimToken: true, IfClaimToken: node.ClaimToken,
+		SetStatus: &todo,
+	}}})
 	if err != nil {
-		return UnstickResult{}, err
+		return UnstickResult{}, e.transitionConflictError(err, "unsticking node "+nodeID, nodeID, node.Status, node.TicketID)
+	}
+	updated := res.Node(nodeID)
+	if updated == nil {
+		return UnstickResult{}, fmt.Errorf("node %s not found after unsticking it", nodeID)
 	}
 	if err := e.syncTicketStatus(node.TicketID); err != nil {
 		return UnstickResult{}, err
 	}
-	return UnstickResult{Node: updated, Warnings: warnings}, nil
+	return UnstickResult{Node: *updated, Warnings: warnings}, nil
 }
 
 // UpdateNode applies patch to nodeID and then brings the owning ticket's
@@ -1962,22 +2105,50 @@ func deriveTicketStatus(detail domain.TicketDetail) (domain.TicketStatus, bool) 
 	}
 }
 
+// syncTicketStatusAttempts is how many times syncTicketStatus reads, derives
+// and writes before it gives up to a status that keeps changing under it.
+const syncTicketStatusAttempts = 3
+
+// syncTicketStatus brings the ticket's status in line with its nodes
+// (deriveTicketStatus). The write carries the status it was derived from
+// (TicketPatch.IfStatus, DFLT-00329): when somebody changed the status
+// between the read and the write -- closed the ticket, typically -- the
+// write is refused, and this reads and derives again, up to
+// syncTicketStatusAttempts times. A ticket found CLOSED is left alone, so a
+// close-ticket that lands while a node completes is never overwritten with
+// a derived status. Giving up is only a warning: the next sync (every
+// complete-node, get-executable and Web UI node change runs one) derives
+// the status again.
 func (e *GraphEngine) syncTicketStatus(ticketID string) error {
+	for attempt := 1; attempt <= syncTicketStatusAttempts; attempt++ {
+		done, err := e.syncTicketStatusOnce(ticketID)
+		if done || err != nil {
+			return err
+		}
+	}
+	e.warnf("ticket %s's status kept changing while it was being brought in line with its nodes (%d attempts); the next complete-node or get-executable will try again", ticketID, syncTicketStatusAttempts)
+	return nil
+}
+
+// syncTicketStatusOnce is one read-derive-write of syncTicketStatus. done is
+// false when the write lost to a concurrent status change (and should be
+// tried again).
+func (e *GraphEngine) syncTicketStatusOnce(ticketID string) (done bool, err error) {
 	detail, err := e.repo.GetTicketDetail(ticketID)
 	if err != nil || detail == nil {
-		return err
+		return true, err
 	}
 	// A CLOSED ticket is withdrawn, not merely idle: complete-node and every
 	// other caller of syncTicketStatus must never resurrect it into
 	// TODO/IN PROGRESS/.../DONE just because a node it no longer cares about
 	// finished. Only ReopenTicket may move it out of CLOSED (DFLT-00043).
 	if detail.Status == domain.TicketClosed {
-		return nil
+		return true, nil
 	}
 
 	newStatus, ok := deriveTicketStatus(*detail)
 	if !ok {
-		return nil
+		return true, nil
 	}
 	// Nothing to sync when the derived status already matches what's stored:
 	// skip the write entirely (DFLT-00100). This is the same "don't take a
@@ -1999,10 +2170,21 @@ func (e *GraphEngine) syncTicketStatus(ticketID string) error {
 	// updated_at now means "something about this ticket actually changed",
 	// which is what a caller reading it would expect anyway.
 	if detail.Status == newStatus {
-		return nil
+		return true, nil
 	}
-	_, err = e.repo.UpdateTicket(ticketID, store.TicketPatch{Status: &newStatus})
-	return err
+	read := detail.Status
+	_, err = e.repo.UpdateTicket(ticketID, store.TicketPatch{Status: &newStatus, IfStatus: &read})
+	if isTicketStatusChanged(err) {
+		return false, nil
+	}
+	return true, err
+}
+
+// isTicketStatusChanged reports whether err is TICKET_STATUS_CHANGED (a
+// TicketPatch.IfStatus that no longer matched).
+func isTicketStatusChanged(err error) bool {
+	var apiErr *domain.APIError
+	return errors.As(err, &apiErr) && apiErr.Code == domain.ErrCodeTicketStatusChanged
 }
 
 // CloseTicket withdraws ticketID without marking it complete: it sets status
@@ -2057,7 +2239,18 @@ func (e *GraphEngine) ReopenTicket(ticketID string) (*domain.Ticket, error) {
 			newStatus = domain.TicketTODO
 		}
 	}
-	updated, err := e.repo.UpdateTicket(ticketID, store.TicketPatch{Status: &newStatus})
+	// Only while it is still CLOSED (DFLT-00329): of two reopen-ticket
+	// calls at once, the second finds the ticket already reopened and is
+	// refused like any reopen of a ticket that is not CLOSED.
+	closed := domain.TicketClosed
+	updated, err := e.repo.UpdateTicket(ticketID, store.TicketPatch{Status: &newStatus, IfStatus: &closed})
+	if isTicketStatusChanged(err) {
+		cur, gerr := e.repo.GetTicket(ticketID)
+		if gerr == nil && cur != nil {
+			return nil, fmt.Errorf("ticket %s is %s, not CLOSED; nothing to reopen", ticketID, cur.Status)
+		}
+		return nil, fmt.Errorf("ticket %s is no longer CLOSED; nothing to reopen", ticketID)
+	}
 	if err != nil {
 		return nil, err
 	}

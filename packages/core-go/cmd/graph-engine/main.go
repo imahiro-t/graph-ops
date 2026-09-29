@@ -119,7 +119,7 @@ func run(cmd string, args []string) error {
 	case "expand-graph":
 		return cmdExpandGraph(eng, repo, rc, args)
 	case "complete-node":
-		return cmdCompleteNode(eng, repo, args)
+		return cmdCompleteNode(eng, repo, rc, args)
 	case "reopen-nodes":
 		return cmdReopenNodes(eng, args)
 	case "grant-iterations":
@@ -371,7 +371,23 @@ Commands:
   complete-node <nodeId> [true|false] [--reason "<text>"] [--claim <token>] [--session <sessionId>]
                                           (--claim refuses the completion (INVALID_NODE_STATE, nothing
                                            written) unless the node still carries that claim token, i.e.
-                                           it has not been released and claimed again since.
+                                           it has not been released and claimed again since. Always pass
+                                           it for a node get-executable handed out (a warning on stderr
+                                           says so when it is missing).
+                                           The completion is checked and written in one atomic step: if
+                                           another member or session decided or completed the node first
+                                           (e.g. approve and reject of the same approval_gate at once), or
+                                           it was rewound, or the ticket was CLOSED, this call is refused
+                                           with INVALID_NODE_STATE and writes nothing -- check the outcome
+                                           with get-ticket, do not retry. CONCURRENT_WRITE_CONFLICT means
+                                           the write kept colliding with other writes to the ticket and
+                                           nothing was written: run the same command again.
+                                           On a manual node (approval_gate, release, is_manual) it records
+                                           you -- your myName, or <OS user>@<host> when that is unset -- as
+                                           the decider, with the time; with --session in an autopilot run's
+                                           session, as the autopilot's decision.
+                                           (An HTTP data source older than protocol 1.2 cannot do any of
+                                           this: the writes are separate calls and no decider is recorded.)
                                            --reason saves the text as a "rejection_reason" text
                                            artifact on the node in the same call; valid ONLY when
                                            passed=false and the node is type approval_gate --
@@ -398,7 +414,11 @@ Commands:
                                            ITERATION LIMIT blocked, the loop target has used its last
                                            round by definition (the review failed in round
                                            max_iterations), so raise the budget with grant-iterations
-                                           first -- see below.)
+                                           first -- see below. Applied in one atomic step: if another
+                                           reopen-nodes (or anything else) changed the ticket or those
+                                           nodes after this call read them, it is refused with
+                                           INVALID_NODE_STATE and writes nothing -- check with get-ticket
+                                           before running it again, so no iteration is spent twice.)
   grant-iterations <ticketId> <nodeId1,nodeId2,...> [--extra <n>]
                                           (raises the given nodes' max_iterations by n (default 1),
                                            touching nothing else -- not their status, not their
@@ -414,7 +434,8 @@ Commands:
                                            A deliberate human decision each time: n is capped per
                                            call, and no flag makes retries unlimited. An unknown id,
                                            an id from another ticket, or an out-of-range n is an
-                                           error that writes nothing.)
+                                           error that writes nothing. n is added to the stored value, so
+                                           two grants at the same moment both count.)
   unstick-node <nodeId> [--session <sessionId>] [--force]
                                           (resets a single node stuck at IN PROGRESS/IN REVIEW back to
                                            TODO, no iteration_count change, no Blocked precondition --
@@ -428,7 +449,9 @@ Commands:
                                            released with a warning on stderr; a claim another session
                                            is still working on is refused with NODE_CLAIMED_BY_OTHER
                                            (nothing written). --force releases that too -- only once a
-                                           person has made sure nobody is working on the node.)
+                                           person has made sure nobody is working on the node. A node
+                                           completed, rewound or claimed again between that check and the
+                                           release is refused with INVALID_NODE_STATE, nothing released.)
   add-artifact <ticketId> <nodeId> <name> <type:text|gherkin|html|image|json> [contentOrPath] [--allow-outside-artifacts-dir] [--session <sessionId>]
                                           (for a "report" node's html artifact, contentOrPath's file
                                            must match the fixed report template's structural markers;
@@ -1435,7 +1458,7 @@ func readPatch(source string) (*engine.Patch, error) {
 // accepted-and-ignored or attached somewhere a later reader wouldn't expect
 // it -- see plan art-5f8847a4 section 2.3(a) and the corresponding
 // misuse-prevention scenarios in the Gherkin spec (art-eff6ffdb section 3.5).
-func cmdCompleteNode(eng *engine.GraphEngine, repo store.GraphRepository, args []string) error {
+func cmdCompleteNode(eng *engine.GraphEngine, repo store.GraphRepository, rc runtimeConfig, args []string) error {
 	const usage = `usage: graph-engine complete-node <nodeId> [true|false] [--reason "<text>"] [--claim <token>] [--session <sessionId>]`
 	// --claim and --session are taken out first, so the positional and
 	// --reason parsing below sees exactly the arguments it always did.
@@ -1514,7 +1537,16 @@ func cmdCompleteNode(eng *engine.GraphEngine, repo store.GraphRepository, args [
 	}
 
 	touchSession(eng, session)
-	result, err := eng.CompleteNodeWith(nodeID, passed, artifacts, engine.CompleteNodeOptions{ClaimToken: claimToken})
+	// Who decides a manual node is resolved here, from this process's own
+	// home config (DFLT-00329) -- the same name get-executable claims in.
+	// It is recorded only on a manual node; an automatic node records none.
+	name, fallback := identity.DisplayName(rc.HomeDir)
+	result, err := eng.CompleteNodeWith(nodeID, passed, artifacts, engine.CompleteNodeOptions{
+		ClaimToken:       claimToken,
+		Decider:          &engine.Decider{Name: name, NameIsFallback: fallback},
+		SessionID:        session,
+		WarnWithoutClaim: true,
+	})
 	if err != nil {
 		return err
 	}

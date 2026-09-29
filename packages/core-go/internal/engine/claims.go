@@ -446,6 +446,7 @@ func (e *GraphEngine) AnnotateClaims(nodeLists ...[]domain.GraphNode) {
 	for _, nodes := range nodeLists {
 		for i := range nodes {
 			n := &nodes[i]
+			sanitizeDecisionForDisplay(n)
 			if !holdsClaim(n.Status) {
 				n.ClaimLease, n.ClaimHeartbeat = "", nil
 				continue
@@ -472,6 +473,17 @@ func sanitizeClaimForDisplay(n *domain.GraphNode) {
 	if n.ClaimSessionID != nil {
 		id := displayname.ID(*n.ClaimSessionID)
 		n.ClaimSessionID = &id
+	}
+}
+
+// sanitizeDecisionForDisplay is sanitizeClaimForDisplay for the decision
+// fields (DFLT-00329): the decider's name is sanitized and a decision time
+// that does not parse is dropped. It runs on every node AnnotateClaims sees,
+// since a decision stays on a DONE / REJECTED node that holds no claim.
+func sanitizeDecisionForDisplay(n *domain.GraphNode) {
+	n.SanitizeDecisionName()
+	if n.DecidedAt != nil && displayname.Timestamp(*n.DecidedAt) == displayname.UnknownTime {
+		n.DecidedAt = nil
 	}
 }
 
