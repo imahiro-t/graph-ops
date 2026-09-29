@@ -14,6 +14,9 @@ import i18n from './i18n';
 import App from './App';
 import { Project } from './types';
 import { FakeBackend, createFakeBackend, installFakeBackend } from './test/fakeBackend';
+import { dispatchCopy, selectContents } from './test/copyEvent';
+import { PLAIN_COPY_ATTR } from './lib/plainCopy';
+import { plainText, WORD_JOINER, ZWSP } from './lib/wbr';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 const beta: Project = { id: 'p-beta', name: 'Beta', prefix: 'BETA', local_path: '/work/beta', created_at: '', updated_at: '' };
@@ -255,6 +258,31 @@ describe('App label filter', () => {
       });
     }
   });
+
+  // DFLT-00310: App installs the copy listener (lib/plainCopy), so copying a
+  // metadata bar label puts it on the clipboard without U+200B / U+2060.
+  it('copies a metadata bar label without its invisible characters', async () => {
+    // TicketItem measures its graph panel with a ResizeObserver, which jsdom lacks.
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+    const user = await renderApp();
+    const card = document.getElementById('ticket-ALP-00001') as HTMLElement;
+    await user.click(within(card).getByTestId('ticket-header-row'));
+    const details = await within(card).findByTestId('ticket-details');
+    const label = Array.from(details.querySelectorAll<HTMLElement>(`[${PLAIN_COPY_ATTR}]`)).find(
+      el => plainText(el.textContent ?? '') === '作成日時:'
+    ) as HTMLElement;
+    expect(label.textContent).toContain(WORD_JOINER);
+    selectContents(label);
+    const { event, written } = dispatchCopy(label);
+    document.getSelection()?.removeAllRanges();
+    expect(event.defaultPrevented).toBe(true);
+    expect(written['text/plain']).toBe('作成日時:');
+    for (const ch of [ZWSP, WORD_JOINER]) {
+      expect(written['text/plain']).not.toContain(ch);
+      expect(written['text/html']).not.toContain(ch);
+    }
+    });
+
   // DFLT-00296: two label re-fetches in flight at once. The older one's
   // answer arrives last but must not replace the newer list.
   it('keeps the newer label list when an older label request answers last', async () => {

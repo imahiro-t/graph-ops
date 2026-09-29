@@ -46,7 +46,8 @@ import { localizedApiErrorMessage, errorMessage } from '../lib/apiError';
 import { apiFetch } from '../lib/apiFetch';
 import { isSubmitShortcut } from '../lib/keyboardShortcuts';
 import { focusIfLost } from '../lib/focusAfterRemoval';
-import { renderWbr, splitWbr } from '../lib/wbr';
+import { plainCopyProps } from '../lib/plainCopy';
+import { withBreaks, WORD_JOINER } from '../lib/wbr';
 
 interface Props {
   ticket: TicketDetail;
@@ -364,37 +365,39 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
 };
 
 // A metadata bar item's label with its colon ("作成日時:", "Closed reason:")
-// (DFLT-00292). Labels break between words only: break-keep (word-break:
-// keep-all) keeps a CJK label such as "クローズ理由" together, and the last
-// character and the colon sit in a whitespace-nowrap span, so the line never
-// breaks just before the colon ("クローズ理由 / :"). A Japanese label marks
-// where it may break between its words with "<wbr/>" in its *Visible
-// translation ("クローズ<wbr/>理由", "作成<wbr/>日時"; see lib/wbr): with a
-// 200% text size "クローズ理由:" is about 147px, wider than the card at
-// 200-240px (118 / 142px), and without the mark keep-all could only break it
-// mid-word at the line's end ("クローズ理 / 由:").
-// A label never breaks inside a word, not even when one word is wider than
-// the metadata bar: at 160px / 200% "Created:" is 88px and "クローズ" 93px
-// against a 78px bar, but the bar sits inside the details panel's padding and
-// the card's clip is 17px further right, so the unbroken word runs into that
-// padding and still ends inside the clip (about R129 / R134 against R136).
-// Breaking it there ("Create / d:", "クロー / ズ理由:") only traded a readable
-// label for nothing. So there is no overflow-wrap here, and no min-w-0: as a
-// flex item the label keeps its longest word's width, and the bar's
-// measurements show where it really ends. Never put wrap-anywhere on a label
-// or its ancestors.
-const MetaLabel: React.FC<{ text: string }> = ({ text }) => {
-  const words = splitWbr(text);
-  const lastWord = Array.from(words.pop() ?? '');
-  const last = lastWord.pop() ?? '';
-  words.push(lastWord.join(''));
-  return (
-    <span className="break-keep">
-      {renderWbr(words)}
-      <span className="whitespace-nowrap">{last}:</span>
-    </span>
-  );
-};
+// (DFLT-00292, DFLT-00295). break-keep (word-break: keep-all) keeps a CJK
+// label such as "クローズ理由" together, so it breaks between words only: a
+// Japanese label marks where with "<wbr/>" in its *Visible translation
+// ("クローズ<wbr/>理由", "作成<wbr/>日時"), which withBreaks (lib/wbr) turns
+// into U+200B. With a 200% text size "クローズ理由:" is about 147px, wider
+// than the card at 200-240px (118 / 142px), and without the mark keep-all
+// could only break it mid-word at the line's end ("クローズ理 / 由:").
+// WORD_JOINER (U+2060) ties the last character to the colon, so the line
+// never breaks just before it ("クローズ理由 / :").
+// DFLT-00295: the label is one string, so one text node: with <wbr> elements
+// and a nowrap span for the last character, Chromium's accessibility tree
+// exposed it as several texts ("作成" "日" "時:", "Create" "d:"). Keep it a
+// single template literal -- adjacent JSX children ({a}{b}:) are separate
+// text nodes.
+// One word may be wider than the metadata bar (at 160px / 200% "Created:" is
+// 88px and "クローズ" 93px against a 78px bar). The bar sits inside the
+// details panel's padding (--details-pad), and the card's clip is the
+// panel's outer edge, so the word may run into that padding: max-width is
+// the item's width plus the padding, and the label ends inside the clip.
+// Only a word wider than that breaks inside itself (wrap-break-word, which
+// unlike wrap-anywhere leaves the min-content width alone, so a word that fits
+// is never broken): a font whose kana are 1em wide makes "クローズ" 96px at
+// 160px / 200%, and a narrower window or a larger text size makes any word
+// too wide. inline-block lets max-width apply in the date item, where the
+// label is inline; in the other items it is a flex item. No min-w-0 and never
+// wrap-anywhere, on the label or its ancestors: the label's box then matches
+// its text, so measurements show where it really ends.
+// DFLT-00310: plainCopyProps marks the label so that a copy touching it puts
+// the text on the clipboard without U+200B / U+2060 (lib/plainCopy); the
+// drawn text and its one text node are unchanged.
+const MetaLabel: React.FC<{ text: string }> = ({ text }) => (
+  <span {...plainCopyProps} className="inline-block max-w-[calc(100%+var(--details-pad))] break-keep wrap-break-word">{`${withBreaks(text)}${WORD_JOINER}:`}</span>
+);
 
 export const TicketItem: React.FC<Props> = ({
   ticket,
@@ -1921,19 +1924,32 @@ export const TicketItem: React.FC<Props> = ({
           when the word is wider than the line (wrap-break-word). With the
           page's own px-1 (App.tsx) every text keeps at least three
           characters a line at 160px / 200%, measured in Japanese and
-          English. The graph keeps scrolling sideways in its own box. */}
+          English. The graph keeps scrolling sideways in its own box.
+          DFLT-00295: the side padding is the --details-pad variable, set
+          with the same variants in the same order (so the same one wins),
+          because MetaLabel lets a label run into the right padding: its
+          max-width is its item's width plus --details-pad. The top and
+          bottom padding stay py-* with the values p-* gave them. */}
       {isExpanded && (
         <div
           data-testid="ticket-details"
-          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 max-sm:p-3 upto-15rem:p-3 upto-200px:p-2 upto-200px:px-1 upto-7_5rem:p-1 space-y-6"
+          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 [--details-pad:1.5rem] max-sm:[--details-pad:0.75rem] upto-15rem:[--details-pad:0.75rem] upto-200px:[--details-pad:0.25rem] upto-7_5rem:[--details-pad:0.25rem] px-(--details-pad) py-6 max-sm:py-3 upto-15rem:py-3 upto-200px:py-2 upto-7_5rem:py-1 space-y-6"
         >
           {/* Metadata Bar */}
           <div className="flex flex-wrap items-center gap-y-2 gap-x-6 text-xs text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800 pb-3">
-            <div>
-              {t('ticketItem.nodeCount')}: <span className="font-semibold text-slate-800 dark:text-slate-200">{totalNodes}</span>
+            {/* DFLT-00295: the label and its colon are one string, so one
+                text node (and one text in the accessibility tree), not
+                "ノード数" and ": " as two. This item and the loop-back line
+                are min-w-0 wrap-break-word: under 160px or over 200% text
+                one word ("Nodes:", "Loop-back") was wider than the bar and
+                ran past the card's clip (R114.5 against R95 at 120px / 200%);
+                it now breaks inside itself only then. Whenever a word fits
+                nothing changes. */}
+            <div className="min-w-0 wrap-break-word">
+              {`${t('ticketItem.nodeCount')}: `}<span className="font-semibold text-slate-800 dark:text-slate-200">{totalNodes}</span>
             </div>
             {loopEdges.length > 0 && (
-              <div className="text-amber-600 dark:text-amber-400 font-medium">
+              <div className="text-amber-600 dark:text-amber-400 font-medium min-w-0 wrap-break-word">
                 {t('ticketItem.loopEdges', { count: loopEdges.length })}
               </div>
             )}
@@ -1947,7 +1963,11 @@ export const TicketItem: React.FC<Props> = ({
                 mid-word ("Create / d:"). The date breaks inside a word only
                 when the word cannot fit on a line; the label (MetaLabel)
                 breaks between words, and never before its colon. At any
-                usable width nothing changes. */}
+                usable width nothing changes.
+                DFLT-00295: the label breaks inside a word only when that
+                word is wider than this item plus the details panel's right
+                padding (a 1em-kana font, under 160px or over 200%); it is
+                inline-block so that max-width applies here. */}
             <div className="min-w-0">
               <MetaLabel text={t('ticketItem.createdAtVisible')} />{' '}
               <span className="font-mono text-slate-700 dark:text-slate-300 wrap-anywhere">{formatDateTime(ticket.created_at, i18n.language)}</span>
@@ -1964,8 +1984,16 @@ export const TicketItem: React.FC<Props> = ({
                 ls"). Each value element carries its own protection instead --
                 the chips here, and inside LabelSelect the button
                 (wrap-break-word: between words, mid-word only when one word is
-                wider than the line) and the save error (wrap-anywhere). */}
-            <div className="flex flex-wrap items-center gap-1.5 min-w-0" data-testid="ticket-detail-labels">
+                wider than the line) and the save error (wrap-anywhere).
+                DFLT-00295: LabelSelect's save error takes this item's width
+                and adds nothing to it, so the error cannot push the item (and
+                the button) onto the next line. While there is one the item
+                grows into the rest of its line of the bar, so the message is
+                as wide as that line instead of squeezed under the labels
+                (about 310px at 1280px, breaking ids mid-word). grow only
+                stretches the item on the line it is already on, so the button
+                stays where it was; without an error nothing changes. */}
+            <div className="flex flex-wrap items-center gap-1.5 min-w-0 has-[[role=alert]]:grow" data-testid="ticket-detail-labels">
               <MetaLabel text={t('ticket.labels.title')} />
               {ticketLabels.length === 0 ? (
                 <span className="text-slate-500 dark:text-slate-400">{t('ticket.labels.none')}</span>
@@ -1998,7 +2026,10 @@ export const TicketItem: React.FC<Props> = ({
                 moves to the next line whole instead of breaking ("クローズ理 /
                 由:"), and it never breaks before its colon ("クローズ理由 /
                 :"). The space is not drawn between flex items (gap-1 keeps the
-                spacing) but keeps the item's text "Closed reason: <reason>". */}
+                spacing) but keeps the item's text "Closed reason: <reason>".
+                DFLT-00295: a word of the label wider than this item plus the
+                details panel's right padding breaks inside itself instead of
+                running past the card's clip (see MetaLabel). */}
             {ticket.closed_reason && (
               <div className="flex flex-wrap items-center gap-1 min-w-0 text-slate-700 dark:text-slate-300">
                 <Archive aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-slate-500 dark:text-slate-400" />

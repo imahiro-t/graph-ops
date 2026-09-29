@@ -111,7 +111,9 @@ describe.each(['ja', 'en'] as const)('TicketItem detail sections in a window of 
   it('pads the detail panel and every card less, only in a window of 200px or less', () => {
     renderTicket();
     const details = screen.getByTestId('ticket-details');
-    expect(details).toHaveClass('p-6', ...tiny('p-2', 'px-1'));
+    // DFLT-00295: the side padding goes through --details-pad (0.25rem, as
+    // px-1 gave it), the top and bottom through py-* (0.5rem, as p-2).
+    expect(details).toHaveClass('px-(--details-pad)', '[--details-pad:1.5rem]', 'py-6', ...tiny('[--details-pad:0.25rem]', 'py-2'));
     expect(screen.getByTestId('ticket-family')).toHaveClass('p-4', ...tiny('px-1', 'py-2'));
     expect(screen.getByTestId('autopilot-decisions')).toHaveClass('p-4', ...tiny('px-1', 'py-2'));
     const descriptionCard = within(details).getByText(i18n.t('ticketItem.description.title')).closest('.rounded-xl') as HTMLElement;

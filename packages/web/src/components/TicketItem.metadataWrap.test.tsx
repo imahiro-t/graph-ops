@@ -20,18 +20,32 @@
 // ("Create / d:", "Edit / labe / ls"), and the closed reason's label could
 // break before its colon ("クローズ理由 / :"). wrap-anywhere now sits on the
 // values only (the date, the closed reason, each chip, and the label save
-// error). Each label is a MetaLabel -- break-keep, with its last character
+// error). Each label was a MetaLabel -- break-keep, with its last character
 // and colon in a whitespace-nowrap span, and a <wbr> between the words of a
-// Japanese label ("クローズ<wbr>理由") -- and never breaks inside a word: at
-// 160px / 200% a word wider than the bar ("Created:", "クローズ") still ends
-// inside the card's clip when left whole, so it gets no overflow-wrap (QA
-// review R1 of DFLT-00292). The "Edit labels"
-// button is flex-wrap wrap-break-word with its name in a break-keep span
-// ("ラベルを<wbr>編集" in Japanese). LabelSelect's wrapper is flex-wrap so a
-// save error goes to its own line instead of squeezing the button.
-// The plain keys (ticketItem.createdAt, ticketItem.close.reasonLabel,
-// ticket.labels.edit) are the baseline the drawn *Visible text is compared
-// with here, so keep them even where the UI draws the *Visible key instead.
+// Japanese label ("クローズ<wbr>理由") -- and never broke inside a word: at
+// 160px / 200% a word wider than the bar ("Created:", "クローズ") still ended
+// inside the card's clip when left whole, so it got no overflow-wrap (QA
+// review R1 of DFLT-00292). The "Edit labels" button is flex-wrap
+// wrap-break-word with its name in a break-keep span ("ラベルを<wbr>編集" in
+// Japanese). LabelSelect's wrapper was flex-wrap so a save error went to its
+// own line instead of squeezing the button.
+// DFLT-00295 replaces the parts of that paragraph written in the past tense:
+// there is no nowrap span and no <wbr> element any more, a label breaks
+// inside a word when one word cannot fit (see below), and LabelSelect's
+// wrapper is display: contents.
+// Each label is now one text node -- its words joined by U+200B (the
+// "<wbr/>" mark, see lib/wbr) and its last character tied to the colon by
+// U+2060 -- so Chromium's accessibility tree shows it as one text, not
+// "作成" "日" "時:". It is inline-block with a max-width of its item plus the
+// details panel's padding (--details-pad), and breaks inside a word only when
+// one word is wider than that (wrap-break-word), so it always ends inside the
+// card's clip. "ノード数: " is one text node as well. The label picker's panel
+// is positioned from an anchor around the button only, so a save error does
+// not move it (LabelSelect.test.tsx covers fitting it into the card), and
+// the labels item grows into the rest of its line while there is a save
+// error, so the message is not squeezed to the width of the labels.
+// The expected label text is derived from the *Visible keys (plainText), and
+// also checked against literals so a broken *Visible key cannot pass.
 // jsdom does no layout, so this checks the classes; the widths themselves
 // were measured in a real browser (see the ticket's implementation notes).
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -39,6 +53,8 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { formatDateTime } from '../i18n/formatDate';
+import { PLAIN_COPY_ATTR } from '../lib/plainCopy';
+import { plainText, WORD_JOINER, ZWSP } from '../lib/wbr';
 import { Label, TicketDetail } from '../types';
 import { TicketItem } from './TicketItem';
 
@@ -78,27 +94,35 @@ const renderTicket = (overrides: Partial<TicketDetail> = {}, projectLabels: Labe
 
 const LONG_WORD = 'label-0123456789abcdef-not-found';
 
-// Checks a MetaLabel: the label and its colon in one span that breaks between
-// words only, with the last character and the colon joined by nowrap. `words`
-// are the parts a <wbr> separates (the Japanese "クローズ / 理由"); the text
-// must still read as the plain translation (`text`).
+// Checks a MetaLabel: the label and its colon as one text node, its `words`
+// joined by U+200B (the Japanese "クローズ / 理由") and the last character tied
+// to the colon by U+2060; without them it reads as `text`.
 const expectMetaLabel = (label: HTMLElement, text: string, words: string[] = [text]) => {
-  expect(label.textContent).toBe(`${text}:`);
-  const wbrs = label.querySelectorAll('wbr');
-  expect(wbrs).toHaveLength(words.length - 1);
-  wbrs.forEach((wbr, i) => {
-    expect(wbr.parentElement).toBe(label);
-    expect(wbr.previousSibling?.textContent).toBe(words[i]);
-  });
+  expect(words.join('')).toBe(text);
+  expect(label.childNodes).toHaveLength(1);
+  expect(label.firstChild?.nodeType).toBe(Node.TEXT_NODE);
+  expect(label.children).toHaveLength(0);
+  expect(label.querySelector('wbr')).toBeNull();
+  expect(label.textContent).toBe(`${words.join(ZWSP)}${WORD_JOINER}:`);
+  expect(plainText(label.textContent ?? '')).toBe(`${text}:`);
   expect(label.textContent).not.toContain('<wbr');
-  expect(label).toHaveClass('break-keep');
-  // Never broken inside a word, and keeps its longest word's width as a flex item.
-  for (const cls of ['wrap-anywhere', 'wrap-break-word', 'min-w-0']) expect(label).not.toHaveClass(cls);
-  const tails = label.querySelectorAll('.whitespace-nowrap');
-  expect(tails).toHaveLength(1);
-  expect(tails[0].textContent).toBe(`${Array.from(text).pop()}:`);
-  expect(tails[0].parentElement).toBe(label);
+  // Breaks between words, and inside a word only when the word is wider than
+  // its item plus the details panel's padding.
+  expect(label).toHaveClass('inline-block', 'break-keep', 'wrap-break-word', 'max-w-[calc(100%+var(--details-pad))]');
+  for (const cls of ['wrap-anywhere', 'min-w-0']) expect(label).not.toHaveClass(cls);
+  // A copy takes it to the clipboard without U+200B / U+2060 (DFLT-00310).
+  expect(label).toHaveAttribute(PLAIN_COPY_ATTR);
 };
+
+// The label text a test expects, from its *Visible key, which must also read
+// as the literal (so the baseline cannot drift along with a broken key).
+const visibleLabel = (key: string, literal: Record<string, string>, lng: string) => {
+  const text = plainText(i18n.t(key));
+  expect(text).toBe(literal[lng]);
+  return text;
+};
+const CREATED = { ja: '作成日時', en: 'Created' };
+const CLOSED_REASON = { ja: 'クローズ理由', en: 'Closed reason' };
 
 // No element from el up to the metadata bar (or beyond) has wrap-anywhere.
 const expectNoInheritedWrapAnywhere = (el: Element) => {
@@ -135,7 +159,8 @@ describe.each(['ja', 'en'])('TicketItem metadata bar wrapping (%s)', lng => {
     const item = dateSpan.parentElement as HTMLElement;
 
     // The item is the metadata bar's "Created: <date>" entry.
-    expect(item.textContent).toBe(`${i18n.t('ticketItem.createdAt')}: ${formatted}`);
+    const created = visibleLabel('ticketItem.createdAtVisible', CREATED, lng);
+    expect(plainText(item.textContent ?? '')).toBe(`${created}: ${formatted}`);
     // It can shrink, but no longer passes wrap-anywhere down to its label.
     expect(item).toHaveClass('min-w-0');
     expect(item).not.toHaveClass('wrap-anywhere');
@@ -144,7 +169,7 @@ describe.each(['ja', 'en'])('TicketItem metadata bar wrapping (%s)', lng => {
     // The label breaks between words only, never before its colon.
     const label = labelSpanOf(item);
     // Japanese may break only between "作成" and "日時" (DFLT-00292).
-    expectMetaLabel(label, i18n.t('ticketItem.createdAt'), lng === 'ja' ? ['作成', '日時'] : undefined);
+    expectMetaLabel(label, created, lng === 'ja' ? ['作成', '日時'] : undefined);
     expectNoInheritedWrapAnywhere(label);
   });
 
@@ -164,7 +189,8 @@ describe.each(['ja', 'en'])('TicketItem metadata bar wrapping (%s)', lng => {
 
     const reason = within(details).getByText('superseded-by-DFLT-00002');
     const reasonItem = reason.parentElement as HTMLElement;
-    expect(reasonItem.textContent).toBe(`${i18n.t('ticketItem.close.reasonLabel')}: superseded-by-DFLT-00002`);
+    const closedReason = visibleLabel('ticketItem.close.reasonLabelVisible', CLOSED_REASON, lng);
+    expect(plainText(reasonItem.textContent ?? '')).toBe(`${closedReason}: superseded-by-DFLT-00002`);
     // The reason moves onto its own line when it does not fit beside the label.
     expect(reasonItem).toHaveClass('flex', 'flex-wrap', 'min-w-0');
     // Not on the item: inherited, it broke the "Closed reason:" label mid-word.
@@ -173,7 +199,7 @@ describe.each(['ja', 'en'])('TicketItem metadata bar wrapping (%s)', lng => {
     const reasonLabel = labelSpanOf(reasonItem);
     expect(reasonLabel.parentElement).toBe(reasonItem);
     // Japanese may break only between "クローズ" and "理由", never "クローズ理 / 由:".
-    expectMetaLabel(reasonLabel, i18n.t('ticketItem.close.reasonLabel'), lng === 'ja' ? ['クローズ', '理由'] : undefined);
+    expectMetaLabel(reasonLabel, closedReason, lng === 'ja' ? ['クローズ', '理由'] : undefined);
     expectNoInheritedWrapAnywhere(reasonLabel);
     // Only the reason itself breaks inside a word, and only when it cannot fit.
     expect(reason).toHaveClass('font-medium', 'min-w-0', 'wrap-anywhere');
@@ -198,22 +224,71 @@ describe.each(['ja', 'en'])('TicketItem metadata bar wrapping (%s)', lng => {
 
     const text = button.querySelector(':scope > span') as HTMLElement;
     expect(text).toHaveClass('min-w-0', 'break-keep');
-    // The visible name (ticket.labels.editVisible) matches ticket.labels.edit.
-    expect(text.textContent).toBe(editName);
+    // The visible name (ticket.labels.editVisible) is one string that reads
+    // as ticket.labels.edit, with U+200B where it may break (DFLT-00295).
+    expect(text.querySelector('wbr')).toBeNull();
+    expect(text.childNodes).toHaveLength(1);
+    expect(plainText(text.textContent ?? '')).toBe(editName);
     expect(text.textContent).not.toContain('wbr');
-    const wbrs = text.querySelectorAll('wbr');
+    // A copy takes it to the clipboard without U+200B (DFLT-00310).
+    expect(text).toHaveAttribute(PLAIN_COPY_ATTR);
+    const parts = (text.textContent ?? '').split(ZWSP);
     if (lng === 'ja') {
       // "ラベルを / 編集" is the only break opportunity under keep-all.
-      expect(wbrs).toHaveLength(1);
-      expect(wbrs[0].previousSibling?.textContent).toBe('ラベルを');
-      expect(wbrs[0].nextSibling?.textContent).toBe('編集');
+      expect(parts).toEqual(['ラベルを', '編集']);
     } else {
-      expect(wbrs).toHaveLength(0);
+      expect(parts).toEqual([editName]);
     }
 
-    // LabelSelect's wrapper can wrap the error below the button and stays in the card.
-    const wrapper = button.parentElement as HTMLElement;
-    expect(wrapper).toHaveClass('flex-wrap', 'min-w-0', 'max-w-full');
+    // The panel's anchor wraps the button only (DFLT-00295).
+    const anchor = button.parentElement as HTMLElement;
+    expect(anchor).toHaveClass('relative', 'min-w-0', 'max-w-full');
+    // LabelSelect's wrapper is display: contents, so the anchor (and a save
+    // error) are items of the labels item itself, which wraps them.
+    const wrapper = anchor.parentElement as HTMLElement;
+    expect(wrapper).toHaveClass('contents');
+    expect(wrapper).not.toHaveClass('relative');
+    expect(wrapper.parentElement).toBe(labels);
+    expect(labels).toHaveClass('flex', 'flex-wrap');
+  });
+
+  it('draws "Nodes: " as one text node before its value (DFLT-00295)', async () => {
+    await i18n.changeLanguage(lng);
+    renderTicket();
+    const bar = screen.getByTestId('ticket-detail-labels').parentElement as HTMLElement;
+    const item = bar.firstElementChild as HTMLElement;
+    expect(item.childNodes).toHaveLength(2);
+    expect(item.childNodes[0].nodeType).toBe(Node.TEXT_NODE);
+    expect(item.childNodes[0].textContent).toBe(`${i18n.t('ticketItem.nodeCount')}: `);
+    expect(item.childNodes[0].textContent).toBe(lng === 'ja' ? 'ノード数: ' : 'Nodes: ');
+    expect((item.childNodes[1] as HTMLElement).tagName).toBe('SPAN');
+    expect(item.childNodes[1].textContent).toBe('0');
+    // A word wider than the bar breaks inside itself instead of running past the card.
+    expect(item).toHaveClass('min-w-0', 'wrap-break-word');
+    expect(item).not.toHaveClass('wrap-anywhere');
+  });
+
+  it('pads the details panel with the variable its labels may run into (DFLT-00295)', async () => {
+    await i18n.changeLanguage(lng);
+    renderTicket();
+    const details = screen.getByTestId('ticket-details');
+    // The side padding is the variable; the top and bottom keep what p-*
+    // gave them (DFLT-00290 / DFLT-00293).
+    expect(details).toHaveClass(
+      'px-(--details-pad)',
+      '[--details-pad:1.5rem]',
+      'max-sm:[--details-pad:0.75rem]',
+      'upto-15rem:[--details-pad:0.75rem]',
+      'upto-200px:[--details-pad:0.25rem]',
+      'upto-7_5rem:[--details-pad:0.25rem]',
+      'py-6',
+      'max-sm:py-3',
+      'upto-15rem:py-3',
+      'upto-200px:py-2',
+      'upto-7_5rem:py-1',
+      'space-y-6'
+    );
+    for (const cls of ['p-6', 'max-sm:p-3', 'upto-15rem:p-3', 'upto-200px:p-2', 'upto-200px:px-1', 'upto-7_5rem:p-1']) expect(details).not.toHaveClass(cls);
   });
 
   it('lets a label save error break inside a word on a line of its own (DFLT-00292)', async () => {
@@ -237,11 +312,29 @@ describe.each(['ja', 'en'])('TicketItem metadata bar wrapping (%s)', lng => {
 
     const alert = await within(labels).findByRole('alert');
     await waitFor(() => expect(alert).toHaveTextContent(i18n.t('ticket.labels.saveError', { message: LONG_WORD })));
-    // The error is a value: it may break inside a word, within the card.
-    expect(alert).toHaveClass('min-w-0', 'max-w-full', 'wrap-anywhere');
-    // Its parent is the wrapper, which sends it to the next line when needed.
-    expect(alert.parentElement).toBe(button.parentElement);
-    expect(alert.parentElement).toHaveClass('flex-wrap');
+    // The error is a value: it may break inside a word, within the card. On
+    // a line of its own, it adds nothing to the labels item's width, so the
+    // item does not wrap onto another line of the bar (DFLT-00295).
+    expect(alert).toHaveClass('w-0', 'min-w-full', 'max-w-full', 'wrap-anywhere');
+    // Its parent is the wrapper (display: contents), so it is an item of the
+    // labels item, which sends it to the next line when needed; added after
+    // the button, it never moves the button (DFLT-00295).
+    const anchor = button.parentElement as HTMLElement;
+    expect(alert.parentElement).toBe(anchor.parentElement);
+    expect(alert.parentElement).toHaveClass('contents');
+    expect(alert.parentElement?.parentElement).toBe(labels);
+    expect(anchor.nextElementSibling).toBe(alert);
+    // While there is an error the labels item grows into the rest of its line
+    // of the bar, so the message is not squeezed under the labels; the
+    // variant matches only an element holding a role="alert" (DFLT-00295).
+    expect(labels).toHaveClass('has-[[role=alert]]:grow');
+    expect(labels).not.toHaveClass('grow');
+    expect(labels.matches(':has([role=alert])')).toBe(true);
+    // The panel is positioned from the anchor, which holds the button but not
+    // the error, so the error does not move it (DFLT-00295).
+    expect(anchor).toHaveClass('relative');
+    expect(anchor).not.toContainElement(alert);
+    expect(anchor).toContainElement(within(labels).getByRole('group'));
     // The button still inherits no wrap-anywhere.
     expectNoInheritedWrapAnywhere(button);
   });
