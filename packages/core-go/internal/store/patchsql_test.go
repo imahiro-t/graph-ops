@@ -24,6 +24,10 @@ func TestNodePatchAssignments_OnlyNamesTheFieldsThePatchSets(t *testing.T) {
 	cleared := (*string)(nil)
 	manual := true
 	gateID, criteria := "gate-1", "does it hold up"
+	// A status write always clears the five claim columns (DFLT-00327,
+	// claimFieldsFor): UpdateNode never carries a claim.
+	claimSets := []string{"claimed_by_name=?", "claimed_by_name_is_fallback=?", "claim_token=?", "claim_session_id=?", "claimed_at=?"}
+	claimCleared := []any{sql.NullString{}, nil, sql.NullString{}, sql.NullString{}, sql.NullString{}}
 
 	for _, tc := range []struct {
 		name     string
@@ -32,7 +36,7 @@ func TestNodePatchAssignments_OnlyNamesTheFieldsThePatchSets(t *testing.T) {
 		wantArgs []any
 	}{
 		{"empty patch assigns nothing", NodePatch{}, []string{}, []any{}},
-		{"status only", NodePatch{Status: &status}, []string{"status=?"}, []any{"IN REVIEW"}},
+		{"status only", NodePatch{Status: &status}, append([]string{"status=?"}, claimSets...), append([]any{"IN REVIEW"}, claimCleared...)},
 		{
 			"assignee set", NodePatch{Assignee: &assignee},
 			[]string{"assignee=?"}, []any{sql.NullString{String: "alice", Valid: true}},
@@ -48,9 +52,9 @@ func TestNodePatchAssignments_OnlyNamesTheFieldsThePatchSets(t *testing.T) {
 				IterationCount: &iteration, MaxIterations: &maxIterations,
 				Assignee: &assignee, IsManual: &manual, GateID: &gateID, Criteria: &criteria,
 			},
-			[]string{"name=?", "type=?", "status=?", "iteration_count=?", "max_iterations=?", "assignee=?", "is_manual=?", "gate_id=?", "criteria=?"},
+			append(append([]string{"name=?", "type=?", "status=?"}, claimSets...), "iteration_count=?", "max_iterations=?", "assignee=?", "is_manual=?", "gate_id=?", "criteria=?"),
 			[]any{
-				"n", "review", "IN REVIEW", 2, 5,
+				"n", "review", "IN REVIEW", sql.NullString{}, nil, sql.NullString{}, sql.NullString{}, sql.NullString{}, 2, 5,
 				sql.NullString{String: "alice", Valid: true}, 1,
 				sql.NullString{String: "gate-1", Valid: true},
 				sql.NullString{String: "does it hold up", Valid: true},

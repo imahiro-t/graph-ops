@@ -191,6 +191,7 @@ func (s *Server) ticketGraphs(tickets []domain.Ticket) ([]domain.TicketGraph, er
 		}
 	}
 
+	nodeLists := make([][]domain.GraphNode, 0, len(tickets))
 	for _, t := range tickets {
 		g := domain.TicketGraph{Ticket: t, Nodes: nodesByTicket[t.ID], Edges: edgesByTicket[t.ID]}
 		if g.Nodes == nil {
@@ -199,8 +200,13 @@ func (s *Server) ticketGraphs(tickets []domain.Ticket) ([]domain.TicketGraph, er
 		if g.Edges == nil {
 			g.Edges = []domain.GraphEdge{}
 		}
+		nodeLists = append(nodeLists, g.Nodes)
 		out = append(out, g)
 	}
+	// Who holds each claimed node and whether they are still at it
+	// (DFLT-00327). One read of sessions for every listed ticket that has a
+	// node claimed in a session, none at all when no such node is listed.
+	s.engine.AnnotateClaims(nodeLists...)
 	return out, nil
 }
 
@@ -624,8 +630,8 @@ func (s *Server) handleCompleteNode(w http.ResponseWriter, r *http.Request) {
 // between out of values already accepted -- the same shape, and for the same
 // reason, as handleUpdateTicket (DFLT-00103 / BUG-05).
 //
-// Three fields this endpoint used to accept are withdrawn: name, type and
-// iteration_count. They are refused explicitly rather than silently ignored
+// Four fields this endpoint used to accept are withdrawn: name, type,
+// iteration_count and status. They are refused explicitly rather than silently ignored
 // as unknown JSON keys would be, so a caller that was setting one gets told
 // instead of watching its write vanish.
 //
@@ -640,18 +646,20 @@ func (s *Server) handleCompleteNode(w http.ResponseWriter, r *http.Request) {
 //   - iteration_count: the engine maintains it as review gates loop
 //     (CompleteNode). A value written from outside is not a smaller version
 //     of that bookkeeping, it is a corruption of it.
+//   - status (DFLT-00327): a status write here bypassed every check the
+//     engine makes on a node's status -- it could move a node another
+//     member's session had claimed and was working on, which is exactly the
+//     double execution unstick-node now guards against. A node's status
+//     changes through get-executable (claim), POST /api/nodes/{id}/complete
+//     and unstick-node / reopen-nodes, each with its own rules.
 //
-// No caller was found for any of the three: the Web UI never issues this
+// No caller was found for any of the four: the Web UI never issues this
 // PATCH at all (it completes nodes through POST /api/nodes/{id}/complete),
 // and the CLI goes through the engine rather than HTTP.
 func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body struct {
-		// Status arrives as a *string and is parsed, for the same reason as
-		// on handleUpdateTicket: a *domain.NodeStatus field would make the
-		// decoder accept any string as a status.
-		Status        *string `json:"status"`
-		MaxIterations *int    `json:"max_iterations"`
+		MaxIterations *int `json:"max_iterations"`
 		// Assignee: see nullableString's doc comment for why this isn't a
 		// plain *string.
 		Assignee nullableString `json:"assignee"`
@@ -664,6 +672,7 @@ func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 		Name           json.RawMessage `json:"name"`
 		Type           json.RawMessage `json:"type"`
 		IterationCount json.RawMessage `json:"iteration_count"`
+		Status         json.RawMessage `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -685,7 +694,7 @@ func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 		field string
 		raw   json.RawMessage
 	}{
-		{"name", body.Name}, {"type", body.Type}, {"iteration_count", body.IterationCount},
+		{"name", body.Name}, {"type", body.Type}, {"iteration_count", body.IterationCount}, {"status", body.Status},
 	}
 	for _, sent := range withdrawn {
 		if sent.raw == nil {
@@ -705,17 +714,7 @@ func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 			"max_iterations must be 1 or greater, got %d", *body.MaxIterations))
 		return
 	}
-	var status *domain.NodeStatus
-	if body.Status != nil {
-		parsed, err := domain.ParseNodeStatus(*body.Status)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation, "%s", err))
-			return
-		}
-		status = &parsed
-	}
-
-	patch := store.NodePatch{Status: status, MaxIterations: body.MaxIterations, IsManual: body.IsManual}
+	patch := store.NodePatch{MaxIterations: body.MaxIterations, IsManual: body.IsManual}
 	if body.Assignee.Present {
 		patch.Assignee = &body.Assignee.Value
 	}

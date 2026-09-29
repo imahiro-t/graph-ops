@@ -112,6 +112,11 @@ var mysqlSchemaStatements = []string{
 	config_id VARCHAR(191),
 	created_at VARCHAR(64) NOT NULL,
 	updated_at VARCHAR(64) NOT NULL,
+	claimed_by_name VARCHAR(255) NULL,
+	claimed_by_name_is_fallback TINYINT(1) NULL,
+	claim_token VARCHAR(64) NULL,
+	claim_session_id VARCHAR(64) NULL,
+	claimed_at VARCHAR(64) NULL,
 	KEY idx_nodes_ticket (ticket_id),
 	CONSTRAINT fk_nodes_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
@@ -202,6 +207,22 @@ var mysqlSchemaStatements = []string{
 	snapshot MEDIUMTEXT NOT NULL,
 	KEY idx_autopilot_runs_project (project_id),
 	CONSTRAINT fk_autopilot_runs_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
+
+	// Processing sessions (DFLT-00327), see schemaDDL's processing_sessions.
+	`CREATE TABLE IF NOT EXISTS processing_sessions (
+	id VARCHAR(64) PRIMARY KEY,
+	project_id VARCHAR(191) NOT NULL,
+	ticket_id VARCHAR(191) NOT NULL,
+	actor_name VARCHAR(255) NOT NULL DEFAULT '',
+	actor_name_is_fallback TINYINT(1) NOT NULL DEFAULT 0,
+	machine_id VARCHAR(64) NOT NULL DEFAULT '',
+	run_id VARCHAR(191) NULL,
+	started_at VARCHAR(64) NOT NULL,
+	heartbeat VARCHAR(64) NOT NULL,
+	KEY idx_processing_sessions_ticket (ticket_id),
+	CONSTRAINT fk_processing_sessions_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+	CONSTRAINT fk_processing_sessions_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
 }
 
@@ -527,8 +548,26 @@ func (r *MySQLRepository) Init() error {
 	if err := r.addTicketParentColumn(); err != nil {
 		return err
 	}
+	if err := addNodeClaimColumns("mysql", func(column string) (bool, error) {
+		return r.mysqlColumnExists("nodes", column)
+	}, func(column, sqlType string) error {
+		_, err := r.db.Exec("ALTER TABLE nodes ADD COLUMN " + column + " " + sqlType)
+		return err
+	}, mysqlNodeClaimColumnTypes); err != nil {
+		return err
+	}
 	// DFLT-00083 migration: tickets whose priority is NULL become MEDIUM.
 	return backfillNullTicketPriority(r.db)
+}
+
+// mysqlNodeClaimColumnTypes are the claim columns' types for
+// addNodeClaimColumns (see mysqlSchemaStatements' nodes).
+var mysqlNodeClaimColumnTypes = map[string]string{
+	"claimed_by_name":             "VARCHAR(255) NULL",
+	"claimed_by_name_is_fallback": "TINYINT(1) NULL",
+	"claim_token":                 "VARCHAR(64) NULL",
+	"claim_session_id":            "VARCHAR(64) NULL",
+	"claimed_at":                  "VARCHAR(64) NULL",
 }
 
 // addTicketParentColumn is the DFLT-00142 migration for a DB created before
@@ -814,8 +853,8 @@ func (r *MySQLRepository) UpdateNode(id string, patch NodePatch) (domain.GraphNo
 
 // ClaimNode implements GraphRepository.ClaimNode; see that interface's doc
 // comment for the contract.
-func (r *MySQLRepository) ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus) (*domain.GraphNode, error) {
-	return claimNodeCAS(r.db, r.GetNode, id, newStatus, excluded)
+func (r *MySQLRepository) ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus, claim *domain.NodeClaim) (*domain.GraphNode, error) {
+	return claimNodeCAS(r.db, r.GetNode, id, newStatus, excluded, claim)
 }
 
 func (r *MySQLRepository) DeleteNode(id string) error {

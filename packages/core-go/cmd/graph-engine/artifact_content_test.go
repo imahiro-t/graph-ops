@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/graph-ops/core-go/internal/domain"
+	"github.com/graph-ops/core-go/internal/engine"
 )
 
 // pngBytes returns bytes starting with the real PNG magic number (image
@@ -42,7 +43,7 @@ func TestCmdAddArtifact_HTMLFilePathStoresContentInDB(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	if err := cmdAddArtifact(repo, artifactsDir, []string{ticketID, nodeID, "Notes", "html", path}); err != nil {
+	if err := cmdAddArtifact(engine.New(repo), repo, artifactsDir, []string{ticketID, nodeID, "Notes", "html", path}); err != nil {
 		t.Fatalf("cmdAddArtifact: %v", err)
 	}
 
@@ -93,7 +94,7 @@ func TestCmdAddArtifact_HTMLFilePathOutsideArtifactsDirRejectedByDefault(t *test
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	if err := cmdAddArtifact(repo, artifactsDir, []string{ticketID, nodeID, "Notes", "html", secret}); err == nil {
+	if err := cmdAddArtifact(engine.New(repo), repo, artifactsDir, []string{ticketID, nodeID, "Notes", "html", secret}); err == nil {
 		t.Fatal("expected cmdAddArtifact to refuse a file outside the artifacts directory")
 	}
 
@@ -122,7 +123,7 @@ func TestCmdAddArtifact_HTMLFilePathOutsideArtifactsDirAllowedWithOptIn(t *testi
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	if err := cmdAddArtifact(repo, artifactsDir, []string{ticketID, nodeID, "Notes", "html", path, "--allow-outside-artifacts-dir"}); err != nil {
+	if err := cmdAddArtifact(engine.New(repo), repo, artifactsDir, []string{ticketID, nodeID, "Notes", "html", path, "--allow-outside-artifacts-dir"}); err != nil {
 		t.Fatalf("cmdAddArtifact: %v", err)
 	}
 
@@ -152,7 +153,7 @@ func TestCmdAddArtifact_ImageFilePathStoresBase64ContentInDB(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	if err := cmdAddArtifact(repo, artifactsDir, []string{ticketID, nodeID, "Screenshot", "image", path}); err != nil {
+	if err := cmdAddArtifact(engine.New(repo), repo, artifactsDir, []string{ticketID, nodeID, "Screenshot", "image", path}); err != nil {
 		t.Fatalf("cmdAddArtifact: %v", err)
 	}
 
@@ -208,7 +209,7 @@ func TestCmdAddArtifact_ImageFilePathRejectsNonImageBytes(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	if err := cmdAddArtifact(repo, artifactsDir, []string{ticketID, nodeID, "Screenshot", "image", path}); err == nil {
+	if err := cmdAddArtifact(engine.New(repo), repo, artifactsDir, []string{ticketID, nodeID, "Screenshot", "image", path}); err == nil {
 		t.Fatal("expected cmdAddArtifact to reject non-image bytes for an image artifact")
 	}
 
@@ -229,7 +230,7 @@ func TestCmdAddArtifact_HTMLInlineContentAccepted(t *testing.T) {
 	ticketID, nodeID := mustCreateTicketAndNode(t, repo, projectID, domain.NodeTypeImplementation)
 
 	const html = "<html><body>inline, no file</body></html>"
-	if err := cmdAddArtifact(repo, t.TempDir(), []string{ticketID, nodeID, "Notes", "html", html}); err != nil {
+	if err := cmdAddArtifact(engine.New(repo), repo, t.TempDir(), []string{ticketID, nodeID, "Notes", "html", html}); err != nil {
 		t.Fatalf("cmdAddArtifact: %v", err)
 	}
 

@@ -103,7 +103,10 @@ type GraphRepository interface {
 	GetNode(id string) (*domain.GraphNode, error)
 	ListNodesByTicket(ticketID string) ([]domain.GraphNode, error)
 	// UpdateNode writes only the columns patch actually names (plus
-	// updated_at, always). Two concurrent updates touching different
+	// updated_at, always). A patch that names Status also clears the node's
+	// claim columns (claimed_by_name .. claimed_at, DFLT-00327): only
+	// ClaimNode records a claim, and every other status write -- complete,
+	// rewind, unstick, reopen -- is one that ends it. Two concurrent updates touching different
 	// columns therefore both survive; before DFLT-00102 each wrote the
 	// whole row back and the later one reverted the earlier one's column.
 	// The returned node is read back after the write, so it shows the row
@@ -138,7 +141,13 @@ type GraphRepository interface {
 	// the Jira sample), so it implements this by fetching the node and then
 	// updating it. Against that backend the check and the write are two
 	// calls and a concurrent claim can still slip between them.
-	ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus) (*domain.GraphNode, error)
+	//
+	// claim (DFLT-00327) is recorded in the node's claim columns when
+	// newStatus is IN PROGRESS or IN REVIEW; for any other newStatus, or a
+	// nil claim, the claim columns are cleared. This is the same rule
+	// UpdateNode applies to a status write (see claimFieldsFor), so a
+	// release or a loop-back rewind through ClaimNode clears the claim too.
+	ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus, claim *domain.NodeClaim) (*domain.GraphNode, error)
 	DeleteNode(id string) error
 
 	CreateEdge(e domain.GraphEdge) (domain.GraphEdge, error)

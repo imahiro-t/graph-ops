@@ -400,7 +400,7 @@ func TestHTTPRepository_ClaimNodeComposesExistingOperations(t *testing.T) {
 	excluded := []domain.NodeStatus{domain.NodeDone, domain.NodeInProgress, domain.NodeInReview}
 	p.ResetRequests()
 
-	claimed, err := r.ClaimNode(f.nodeID, domain.NodeInProgress, excluded)
+	claimed, err := r.ClaimNode(f.nodeID, domain.NodeInProgress, excluded, nil)
 	must(t, err)
 	if claimed == nil || claimed.Status != domain.NodeInProgress {
 		t.Fatalf("ClaimNode = %+v, want the node at IN PROGRESS", claimed)
@@ -417,7 +417,7 @@ func TestHTTPRepository_ClaimNodeComposesExistingOperations(t *testing.T) {
 	// It is IN PROGRESS now, so it is in the excluded set: the second claim
 	// must come back empty, and must not write.
 	p.ResetRequests()
-	again, err := r.ClaimNode(f.nodeID, domain.NodeInProgress, excluded)
+	again, err := r.ClaimNode(f.nodeID, domain.NodeInProgress, excluded, nil)
 	must(t, err)
 	if again != nil {
 		t.Fatalf("second ClaimNode = %+v, want nil (already claimed)", again)

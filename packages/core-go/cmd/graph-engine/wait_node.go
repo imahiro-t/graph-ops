@@ -7,12 +7,17 @@ import (
 	"time"
 
 	"github.com/graph-ops/core-go/internal/domain"
+	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/store"
 )
 
 // waitNodePollInterval is how often wait-node re-reads the watched nodes. A
 // package variable (not a constant) so tests can shorten it.
 var waitNodePollInterval = 2 * time.Second
+
+// waitNodeHeartbeatInterval is how often wait-node --session records a
+// heartbeat of the session (DFLT-00327).
+var waitNodeHeartbeatInterval = time.Minute
 
 // waitNodeTimeoutExitCode is wait-node's exit code on timeout, distinct from
 // 0 (a node changed) and 1 (any error), so a caller can tell "nothing
@@ -62,8 +67,12 @@ type waitNodeResult struct {
 // exitCodeError so the process exits 2. process-ticket runs it in the
 // background at an approval_gate so a decision made in the Web UI resumes the
 // waiting session.
-func cmdWaitNode(repo store.GraphRepository, args []string) error {
-	const usage = `usage: graph-engine wait-node <nodeId> [<nodeId> ...] [--timeout <duration>]`
+func cmdWaitNode(eng *engine.GraphEngine, repo store.GraphRepository, args []string) error {
+	const usage = `usage: graph-engine wait-node <nodeId> [<nodeId> ...] [--timeout <duration>] [--session <sessionId>]`
+	session, args, err := takeFlagValue(args, "--session", usage)
+	if err != nil {
+		return err
+	}
 	var ids []string
 	seen := map[string]bool{}
 	var timeout time.Duration
@@ -105,7 +114,20 @@ func cmdWaitNode(repo store.GraphRepository, args []string) error {
 		}
 	}
 
-	result, err := waitForNodes(repo, ids, waitNodePollInterval, timeout)
+	// The session's heartbeat is kept moving while this waits (a person
+	// may take hours over an approval), but at most once a minute rather
+	// than on every poll.
+	var heartbeat func()
+	if session != "" {
+		var last time.Time
+		heartbeat = func() {
+			if now := time.Now(); now.Sub(last) >= waitNodeHeartbeatInterval {
+				last = now
+				touchSession(eng, session)
+			}
+		}
+	}
+	result, err := waitForNodes(repo, ids, waitNodePollInterval, timeout, heartbeat)
 	if err != nil {
 		return err
 	}
@@ -124,7 +146,7 @@ func cmdWaitNode(repo store.GraphRepository, args []string) error {
 // immediately. A node that disappears mid-wait, or any DB error, ends the wait
 // with an error rather than a retry: the caller (process-ticket) re-checks the
 // gate with get-ticket and restarts the wait if needed.
-func waitForNodes(repo store.GraphRepository, ids []string, interval, timeout time.Duration) (waitNodeResult, error) {
+func waitForNodes(repo store.GraphRepository, ids []string, interval, timeout time.Duration, heartbeat func()) (waitNodeResult, error) {
 	var timerC <-chan time.Time
 	if timeout > 0 {
 		timer := time.NewTimer(timeout)
@@ -135,6 +157,9 @@ func waitForNodes(repo store.GraphRepository, ids []string, interval, timeout ti
 	defer ticker.Stop()
 
 	for {
+		if heartbeat != nil {
+			heartbeat()
+		}
 		changed, err := collectChangedNodes(repo, ids)
 		if err != nil {
 			return waitNodeResult{}, err

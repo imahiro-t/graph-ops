@@ -70,6 +70,11 @@ CREATE TABLE IF NOT EXISTS nodes (
 	config_id TEXT,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL,
+	claimed_by_name TEXT,
+	claimed_by_name_is_fallback INTEGER,
+	claim_token TEXT,
+	claim_session_id TEXT,
+	claimed_at TEXT,
 	FOREIGN KEY(ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
 );
 
@@ -154,6 +159,26 @@ CREATE TABLE IF NOT EXISTS autopilot_runs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_autopilot_runs_project ON autopilot_runs(project_id);
+
+-- Processing sessions (DFLT-00327; see processing_sessions.go): one per
+-- process-ticket run over a ticket, whose heartbeat tells whether the node
+-- claims made in it are still being worked on. A new table only, so Init on
+-- an existing DB just adds it.
+CREATE TABLE IF NOT EXISTS processing_sessions (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	ticket_id TEXT NOT NULL,
+	actor_name TEXT NOT NULL DEFAULT '',
+	actor_name_is_fallback INTEGER NOT NULL DEFAULT 0,
+	machine_id TEXT NOT NULL DEFAULT '',
+	run_id TEXT,
+	started_at TEXT NOT NULL,
+	heartbeat TEXT NOT NULL,
+	FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+	FOREIGN KEY(ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_processing_sessions_ticket ON processing_sessions(ticket_id);
 `
 
 // sqliteDialect is the shared label/ticket-update code's view of SQLite: no
@@ -261,8 +286,26 @@ func (r *SQLiteRepository) Init() error {
 	if err := r.addTicketParentColumn(); err != nil {
 		return err
 	}
+	if err := addNodeClaimColumns("sqlite", func(column string) (bool, error) {
+		return r.sqliteColumnExists("nodes", column)
+	}, func(column, sqlType string) error {
+		_, err := r.db.Exec(`ALTER TABLE nodes ADD COLUMN ` + column + ` ` + sqlType)
+		return err
+	}, sqliteNodeClaimColumnTypes); err != nil {
+		return err
+	}
 	// DFLT-00083 migration: tickets whose priority is NULL become MEDIUM.
 	return backfillNullTicketPriority(r.db)
+}
+
+// sqliteNodeClaimColumnTypes are the claim columns' types for
+// addNodeClaimColumns (see schemaDDL's nodes).
+var sqliteNodeClaimColumnTypes = map[string]string{
+	"claimed_by_name":             "TEXT",
+	"claimed_by_name_is_fallback": "INTEGER",
+	"claim_token":                 "TEXT",
+	"claim_session_id":            "TEXT",
+	"claimed_at":                  "TEXT",
 }
 
 // dropLegacyProjectsWorkDir is the DFLT-00080 migration: a DB created before
@@ -581,10 +624,21 @@ func scanNode(row interface {
 }) (*domain.GraphNode, error) {
 	var n domain.GraphNode
 	var assignee, gateID, criteria, configID sql.NullString
+	var claimedBy, claimToken, claimSession, claimedAt sql.NullString
+	var claimedByFallback sql.NullInt64
 	var isManual int
 	if err := row.Scan(&n.ID, &n.TicketID, &n.Name, &n.Type, &n.Status, &n.IterationCount,
-		&n.MaxIterations, &assignee, &isManual, &gateID, &criteria, &configID, &n.CreatedAt, &n.UpdatedAt); err != nil {
+		&n.MaxIterations, &assignee, &isManual, &gateID, &criteria, &configID, &n.CreatedAt, &n.UpdatedAt,
+		&claimedBy, &claimedByFallback, &claimToken, &claimSession, &claimedAt); err != nil {
 		return nil, err
+	}
+	n.ClaimedByName = stringOrNil(claimedBy)
+	n.ClaimToken = stringOrNil(claimToken)
+	n.ClaimSessionID = stringOrNil(claimSession)
+	n.ClaimedAt = stringOrNil(claimedAt)
+	if claimedByFallback.Valid {
+		b := claimedByFallback.Int64 != 0
+		n.ClaimedByNameIsFallback = &b
 	}
 	if assignee.Valid {
 		n.Assignee = &assignee.String
@@ -602,7 +656,17 @@ func scanNode(row interface {
 	return &n, nil
 }
 
-const nodeSelectCols = `id, ticket_id, name, type, status, iteration_count, max_iterations, assignee, is_manual, gate_id, criteria, config_id, created_at, updated_at`
+const nodeSelectCols = `id, ticket_id, name, type, status, iteration_count, max_iterations, assignee, is_manual, gate_id, criteria, config_id, created_at, updated_at, ` +
+	`claimed_by_name, claimed_by_name_is_fallback, claim_token, claim_session_id, claimed_at`
+
+// stringOrNil is a NULL-able column as a *string.
+func stringOrNil(s sql.NullString) *string {
+	if !s.Valid {
+		return nil
+	}
+	v := s.String
+	return &v
+}
 
 // GetNode looks up a node by its ID.
 func (r *SQLiteRepository) GetNode(id string) (*domain.GraphNode, error) {
@@ -640,8 +704,8 @@ func (r *SQLiteRepository) UpdateNode(id string, patch NodePatch) (domain.GraphN
 
 // ClaimNode implements GraphRepository.ClaimNode; see that interface's doc
 // comment for the contract.
-func (r *SQLiteRepository) ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus) (*domain.GraphNode, error) {
-	return claimNodeCAS(r.db, r.GetNode, id, newStatus, excluded)
+func (r *SQLiteRepository) ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus, claim *domain.NodeClaim) (*domain.GraphNode, error) {
+	return claimNodeCAS(r.db, r.GetNode, id, newStatus, excluded, claim)
 }
 
 func (r *SQLiteRepository) DeleteNode(id string) error {

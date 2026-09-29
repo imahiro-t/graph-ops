@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/graph-ops/core-go/internal/domain"
@@ -133,6 +134,7 @@ func TestUpdateNode_RejectsInvalidInputAndChangesNothing(t *testing.T) {
 		{"withdrawn name", map[string]any{"name": "別の名前"}, domain.ErrCodeValidation},
 		{"withdrawn type", map[string]any{"type": "totally-made-up-type"}, domain.ErrCodeValidation},
 		{"withdrawn iteration_count", map[string]any{"iteration_count": 99}, domain.ErrCodeValidation},
+		{"withdrawn status", map[string]any{"status": "DONE"}, domain.ErrCodeValidation},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, repo, ticketID, nodeID := newPatchNode(t)
@@ -166,39 +168,50 @@ func TestUpdateNode_RejectsInvalidInputAndChangesNothing(t *testing.T) {
 	}
 }
 
-// A node status this endpoint accepts is one the engine can still reason
-// about -- and setting one now re-derives the ticket's status, which this
-// path used to skip entirely.
-func TestUpdateNode_SyncsTicketStatus(t *testing.T) {
+// status is withdrawn from this endpoint (DFLT-00327): a valid status is
+// refused just like an unknown one, and a node another session has claimed
+// keeps its status and its claim. The fields that remain still go through.
+func TestUpdateNode_StatusIsWithdrawnOtherFieldsStillApply(t *testing.T) {
 	s, repo, ticketID, nodeID := newPatchNode(t)
+	claim := &domain.NodeClaim{Name: "alice", Token: "tok-1", SessionID: "sess-1", ClaimedAt: "2026-09-29T00:00:00Z"}
+	if _, err := repo.ClaimNode(nodeID, domain.NodeInProgress, []domain.NodeStatus{domain.NodeInProgress, domain.NodeInReview, domain.NodeDone}, claim); err != nil {
+		t.Fatalf("ClaimNode: %v", err)
+	}
+	for _, st := range []domain.NodeStatus{domain.NodeTODO, domain.NodeDone, domain.NodeInProgress} {
+		rec := doJSON(t, s, http.MethodPatch, "/api/nodes/"+nodeID, map[string]any{"status": string(st)})
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("PATCH status %q = %d, want 400: %s", st, rec.Code, rec.Body.String())
+		}
+		if got := decodeError(t, rec).Code; got != domain.ErrCodeValidation {
+			t.Errorf("error code = %q, want %q", got, domain.ErrCodeValidation)
+		}
+	}
+	after, err := repo.GetNode(nodeID)
+	if err != nil || after == nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if after.Status != domain.NodeInProgress || after.ClaimToken == nil || *after.ClaimToken != "tok-1" {
+		t.Fatalf("node after refused status PATCHes = %s / token %v, want IN PROGRESS with its claim kept", after.Status, after.ClaimToken)
+	}
 
 	rec := doJSON(t, s, http.MethodPatch, "/api/nodes/"+nodeID, map[string]any{
-		"status": string(domain.NodeInProgress),
+		"max_iterations": 5, "assignee": "bob", "is_manual": false,
 	})
 	if rec.Code != http.StatusOK {
-		t.Fatalf("PATCH = %d, want 200: %s", rec.Code, rec.Body.String())
+		t.Fatalf("PATCH of the remaining fields = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	if got := ticketFromAPI(t, s, ticketID)["status"]; got != string(domain.TicketInProgress) {
-		t.Errorf("ticket status = %v after its only node went IN PROGRESS, want %q", got, domain.TicketInProgress)
+	if strings.Contains(rec.Body.String(), "tok-1") {
+		t.Errorf("PATCH response leaks the claim token: %s", rec.Body.String())
 	}
-
-	// DONE additionally requires the graph to have been expanded (see
-	// deriveTicketStatus), which a hand-built test graph has not been --
-	// stamping it is what makes "every node is DONE" mean the whole ticket
-	// is, rather than just the seed.
-	expandedAt := "2026-01-01T00:00:00Z"
-	if _, err := repo.UpdateTicket(ticketID, store.TicketPatch{GraphExpandedAt: &expandedAt}); err != nil {
-		t.Fatalf("UpdateTicket: %v", err)
+	after, _ = repo.GetNode(nodeID)
+	if after.MaxIterations != 5 || after.Assignee == nil || *after.Assignee != "bob" {
+		t.Errorf("node = %+v, want max_iterations 5 and assignee bob", *after)
 	}
-
-	rec = doJSON(t, s, http.MethodPatch, "/api/nodes/"+nodeID, map[string]any{
-		"status": string(domain.NodeDone),
-	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PATCH = %d, want 200: %s", rec.Code, rec.Body.String())
+	if after.ClaimToken == nil || *after.ClaimToken != "tok-1" {
+		t.Errorf("a PATCH without status cleared the claim: %v", after.ClaimToken)
 	}
-	if got := ticketFromAPI(t, s, ticketID)["status"]; got != string(domain.TicketDone) {
-		t.Errorf("ticket status = %v after its only node went DONE, want %q", got, domain.TicketDone)
+	if got := ticketFromAPI(t, s, ticketID)["status"]; got == nil {
+		t.Errorf("ticket status missing")
 	}
 }
 
@@ -216,7 +229,7 @@ func TestUpdateNode_LeavesAClosedTicketClosed(t *testing.T) {
 	}
 
 	rec = doJSON(t, s, http.MethodPatch, "/api/nodes/"+nodeID, map[string]any{
-		"status": string(domain.NodeDone),
+		"max_iterations": 4,
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PATCH = %d, want 200: %s", rec.Code, rec.Body.String())
@@ -236,7 +249,7 @@ func TestUpdateNode_LeavesAClosedTicketClosed(t *testing.T) {
 func TestUpdateNode_MissingNodeIs404(t *testing.T) {
 	s, _, _ := newTestServer(t)
 	rec := doJSON(t, s, http.MethodPatch, "/api/nodes/node-does-not-exist", map[string]any{
-		"status": string(domain.NodeDone),
+		"max_iterations": 4,
 	})
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())

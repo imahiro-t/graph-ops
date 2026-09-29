@@ -580,17 +580,20 @@ func (r *HTTPRepository) GetTicket(id string) (*domain.Ticket, error) {
 }
 
 func (r *HTTPRepository) GetTicketDetail(id string) (*domain.TicketDetail, error) {
-	var out domain.TicketDetail
-	if err := r.do(http.MethodGet, "/tickets/"+esc(id)+"/detail", nil, &out); err != nil {
+	var wire struct {
+		domain.Ticket
+		Nodes     []httpNodeWire     `json:"nodes"`
+		Edges     []domain.GraphEdge `json:"edges"`
+		Artifacts []domain.Artifact  `json:"artifacts"`
+	}
+	if err := r.do(http.MethodGet, "/tickets/"+esc(id)+"/detail", nil, &wire); err != nil {
 		if isNotFoundCode(err, domain.ErrCodeTicketNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
+	out := domain.TicketDetail{Ticket: wire.Ticket, Nodes: r.nodesFromWire(wire.Nodes), Edges: wire.Edges, Artifacts: wire.Artifacts}
 	normalizeTicket(&out.Ticket)
-	if out.Nodes == nil {
-		out.Nodes = []domain.GraphNode{}
-	}
 	if out.Edges == nil {
 		out.Edges = []domain.GraphEdge{}
 	}
@@ -635,50 +638,117 @@ func (r *HTTPRepository) DeleteTicket(id string) error {
 	return r.do(http.MethodDelete, "/tickets/"+esc(id), nil, nil)
 }
 
+// httpNodeWire is a node as it travels to and from the data source. It is
+// domain.GraphNode plus claim_token, which GraphNode itself never
+// serializes (see its ClaimToken): the data source has to keep the token
+// like any other column, and this is one of the only two places it is
+// allowed onto the wire (get-executable's output is the other).
+type httpNodeWire struct {
+	domain.GraphNode
+	ClaimToken *string `json:"claim_token,omitempty"`
+}
+
+// nodeToWire is n as sent to the data source: with its claim token, and
+// without what the engine computes for display (claim_heartbeat,
+// claim_lease), which is not the data source's to keep.
+func nodeToWire(n domain.GraphNode) httpNodeWire {
+	token := n.ClaimToken
+	n.ClaimHeartbeat, n.ClaimLease = nil, ""
+	return httpNodeWire{GraphNode: n, ClaimToken: token}
+}
+
+// nodeFromWire is the node the data source sent. Against a data source
+// older than protocol 1.2 the claim fields are dropped even if present:
+// such a data source does not keep them, so whatever it echoes is not a
+// claim graph-engine can rely on.
+func (r *HTTPRepository) nodeFromWire(w httpNodeWire) domain.GraphNode {
+	n := w.GraphNode
+	n.ClaimToken = w.ClaimToken
+	n.ClaimHeartbeat, n.ClaimLease = nil, ""
+	if !r.supportsClaims() {
+		n.ClaimedByName, n.ClaimedByNameIsFallback, n.ClaimToken, n.ClaimSessionID, n.ClaimedAt = nil, nil, nil, nil, nil
+	}
+	return n
+}
+
+func (r *HTTPRepository) nodesFromWire(ws []httpNodeWire) []domain.GraphNode {
+	out := make([]domain.GraphNode, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, r.nodeFromWire(w))
+	}
+	return out
+}
+
 func (r *HTTPRepository) CreateNode(n domain.GraphNode) (domain.GraphNode, error) {
-	var out domain.GraphNode
-	if err := r.do(http.MethodPost, "/tickets/"+esc(n.TicketID)+"/nodes", n, &out); err != nil {
+	var out httpNodeWire
+	if err := r.do(http.MethodPost, "/tickets/"+esc(n.TicketID)+"/nodes", nodeToWire(n), &out); err != nil {
 		return domain.GraphNode{}, err
 	}
-	return out, nil
+	return r.nodeFromWire(out), nil
 }
 
 func (r *HTTPRepository) GetNode(id string) (*domain.GraphNode, error) {
-	var out domain.GraphNode
+	var out httpNodeWire
 	if err := r.do(http.MethodGet, "/nodes/"+esc(id), nil, &out); err != nil {
 		if isNotFoundCode(err, domain.ErrCodeNodeNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return &out, nil
+	n := r.nodeFromWire(out)
+	return &n, nil
 }
 
 func (r *HTTPRepository) ListNodesByTicket(ticketID string) ([]domain.GraphNode, error) {
-	out := []domain.GraphNode{}
+	var out []httpNodeWire
 	if err := r.do(http.MethodGet, "/tickets/"+esc(ticketID)+"/nodes", nil, &out); err != nil {
 		return nil, err
 	}
-	if out == nil {
-		out = []domain.GraphNode{}
-	}
-	return out, nil
+	return r.nodesFromWire(out), nil
 }
 
+// UpdateNode sends patch as a PATCH. When the patch writes the status and
+// the data source speaks 1.2, the five claim fields go with it, all null --
+// the rule claimFieldsFor states for every status write that is not a
+// claim, the same one the SQL backends apply.
 func (r *HTTPRepository) UpdateNode(id string, patch NodePatch) (domain.GraphNode, error) {
-	var out domain.GraphNode
-	if err := r.do(http.MethodPatch, "/nodes/"+esc(id), nodePatchBody(patch), &out); err != nil {
+	body := nodePatchBody(patch)
+	if patch.Status != nil {
+		r.addClaimPatchFields(body, *patch.Status, nil)
+	}
+	return r.patchNode(id, body)
+}
+
+func (r *HTTPRepository) patchNode(id string, body map[string]any) (domain.GraphNode, error) {
+	var out httpNodeWire
+	if err := r.do(http.MethodPatch, "/nodes/"+esc(id), body, &out); err != nil {
 		return domain.GraphNode{}, err
 	}
-	return out, nil
+	return r.nodeFromWire(out), nil
+}
+
+// addClaimPatchFields adds claimFieldsFor(status, claim) to a PATCH body,
+// as values or nulls -- nothing at all against a data source older than
+// 1.2, which does not keep them.
+func (r *HTTPRepository) addClaimPatchFields(body map[string]any, status domain.NodeStatus, claim *domain.NodeClaim) {
+	if !r.supportsClaims() {
+		return
+	}
+	f := claimFieldsFor(status, claim)
+	body["claimed_by_name"] = f.Name
+	body["claimed_by_name_is_fallback"] = f.NameIsFallback
+	body["claim_token"] = f.Token
+	body["claim_session_id"] = f.SessionID
+	body["claimed_at"] = f.ClaimedAt
 }
 
 // ClaimNode implements GraphRepository.ClaimNode, deliberately without the
 // atomicity the SQL backends give it: see that interface's doc comment for why
 // the REST datasource keeps a fetch-then-update. The status check is still
 // made, so a node another caller has already claimed is reported as
-// (nil, nil) in every case but a genuine race.
-func (r *HTTPRepository) ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus) (*domain.GraphNode, error) {
+// (nil, nil) in every case but a genuine race. The claim is written by the
+// same PATCH as the status.
+func (r *HTTPRepository) ClaimNode(id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus, claim *domain.NodeClaim) (*domain.GraphNode, error) {
 	cur, err := r.GetNode(id)
 	if err != nil {
 		return nil, err
@@ -691,7 +761,9 @@ func (r *HTTPRepository) ClaimNode(id string, newStatus domain.NodeStatus, exclu
 			return nil, nil
 		}
 	}
-	updated, err := r.UpdateNode(id, NodePatch{Status: &newStatus})
+	body := nodePatchBody(NodePatch{Status: &newStatus})
+	r.addClaimPatchFields(body, newStatus, claim)
+	updated, err := r.patchNode(id, body)
 	if err != nil {
 		return nil, err
 	}

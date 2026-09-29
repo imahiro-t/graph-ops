@@ -179,6 +179,14 @@ const (
 	// "saved but not in effect" for "saved". Details carries "keys", the
 	// sorted list of offending keys. Returned with a 400.
 	ErrCodeAutopilotSettingLocked ErrorCode = "AUTOPILOT_SETTING_LOCKED"
+	// ErrCodeNodeClaimedByOther: unstick-node was asked to release a node
+	// that another processing session claimed and is still working on --
+	// its session (or autopilot run) has shown a heartbeat within its lease
+	// (DFLT-00327). Nothing is written. Details names who holds it and
+	// since when; --force releases it anyway, which is only right once a
+	// person has made sure that nobody is working on the node. Returned
+	// with a 409.
+	ErrCodeNodeClaimedByOther ErrorCode = "NODE_CLAIMED_BY_OTHER"
 )
 
 // APIError pairs a machine-readable Code with a developer-facing English

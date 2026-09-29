@@ -26,7 +26,7 @@ func runWaitNode(t *testing.T, repo store.GraphRepository, args ...string) (wait
 	t.Helper()
 	var cmdErr error
 	out := captureStdout(t, func() {
-		cmdErr = cmdWaitNode(repo, args)
+		cmdErr = cmdWaitNode(engine.New(repo), repo, args)
 	})
 	var res waitNodeResult
 	if strings.TrimSpace(out) != "" {

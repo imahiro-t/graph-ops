@@ -23,6 +23,7 @@ import (
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/httpserver"
+	"github.com/graph-ops/core-go/internal/identity"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
 )
@@ -109,6 +110,8 @@ func run(cmd string, args []string) error {
 		return cmdUpdateTicket(repo, args)
 	case "get-ticket":
 		return cmdGetTicket(eng, args)
+	case "begin-session":
+		return cmdBeginSession(eng, rc, args)
 	case "list-tickets":
 		return cmdListTickets(repo)
 	case "get-executable":
@@ -122,13 +125,13 @@ func run(cmd string, args []string) error {
 	case "grant-iterations":
 		return cmdGrantIterations(eng, args)
 	case "unstick-node":
-		return cmdUnstickNode(eng, args)
+		return cmdUnstickNode(eng, rc, args)
 	case "add-artifact":
-		return cmdAddArtifact(repo, rc.ArtifactsDir, args)
+		return cmdAddArtifact(eng, repo, rc.ArtifactsDir, args)
 	case "get-review-criteria":
 		return cmdGetReviewCriteria(repo, args)
 	case "wait-node":
-		return cmdWaitNode(repo, args)
+		return cmdWaitNode(eng, repo, args)
 	case "get-language-settings":
 		return cmdGetLanguageSettings(rc, args)
 	case "ui":
@@ -327,12 +330,37 @@ Commands:
                                            HIGH/MEDIUM/LOW, an empty title, an unknown flag (e.g. --assignee)
                                            or an unknown id (TICKET_NOT_FOUND) is an error and changes
                                            nothing. Prints the updated ticket JSON)
-  get-ticket <ticketId>                  (the ticket with its nodes, edges and artifacts, plus
+  get-ticket <ticketId> [--session <sessionId>]
+                                          (the ticket with its nodes, edges and artifacts, plus
                                            "parent_ticket_id", "parent" ({id,title,status} or null) and
-                                           "children" (the same shape, in creation order, [] if none))
+                                           "children" (the same shape, in creation order, [] if none).
+                                           A node at IN PROGRESS/IN REVIEW also shows who claimed it:
+                                           "claimed_by_name" (+ "claimed_by_name_is_fallback" when it is
+                                           the <user>@<host> stand-in for an unset myName),
+                                           "claim_session_id", "claimed_at", "claim_heartbeat" and
+                                           "claim_lease" (live|expired|unknown|legacy). The claim token
+                                           is never shown here)
+  begin-session <ticketId> [--run <runId>]
+                                          (starts a processing session of the ticket and prints
+                                           {"session_id","lease_minutes","sessions_supported","others",
+                                           "same_run"}. Pass the session ID with --session to
+                                           get-executable, get-ticket, complete-node, unstick-node,
+                                           wait-node and add-artifact: each such call is a heartbeat, and
+                                           a session silent for lease_minutes (60) no longer protects its
+                                           claims (an autopilot session, begun with --run, follows its
+                                           run's heartbeat instead). "others" lists the other live
+                                           sessions of the ticket -- somebody else processing it -- with
+                                           the nodes they hold; they are also named in a warning on
+                                           stderr. It never blocks: the exit status is 0 either way.
+                                           "sessions_supported": false means the data source cannot keep
+                                           sessions (HTTP older than protocol 1.2); do not pass --session
+                                           then)
   list-tickets
-  get-executable <ticketId> [--language <code>]
-                                          (auto-seeds the graph's plan/plan_review nodes on first call;
+  get-executable <ticketId> [--language <code>] [--session <sessionId>]
+                                          (claims the nodes it prints in your name and --session's
+                                           session, each with its own "claim_token" -- pass it back with
+                                           complete-node --claim. Auto-seeds the graph's plan/plan_review
+                                           nodes on first call;
                                            --language, only meaningful on that first/seeding call, is this
                                            one call's explicit language choice -- see get-language-settings --
                                            and outranks the persistent (user-tier) language setting)
@@ -340,8 +368,11 @@ Commands:
                                           (call once the seed passes; no patch = default full template;
                                            --language is this one call's explicit language choice, same
                                            precedence note as get-executable's)
-  complete-node <nodeId> [true|false] [--reason "<text>"]
-                                          (--reason saves the text as a "rejection_reason" text
+  complete-node <nodeId> [true|false] [--reason "<text>"] [--claim <token>] [--session <sessionId>]
+                                          (--claim refuses the completion (INVALID_NODE_STATE, nothing
+                                           written) unless the node still carries that claim token, i.e.
+                                           it has not been released and claimed again since.
+                                           --reason saves the text as a "rejection_reason" text
                                            artifact on the node in the same call; valid ONLY when
                                            passed=false and the node is type approval_gate --
                                            any other combination (passed=true, or a non-approval_gate
@@ -384,14 +415,21 @@ Commands:
                                            call, and no flag makes retries unlimited. An unknown id,
                                            an id from another ticket, or an out-of-range n is an
                                            error that writes nothing.)
-  unstick-node <nodeId>                  (resets a single node stuck at IN PROGRESS/IN REVIEW back to
+  unstick-node <nodeId> [--session <sessionId>] [--force]
+                                          (resets a single node stuck at IN PROGRESS/IN REVIEW back to
                                            TODO, no iteration_count change, no Blocked precondition --
                                            for a node get-executable claimed but that no worker ever
                                            actually completed (e.g. a stray get-executable poll from
                                            elsewhere claimed it out from under the intended dispatch).
-                                           process-ticket must first satisfy itself nothing is still
-                                           working the node -- this does not check.)
-  add-artifact <ticketId> <nodeId> <name> <type:text|gherkin|html|image|json> [contentOrPath] [--allow-outside-artifacts-dir]
+                                           It checks who holds the node first: your own session's claim
+                                           (or one of your autopilot run's sessions) is released; a
+                                           claim whose session has gone silent past its lease, one made
+                                           without a session, or one with no claim record at all is
+                                           released with a warning on stderr; a claim another session
+                                           is still working on is refused with NODE_CLAIMED_BY_OTHER
+                                           (nothing written). --force releases that too -- only once a
+                                           person has made sure nobody is working on the node.)
+  add-artifact <ticketId> <nodeId> <name> <type:text|gherkin|html|image|json> [contentOrPath] [--allow-outside-artifacts-dir] [--session <sessionId>]
                                           (for a "report" node's html artifact, contentOrPath's file
                                            must match the fixed report template's structural markers;
                                            for html/image, a contentOrPath that names a real file is read
@@ -415,7 +453,7 @@ Commands:
                                            round granted past it is Final. From round 2 on it also
                                            tells the reviewer to fetch its previous review and the
                                            changes made since.)
-  wait-node <nodeId> [<nodeId> ...] [--timeout <duration>]
+  wait-node <nodeId> [<nodeId> ...] [--timeout <duration>] [--session <sessionId>]
                                           (blocks, polling the DB every ~2s, until at least one given node
                                            is no longer TODO -- any other status counts, including IN
                                            PROGRESS, not only DONE/REJECTED -- then prints
@@ -1255,9 +1293,15 @@ func cmdUpdateTicket(repo store.GraphRepository, args []string) error {
 // cmdGetTicket prints the ticket's detail plus its parent and children
 // (DFLT-00142, see engine.GetTicketDetailWithFamily).
 func cmdGetTicket(eng *engine.GraphEngine, args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: graph-engine get-ticket <ticketId>")
+	const usage = "usage: graph-engine get-ticket <ticketId> [--session <sessionId>]"
+	session, args, err := takeFlagValue(args, "--session", usage)
+	if err != nil {
+		return err
 	}
+	if len(args) < 1 {
+		return fmt.Errorf(usage)
+	}
+	touchSession(eng, session)
 	detail, err := eng.GetTicketDetailWithFamily(args[0])
 	if err != nil {
 		return err
@@ -1277,7 +1321,11 @@ func cmdListTickets(repo store.GraphRepository) error {
 }
 
 func cmdGetExecutable(eng *engine.GraphEngine, repo store.GraphRepository, rc runtimeConfig, args []string) error {
-	const usage = `usage: graph-engine get-executable <ticketId> [--language <code>]`
+	const usage = `usage: graph-engine get-executable <ticketId> [--language <code>] [--session <sessionId>]`
+	session, args, err := takeFlagValue(args, "--session", usage)
+	if err != nil {
+		return err
+	}
 	if len(args) < 1 {
 		return fmt.Errorf(usage)
 	}
@@ -1297,11 +1345,15 @@ func cmdGetExecutable(eng *engine.GraphEngine, repo store.GraphRepository, rc ru
 		return err
 	}
 	emitCatalogWarnings(catalog)
-	nodes, err := eng.GetExecutableNodes(ticketID, catalog)
+	touchSession(eng, session)
+	// Every node handed out is claimed in the caller's name (DFLT-00327),
+	// with or without a session; the name is for display only.
+	name, fallback := identity.DisplayName(rc.HomeDir)
+	nodes, err := eng.GetExecutableNodesAs(ticketID, catalog, engine.Claimer{Name: name, NameIsFallback: fallback, SessionID: session})
 	if err != nil {
 		return err
 	}
-	return printJSON(nodes)
+	return printJSON(claimedNodeViews(nodes))
 }
 
 // cmdExpandGraph builds the rest of a ticket's graph once the seed
@@ -1384,7 +1436,20 @@ func readPatch(source string) (*engine.Patch, error) {
 // it -- see plan art-5f8847a4 section 2.3(a) and the corresponding
 // misuse-prevention scenarios in the Gherkin spec (art-eff6ffdb section 3.5).
 func cmdCompleteNode(eng *engine.GraphEngine, repo store.GraphRepository, args []string) error {
-	const usage = `usage: graph-engine complete-node <nodeId> [true|false] [--reason "<text>"]`
+	const usage = `usage: graph-engine complete-node <nodeId> [true|false] [--reason "<text>"] [--claim <token>] [--session <sessionId>]`
+	// --claim and --session are taken out first, so the positional and
+	// --reason parsing below sees exactly the arguments it always did.
+	// --reason's value is never mistaken for one of them: they are only
+	// taken as flags, and a reason that is literally "--claim" has to go
+	// through the Web UI.
+	session, args, err := takeFlagValue(args, "--session", usage)
+	if err != nil {
+		return err
+	}
+	claimToken, args, err := takeFlagValue(args, "--claim", usage)
+	if err != nil {
+		return err
+	}
 	if len(args) < 1 {
 		return fmt.Errorf(usage)
 	}
@@ -1448,7 +1513,8 @@ func cmdCompleteNode(eng *engine.GraphEngine, repo store.GraphRepository, args [
 		artifacts = []domain.Artifact{{Name: "rejection_reason", Type: domain.ArtifactText, Content: &reason}}
 	}
 
-	result, err := eng.CompleteNode(nodeID, passed, artifacts)
+	touchSession(eng, session)
+	result, err := eng.CompleteNodeWith(nodeID, passed, artifacts, engine.CompleteNodeOptions{ClaimToken: claimToken})
 	if err != nil {
 		return err
 	}
@@ -1537,16 +1603,40 @@ func cmdGrantIterations(eng *engine.GraphEngine, args []string) error {
 // CLI-only for the same reason reopen-nodes and expand-graph's --patch are:
 // deciding a node's claim is actually stale is process-ticket's judgment
 // call, not something a human should trigger by clicking through the Web UI.
-func cmdUnstickNode(eng *engine.GraphEngine, args []string) error {
-	const usage = `usage: graph-engine unstick-node <nodeId>`
-	if len(args) < 1 {
-		return fmt.Errorf(usage)
-	}
-	node, err := eng.UnstickNode(args[0])
+//
+// Since DFLT-00327 it checks who holds the node first (engine.UnstickNodeWith):
+// another session's claim that is still live is refused with
+// NODE_CLAIMED_BY_OTHER unless --force is given; every release it allows
+// without being able to vouch for it comes with a warning on stderr.
+func cmdUnstickNode(eng *engine.GraphEngine, rc runtimeConfig, args []string) error {
+	const usage = `usage: graph-engine unstick-node <nodeId> [--session <sessionId>] [--force]`
+	session, args, err := takeFlagValue(args, "--session", usage)
 	if err != nil {
 		return err
 	}
-	return printJSON(node)
+	force := false
+	var positional []string
+	for _, a := range args {
+		switch {
+		case a == "--force":
+			force = true
+		case strings.HasPrefix(a, "-"):
+			return fmt.Errorf("%s: unrecognized argument %q", usage, a)
+		default:
+			positional = append(positional, a)
+		}
+	}
+	if len(positional) != 1 {
+		return fmt.Errorf(usage)
+	}
+	touchSession(eng, session)
+	machineID, _ := identity.MachineID(rc.HomeDir)
+	res, err := eng.UnstickNodeWith(positional[0], engine.UnstickOptions{SessionID: session, MachineID: machineID, Force: force})
+	if err != nil {
+		return err
+	}
+	emitSessionWarnings(res.Warnings)
+	return printJSON(res.Node)
 }
 
 // cmdAddArtifact is the CLI's independent artifact-creation path -- it does
@@ -1579,10 +1669,15 @@ func cmdUnstickNode(eng *engine.GraphEngine, args []string) error {
 //     types this command always treats it as literal content (below, the
 //     `else { artifact.Content = contentOrPath }` branch) and never even has
 //     a FilePath value to reject.
-func cmdAddArtifact(repo store.GraphRepository, artifactsDir string, args []string) error {
-	// --allow-outside-artifacts-dir can appear anywhere after the required
-	// positional args; stripping it out first keeps the positional-argument
-	// parsing beneath unaware of flags entirely.
+func cmdAddArtifact(eng *engine.GraphEngine, repo store.GraphRepository, artifactsDir string, args []string) error {
+	const usage = "usage: graph-engine add-artifact <ticketId> <nodeId> <name> <type> [contentOrPath] [--allow-outside-artifacts-dir] [--session <sessionId>]"
+	// --allow-outside-artifacts-dir and --session can appear anywhere after
+	// the required positional args; stripping them out first keeps the
+	// positional-argument parsing beneath unaware of flags entirely.
+	session, args, err := takeFlagValue(args, "--session", usage)
+	if err != nil {
+		return err
+	}
 	allowOutside := false
 	positional := args[:0:0]
 	for _, a := range args {
@@ -1595,8 +1690,9 @@ func cmdAddArtifact(repo store.GraphRepository, artifactsDir string, args []stri
 	args = positional
 
 	if len(args) < 4 {
-		return fmt.Errorf("usage: graph-engine add-artifact <ticketId> <nodeId> <name> <type> [contentOrPath] [--allow-outside-artifacts-dir]")
+		return fmt.Errorf(usage)
 	}
+	touchSession(eng, session)
 	ticketID, nodeID, name, artType := args[0], args[1], args[2], args[3]
 
 	// Verify the ticket/node exist before writing anything.

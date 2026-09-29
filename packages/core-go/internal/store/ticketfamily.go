@@ -98,3 +98,32 @@ func ensureTicketParentColumn(backend string, columnExists func() (bool, error),
 	}
 	return nil
 }
+
+// nodeClaimColumns are the claim columns DFLT-00327 added to nodes, in the
+// order addNodeClaimColumns adds them.
+var nodeClaimColumns = []string{"claimed_by_name", "claimed_by_name_is_fallback", "claim_token", "claim_session_id", "claimed_at"}
+
+// addNodeClaimColumns is the backend-independent body of the DFLT-00327
+// migration that adds the claim columns to the nodes of a DB created before
+// them: each missing column is added (as NULL-able, so existing rows read
+// back as unclaimed -- a node already IN PROGRESS then counts as claimed by
+// an older client). Like ensureTicketParentColumn, a failed ALTER is
+// forgiven when the column exists afterwards (a concurrent Init added it).
+func addNodeClaimColumns(backend string, columnExists func(column string) (bool, error), addColumn func(column, sqlType string) error, types map[string]string) error {
+	for _, column := range nodeClaimColumns {
+		has, err := columnExists(column)
+		if err != nil {
+			return fmt.Errorf("inspecting nodes columns: %w", err)
+		}
+		if has {
+			continue
+		}
+		if addErr := addColumn(column, types[column]); addErr != nil {
+			nowHas, checkErr := columnExists(column)
+			if checkErr != nil || !nowHas {
+				return fmt.Errorf("adding nodes.%s column (%s): %w", column, backend, addErr)
+			}
+		}
+	}
+	return nil
+}

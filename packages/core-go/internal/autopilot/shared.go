@@ -435,3 +435,13 @@ func (r *Run) StopOvertakenBy(o *Run, now time.Time) {
 		o.ID, o.RootTicketID, startedBySuffix(o), o.begunAt().UTC().Format(time.RFC3339))
 	r.stop(now, StopOvertaken, "", detail)
 }
+
+// RecordActive reports whether the run behind a shared record is still
+// active at now -- not finished or stopped, and with a heartbeat within
+// ActiveThreshold (Run.IsActive) -- without decoding its snapshot. The
+// engine uses it to decide the lease of a node claimed by an autopilot
+// worker (DFLT-00327).
+func RecordActive(rec domain.AutopilotRunRecord, now time.Time) bool {
+	r := Run{State: rec.State, Heartbeat: parseTime(rec.Heartbeat)}
+	return r.IsActive(now)
+}

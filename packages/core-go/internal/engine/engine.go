@@ -17,6 +17,10 @@ import (
 
 type GraphEngine struct {
 	repo store.GraphRepository
+	// clock and logf are the engine's time source and warning sink (see
+	// SetClock / SetLogf in claims.go); nil means time.Now and stderr.
+	clock func() time.Time
+	logf  func(format string, args ...any)
 }
 
 func New(repo store.GraphRepository) *GraphEngine {
@@ -142,6 +146,10 @@ func (e *GraphEngine) GetTicketDetailWithFamily(id string) (*domain.TicketDetail
 	for _, c := range children {
 		out.Children = append(out.Children, domain.TicketRef{ID: c.ID, Title: c.Title, Status: c.Status})
 	}
+	// Who holds each claimed node, and whether they are still at it
+	// (DFLT-00327): computed here so get-ticket and GET /api/tickets/{id}
+	// show the same thing.
+	e.AnnotateClaims(out.Nodes)
 	return out, nil
 }
 
@@ -632,6 +640,17 @@ func isClaimed(status domain.NodeStatus) bool {
 // a release itself fails does the error name nodes left claimed, for
 // unstick-node. See releaseClaims.
 func (e *GraphEngine) GetExecutableNodes(ticketID string, catalog config.Catalog) ([]domain.GraphNode, error) {
+	return e.GetExecutableNodesAs(ticketID, catalog, Claimer{})
+}
+
+// GetExecutableNodesAs is GetExecutableNodes with the claimer recorded on
+// every node it claims (DFLT-00327): the claimer's name, its processing
+// session, the time and a token minted per node, all written by the same
+// ClaimNode as the status. The returned nodes carry their tokens in
+// ClaimToken (read back from the store, so a data source that cannot keep
+// claims -- HTTP older than 1.2 -- returns none); GraphNode never serializes
+// it, and get-executable prints it through a type of its own.
+func (e *GraphEngine) GetExecutableNodesAs(ticketID string, catalog config.Catalog, claimer Claimer) ([]domain.GraphNode, error) {
 	// Checked before EnsureGraphStarted (which seeds the graph on first
 	// call): a CLOSED ticket must never gain nodes just because something
 	// polled it, and must never be handed nodes to execute (DFLT-00043).
@@ -692,7 +711,7 @@ func (e *GraphEngine) GetExecutableNodes(ticketID string, catalog config.Catalog
 		// same node at TODO and both be handed it (CHK-01). The excluded
 		// set is exactly the skip condition above, so the range of
 		// claimable statuses is unchanged.
-		claimed, err := e.repo.ClaimNode(n.ID, claimedStatus, claimableExclusions)
+		claimed, err := e.repo.ClaimNode(n.ID, claimedStatus, claimableExclusions, newClaim(claimer, e.now()))
 		if err != nil {
 			// This node itself is not released: the failure may have come
 			// after the write (claimNodeCAS reads the row back), but it may
@@ -777,7 +796,9 @@ func (e *GraphEngine) releaseClaims(claims []nodeClaim, cause error) error {
 				excluded = append(excluded, s)
 			}
 		}
-		if _, err := e.repo.ClaimNode(c.id, c.from, excluded); err != nil {
+		// No claim: moving the node back off IN PROGRESS / IN REVIEW clears
+		// the claim this call recorded (store's claimFieldsFor).
+		if _, err := e.repo.ClaimNode(c.id, c.from, excluded, nil); err != nil {
 			stuck = append(stuck, c.id)
 			releaseErrs = append(releaseErrs, fmt.Sprintf("%s: %v", c.id, err))
 		}
@@ -1045,6 +1066,23 @@ type CompleteNodeResult struct {
 // this method has no way to enforce that itself, since it doesn't know
 // (and shouldn't need to know) what a "valid" artifact looks like.
 func (e *GraphEngine) CompleteNode(nodeID string, passed bool, artifacts []domain.Artifact) (CompleteNodeResult, error) {
+	return e.CompleteNodeWith(nodeID, passed, artifacts, CompleteNodeOptions{})
+}
+
+// CompleteNodeOptions are CompleteNodeWith's settings.
+type CompleteNodeOptions struct {
+	// ClaimToken, when non-empty, is the token get-executable handed out
+	// with the node (`complete-node --claim`, DFLT-00327). The completion is
+	// refused with INVALID_NODE_STATE, before anything is written, unless
+	// the node still carries exactly that token -- i.e. unless it is still
+	// the same claim: not released and handed to somebody else meanwhile.
+	// The check and the write are not one atomic step yet (DFLT-00329).
+	// Empty skips the check, as before.
+	ClaimToken string
+}
+
+// CompleteNodeWith is CompleteNode with options (see CompleteNodeOptions).
+func (e *GraphEngine) CompleteNodeWith(nodeID string, passed bool, artifacts []domain.Artifact, opts CompleteNodeOptions) (CompleteNodeResult, error) {
 	node, err := e.repo.GetNode(nodeID)
 	if err != nil {
 		return CompleteNodeResult{}, err
@@ -1066,6 +1104,10 @@ func (e *GraphEngine) CompleteNode(nodeID string, passed bool, artifacts []domai
 	// is a read.
 	if err := checkCompletable(node, detail); err != nil {
 		return CompleteNodeResult{}, err
+	}
+	if opts.ClaimToken != "" && (node.ClaimToken == nil || *node.ClaimToken != opts.ClaimToken) {
+		return CompleteNodeResult{}, domain.NewAPIError(domain.ErrCodeInvalidNodeState,
+			"node %s no longer carries the claim token passed with --claim: it has been released (unstick-node, a loop-back rewind) and claimed again since this run took it, so this run's verdict is not recorded. Go back to get-executable", node.ID)
 	}
 
 	for _, art := range artifacts {
@@ -1213,7 +1255,7 @@ func (e *GraphEngine) CompleteNode(nodeID string, passed bool, artifacts []domai
 			// for the count to have moved since, the target must have been
 			// redone in between, which means the check is simply one round
 			// late -- the next failure blocks.
-			claimed, err := e.repo.ClaimNode(target.ID, todo, []domain.NodeStatus{todo})
+			claimed, err := e.repo.ClaimNode(target.ID, todo, []domain.NodeStatus{todo}, nil)
 			if err != nil {
 				return CompleteNodeResult{}, err
 			}
@@ -1599,37 +1641,68 @@ func (e *GraphEngine) GrantIterations(ticketID string, nodeIDs []string, extra i
 // this way and sat IN REVIEW, unreachable via get-executable, from before
 // its own Implementation loop-back target was even fixed.)
 //
-// Like ReopenNodes, this is a mechanical primitive: deciding that a given
-// node's claim is actually stale (nothing is currently working it) is a
-// judgment call left to the caller (process-ticket), not something this
-// method can verify on its own -- there is no lease/heartbeat tracking a
-// claim's owner. Calling this on a node a live subagent is still working
+// Deciding that a given node's claim is actually stale (nothing is
+// currently working it) used to be left entirely to the caller: nothing
+// tracked a claim's owner. Since DFLT-00327 the claim records its owner and
+// processing session, and this checks it the way UnstickNodeWith does for a
+// caller with no session of its own: another session's live claim is
+// refused with NODE_CLAIMED_BY_OTHER. What it still cannot see is a claim
+// recorded without a session (or by an older client), which it releases
+// with a warning the caller does not get here -- use UnstickNodeWith to see
+// the warnings. Calling this on a node a live subagent is still working
 // races that subagent's own eventual CompleteNode call, exactly as
 // ReopenNodes' doc comment warns for its own, narrower precondition. No
 // iteration_count bump: unlike a loop-back or a rejection, no actual
 // attempt at this node happened, so nothing should count against its
 // max_iterations budget.
 func (e *GraphEngine) UnstickNode(nodeID string) (domain.GraphNode, error) {
+	res, err := e.UnstickNodeWith(nodeID, UnstickOptions{})
+	return res.Node, err
+}
+
+// UnstickNodeWith is UnstickNode with the claim check of DFLT-00327: before
+// releasing, it looks at who holds the node.
+//
+//   - No claim record (claimed by an older client, or through an HTTP data
+//     source older than 1.2): released, with a warning that nobody could be
+//     checked.
+//   - The caller's own claim -- its session's, or another session of the
+//     same autopilot run's (isOwnClaim): released, whatever the lease.
+//   - No session recorded, or the session cannot be found: released, with a
+//     warning.
+//   - The claimant's lease has expired: released, with a warning naming its
+//     last heartbeat.
+//   - The claimant's lease is live: refused with NODE_CLAIMED_BY_OTHER
+//     (nothing written), unless opts.Force, which releases it with a
+//     warning.
+//
+// The check reads the node and then writes it, as before: it is not atomic
+// (DFLT-00329 adds the compare-and-set).
+func (e *GraphEngine) UnstickNodeWith(nodeID string, opts UnstickOptions) (UnstickResult, error) {
 	node, err := e.repo.GetNode(nodeID)
 	if err != nil {
-		return domain.GraphNode{}, err
+		return UnstickResult{}, err
 	}
 	if node == nil {
-		return domain.GraphNode{}, fmt.Errorf("node %s not found", nodeID)
+		return UnstickResult{}, fmt.Errorf("node %s not found", nodeID)
 	}
 	if node.Status != domain.NodeInProgress && node.Status != domain.NodeInReview {
-		return domain.GraphNode{}, fmt.Errorf("node %s is %s, not IN PROGRESS or IN REVIEW; only a claimed-but-unworked node can be unstuck", nodeID, node.Status)
+		return UnstickResult{}, fmt.Errorf("node %s is %s, not IN PROGRESS or IN REVIEW; only a claimed-but-unworked node can be unstuck", nodeID, node.Status)
+	}
+	warnings, err := e.checkUnstick(node, opts)
+	if err != nil {
+		return UnstickResult{}, err
 	}
 
 	todo := domain.NodeTODO
 	updated, err := e.repo.UpdateNode(nodeID, store.NodePatch{Status: &todo})
 	if err != nil {
-		return domain.GraphNode{}, err
+		return UnstickResult{}, err
 	}
 	if err := e.syncTicketStatus(node.TicketID); err != nil {
-		return domain.GraphNode{}, err
+		return UnstickResult{}, err
 	}
-	return updated, nil
+	return UnstickResult{Node: updated, Warnings: warnings}, nil
 }
 
 // UpdateNode applies patch to nodeID and then brings the owning ticket's
