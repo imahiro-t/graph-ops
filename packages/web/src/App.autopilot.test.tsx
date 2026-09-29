@@ -10,6 +10,7 @@ import i18n from './i18n';
 import App from './App';
 import { AutopilotRun, Project } from './types';
 import { FakeAutopilotStart, FakeBackend, FakeTicket, createFakeBackend, installFakeBackend } from './test/fakeBackend';
+import { trackBodyReads } from './test/waitForAnswers';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 
@@ -114,6 +115,18 @@ function holdStarts() {
     return backend.fetch(input, init);
   });
   return release;
+}
+
+// The runs (GET /api/autopilot/runs) are fetched twice at startup (for the
+// current project, then after the first ticket fetch), independently of the
+// ticket list, and nothing on screen always shows that their answers are in.
+// This tracks them with trackBodyReads; call it after seed() and before
+// rendering. The runsSettled() it returns waits until every runs request
+// made so far has been answered and applied. refreshAutopilotRuns
+// applies whichever answer arrives last, so a test that refreshes the runs
+// lets the startup ones settle first (DFLT-00296).
+function trackRunReads() {
+  return trackBodyReads(backend, url => url.startsWith('/api/autopilot/runs'));
 }
 
 const startRequests = () =>
@@ -352,8 +365,12 @@ describe('autopilot in the Web UI', () => {
   it('leaves focus on the focus fallback when the refreshed runs disable the button after a start', async () => {
     seed();
     const release = holdStarts();
+    const runsSettled = trackRunReads();
     const user = await renderApp();
     const controls = await expand(user, X);
+    // Let the startup runs requests answer first, so neither lands after
+    // the refreshed runs below (see trackRunReads).
+    await runsSettled();
     const tree = startButton(controls);
     await user.click(tree);
     await confirmStart(user);
@@ -372,8 +389,12 @@ describe('autopilot in the Web UI', () => {
     const list = tickets();
     list[4].status = 'DONE';
     seed({ tickets: list, runs: [run({ root: X, mode: 'tree', active: false, state: 'stopped', members: [], current: undefined })] });
+    const runsSettled = trackRunReads();
     const user = await renderApp();
     const controls = await expand(user, X);
+    // Let the startup runs requests answer first, so neither lands after
+    // the refreshed runs below (see trackRunReads).
+    await runsSettled();
     const tree = startButton(controls);
     await waitFor(() => expect(tree).toBeEnabled());
     await user.click(tree);
@@ -381,14 +402,29 @@ describe('autopilot in the Web UI', () => {
     expect(screen.getByRole('dialog', { name: modeTitle('tree', true) })).toHaveAccessibleDescription(resumeText);
     expect(screen.getByTestId('autopilot-mode-ticket')).toBeDisabled();
 
-    // The poll shows the ticket reopened and the stopped run gone: a start
-    // would now be a fresh one (still allowed), so only the text could change.
+    // The polls show the ticket reopened and then the stopped run gone: a
+    // start would now be a fresh one (still allowed), so only the text could
+    // change. The two changes go in one poll each, because a poll's tickets
+    // and runs are separate requests: had the runs (none) landed before the
+    // ticket's new status, the view would briefly say a DONE ticket with
+    // nothing to resume, and the dialog would rightly close (DFLT-00296).
     backend.tickets = backend.tickets.map(tk => (tk.id === X ? { ...tk, status: 'IN PROGRESS' } : tk));
-    backend.autopilotRuns = [];
     await poll();
     // The single choice, disabled on the finished ticket, is enabled again
-    // once the new view has arrived; the choice itself does not move.
+    // once the reopened ticket has arrived; the choice itself does not move.
     await waitFor(() => expect(screen.getByTestId('autopilot-mode-ticket')).toBeEnabled());
+    expect(screen.getByTestId('autopilot-mode-tree')).toBeChecked();
+
+    // The refresh button stays disabled until the first poll's fetch is
+    // done; a click before that would not poll again.
+    await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('toolbar.refreshTitle') })).toBeEnabled());
+    await runsSettled();
+    backend.autopilotRuns = [];
+    await poll();
+    // Nothing on screen shows the empty runs have arrived: wait for the app
+    // to read and apply them.
+    await runsSettled();
+    expect(screen.getByTestId('autopilot-mode-ticket')).toBeEnabled();
     expect(screen.getByTestId('autopilot-mode-tree')).toBeChecked();
 
     expect(screen.getByRole('dialog', { name: modeTitle('tree', true) })).toHaveAccessibleDescription(resumeText);
@@ -397,8 +433,12 @@ describe('autopilot in the Web UI', () => {
 
   it('closes the dialog without starting when a poll shows the start would be refused', async () => {
     seed();
+    const runsSettled = trackRunReads();
     const user = await renderApp();
     const controls = await expand(user, X);
+    // Let the startup runs requests answer first, so neither lands after
+    // the refreshed runs below (see trackRunReads).
+    await runsSettled();
     const tree = startButton(controls);
     await user.click(tree);
     expect(dialog()).toBeInTheDocument();
@@ -412,14 +452,21 @@ describe('autopilot in the Web UI', () => {
     expect(tree).toBeDisabled();
     expect(within(controls).getByTestId('autopilot-disabled-reason')).toHaveTextContent(i18n.t('autopilot.blocked', { root: X }));
     expect(focusFallback(controls)).toContainElement(within(controls).getByTestId('autopilot-disabled-reason'));
-    expect(focusFallback(controls)).toHaveFocus();
+    // The dialog hands focus back in an effect cleanup, which can run just
+    // after the DOM change that took the dialog out: wait for it
+    // (DFLT-00296).
+    await waitFor(() => expect(focusFallback(controls)).toHaveFocus());
     expect(document.body).not.toHaveFocus();
   });
 
   it('closes the dialog when a poll refuses the chosen tree start, and returns focus to the still-enabled button', async () => {
     seed();
+    const runsSettled = trackRunReads();
     const user = await renderApp();
     const controls = await expand(user, P);
+    // Let the startup runs requests answer first, so neither lands after
+    // the refreshed runs below (see trackRunReads).
+    await runsSettled();
     const button = startButton(controls);
     await user.click(button);
     expect(screen.getByTestId('autopilot-mode-tree')).toBeChecked();
@@ -432,15 +479,24 @@ describe('autopilot in the Web UI', () => {
     await waitFor(() => expect(dialog()).not.toBeInTheDocument());
     expect(startRequests()).toEqual([]);
     expect(button).toBeEnabled();
-    expect(button).toHaveFocus();
+    // The dialog hands focus back in an effect cleanup, which can run just
+    // after the DOM change that took the dialog out: wait for it
+    // (DFLT-00296).
+    await waitFor(() => expect(button).toHaveFocus());
     expect(focusFallback(controls)).not.toHaveFocus();
     expect(within(controls).queryByTestId('autopilot-disabled-reason')).not.toBeInTheDocument();
   });
 
   it('keeps the dialog open and disables the other choice when a poll refuses only the mode not chosen', async () => {
     seed();
+    const runsSettled = trackRunReads();
     const user = await renderApp();
     const controls = await expand(user, P);
+    // Let the startup runs requests answer first: refreshAutopilotRuns
+    // applies whichever answer arrives last, so a startup answer (no runs)
+    // landing after the poll's would enable the tree choice again
+    // (DFLT-00296).
+    await runsSettled();
     await user.click(startButton(controls));
     await user.click(screen.getByTestId('autopilot-mode-ticket'));
 
@@ -539,8 +595,12 @@ describe('autopilot in the Web UI', () => {
 
   it('ignores inactive runs for badges and buttons', async () => {
     seed({ runs: [run({ active: false, state: 'finished', members: [] })] });
+    const runsSettled = trackRunReads();
     const user = await renderApp();
     const controls = await expand(user, C);
+    // With no runs loaded yet the button is enabled and unbadged too: check
+    // only once the finished run has been read and applied (DFLT-00296).
+    await runsSettled();
     expect(within(controls).getByRole('button', { name: 'オートパイロット' })).toBeEnabled();
     expect(within(card(C)).queryByTestId('autopilot-badges')).not.toBeInTheDocument();
   });
@@ -600,6 +660,11 @@ describe('autopilot in the Web UI', () => {
     expect(untrusted.querySelector('p')).not.toHaveClass('max-sm:basis-24');
     expect(dismiss).toHaveClass('shrink-0', 'max-w-full', 'max-sm:wrap-anywhere');
 
+    // The start settles only once the runs it re-fetches (GET
+    // /api/autopilot/runs) have answered, and settling moves focus from the
+    // fallback back to the button. Let that happen first, so the focus
+    // checked below is the dismiss button's doing (DFLT-00296).
+    await waitFor(() => expect(startButton(controls)).toBeEnabled());
     await user.click(dismiss);
     expect(within(controls).queryByTestId('autopilot-untrusted')).not.toBeInTheDocument();
     expect(within(controls).getAllByRole('status').some(r => r.textContent === notice)).toBe(false);
@@ -618,8 +683,12 @@ describe('autopilot in the Web UI', () => {
 
   it('refreshes the runs right after a start', async () => {
     seed();
+    const runsSettled = trackRunReads();
     const user = await renderApp();
     const controls = await expand(user, X);
+    // Let the startup runs requests answer first, so neither lands after
+    // the refreshed runs below (see trackRunReads).
+    await runsSettled();
     backend.autopilotRuns = [run({ root: X, members: [X], current: undefined, tickets: {}, state: 'starting' })];
     await user.click(startButton(controls));
     await confirmStart(user);
@@ -650,8 +719,13 @@ describe('autopilot in the Web UI', () => {
 
   it('switches to the resume wording when the chosen mode has a run to resume', async () => {
     seed({ runs: [run({ root: X, mode: 'ticket', active: false, state: 'interrupted', members: [], current: undefined })] });
+    const runsSettled = trackRunReads();
     const user = await renderApp();
     const controls = await expand(user, X);
+    // Whether a mode resumes comes from the runs, which nothing on screen
+    // shows before the dialog opens, and the dialog fixes it when it opens
+    // (DFLT-00296).
+    await runsSettled();
     await user.click(startButton(controls));
     expect(screen.getByRole('dialog', { name: modeTitle('tree') })).toBeInTheDocument();
     expect(screen.getByTestId('autopilot-confirm-confirm')).toHaveTextContent('起動する');

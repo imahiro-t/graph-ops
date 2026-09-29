@@ -83,7 +83,16 @@ type User = ReturnType<typeof userEvent.setup>;
 
 async function open(user: User, f: FilterName) {
   if (trigger(f).getAttribute('aria-expanded') !== 'true') await user.click(trigger(f));
-  return panel(f);
+  const p = panel(f);
+  // The label filter's options are the project's labels, which come from
+  // their own request (GET /api/projects/{id}/labels), not from the ticket
+  // list renderApp waits for: that request having been made does not mean
+  // its answer is on screen. Wait for every label to be offered before a
+  // test picks from, counts or selects all of them (DFLT-00296).
+  if (f === 'label') {
+    await waitFor(() => expect(within(p).queryAllByRole('checkbox')).toHaveLength(backend.labels.length));
+  }
+  return p;
 }
 
 async function close(user: User, f: FilterName) {
@@ -736,8 +745,10 @@ describe('App toolbar filters', () => {
     fetchMock = installFakeBackend(backend);
     const user = await renderApp();
 
-    // The pager's "next" button, found by its accessible name.
-    const nextPage = screen.getByRole('button', { name: i18n.t('pagination.next') });
+    // The pager's "next" button, found by its accessible name. The page size
+    // comes from its own request (GET /api/settings/app), so the list can be
+    // on screen before the pager is (DFLT-00296).
+    const nextPage = await screen.findByRole('button', { name: i18n.t('pagination.next') });
     await user.click(nextPage);
     expect(screen.getByText(i18n.t('pagination.pageOf', { page: 2, total: 5 }))).toBeInTheDocument();
 

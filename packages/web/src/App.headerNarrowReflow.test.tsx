@@ -53,6 +53,7 @@ import i18n from './i18n';
 import App from './App';
 import { Project } from './types';
 import { createFakeBackend, installFakeBackend } from './test/fakeBackend';
+import { findPreviousPage } from './test/waitForAnswers';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 
@@ -191,7 +192,7 @@ describe.each(['ja', 'en'] as const)('pagination in a 160px window at 200%% (%s)
 
   it('lets the button group wrap right-aligned under 15rem, in reading order', async () => {
     await renderApp();
-    const previous = screen.getByRole('button', { name: i18n.t('pagination.previous') });
+    const previous = await findPreviousPage();
     const next = screen.getByRole('button', { name: i18n.t('pagination.next') });
     const group = previous.parentElement as HTMLElement;
     expect(next.parentElement).toBe(group);
@@ -215,7 +216,7 @@ describe.each(['ja', 'en'] as const)('pagination in a 160px window at 200%% (%s)
 
   it('lets the page number break inside its digits', async () => {
     await renderApp();
-    const previous = screen.getByRole('button', { name: i18n.t('pagination.previous') });
+    const previous = await findPreviousPage();
     const page = previous.nextElementSibling as HTMLElement;
     expect(page).toHaveTextContent(i18n.t('pagination.pageOf', { page: 1, total: 2 }));
     expect(page).toHaveClass('min-w-0', BREAKS_ANYWHERE);

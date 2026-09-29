@@ -165,12 +165,12 @@ export const App: React.FC = () => {
   //   3. Writes. A request already in flight when the header moves still
   //      comes back. fetchAllTickets drops it (a newer run, or a different
   //      current project, supersedes it), as refreshProjectLabels does for
-  //      labels. (1) already stops such a response from being *shown*; (3)
-  //      stops it from knocking the current project's loaded list back to
-  //      "loading" until the next poll. An expanded ticket's detail
-  //      response (DFLT-00112) only ever replaces a ticket with the same id
-  //      inside the loaded list, so one for a project the user has left
-  //      matches nothing (see fetchTicketDetail).
+  //      labels (DFLT-00296). (1) already stops such a response from being
+  //      *shown*; (3) stops it from knocking the current project's loaded
+  //      list back to "loading" until the next poll. An expanded ticket's
+  //      detail response (DFLT-00112) only ever replaces a ticket with the
+  //      same id inside the loaded list, so one for a project the user has
+  //      left matches nothing (see fetchTicketDetail).
   //
   // What is NOT promised: that the header follows a switch made in another
   // tab of the same environment. It shows this window's own choice until a
@@ -447,6 +447,12 @@ export const App: React.FC = () => {
   // Tagged like ticketList, so the previous project's labels are never
   // offered (or drawn on tickets) under the new project's header while the
   // new ones load.
+  //
+  // Re-fetches overlap (a poll, a manual refresh and a settings change can
+  // each start one), and their answers may come back in any order. Like
+  // fetchAllTickets, each call takes a sequence number and only the latest
+  // call's answer is applied, so an older answer arriving last cannot put
+  // an older list back over a newer one (DFLT-00296).
   const [labelList, setLabelList] = useState<ProjectScoped<Label[]> | null>(null);
   const currentProjectId = currentProject?.id ?? '';
   const projectLabels = useMemo(
@@ -454,16 +460,23 @@ export const App: React.FC = () => {
     [currentProjectId, labelList]
   );
   const currentProjectIdRef = useLatest(currentProjectId);
+  const labelFetchSeqRef = useRef(0);
   const refreshProjectLabels = useCallback(
     async (projectId: string = currentProjectIdRef.current) => {
+      // Taken before the no-project case too: clearing the list supersedes
+      // any request still in flight, which must not fill it back in.
+      const seq = ++labelFetchSeqRef.current;
       if (!projectId) {
         setLabelList(null);
         return;
       }
       try {
         const labels = await fetchLabels(tRef.current, projectId);
-        // Ignore a response for a project that is no longer current.
-        if (projectId === currentProjectIdRef.current) setLabelList({ projectId, value: labels });
+        // Ignore a response a later call has superseded, or one for a
+        // project that is no longer current.
+        if (seq === labelFetchSeqRef.current && projectId === currentProjectIdRef.current) {
+          setLabelList({ projectId, value: labels });
+        }
       } catch (e) {
         // Keep the previous list: clearing it would also clear the filter.
         console.error('Failed to load labels', e);
