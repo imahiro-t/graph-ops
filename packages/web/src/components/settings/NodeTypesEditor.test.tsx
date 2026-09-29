@@ -65,14 +65,19 @@ describe('NodeTypesEditor', () => {
       expect(mockedFetchTypes).not.toHaveBeenCalled();
     });
 
-    it('drops the loading line and shows the error when the list cannot be fetched', async () => {
+    // DFLT-00350: a failed list load shows the error and a retry button in
+    // place of the editor -- no empty textarea to save over stored text.
+    it('drops the loading line and shows the error with a retry button, not the editor, when the list cannot be fetched', async () => {
       mockedFetchTypes.mockReset();
       mockedFetchTypes.mockRejectedValue(new Error('list failed'));
       render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
 
-      expect(screen.getByText(i18n.t('settings.common.loading'))).toBeInTheDocument();
-      expect(await screen.findByText('list failed')).toBeInTheDocument();
+      expect(screen.getByText(i18n.t('settings.common.loading'), { selector: '[role="status"]' })).toBeInTheDocument();
+      expect(await screen.findByRole('alert')).toHaveTextContent('list failed');
+      expect(screen.getByRole('button', { name: i18n.t('settings.common.retry') })).toBeInTheDocument();
       expect(screen.queryByText(i18n.t('settings.common.loading'))).not.toBeInTheDocument();
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
       expect(mockedFetchType).not.toHaveBeenCalled();
     });
 
@@ -1108,5 +1113,201 @@ describe('NodeTypesEditor names cut off with an ellipsis, full name in the edito
     expect(listButton('implementation')).not.toHaveAttribute('aria-current');
     expect(deleteButton).not.toHaveAttribute('aria-current');
     expect(document.querySelectorAll('[aria-current]')).toHaveLength(1);
+  });
+});
+
+// DFLT-00350: load failures (the list, the selected type's text), the retry
+// that follows them, and what the right-hand pane shows right after a switch.
+describe('NodeTypesEditor load failures and switching', () => {
+  const retryButton = () => screen.getByRole('button', { name: i18n.t('settings.common.retry') });
+  const reviewItem = () => screen.getByRole('button', { name: new RegExp(`^${i18n.t('nodeType.review')}`) });
+  const addButton = () => screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') });
+  type Detail = { type: string; tier_text: string; merged_text: string };
+  const deferred = <T,>() => {
+    let resolve!: (v: T) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+  };
+
+  beforeEach(() => {
+    mockedFetchTypes.mockReset();
+    mockedFetchType.mockReset();
+    mockedSaveType.mockReset();
+    mockedFetchTypes.mockResolvedValue(TYPES);
+    stubFetchType();
+  });
+
+  it('shows the loading line as a status', () => {
+    mockedFetchTypes.mockReturnValue(new Promise(() => {}));
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    expect(screen.getByText(i18n.t('settings.common.loading'), { selector: '[role="status"]' })).toBeInTheDocument();
+  });
+
+  it('loads the list and the first type on retry, keeping the retry button busy meanwhile, and moves focus to the editor pane', async () => {
+    const user = userEvent.setup();
+    const pending = deferred<SettingsNodeTypeInfo[]>();
+    mockedFetchTypes.mockRejectedValueOnce(new Error('list failed')).mockReturnValueOnce(pending.promise);
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByRole('alert');
+
+    const button = retryButton();
+    button.focus();
+    await user.keyboard('{Enter}');
+    expect(button).toHaveFocus();
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    await user.keyboard('{Enter}');
+    expect(mockedFetchTypes).toHaveBeenCalledTimes(2);
+
+    await act(async () => { pending.resolve(TYPES); });
+
+    const textarea = await screen.findByDisplayValue('implementation-tier-text');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toHaveAttribute('tabindex', '-1'));
+    expect(document.activeElement?.contains(textarea)).toBe(true);
+  });
+
+  it('keeps the error and the retry button when the list retry fails again', async () => {
+    const user = userEvent.setup();
+    mockedFetchTypes.mockRejectedValue(new Error('list failed'));
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    const first = await screen.findByRole('alert');
+
+    retryButton().focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(mockedFetchTypes).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole('alert')).not.toBe(first));
+    expect(screen.getByRole('alert')).toHaveTextContent('list failed');
+    expect(retryButton()).toHaveFocus();
+    expect(retryButton()).not.toHaveAttribute('aria-busy');
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  });
+
+  it('leaves the loading line when the list retry returns an empty list', async () => {
+    const user = userEvent.setup();
+    mockedFetchTypes.mockRejectedValueOnce(new Error('list failed')).mockResolvedValueOnce([]);
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByRole('alert');
+
+    await user.click(retryButton());
+
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(screen.queryByText(i18n.t('settings.common.loading'))).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.retry') })).not.toBeInTheDocument();
+    expect(mockedFetchType).not.toHaveBeenCalled();
+  });
+
+  it('disables "add node type" while the list is loading or failed', async () => {
+    const user = userEvent.setup();
+    const pending = deferred<SettingsNodeTypeInfo[]>();
+    mockedFetchTypes.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(TYPES);
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    expect(addButton()).toBeDisabled();
+
+    await act(async () => { pending.reject(new Error('list failed')); });
+    await screen.findByRole('alert');
+    expect(addButton()).toBeDisabled();
+
+    await user.click(retryButton());
+    await screen.findByDisplayValue('implementation-tier-text');
+    expect(addButton()).toBeEnabled();
+  });
+
+  it('keeps the editor and shows a non-blocking error when the list re-fetch after a save fails', async () => {
+    const user = userEvent.setup();
+    mockedSaveType.mockResolvedValue({ type: 'implementation', tier_text: 'edited', merged_text: 'edited' });
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    const textarea = await screen.findByDisplayValue('implementation-tier-text');
+    mockedFetchTypes.mockRejectedValueOnce(new Error('refresh failed'));
+
+    await user.clear(textarea);
+    await user.type(textarea, 'edited');
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
+
+    expect(await screen.findByText('refresh failed')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('edited')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.retry') })).not.toBeInTheDocument();
+  });
+
+  it('shows the error and a retry button, not the editor, when the selected type\'s text cannot be loaded, and loads it on retry', async () => {
+    const user = userEvent.setup();
+    const pending = deferred<Detail>();
+    mockedFetchType.mockRejectedValueOnce(new Error('text failed')).mockReturnValueOnce(pending.promise);
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('text failed');
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
+    // The list is fine, so adding stays available.
+    expect(addButton()).toBeEnabled();
+
+    const button = retryButton();
+    button.focus();
+    await user.keyboard('{Enter}');
+    // The failure and the busy retry button stay up while the retry runs,
+    // rather than the loading line.
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(button).toHaveFocus();
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    expect(screen.queryByText(i18n.t('settings.common.loading'))).not.toBeInTheDocument();
+
+    await act(async () => { pending.resolve({ type: 'implementation', tier_text: 'implementation-tier-text', merged_text: 'm' }); });
+
+    const textarea = await screen.findByDisplayValue('implementation-tier-text');
+    await waitFor(() => expect(textarea).toHaveFocus());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows the loading line, not the previous type\'s text, right after a switch', async () => {
+    const user = userEvent.setup();
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+    mockedFetchType.mockReturnValueOnce(new Promise(() => {}));
+
+    await user.click(reviewItem());
+
+    expect(screen.getByText(i18n.t('settings.common.loading'), { selector: '[role="status"]' })).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('implementation-tier-text')).not.toBeInTheDocument();
+    expect(screen.queryByText('implementation-merged-text')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  });
+
+  it('does not show the previous type\'s load error after switching to another type', async () => {
+    const user = userEvent.setup();
+    mockedFetchType.mockRejectedValueOnce(new Error('implementation failed'));
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByRole('alert');
+    mockedFetchType.mockReturnValueOnce(new Promise(() => {}));
+
+    await user.click(reviewItem());
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText(/implementation failed/)).not.toBeInTheDocument();
+    expect(screen.getByText(i18n.t('settings.common.loading'), { selector: '[role="status"]' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['succeeds', (d: ReturnType<typeof deferred<Detail>>) => d.resolve({ type: 'implementation', tier_text: 'late-implementation-text', merged_text: 'late' })],
+    ['fails', (d: ReturnType<typeof deferred<Detail>>) => d.reject(new Error('late implementation failure'))]
+  ])('ignores the previous type\'s answer that arrives after a switch (it %s)', async (_how, settle) => {
+    const user = userEvent.setup();
+    const first = deferred<Detail>();
+    const second = deferred<Detail>();
+    mockedFetchType.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await waitFor(() => expect(mockedFetchType).toHaveBeenCalledTimes(1));
+
+    await user.click(reviewItem());
+    await waitFor(() => expect(mockedFetchType).toHaveBeenCalledTimes(2));
+    await act(async () => { second.resolve({ type: 'review', tier_text: 'review-tier-text', merged_text: 'review-merged' }); });
+    await screen.findByDisplayValue('review-tier-text');
+
+    await act(async () => { settle(first); });
+
+    expect(screen.getByDisplayValue('review-tier-text')).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('late-implementation-text')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

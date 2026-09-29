@@ -19,6 +19,8 @@ import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
 import { submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
+import { LoadFailure, useFocusAfterRetry } from './LoadFailure';
+import { LoadingLine } from './LoadingLine';
 import { LIST_HEADING_CLASS, LIST_ITEM_FOCUS_CLASS, LIST_LAYOUT_CLASS, LIST_PANE_CLASS } from './listPane';
 import { Spinner } from '../Spinner';
 
@@ -48,19 +50,46 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const [tierText, setTierText] = useState('');
   const [savedTierText, setSavedTierText] = useState('');
   const [mergedText, setMergedText] = useState('');
-  // Starts true: the first render already shows the loading line, so the
-  // right-hand editor is never drawn empty (an empty textarea and a save
-  // button) while the type list and then the selected type's text are on
-  // their way (DFLT-00343). loadSelected clears it once the text is in;
-  // when the first list load picks nothing to load -- it failed, or the
-  // list is empty -- loadTypes clears it instead (see initialListPendingRef).
-  const [loading, setLoading] = useState(true);
-  // True until the first loadTypes call has settled. Only that call may
-  // clear the initial `loading` (when it leaves nothing selected to load);
-  // the re-fetch after a save or delete must not, since it can overlap a
-  // loadSelected whose loading line has to stay up.
-  const initialListPendingRef = useRef(true);
+  // What the right-hand pane shows is derived at render time from the state
+  // below (DFLT-00343, DFLT-00350; see the pane's JSX for the order), so no
+  // frame -- the first one, or the one right after a switch, before the
+  // effect has started the next load -- ever shows an empty editor, or the
+  // previous type's text or error, where the selected type's belongs.
+  //
+  // Whether the type list has been fetched once. False at first, so the
+  // first render already shows the loading line. A list fetch that fails
+  // while this is false (the first one or a retry of it) is listLoadError,
+  // shown in place of the editor with a retry button; once it is true, a
+  // failed re-fetch (after a save or delete) goes to the non-blocking
+  // `error` instead -- the list on screen is still right then. The ref
+  // mirrors it for loadTypes, which must keep a stable identity.
+  const [listLoaded, setListLoaded] = useState(false);
+  const listLoadedRef = useRef(false);
+  const [listLoadError, setListLoadError] = useState('');
+  const [listFailures, setListFailures] = useState(0);
+  const [listRetrying, setListRetrying] = useState(false);
+  // The type whose text is in tierText/mergedText, '' while none is. Set
+  // only by a successful loadSelected for the latest request, and cleared
+  // when a load starts, so `selected !== loadedKey` means "the selected
+  // type's text is not in yet" -- the old `loading` flag is not needed.
+  const [loadedKey, setLoadedKey] = useState('');
+  // Why the selected type's text could not be loaded, with the type it
+  // belongs to: only shown while that type is the selected one, so after a
+  // switch the previous type's error is never drawn under the new one. A
+  // retry leaves it in place until its own result is in.
+  const [selectedLoadError, setSelectedLoadError] = useState<{ key: string; message: string } | null>(null);
+  const [selectedFailures, setSelectedFailures] = useState(0);
+  // The type a retry of loadSelected is running for, so its busy state is
+  // not shown on another type's failure after a switch.
+  const [selectedRetryingKey, setSelectedRetryingKey] = useState<string | null>(null);
+  // Numbers loadSelected's requests; only the latest one's answer (success
+  // or failure) is used. A slower answer for a type switched away from must
+  // not land in the next type's editor -- saving it would write one type's
+  // text over another's.
+  const selectedRequestRef = useRef(0);
   const [saving, setSaving] = useState(false);
+  // A failed save, add or delete, and a failed list re-fetch once the list
+  // has been loaded: shown above the editor without hiding it.
   const [error, setError] = useState('');
   const { savedFlash, showSavedFlash } = useSavedFlash();
   // Announces a successful delete (DFLT-00194): focus moves to a neighbor
@@ -83,6 +112,14 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const tierTextId = useId();
   const mergedPreviewLabelId = useId();
   const listRef = useRef<HTMLDivElement>(null);
+  const editorPaneRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // After a successful retry the focused retry button is gone: a list retry
+  // moves focus to the right-hand pane (the editor may still be loading the
+  // selected type's text), a retry of the selected type's text to its
+  // textarea.
+  const focusPaneAfterRetry = useFocusAfterRetry(() => editorPaneRef.current);
+  const focusTextareaAfterRetry = useFocusAfterRetry(() => textareaRef.current);
   // Where keyboard focus goes once the next render has settled (DFLT-00191):
   // deleting a type removes its row, focused delete button included, which
   // would otherwise drop focus to <body>. Same pattern as LabelsEditor's.
@@ -129,35 +166,65 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       // change loadTypes's identity and re-fetch the whole list for no
       // reason (#3).
       setSelected(prev => (list.length > 0 && !list.some(info => info.type === prev) ? list[0].type : prev));
-      if (initialListPendingRef.current && list.length === 0) setLoading(false);
+      listLoadedRef.current = true;
+      setListLoaded(true);
+      setListLoadError('');
       return list;
     } catch (e) {
-      setError(errorMessage(e, tRef.current('errors.UNKNOWN')));
-      if (initialListPendingRef.current) setLoading(false);
+      const message = errorMessage(e, tRef.current('errors.UNKNOWN'));
+      if (listLoadedRef.current) {
+        setError(message);
+      } else {
+        setListLoadError(message);
+        setListFailures(n => n + 1);
+      }
       return null;
-    } finally {
-      initialListPendingRef.current = false;
     }
   }, [tRef]);
 
-  const loadSelected = useCallback(async (type: string) => {
-    if (!type) return;
-    setLoading(true);
+  // Resolves to whether the text was loaded (and is the latest request's).
+  // retry: the same type's load again after a failure, which keeps the
+  // failure on screen until its result is in; any other load clears it.
+  const loadSelected = useCallback(async (type: string, retry = false): Promise<boolean> => {
+    if (!type) return false;
+    const request = ++selectedRequestRef.current;
+    setLoadedKey('');
+    if (!retry) setSelectedLoadError(null);
     setError('');
     try {
       const res = await fetchSettingsNodeType(tRef.current, type);
+      if (request !== selectedRequestRef.current) return false;
       setTierText(res.tier_text);
       setSavedTierText(res.tier_text);
       setMergedText(res.merged_text);
+      setLoadedKey(type);
+      setSelectedLoadError(null);
+      return true;
     } catch (e) {
-      setError(errorMessage(e, tRef.current('errors.UNKNOWN')));
-    } finally {
-      setLoading(false);
+      if (request !== selectedRequestRef.current) return false;
+      setSelectedLoadError({ key: type, message: errorMessage(e, tRef.current('errors.UNKNOWN')) });
+      setSelectedFailures(n => n + 1);
+      return false;
     }
   }, [tRef]);
 
   useEffect(() => { loadTypes(); }, [loadTypes]);
   useEffect(() => { if (selected) loadSelected(selected); }, [selected, loadSelected]);
+
+  const retryList = async () => {
+    setListRetrying(true);
+    const list = await loadTypes();
+    setListRetrying(false);
+    if (list !== null) focusPaneAfterRetry();
+  };
+
+  const retrySelected = async () => {
+    const type = selected;
+    setSelectedRetryingKey(type);
+    const ok = await loadSelected(type, true);
+    setSelectedRetryingKey(prev => (prev === type ? null : prev));
+    if (ok) focusTextareaAfterRetry();
+  };
 
   // Switches the selected type, asking first when the current one has
   // unsaved edits -- same shape as TemplatesEditor's select and the same
@@ -180,6 +247,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     // tab switch in SettingsModal would ask a second time.
     setTierText(savedTierText);
     onDirtyChange(false);
+    setSelectedLoadError(null);
     setSelected(next);
     return true;
   };
@@ -206,6 +274,11 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // the text and creates the override file; nothing is lost if they navigate
   // away first (matches レビューゲート's unsaved-new-row behavior).
   const confirmAddType = async () => {
+    // Not before the list has been fetched: the added type would switch the
+    // selection while the list failure (or loading line) hides the editor,
+    // and the list a retry then fetches would replace it, unsaved type and
+    // all. The add button is disabled then too.
+    if (!listLoaded) return;
     const name = newTypeName.trim();
     if (!name) return;
     if (!isValidTypeName(name)) {
@@ -466,6 +539,8 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               ref={addTypeButtonRef}
               data-focus-key={ADD_TYPE_FOCUS_KEY}
               onClick={() => setIsAddingType(true)}
+              // Until the list has been fetched (see confirmAddType).
+              disabled={!listLoaded}
               className="w-full px-2 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 rounded-sm text-[0.6875rem] font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition border border-slate-200 dark:border-slate-700"
             >
               <Plus aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.nodeTypes.addType')}
@@ -474,8 +549,9 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         </div>
       </div>
 
-      {/* Right: editor */}
-      <div className="flex-1 min-w-0 flex flex-col gap-3">
+      {/* Right: editor. tabIndex -1 and the ref: where focus goes after a
+          successful list retry. No outline: it is not a control. */}
+      <div ref={editorPaneRef} tabIndex={-1} className="flex-1 min-w-0 flex flex-col gap-3 focus:outline-hidden">
         {/* DFLT-00287: the selected type's full name, which the list may cut
             off with an ellipsis. It wraps (between words where it can, else
             anywhere) instead of overflowing, and stays up while the type's
@@ -495,10 +571,30 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           </h3>
         )}
         {error && <ErrorBox className="p-2.5 text-[0.6875rem]">{error}</ErrorBox>}
-        {loading ? (
-          <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
-            <Spinner className="w-4 h-4" /> {t('settings.common.loading')}
-          </div>
+        {/* In this order (see LoadFailure): a failure before loading, since a
+            failed load never sets loadedKey and a retry keeps the failure
+            (and its focused retry button) up until its result is in.
+            selected === '' is an empty list, not a load in progress: it
+            falls through to the editor as before, or it would never leave
+            the loading line. */}
+        {listLoadError ? (
+          <LoadFailure
+            message={t('settings.common.loadFailed', { message: listLoadError })}
+            retrying={listRetrying}
+            onRetry={() => void retryList()}
+            failureKey={listFailures}
+          />
+        ) : !listLoaded ? (
+          <LoadingLine />
+        ) : selected !== '' && selectedLoadError?.key === selected ? (
+          <LoadFailure
+            message={t('settings.common.loadFailed', { message: selectedLoadError.message })}
+            retrying={selectedRetryingKey === selected}
+            onRetry={() => void retrySelected()}
+            failureKey={selectedFailures}
+          />
+        ) : selected !== '' && selected !== loadedKey ? (
+          <LoadingLine />
         ) : (
           <>
             <div>
@@ -519,6 +615,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
             <div className="flex-1 min-h-0 flex flex-col">
               <label htmlFor={tierTextId} className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{t('settings.nodeTypes.tierTextLabel')}</label>
               <textarea
+                ref={textareaRef}
                 id={tierTextId}
                 value={tierText}
                 onChange={e => setTierText(e.target.value)}

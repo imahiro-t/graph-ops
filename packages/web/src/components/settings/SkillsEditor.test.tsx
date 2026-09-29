@@ -19,10 +19,11 @@ vi.mock('../../lib/settingsApi', async () => {
   };
 });
 
-import { fetchSettingsSkill, fetchSettingsSkills } from '../../lib/settingsApi';
+import { fetchSettingsSkill, fetchSettingsSkills, saveSettingsSkill } from '../../lib/settingsApi';
 
 const mockedFetchSkills = fetchSettingsSkills as unknown as ReturnType<typeof vi.fn>;
 const mockedFetchSkill = fetchSettingsSkill as unknown as ReturnType<typeof vi.fn>;
+const mockedSaveSkill = saveSettingsSkill as unknown as ReturnType<typeof vi.fn>;
 
 const SKILLS: SettingsSkillInfo[] = [
   { name: 'create-ticket', has_user_override: false },
@@ -62,14 +63,19 @@ describe('SkillsEditor', () => {
       expect(mockedFetchSkills).not.toHaveBeenCalled();
     });
 
-    it('drops the loading line and shows the error when the list cannot be fetched', async () => {
+    // DFLT-00350: a failed list load shows the error and a retry button in
+    // place of the editor -- no empty textarea to save over stored text.
+    it('drops the loading line and shows the error with a retry button, not the editor, when the list cannot be fetched', async () => {
       mockedFetchSkills.mockReset();
       mockedFetchSkills.mockRejectedValue(new Error('list failed'));
       render(<SkillsEditor onDirtyChange={vi.fn()} />);
 
-      expect(screen.getByText(i18n.t('settings.common.loading'))).toBeInTheDocument();
-      expect(await screen.findByText('list failed')).toBeInTheDocument();
+      expect(screen.getByText(i18n.t('settings.common.loading'), { selector: '[role="status"]' })).toBeInTheDocument();
+      expect(await screen.findByRole('alert')).toHaveTextContent('list failed');
+      expect(screen.getByRole('button', { name: i18n.t('settings.common.retry') })).toBeInTheDocument();
       expect(screen.queryByText(i18n.t('settings.common.loading'))).not.toBeInTheDocument();
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
       expect(mockedFetchSkill).not.toHaveBeenCalled();
     });
 
@@ -376,5 +382,172 @@ describe('SkillsEditor narrow reflow (DFLT-00261)', () => {
     expect(refineButton).toHaveAttribute('aria-current', 'true');
     expect(createButton).not.toHaveAttribute('aria-current');
     expect(document.querySelectorAll('[aria-current]')).toHaveLength(1);
+  });
+});
+
+// DFLT-00350: load failures (the list, the selected skill's text), the retry
+// that follows them, and what the right-hand pane shows right after a switch.
+describe('SkillsEditor load failures and switching', () => {
+  const retryButton = () => screen.getByRole('button', { name: i18n.t('settings.common.retry') });
+  const refineItem = () => screen.getByRole('button', { name: i18n.t('settings.skills.names.refineTicket') });
+  const loadingStatus = () => screen.queryByText(i18n.t('settings.common.loading'), { selector: '[role="status"]' });
+  type Detail = { name: string; tier_text: string; merged_text: string };
+  const deferred = <T,>() => {
+    let resolve!: (v: T) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+  };
+
+  beforeEach(() => {
+    mockedFetchSkills.mockReset();
+    mockedFetchSkill.mockReset();
+    mockedSaveSkill.mockReset();
+    mockedFetchSkills.mockResolvedValue(SKILLS);
+    stubFetchSkill();
+  });
+
+  it('shows the loading line as a status', () => {
+    mockedFetchSkills.mockReturnValue(new Promise(() => {}));
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    expect(screen.getByRole('status')).toHaveTextContent(i18n.t('settings.common.loading'));
+  });
+
+  it('loads the list and the first skill on retry and moves focus to the editor pane', async () => {
+    const user = userEvent.setup();
+    const pending = deferred<SettingsSkillInfo[]>();
+    mockedFetchSkills.mockRejectedValueOnce(new Error('list failed')).mockReturnValueOnce(pending.promise);
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await screen.findByRole('alert');
+
+    const button = retryButton();
+    button.focus();
+    await user.keyboard('{Enter}');
+    expect(button).toHaveFocus();
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+
+    await act(async () => { pending.resolve(SKILLS); });
+
+    const textarea = await screen.findByDisplayValue('create-ticket-tier-text');
+    await waitFor(() => expect(document.activeElement).toHaveAttribute('tabindex', '-1'));
+    expect(document.activeElement?.contains(textarea)).toBe(true);
+  });
+
+  it('keeps the error and the retry button when the list retry fails again', async () => {
+    const user = userEvent.setup();
+    mockedFetchSkills.mockRejectedValue(new Error('list failed'));
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    const first = await screen.findByRole('alert');
+
+    retryButton().focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(screen.getByRole('alert')).not.toBe(first));
+    expect(screen.getByRole('alert')).toHaveTextContent('list failed');
+    expect(retryButton()).toHaveFocus();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  });
+
+  it('leaves the loading line when the list retry returns an empty list', async () => {
+    const user = userEvent.setup();
+    mockedFetchSkills.mockRejectedValueOnce(new Error('list failed')).mockResolvedValueOnce([]);
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await screen.findByRole('alert');
+
+    await user.click(retryButton());
+
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(loadingStatus()).not.toBeInTheDocument();
+    expect(mockedFetchSkill).not.toHaveBeenCalled();
+  });
+
+  it('keeps the editor and shows a non-blocking error when the list re-fetch after a save fails', async () => {
+    const user = userEvent.setup();
+    mockedSaveSkill.mockResolvedValue({ name: 'create-ticket', tier_text: 'edited', merged_text: 'edited' });
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    const textarea = await screen.findByDisplayValue('create-ticket-tier-text');
+    mockedFetchSkills.mockRejectedValueOnce(new Error('refresh failed'));
+
+    await user.clear(textarea);
+    await user.type(textarea, 'edited');
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
+
+    expect(await screen.findByText('refresh failed')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('edited')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.retry') })).not.toBeInTheDocument();
+  });
+
+  it('shows the error and a retry button, not the editor, when the selected skill\'s text cannot be loaded, and loads it on retry', async () => {
+    const user = userEvent.setup();
+    const pending = deferred<Detail>();
+    mockedFetchSkill.mockRejectedValueOnce(new Error('text failed')).mockReturnValueOnce(pending.promise);
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('text failed');
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
+
+    const button = retryButton();
+    button.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(button).toHaveFocus();
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    expect(loadingStatus()).not.toBeInTheDocument();
+
+    await act(async () => { pending.resolve({ name: 'create-ticket', tier_text: 'create-ticket-tier-text', merged_text: 'm' }); });
+
+    const textarea = await screen.findByDisplayValue('create-ticket-tier-text');
+    await waitFor(() => expect(textarea).toHaveFocus());
+  });
+
+  it('shows the loading line, not the previous skill\'s text, right after a switch', async () => {
+    const user = userEvent.setup();
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('create-ticket-tier-text');
+    mockedFetchSkill.mockReturnValueOnce(new Promise(() => {}));
+
+    await user.click(refineItem());
+
+    expect(loadingStatus()).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('create-ticket-tier-text')).not.toBeInTheDocument();
+    expect(screen.queryByText('create-ticket-merged-text')).not.toBeInTheDocument();
+  });
+
+  it('does not show the previous skill\'s load error after switching to another skill', async () => {
+    const user = userEvent.setup();
+    mockedFetchSkill.mockRejectedValueOnce(new Error('create failed'));
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await screen.findByRole('alert');
+    mockedFetchSkill.mockReturnValueOnce(new Promise(() => {}));
+
+    await user.click(refineItem());
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(loadingStatus()).toBeInTheDocument();
+  });
+
+  it.each([
+    ['succeeds', (d: ReturnType<typeof deferred<Detail>>) => d.resolve({ name: 'create-ticket', tier_text: 'late-create-text', merged_text: 'late' })],
+    ['fails', (d: ReturnType<typeof deferred<Detail>>) => d.reject(new Error('late create failure'))]
+  ])('ignores the previous skill\'s answer that arrives after a switch (it %s)', async (_how, settle) => {
+    const user = userEvent.setup();
+    const first = deferred<Detail>();
+    const second = deferred<Detail>();
+    mockedFetchSkill.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await waitFor(() => expect(mockedFetchSkill).toHaveBeenCalledTimes(1));
+
+    await user.click(refineItem());
+    await waitFor(() => expect(mockedFetchSkill).toHaveBeenCalledTimes(2));
+    await act(async () => { second.resolve({ name: 'refine-ticket', tier_text: 'refine-ticket-tier-text', merged_text: 'r' }); });
+    await screen.findByDisplayValue('refine-ticket-tier-text');
+
+    await act(async () => { settle(first); });
+
+    expect(screen.getByDisplayValue('refine-ticket-tier-text')).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('late-create-text')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
