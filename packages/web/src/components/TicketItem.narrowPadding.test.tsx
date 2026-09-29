@@ -33,7 +33,7 @@ import { TicketItem } from './TicketItem';
 
 const NARROW_LARGE_TEXT_PADDING = 'upto-15rem:p-3';
 const BELOW_SM_PADDING = 'max-sm:p-3';
-const TINY_WINDOW_PADDING = '[@media(max-width:200px)]:p-2';
+const TINY_WINDOW_PADDING = 'upto-200px:p-2';
 
 const makeTicket = (): TicketDetail => ({
   id: 'TEST-00227',
