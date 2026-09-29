@@ -199,6 +199,17 @@ export interface GraphNode {
   // The claimer's session's (or autopilot run's) last heartbeat.
   claim_heartbeat?: string;
   claim_lease?: 'live' | 'expired' | 'unknown' | 'legacy';
+  // DFLT-00329: who last decided a manual node (approved or rejected an
+  // approval gate, completed a release or another manual node) and when.
+  // The server resolves the name itself; it is sent only while the node
+  // still carries the status that decision set (a rewind clears it).
+  decided_by_name?: string;
+  // true when decided_by_name is the "<OS user>@<host>" stand-in for an
+  // unset name.
+  decided_by_name_is_fallback?: boolean;
+  decided_at?: string;
+  // true when an autopilot run made the decision.
+  decided_by_autopilot?: boolean;
 }
 
 export interface GraphEdge {

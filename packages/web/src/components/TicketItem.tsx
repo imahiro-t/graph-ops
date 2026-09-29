@@ -29,6 +29,7 @@ import { GherkinViewer } from './GherkinViewer';
 import { MarkdownViewer } from './MarkdownViewer';
 import { NodeTypeBadge } from './NodeTypeBadge';
 import { NodeClaimLine } from './NodeClaimLine';
+import { NodeDecisionLine } from './NodeDecisionLine';
 import { PrioritySelect } from './PrioritySelect';
 import { LabelChip } from './LabelChip';
 import { LabelSelect } from './LabelSelect';
@@ -2700,6 +2701,11 @@ export const TicketItem: React.FC<Props> = ({
                               badges for width. Outside the clickable row: it
                               is text to read, not a toggle. */}
                           <NodeClaimLine node={node} />
+
+                          {/* Who decided a manual node and when
+                              (DFLT-00329), on its own line like the claim
+                              above. */}
+                          <NodeDecisionLine node={node} />
 
                           {/* Reject-with-reason prompt (DFLT-00016). A free-
                               text reason is required -- the confirm button

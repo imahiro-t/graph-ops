@@ -283,6 +283,13 @@
       "claimedAgo": "claimed {{ago}}",
       "heartbeatAgo": "last heartbeat {{ago}}",
       "noResponse": "not responding"
+    },
+    "decision": {
+      "approvedBy": "Approved by {{name}}",
+      "rejectedBy": "Rejected by {{name}}",
+      "completedBy": "Completed by {{name}}",
+      "sentBackBy": "Sent back by {{name}}",
+      "byAutopilot": " (autopilot)"
     }
   },
   "artifactModal": {
@@ -696,7 +703,9 @@
     "TICKET_NOT_FOUND": "That ticket could not be found.",
     "PARENT_TICKET_UNSUPPORTED": "The data source in use cannot store a parent ticket. Update the HTTP data source plugin to protocol 1.1 or later.",
     "NODE_NOT_FOUND": "That node could not be found.",
-    "INVALID_NODE_STATE": "This node cannot be completed while it is in its current state - it may already be finished, or may not have started yet. Reload the page to see where it stands now.",
+    "INVALID_NODE_STATE": "This node cannot be completed while it is in its current state - another member may have approved or rejected it first, it may already be finished, or it may not have started yet. Reload the page to see where it stands now.",
+    "CONCURRENT_WRITE_CONFLICT": "This could not be saved because it collided with other changes to the same ticket. Nothing was changed, so please try again.",
+    "TICKET_STATUS_CHANGED": "The ticket's status was changed by another action, so this was not saved. Reload the page to see where it stands now.",
     "VALIDATION_ERROR": "The request was invalid. Please check your input and try again.",
     "INTERNAL_ERROR": "Something went wrong on the server. Please try again.",
     "INVALID_PREFIX": "The prefix must be 1-5 alphanumeric characters.",
