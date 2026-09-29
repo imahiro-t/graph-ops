@@ -1183,13 +1183,20 @@ export const TicketItem: React.FC<Props> = ({
     has_content?: boolean;
   }) => {
     if (!(artifact.content || artifact.file_path || artifact.has_content)) return null;
+    // DFLT-00334: under 80rem the link itself may shrink to its row
+    // (min-w-0). overflow-wrap: break-word on the label does not lower the
+    // link's min-content, so without min-w-0 on the <a> an English
+    // "Download" that is longer than an 80px header row (320px, 200% font)
+    // still sticks out past the row's left edge. The label wraps between
+    // words while it fits and mid-word only when one word is wider than the
+    // row; the icon keeps its size.
     return (
       <a
         href={`/api/artifacts/${artifact.id}/content?download=1`}
-        className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1 text-[0.6875rem]"
+        className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1 text-[0.6875rem] below-80rem:min-w-0 below-80rem:max-w-full"
       >
-        <Download aria-hidden="true" className="w-3 h-3" />
-        {t('ticketItem.download')}
+        <Download aria-hidden="true" className="w-3 h-3 shrink-0" />
+        <span className="below-80rem:min-w-0 below-80rem:wrap-break-word">{t('ticketItem.download')}</span>
       </a>
     );
   };
@@ -2812,16 +2819,34 @@ export const TicketItem: React.FC<Props> = ({
                               ) : (
                                 nodeArtifacts.map(art => (
                                   <div key={art.id} className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 space-y-2">
-                                    <div className="flex items-center justify-between font-bold text-slate-700 dark:text-slate-300 text-xs">
-                                      <span className="flex items-center gap-1.5">
-                                        {art.type === 'gherkin' && <FileCode aria-hidden="true" className="w-3.5 h-3.5 text-amber-500" />}
-                                        {art.type === 'html' && <Globe aria-hidden="true" className="w-3.5 h-3.5 text-cyan-500" />}
-                                        {art.type === 'text' && <FileText aria-hidden="true" className="w-3.5 h-3.5 text-indigo-500" />}
-                                        {art.name}
+                                    {/* DFLT-00334: under 80rem the header row
+                                        wraps instead of forcing name, Download
+                                        and the type badge onto one line: at
+                                        320px with a 200% font the row is ~80px,
+                                        and the node card (overflow-hidden)
+                                        clipped the right group while the name
+                                        was squeezed to one character a line.
+                                        The name group wraps too, so a long name
+                                        moves under its icon and gets the full
+                                        row; the name keeps an auto basis and
+                                        wrap-break-word (never wrap-anywhere or
+                                        basis-0, which would let it shrink to one
+                                        character again). The right group moves
+                                        to the next line, stays right-aligned
+                                        (safe, so it never runs out on the left)
+                                        and wraps within itself. From 80rem up
+                                        the row is unchanged: only shrink-0 is
+                                        added without the variant. */}
+                                    <div className="flex items-center justify-between font-bold text-slate-700 dark:text-slate-300 text-xs below-80rem:flex-wrap below-80rem:gap-x-2 below-80rem:gap-y-1">
+                                      <span className="flex items-center gap-1.5 below-80rem:flex-wrap below-80rem:min-w-0 below-80rem:max-w-full">
+                                        {art.type === 'gherkin' && <FileCode aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-amber-500" />}
+                                        {art.type === 'html' && <Globe aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-cyan-500" />}
+                                        {art.type === 'text' && <FileText aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-500" />}
+                                        <span className="below-80rem:min-w-0 below-80rem:wrap-break-word">{art.name}</span>
                                       </span>
-                                      <span className="flex items-center gap-2">
+                                      <span className="flex items-center gap-2 below-80rem:flex-wrap below-80rem:ml-auto below-80rem:min-w-0 below-80rem:max-w-full below-80rem:justify-end-safe">
                                         {downloadLink(art)}
-                                        <span className="text-[0.625rem] uppercase font-mono px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-sm">
+                                        <span className="text-[0.625rem] uppercase font-mono px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-sm below-80rem:min-w-0 below-80rem:wrap-break-word">
                                           {art.type}
                                         </span>
                                       </span>
@@ -2942,14 +2967,17 @@ export const TicketItem: React.FC<Props> = ({
                           key={a.id}
                           className="p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs"
                         >
-                          <div className="flex items-center justify-between font-semibold text-slate-800 dark:text-slate-200 mb-1">
-                            <span className="flex items-center gap-2">
-                              <FileText aria-hidden="true" className="w-4 h-4 text-indigo-500" />
-                              {a.name}
+                          {/* DFLT-00334: same wrapping header as the
+                              node artifacts above -- this row is ~122px at
+                              320px with a 200% font and overflowed too. */}
+                          <div className="flex items-center justify-between font-semibold text-slate-800 dark:text-slate-200 mb-1 below-80rem:flex-wrap below-80rem:gap-x-2 below-80rem:gap-y-1">
+                            <span className="flex items-center gap-2 below-80rem:flex-wrap below-80rem:min-w-0 below-80rem:max-w-full">
+                              <FileText aria-hidden="true" className="w-4 h-4 shrink-0 text-indigo-500" />
+                              <span className="below-80rem:min-w-0 below-80rem:wrap-break-word">{a.name}</span>
                             </span>
-                            <span className="flex items-center gap-2">
+                            <span className="flex items-center gap-2 below-80rem:flex-wrap below-80rem:ml-auto below-80rem:min-w-0 below-80rem:max-w-full below-80rem:justify-end-safe">
                               {downloadLink(a)}
-                              <span className="text-[0.625rem] px-2 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 uppercase font-mono">
+                              <span className="text-[0.625rem] px-2 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 uppercase font-mono below-80rem:min-w-0 below-80rem:wrap-break-word">
                                 {a.type}
                               </span>
                             </span>
