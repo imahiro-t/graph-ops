@@ -10,7 +10,7 @@
 // 2 つ必要だった。
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Save, CheckCircle2, XCircle, Trash2, FolderCog, PlugZap, RotateCw } from 'lucide-react';
+import { Save, CheckCircle2, XCircle, Trash2, FolderCog, PlugZap } from 'lucide-react';
 import {
   AppSettingsFile,
   APP_SETTINGS_WARNINGS,
@@ -33,6 +33,8 @@ import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
 import { SubmittingText, submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
+import { LoadFailure, useFocusAfterRetry } from './LoadFailure';
+import { LoadingLine } from './LoadingLine';
 import { Spinner } from '../Spinner';
 
 interface Props {
@@ -202,10 +204,10 @@ export const AppSettingsEditor: React.FC<Props> = ({
   // Counts the failed loads, as a key for the error box: a retry that fails
   // with the same message remounts the alert, so it is announced again.
   const [loadFailures, setLoadFailures] = useState(0);
-  // Set when a retry has loaded the settings: the retry button that had focus
-  // is gone, so focus moves to the form's container (see the effect below).
-  const [focusFormAfterRetry, setFocusFormAfterRetry] = useState(false);
+  // A successful retry unmounts the focused retry button; focus then moves to
+  // the form's container (see useFocusAfterRetry).
   const formContainerRef = useRef<HTMLDivElement>(null);
+  const focusFormAfterRetry = useFocusAfterRetry(() => formContainerRef.current);
   const { savedFlash, showSavedFlash } = useSavedFlash();
   // Announces a successful project delete (DFLT-00194): focus moves to a
   // neighbor afterwards, and this says why -- which project is gone.
@@ -302,17 +304,8 @@ export const AppSettingsEditor: React.FC<Props> = ({
     // aria-disabled, not disabled, while a retry is running (so the button
     // keeps focus), hence this guard against a second request.
     if (loading) return;
-    if (await load()) setFocusFormAfterRetry(true);
+    if (await load()) focusFormAfterRetry();
   };
-
-  // A successful retry unmounts the focused retry button, dropping focus to
-  // <body>; put it on the form's container instead -- unless the user has
-  // moved it somewhere else meanwhile (focusIfLost).
-  useEffect(() => {
-    if (!focusFormAfterRetry) return;
-    focusIfLost(formContainerRef.current);
-    setFocusFormAfterRetry(false);
-  }, [focusFormAfterRetry]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -531,40 +524,20 @@ export const AppSettingsEditor: React.FC<Props> = ({
     }
   };
 
-  // Checked before `loading`: a retry keeps this view (and the focused retry
-  // button, showing that it is busy) until its result is in.
+  // Checked before `loading` (see LoadFailure): a retry keeps this view (and
+  // the focused retry button, showing that it is busy) until its result is in.
   if (loadError) {
     return (
-      <div className="flex flex-col items-start gap-3 py-4">
-        <ErrorBox key={loadFailures} role="alert" className="p-2.5 text-[0.6875rem] whitespace-pre-wrap self-stretch">
-          {t('settings.appSettings.loadFailed', { message: loadError })}
-        </ErrorBox>
-        {/* Styled like App.tsx's retry button for a project that failed to
-            load (DFLT-00164 contrast, DFLT-00167 focus ring). */}
-        <button
-          type="button"
-          onClick={() => void retryLoad()}
-          aria-disabled={loading}
-          {...submittingProps(loading)}
-          className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold inline-flex items-center gap-1.5 transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 aria-disabled:cursor-wait"
-        >
-          {loading ? <Spinner className="w-4 h-4" /> : <RotateCw aria-hidden="true" className="w-4 h-4" />}
-          {t('settings.common.retry')}
-          <SubmittingText busy={loading} />
-        </button>
-      </div>
+      <LoadFailure
+        message={t('settings.appSettings.loadFailed', { message: loadError })}
+        retrying={loading}
+        onRetry={() => void retryLoad()}
+        failureKey={loadFailures}
+      />
     );
   }
 
-  if (loading) {
-    // role="status", like LabelsEditor's loading line (DFLT-00343): the
-    // spinner is aria-hidden, so the text alone says the settings are loading.
-    return (
-      <div role="status" className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
-        <Spinner className="w-4 h-4" /> {t('settings.common.loading')}
-      </div>
-    );
-  }
+  if (loading) return <LoadingLine />;
 
   const pageSizeInvalid = !Number.isInteger(form.paginationPageSize) || form.paginationPageSize < 1;
   const teamDirTrimmed = form.teamExtensionsDir.trim();
@@ -635,7 +608,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
 
   return (
     // tabIndex -1 and the ref: where focus goes after a successful retry
-    // (see focusFormAfterRetry). No outline: it is not a control.
+    // (see useFocusAfterRetry). No outline: it is not a control.
     <div
       ref={formContainerRef}
       tabIndex={-1}

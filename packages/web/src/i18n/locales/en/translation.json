@@ -393,6 +393,7 @@
       "noChangesToSave": "No changes to save.",
       "loading": "Loading...",
       "retry": "Retry",
+      "loadFailed": "The settings could not be loaded ({{message}}). The editor stays hidden until they load, so the saved content cannot be overwritten with empty or default values. Please retry.",
       "inheritedFromDefault": "Inherited from the plugin default",
       "yes": "Yes",
       "no": "No",
