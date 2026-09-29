@@ -16,12 +16,13 @@ const TOOLTIP_SELECTOR = '[data-icon-button-tooltip]';
 // It moves the fake clock past the delay instead of waiting for it in real
 // time (DFLT-00341), so a test that hovers must run under fake timers: call
 // useHoverFakeTimers() in its describe (or startHoverFakeTimers() at the top
-// of the test) and create its user with setupHoverUser(). Without fake timers it throws rather than falling back to
-// a real wait, so a missing setup fails loudly instead of slowing tests down.
+// of the test) and create its user with setupHoverUser(). Without fake
+// timers it throws rather than falling back to a real wait, so a missing
+// setup fails loudly instead of slowing tests down.
 export async function waitForHoverOpenDelay(): Promise<void> {
   if (!vi.isFakeTimers()) {
     throw new Error(
-      'waitForHoverOpenDelay() needs fake timers: call useHoverFakeTimers() in the describe and create the user with setupHoverUser()'
+      'waitForHoverOpenDelay() needs fake timers: call useHoverFakeTimers() in the describe or startHoverFakeTimers() at the top of the test, and create the user with setupHoverUser()'
     );
   }
   await act(async () => {
@@ -55,7 +56,8 @@ export function startHoverFakeTimers(): void {
 }
 
 // A user-event instance whose internal waits advance the fake clock, for
-// tests run under useHoverFakeTimers().
+// tests run under fake timers from useHoverFakeTimers() or
+// startHoverFakeTimers().
 export function setupHoverUser(options: Parameters<typeof userEvent.setup>[0] = {}): ReturnType<typeof userEvent.setup> {
   return userEvent.setup({ advanceTimers: vi.advanceTimersByTime, ...options });
 }
