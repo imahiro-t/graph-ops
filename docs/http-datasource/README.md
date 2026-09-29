@@ -268,6 +268,16 @@ server speaks 2.0, graph-engine requires 1.x"). A different MINOR is accepted,
 because minor versions only add optional things. graph-engine sends its own
 version on every request in the `GraphOps-Protocol-Version` header.
 
+The protocol version is the only version check against an HTTP data source.
+It is a separate axis from the database schema version that graph-engine
+records in SQLite and MySQL (the `graphops_schema` table, which stops a
+graph-engine older than the database with `CLIENT_TOO_OLD`; see the README's
+notes, "Several members on the same tickets: graph-engine versions"). With an
+HTTP data source your plugin owns the storage and its schema, so graph-engine
+neither records nor checks a schema version there and asks nothing of your
+plugin for it: no table, no endpoint, no field. Keeping your own storage
+compatible across plugin versions is up to you.
+
 What each minor version added:
 
 | Version | Added |
