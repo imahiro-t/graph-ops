@@ -114,7 +114,7 @@ describe('App project scoping', () => {
       await screen.findByText('ALP-00001');
 
       await user.click(screen.getByRole('button', { name: /^Alpha/ }));
-      await user.click(screen.getByRole('button', { name: /^Beta/ }));
+      await user.click(await screen.findByRole('button', { name: /^Beta/ }));
       await screen.findByText('BETA-00001');
       expect(ticketListRequests()).toContain(`/api/tickets?project_id=${beta.id}`);
 
@@ -190,7 +190,7 @@ describe('App project scoping', () => {
       expect(screen.queryByText('ALP-00001')).not.toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: /^Alpha/ }));
-      await user.click(screen.getByRole('button', { name: /^Beta/ }));
+      await user.click(await screen.findByRole('button', { name: /^Beta/ }));
       await screen.findByText('BETA-00001');
 
       releaseAlpha();
@@ -224,7 +224,10 @@ describe('App project scoping', () => {
       render(<App />);
       await screen.findByRole('button', { name: /^Alpha/ });
       await user.click(screen.getByRole('button', { name: /^Alpha/ }));
-      await user.click(screen.getByRole('button', { name: /^Beta/ }));
+      await user.click(await screen.findByRole('button', { name: /^Beta/ }));
+      // The header moves to Beta -- and Beta's fetch supersedes Alpha's --
+      // only once the switch (PUT /api/current-project) has been answered.
+      await screen.findByRole('button', { name: /^Beta/ });
 
       // Alpha answers while Beta is still loading.
       releaseAlpha();
@@ -271,6 +274,12 @@ describe('App project scoping', () => {
 
       await user.click(screen.getByRole('button', { name: i18n.t('header.settings') }));
       await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.appSettings') }));
+      // The tab reads the app settings (GET /api/settings/app) and shows a
+      // spinner in place of its form until they arrive, so a delete button
+      // found before that answer is replaced by the spinner. Wait for a line
+      // only the loaded form has (DFLT-00296).
+      const inEffect = i18n.t('settings.appSettings.currentlyInEffect', { value: '' });
+      await screen.findAllByText(text => text.startsWith(inEffect));
       const deleteAlpha = await screen.findByRole('button', { name: i18n.t('settings.appSettings.projects.deleteAriaLabel', { name: 'Alpha' }) });
       await user.click(deleteAlpha);
       // The in-app confirmation (DFLT-00148).
@@ -307,7 +316,7 @@ describe('App project scoping', () => {
       render(<App />);
       await screen.findByText('ALP-00001');
       await user.click(screen.getByRole('button', { name: /^Alpha/ }));
-      await user.click(screen.getByRole('button', { name: /^Beta/ }));
+      await user.click(await screen.findByRole('button', { name: /^Beta/ }));
       await screen.findByRole('button', { name: /^Beta/ });
       await new Promise(r => setTimeout(r, 50));
 
@@ -366,7 +375,7 @@ describe('App project scoping', () => {
       await user.click(assigneeButton());
 
       await user.click(screen.getByRole('button', { name: /^Alpha/ }));
-      await user.click(screen.getByRole('button', { name: /^Beta/ }));
+      await user.click(await screen.findByRole('button', { name: /^Beta/ }));
       await screen.findByRole('button', { name: /^Beta/ });
       await new Promise(r => setTimeout(r, 50));
 
@@ -421,7 +430,7 @@ describe('App project scoping', () => {
       await user.click(labelButton());
 
       await user.click(screen.getByRole('button', { name: /^Alpha/ }));
-      await user.click(screen.getByRole('button', { name: /^Beta/ }));
+      await user.click(await screen.findByRole('button', { name: /^Beta/ }));
       await screen.findByText('BETA-00001');
 
       await user.click(labelButton());
@@ -550,7 +559,7 @@ describe('App project scoping', () => {
       await waitFor(() => expect(fetchMock.mock.calls.map(c => String(c[0]))).toContain('/api/tickets/ALP-00001'));
 
       await user.click(screen.getByRole('button', { name: /^Alpha/ }));
-      await user.click(screen.getByRole('button', { name: /^Beta/ }));
+      await user.click(await screen.findByRole('button', { name: /^Beta/ }));
       await screen.findByText('BETA-00001');
 
       releaseDetail();
@@ -578,7 +587,7 @@ describe('App project scoping', () => {
         render(<App />);
         await screen.findByText('ALP-00001');
         await user.click(screen.getByRole('button', { name: /^Alpha/ }));
-        await user.click(screen.getByRole('button', { name: /^Beta/ }));
+        await user.click(await screen.findByRole('button', { name: /^Beta/ }));
         await screen.findByText('BETA-00001');
 
         visibility = 'hidden';
@@ -778,7 +787,11 @@ describe('App project scoping', () => {
 
       await user.click(screen.getByRole('button', { name: /^ラベル: / }));
       const panel = screen.getByRole('group', { name: i18n.t('toolbar.labelGroupLabel') });
-      expect(within(panel).getAllByRole('checkbox').map(c => c.getAttribute('aria-label'))).toEqual(['Alpha のラベル']);
+      // The options are the labels request's answer, not the ticket list's:
+      // wait for them rather than assume they are in (DFLT-00296).
+      await waitFor(() =>
+        expect(within(panel).getAllByRole('checkbox').map(c => c.getAttribute('aria-label'))).toEqual(['Alpha のラベル'])
+      );
     });
   });
 

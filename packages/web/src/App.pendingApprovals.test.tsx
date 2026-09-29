@@ -73,10 +73,44 @@ function badgeIn(p: Project) {
   return within(menuItem(p)).queryByRole('img');
 }
 
+// Resolves once the app has read the body of its GET /api/projects answer.
+function projectListRead(): Promise<void> {
+  let read!: () => void;
+  const done = new Promise<void>(resolve => {
+    read = resolve;
+  });
+  const inner = backend.fetch.bind(backend);
+  backend.fetch = async (input, init) => {
+    const res = await inner(input, init);
+    if (String(input) === '/api/projects' && (init?.method ?? 'GET') === 'GET') {
+      const json = res.json.bind(res);
+      res.json = async () => {
+        try {
+          return await json();
+        } finally {
+          read();
+        }
+      };
+    }
+    return res;
+  };
+  return done;
+}
+
+// The menu's items are the project list (GET /api/projects), a request of
+// its own that seeing a ticket does not imply has been answered -- and until
+// it is, the open menu has no project items at all. So besides the first
+// ticket, wait for the app to read that list and let it reach the state and
+// the render, before any test opens the menu (DFLT-00296).
 async function renderApp() {
   const user = userEvent.setup();
+  const projectsRead = projectListRead();
   render(<App />);
   await screen.findByText('AAA-00001');
+  await act(async () => {
+    await projectsRead;
+    await new Promise(r => setTimeout(r, 0));
+  });
   return user;
 }
 

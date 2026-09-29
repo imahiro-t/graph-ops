@@ -183,6 +183,11 @@ describe.each(['ja', 'en'] as const)('top header in a 160px window at 200%% (%s)
   });
 });
 
+// The pager is drawn only once the page size of five has arrived, which is
+// its own request (GET /api/settings/app): seeing a ticket does not imply
+// it has been answered (DFLT-00296).
+const findPreviousPage = () => screen.findByRole('button', { name: i18n.t('pagination.previous') });
+
 describe.each(['ja', 'en'] as const)('pagination in a 160px window at 200%% (%s)', lng => {
   beforeEach(async () => {
     seed();
@@ -191,7 +196,7 @@ describe.each(['ja', 'en'] as const)('pagination in a 160px window at 200%% (%s)
 
   it('lets the button group wrap right-aligned under 15rem, in reading order', async () => {
     await renderApp();
-    const previous = screen.getByRole('button', { name: i18n.t('pagination.previous') });
+    const previous = await findPreviousPage();
     const next = screen.getByRole('button', { name: i18n.t('pagination.next') });
     const group = previous.parentElement as HTMLElement;
     expect(next.parentElement).toBe(group);
@@ -215,7 +220,7 @@ describe.each(['ja', 'en'] as const)('pagination in a 160px window at 200%% (%s)
 
   it('lets the page number break inside its digits', async () => {
     await renderApp();
-    const previous = screen.getByRole('button', { name: i18n.t('pagination.previous') });
+    const previous = await findPreviousPage();
     const page = previous.nextElementSibling as HTMLElement;
     expect(page).toHaveTextContent(i18n.t('pagination.pageOf', { page: 1, total: 2 }));
     expect(page).toHaveClass('min-w-0', BREAKS_ANYWHERE);
