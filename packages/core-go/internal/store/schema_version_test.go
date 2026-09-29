@@ -389,9 +389,9 @@ func TestSchemaRecord_OlderClientDoesNotLowerTheRecord(t *testing.T) {
 // Concurrent Inits on a database without a record all succeed and leave
 // the highest record; mixing clients of different versions is no
 // different. The database is an existing one whose record was dropped (as
-// before DFLT-00331): concurrent first opens of a brand-new SQLite file race
-// on switching it to WAL, which returns SQLITE_BUSY without waiting -- an
-// older, separate matter this test is not about.
+// before DFLT-00331). Concurrent first opens of a brand-new SQLite file,
+// which race on switching it to WAL, are covered separately by
+// TestSQLiteConcurrentFirstInitOnNewFile (DFLT-00354).
 func TestSchemaRecord_ConcurrentInit(t *testing.T) {
 	for _, b := range schemaBackends() {
 		t.Run(b.name, func(t *testing.T) {

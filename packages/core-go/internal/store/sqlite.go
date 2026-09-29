@@ -2,14 +2,17 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/project"
@@ -298,9 +301,82 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 // Init checks the DB's schema record before anything else and stops with
 // CLIENT_TOO_OLD, writing nothing, when this client is older than the record
 // allows; otherwise it applies schemaDDL and the migrations, then raises the
-// record if this client is ahead of it (see schema_version.go).
+// record if this client is ahead of it (see schema_version.go). It first
+// connects, retrying the WAL switch of a new file (connectWithBusyRetry).
 func (r *SQLiteRepository) Init() error {
+	if err := r.connectWithBusyRetry(); err != nil {
+		return err
+	}
 	return initWithSchemaRecord("sqlite", clientSchemaOrDefault(r.clientSchema), r.readSchemaRecord, r.migrate, r.writeSchemaRecord)
+}
+
+// sqliteFirstConnectRetryLimit bounds how long connectWithBusyRetry keeps
+// retrying. It matches the DSN's busy_timeout(5000): a contender that
+// busy_timeout would have made wait that long gets the same allowance here.
+const sqliteFirstConnectRetryLimit = 5 * time.Second
+
+// connectWithBusyRetry establishes the pool's connection before Init's first
+// query, retrying while it fails with SQLITE_BUSY (DFLT-00354).
+//
+// Opening a connection runs the DSN's pragmas, and journal_mode(WAL) is one
+// of them. On a file that is not in WAL mode yet -- a brand-new one --
+// several processes (or several SQLiteRepository values) opening it at once
+// race to switch it, and the losers get SQLITE_BUSY straight away: SQLite
+// does not call the busy handler on that path, so busy_timeout, although it
+// is already set by then, does not help. The error used to surface as Init's
+// "reading sqlite schema version: database is locked". Once the file is in
+// WAL mode the mode is persistent and later opens do not switch it, so only
+// a first open can hit this, and a retry after the winner has switched the
+// file succeeds.
+//
+// It runs at the start of Init rather than in NewSQLiteRepository, which
+// connects lazily and so reports no connection errors; store.Open always
+// calls Init right after it. A failed connection is not kept by the pool, so
+// each retry opens a fresh one and re-runs every pragma. Any other error is
+// returned at once, and the last SQLITE_BUSY is returned once
+// sqliteFirstConnectRetryLimit has passed. The connection that succeeds stays
+// idle in the pool (SetMaxOpenConns(1)) for Init to use.
+func (r *SQLiteRepository) connectWithBusyRetry() error {
+	if err := retryOnSQLiteBusy(r.db.Ping, sqliteFirstConnectRetryLimit); err != nil {
+		return fmt.Errorf("connecting to sqlite db: %w", err)
+	}
+	return nil
+}
+
+// retryOnSQLiteBusy calls op until it returns something other than
+// SQLITE_BUSY, or until limit has passed since the first call, in which case
+// it returns op's last error. It backs off from 5ms to at most 100ms, with
+// jitter so that the processes that lost the same race do not retry in step.
+func retryOnSQLiteBusy(op func() error, limit time.Duration) error {
+	deadline := time.Now().Add(limit)
+	backoff := 5 * time.Millisecond
+	const maxBackoff = 100 * time.Millisecond
+	for {
+		err := op()
+		if err == nil || !isSQLiteBusy(err) {
+			return err
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return err
+		}
+		sleep := backoff/2 + rand.N(backoff/2+1)
+		if sleep > remaining {
+			sleep = remaining
+		}
+		time.Sleep(sleep)
+		backoff = min(backoff*2, maxBackoff)
+	}
+}
+
+// isSQLiteBusy reports whether err is SQLITE_BUSY or one of its extended
+// codes (SQLITE_BUSY_RECOVERY, SQLITE_BUSY_SNAPSHOT, ...), which carry
+// SQLITE_BUSY in their low 8 bits. It checks the driver's error code rather
+// than the message text. SQLITE_LOCKED is a different condition (a conflict
+// within one connection) and is not included.
+func isSQLiteBusy(err error) bool {
+	var sqliteErr *sqlite.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == sqlite3.SQLITE_BUSY
 }
 
 // CheckClientSchema re-reads the schema record and answers CLIENT_TOO_OLD
