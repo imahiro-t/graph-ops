@@ -55,7 +55,11 @@ export const TemplateTextEditor: React.FC<Props> = ({
   const [tierText, setTierText] = useState('');
   const [savedTierText, setSavedTierText] = useState('');
   const [mergedText, setMergedText] = useState('');
-  const [loading, setLoading] = useState(false);
+  // Starts true: the first render already shows the loading line, so the
+  // editor is never drawn with its defaults for a frame before load() runs
+  // (DFLT-00323, DFLT-00343) -- a flicker, and a form someone could start
+  // editing or save with values that are not the stored ones.
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const { savedFlash, showSavedFlash } = useSavedFlash();
