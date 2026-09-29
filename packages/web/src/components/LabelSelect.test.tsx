@@ -192,15 +192,19 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
 
   type Box = { left: number; clientLeft: number; clientWidth: number };
 
-  const setup = (box: Box, anchorLeft: number) => {
+  const setup = (box: Box, initialAnchorLeft: number) => {
     const user = userEvent.setup();
-    const view = render(
+    const tree = (labels: Label[]) => (
       <div data-testid="clip" style={{ overflowX: 'clip' }}>
-        <div>
-          <LabelSelect ticketId="TEST-00001" labels={[]} projectLabels={PROJECT_LABELS} onSaved={vi.fn()} />
+        <div data-testid="row">
+          <LabelSelect ticketId="TEST-00001" labels={labels} projectLabels={PROJECT_LABELS} onSaved={vi.fn()} />
         </div>
       </div>
     );
+    const view = render(tree([]));
+    // Re-renders with the ticket's labels changed, as the parent's re-fetch
+    // does after a save.
+    const setLabels = (labels: Label[]) => view.rerender(tree(labels));
     const clip = screen.getByTestId('clip');
     const current = { ...box };
     const clipRect = vi.fn(() => ({ left: current.left, right: current.left + current.clientWidth, top: 0, bottom: 0, width: current.clientWidth, height: 0, x: current.left, y: 0, toJSON: () => ({}) }) as DOMRect);
@@ -209,9 +213,12 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
     Object.defineProperty(clip, 'clientLeft', { configurable: true, get: () => current.clientLeft });
     const button = screen.getByRole('button', { name: editButtonName() });
     const anchor = button.parentElement as HTMLElement;
+    let anchorLeft = initialAnchorLeft;
     anchor.getBoundingClientRect = () => ({ left: anchorLeft, right: anchorLeft, top: 0, bottom: 0, width: 0, height: 0, x: anchorLeft, y: 0, toJSON: () => ({}) }) as DOMRect;
     const setBox = (next: Box) => Object.assign(current, next);
-    return { user, view, clip, clipRect, button, anchor, setBox };
+    // Moves the button, as a chip added before it does.
+    const setAnchorLeft = (left: number) => (anchorLeft = left);
+    return { user, view, clip, clipRect, button, anchor, setBox, setAnchorLeft, setLabels };
   };
 
   // What the panel should be for a clip `box` and an anchor at `anchorLeft`.
@@ -324,6 +331,104 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
     clipRect.mockClear();
     expect(() => fireEvent(window, new Event('resize'))).not.toThrow();
     expect(clipRect).not.toHaveBeenCalled();
+  });
+
+  it('refits the open panel when a saved label moves the button (the labels prop changes)', async () => {
+    // At 320px the button sat at the right end of its line, so the panel was
+    // moved left; a label saved with the panel open pushed the button onto
+    // the next line, and the panel kept the old left, past the clip's left
+    // edge. Less the inset, the clip's inside runs from 17 to 303 here.
+    const box: Box = { left: 12, clientLeft: 1, clientWidth: 294 };
+    const { user, setAnchorLeft, setLabels } = setup(box, 130);
+    const panel = await openPanel(user);
+    expect(panel.style.width).toBe(`${NATURAL}px`);
+    expect(panel.style.left).toBe(`${expected(box, 130).left}px`);
+    expect(panel.style.left).toBe('-51px');
+
+    setAnchorLeft(25);
+    setLabels([BUG]);
+    // Fits from the button's new place: 224px wide from 25 ends at 249, so no
+    // style at all -- nothing of the old left is left behind.
+    expectUntouched(panel);
+
+    setAnchorLeft(200);
+    setLabels([BUG, UI]);
+    expect(panel.style.left).toBe('-121px');
+    // 224px from 79 ends at the inside's right edge, 303.
+    expect(200 + parseFloat(panel.style.left)).toBeGreaterThanOrEqual(17);
+  });
+
+  it('refits the open panel when a save error appears', async () => {
+    mockedSet.mockReset();
+    mockedSet.mockRejectedValue(new Error(i18n.t('errors.LABEL_NOT_FOUND')));
+    const { user, setAnchorLeft } = setup(NARROW, 60);
+    const panel = await openPanel(user);
+    expectFitted(panel, NARROW, 60);
+    setAnchorLeft(40);
+    await user.click(screen.getByRole('checkbox', { name: 'UI' }));
+    await screen.findByRole('alert');
+    expectFitted(panel, NARROW, 40);
+  });
+
+  describe('with a ResizeObserver', () => {
+    type Callback = () => void;
+    const observers: { callback: Callback; targets: Element[]; disconnected: boolean }[] = [];
+
+    beforeEach(() => {
+      observers.length = 0;
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          private entry: (typeof observers)[number];
+          constructor(callback: Callback) {
+            this.entry = { callback, targets: [], disconnected: false };
+            observers.push(this.entry);
+          }
+          observe(el: Element) {
+            this.entry.targets.push(el);
+          }
+          unobserve() {}
+          disconnect() {
+            this.entry.disconnected = true;
+          }
+        }
+      );
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const live = () => observers.filter(o => !o.disconnected);
+
+    it('watches the anchor, the row it sits in and the clip, and refits when they resize', async () => {
+      const { user, clip, anchor, setBox, setAnchorLeft } = setup(WIDE, 60);
+      const panel = await openPanel(user);
+      expectUntouched(panel);
+      expect(live()).toHaveLength(1);
+      // The wrapper is display: contents, so its parent (the row) is watched.
+      expect(live()[0].targets).toEqual([anchor, screen.getByTestId('row'), clip]);
+
+      // A change of the text size or of the row moves the button; nothing
+      // else fires.
+      setBox(NARROW);
+      setAnchorLeft(40);
+      live()[0].callback();
+      expectFitted(panel, NARROW, 40);
+    });
+
+    it('disconnects when the panel closes or unmounts', async () => {
+      const { user, view, button } = setup(NARROW, 60);
+      await openPanel(user);
+      expect(live()).toHaveLength(1);
+      await user.click(button);
+      expect(live()).toHaveLength(0);
+
+      await openPanel(user);
+      expect(live()).toHaveLength(1);
+      view.unmount();
+      expect(live()).toHaveLength(0);
+    });
   });
 
   it('keeps the panel in the anchor around the button, apart from a save error', async () => {

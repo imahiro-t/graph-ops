@@ -20,16 +20,20 @@
 // ("Create / d:", "Edit / labe / ls"), and the closed reason's label could
 // break before its colon ("クローズ理由 / :"). wrap-anywhere now sits on the
 // values only (the date, the closed reason, each chip, and the label save
-// error). Each label is a MetaLabel -- break-keep, with its last character
+// error). Each label was a MetaLabel -- break-keep, with its last character
 // and colon in a whitespace-nowrap span, and a <wbr> between the words of a
-// Japanese label ("クローズ<wbr>理由") -- and never breaks inside a word: at
-// 160px / 200% a word wider than the bar ("Created:", "クローズ") still ends
-// inside the card's clip when left whole, so it gets no overflow-wrap (QA
-// review R1 of DFLT-00292). The "Edit labels"
-// button is flex-wrap wrap-break-word with its name in a break-keep span
-// ("ラベルを<wbr>編集" in Japanese). LabelSelect's wrapper is flex-wrap so a
-// save error goes to its own line instead of squeezing the button.
-// DFLT-00295: each label is one text node -- its words joined by U+200B (the
+// Japanese label ("クローズ<wbr>理由") -- and never broke inside a word: at
+// 160px / 200% a word wider than the bar ("Created:", "クローズ") still ended
+// inside the card's clip when left whole, so it got no overflow-wrap (QA
+// review R1 of DFLT-00292). The "Edit labels" button is flex-wrap
+// wrap-break-word with its name in a break-keep span ("ラベルを<wbr>編集" in
+// Japanese). LabelSelect's wrapper was flex-wrap so a save error went to its
+// own line instead of squeezing the button.
+// DFLT-00295 replaces the parts of that paragraph written in the past tense:
+// there is no nowrap span and no <wbr> element any more, a label breaks
+// inside a word when one word cannot fit (see below), and LabelSelect's
+// wrapper is display: contents.
+// Each label is now one text node -- its words joined by U+200B (the
 // "<wbr/>" mark, see lib/wbr) and its last character tied to the colon by
 // U+2060 -- so Chromium's accessibility tree shows it as one text, not
 // "作成" "日" "時:". It is inline-block with a max-width of its item plus the
@@ -37,7 +41,9 @@
 // one word is wider than that (wrap-break-word), so it always ends inside the
 // card's clip. "ノード数: " is one text node as well. The label picker's panel
 // is positioned from an anchor around the button only, so a save error does
-// not move it (LabelSelect.test.tsx covers fitting it into the card).
+// not move it (LabelSelect.test.tsx covers fitting it into the card), and
+// the labels item grows into the rest of its line while there is a save
+// error, so the message is not squeezed to the width of the labels.
 // The expected label text is derived from the *Visible keys (plainText), and
 // also checked against literals so a broken *Visible key cannot pass.
 // jsdom does no layout, so this checks the classes; the widths themselves
@@ -305,6 +311,12 @@ describe.each(['ja', 'en'])('TicketItem metadata bar wrapping (%s)', lng => {
     expect(alert.parentElement).toHaveClass('contents');
     expect(alert.parentElement?.parentElement).toBe(labels);
     expect(anchor.nextElementSibling).toBe(alert);
+    // While there is an error the labels item grows into the rest of its line
+    // of the bar, so the message is not squeezed under the labels; the
+    // variant matches only an element holding a role="alert" (DFLT-00295).
+    expect(labels).toHaveClass('has-[[role=alert]]:grow');
+    expect(labels).not.toHaveClass('grow');
+    expect(labels.matches(':has([role=alert])')).toBe(true);
     // The panel is positioned from the anchor, which holds the button but not
     // the error, so the error does not move it (DFLT-00295).
     expect(anchor).toHaveClass('relative');

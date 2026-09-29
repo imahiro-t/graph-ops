@@ -30,9 +30,10 @@ interface Props {
 //
 // DFLT-00295: the panel is positioned from an anchor that wraps the button
 // only, and a save error goes on a line of its own below the labels, so the
-// error never moves the button or the panel. While it is open (and on window resizes) placePanel fits it
-// into the card: at 160px / 200% its 14rem (448px) ran far past the card's
-// clip.
+// error never moves the button or the panel. placePanel fits the open panel
+// into the card (at 160px / 200% its 14rem, 448px, ran far past the card's
+// clip), and fits it again whenever the button may have moved while it is
+// open: see the layout effect below.
 export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, onSaved }) => {
   const { t } = useTranslation();
   // The trigger stays usable while labels save (it only toggles the panel),
@@ -44,26 +45,44 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
   const buttonRef = useRef<HTMLButtonElement>(null);
   const anchorRef = useRef<HTMLSpanElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-
-  // DFLT-00295: fit the open panel into the card. Recomputed when it opens
-  // and on window resizes while it is open (not when only the browser's text
-  // size changes; reopening it fixes that). Sets the panel's style directly,
-  // and only when it has to move or shrink; the panel unmounts on close.
-  useLayoutEffect(() => {
-    if (!isOpen) return;
-    const place = () => {
-      const anchor = anchorRef.current;
-      const panel = panelRef.current;
-      if (anchor && panel) placePanel(anchor, panel);
-    };
-    place();
-    window.addEventListener('resize', place);
-    return () => window.removeEventListener('resize', place);
-  }, [isOpen]);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   // Local copy of the selection so a check shows at once, before the parent's
   // re-fetch brings the new labels back in; re-synced whenever they change.
   const labelIdsKey = labels.map(l => l.id).join(',');
+
+  // DFLT-00295: fit the open panel into the card. Recomputed when it opens,
+  // and while it is open whenever the button may have moved: when the
+  // ticket's labels or the save error change (a label saved with the panel
+  // open adds a chip, which can push the button onto the next line -- at
+  // 320px the panel kept its old left and ran past the card's left edge), on
+  // window resizes, and when the button, the labels item or the clip changes
+  // size (ResizeObserver, where there is one: that also catches a change of
+  // the browser's text size). Sets the panel's style directly, and only when
+  // it has to move or shrink; the panel unmounts on close.
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    const anchor = anchorRef.current;
+    const panel = panelRef.current;
+    if (!anchor || !panel) return;
+    const place = () => placePanel(anchor, panel);
+    place();
+    window.addEventListener('resize', place);
+    let observer: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(place);
+      // The button's anchor, the row it sits in (the wrapper is display:
+      // contents, so its parent) and the clip. The panel is absolute, so
+      // fitting it never resizes any of them.
+      for (const el of [anchor, wrapperRef.current?.parentElement, clippingAncestor(anchor)]) {
+        if (el) observer.observe(el);
+      }
+    }
+    return () => {
+      window.removeEventListener('resize', place);
+      observer?.disconnect();
+    };
+  }, [isOpen, labelIdsKey, error]);
   const [selectedIds, setSelectedIds] = useState<string[]>(() => labels.map(l => l.id));
   useEffect(() => {
     setSelectedIds(labelIdsKey === '' ? [] : labelIdsKey.split(','));
@@ -103,6 +122,7 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
     // moves it. The wrapper only keeps its event handlers (they work
     // through contents).
     <div
+      ref={wrapperRef}
       className="contents"
       onClick={e => e.stopPropagation()}
       onKeyDown={e => {
@@ -207,7 +227,9 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
           item's own (max-content) width. Beside the button it widened the
           labels item, which then wrapped onto the next line of the metadata
           bar at 1280px -- moving the button and the open panel about 560px
-          left and 24px down under the pointer. */}
+          left and 24px down under the pointer. The labels item grows into
+          the rest of its line while there is an error (TicketItem), so the
+          message is not squeezed to the width of the labels. */}
       {error && (
         <span role="alert" className="text-red-600 dark:text-red-400 font-medium text-[11px] w-0 min-w-full max-w-full wrap-anywhere">
           {error}
@@ -222,6 +244,14 @@ const PANEL_INSET_PX = 4;
 // The panel's own width, w-56.
 const PANEL_WIDTH_REM = 14;
 
+// The first ancestor of `el` that clips horizontally (overflow-x other than
+// visible), or null.
+const clippingAncestor = (el: HTMLElement): HTMLElement | null => {
+  let clip = el.parentElement;
+  while (clip && ['', 'visible'].includes(getComputedStyle(clip).overflowX)) clip = clip.parentElement;
+  return clip;
+};
+
 // DFLT-00295: fits `panel` (absolute, left-0 w-56 in `anchor`) into the first
 // ancestor of `anchor` that clips horizontally -- the ticket card's
 // overflow-clip; if another clipping or scrolling element is ever put
@@ -234,9 +264,7 @@ const PANEL_WIDTH_REM = 14;
 const placePanel = (anchor: HTMLElement, panel: HTMLElement) => {
   panel.style.removeProperty('width');
   panel.style.removeProperty('left');
-  const clips = (el: HTMLElement) => !['', 'visible'].includes(getComputedStyle(el).overflowX);
-  let clip: HTMLElement | null = anchor.parentElement;
-  while (clip && !clips(clip)) clip = clip.parentElement;
+  const clip = clippingAncestor(anchor);
   if (!clip || clip.clientWidth <= 0) return;
   // The clip's inside (within its borders), less the inset on both sides.
   const min = clip.getBoundingClientRect().left + clip.clientLeft + PANEL_INSET_PX;

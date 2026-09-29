@@ -1956,8 +1956,16 @@ export const TicketItem: React.FC<Props> = ({
                 ls"). Each value element carries its own protection instead --
                 the chips here, and inside LabelSelect the button
                 (wrap-break-word: between words, mid-word only when one word is
-                wider than the line) and the save error (wrap-anywhere). */}
-            <div className="flex flex-wrap items-center gap-1.5 min-w-0" data-testid="ticket-detail-labels">
+                wider than the line) and the save error (wrap-anywhere).
+                DFLT-00295: LabelSelect's save error takes this item's width
+                and adds nothing to it, so the error cannot push the item (and
+                the button) onto the next line. While there is one the item
+                grows into the rest of its line of the bar, so the message is
+                as wide as that line instead of squeezed under the labels
+                (about 310px at 1280px, breaking ids mid-word). grow only
+                stretches the item on the line it is already on, so the button
+                stays where it was; without an error nothing changes. */}
+            <div className="flex flex-wrap items-center gap-1.5 min-w-0 has-[[role=alert]]:grow" data-testid="ticket-detail-labels">
               <MetaLabel text={t('ticket.labels.title')} />
               {ticketLabels.length === 0 ? (
                 <span className="text-slate-500 dark:text-slate-400">{t('ticket.labels.none')}</span>
