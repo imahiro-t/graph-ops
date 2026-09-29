@@ -18,6 +18,8 @@ import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 import { submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
+import { LoadFailure, useFocusAfterRetry } from './LoadFailure';
+import { LoadingLine } from './LoadingLine';
 import { Spinner } from '../Spinner';
 
 export type TemplateFetcher = (
@@ -61,7 +63,16 @@ export const TemplateTextEditor: React.FC<Props> = ({
   // editing or save with values that are not the stored ones.
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // A failed save, shown above the editor.
   const [error, setError] = useState('');
+  // Why the template could not be loaded, '' once it has been (DFLT-00350).
+  // While this is set the preview, textarea and save button are not drawn --
+  // an empty textarea saved by mistake would clear the stored override --
+  // and LoadFailure takes their place. No key is kept with it: switching
+  // templates remounts this editor (TemplatesEditor's key={selected}).
+  const [loadError, setLoadError] = useState('');
+  const [loadFailures, setLoadFailures] = useState(0);
+  const [retrying, setRetrying] = useState(false);
   const { savedFlash, showSavedFlash } = useSavedFlash();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveButtonRef = useRef<HTMLButtonElement>(null);
@@ -69,7 +80,8 @@ export const TemplateTextEditor: React.FC<Props> = ({
   const isDirty = tierText !== savedTierText;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
 
-  const load = useCallback(async () => {
+  // Resolves to whether the template was loaded.
+  const load = useCallback(async (): Promise<boolean> => {
     setLoading(true);
     setError('');
     try {
@@ -77,14 +89,26 @@ export const TemplateTextEditor: React.FC<Props> = ({
       setTierText(res.tier_text);
       setSavedTierText(res.tier_text);
       setMergedText(res.merged_text);
+      setLoadError('');
+      return true;
     } catch (e) {
-      setError(errorMessage(e, tRef.current('errors.UNKNOWN')));
+      setLoadError(errorMessage(e, tRef.current('errors.UNKNOWN')));
+      setLoadFailures(n => n + 1);
+      return false;
     } finally {
       setLoading(false);
     }
   }, [tRef, fetchTemplate]);
 
   useEffect(() => { load(); }, [load]);
+
+  const focusTextareaAfterRetry = useFocusAfterRetry(() => textareaRef.current);
+  const retryLoad = async () => {
+    setRetrying(true);
+    const ok = await load();
+    setRetrying(false);
+    if (ok) focusTextareaAfterRetry();
+  };
 
   const handleSave = async () => {
     // The save button is disabled while saving and stays disabled after a
@@ -123,10 +147,18 @@ export const TemplateTextEditor: React.FC<Props> = ({
           {error}
         </ErrorBox>
       )}
-      {loading ? (
-        <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
-          <Spinner className="w-4 h-4" /> {t('settings.common.loading')}
-        </div>
+      {/* The load failure first, then loading, then the editor (see
+          LoadFailure): a retry keeps the failure (and the focused retry
+          button) on screen until its result is in. */}
+      {loadError ? (
+        <LoadFailure
+          message={t('settings.common.loadFailed', { message: loadError })}
+          retrying={retrying}
+          onRetry={() => void retryLoad()}
+          failureKey={loadFailures}
+        />
+      ) : loading ? (
+        <LoadingLine />
       ) : (
         <>
           <div>
