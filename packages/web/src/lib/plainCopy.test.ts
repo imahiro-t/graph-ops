@@ -32,6 +32,8 @@ const build = () => {
   return { before, label, value, after, field, text: (el: Element) => el.firstChild as Text };
 };
 
+type Built = ReturnType<typeof build>;
+
 const expectNoInvisible = (s: string) => {
   expect(s).not.toContain(ZWSP);
   expect(s).not.toContain(WORD_JOINER);
@@ -110,6 +112,40 @@ describe('plainCopy (DFLT-00310)', () => {
     const { event, written } = dispatchCopy(after);
     expect(event.defaultPrevented).toBe(false);
     expect(written).toEqual({});
+  });
+
+  // A range whose edge only touches the label, holding none of its characters
+  // (Range.intersectsNode is true for these): a triple click or a drag to the
+  // start of the next line ends a selection at (label text, 0).
+  it.each([
+    ['ending at the start of the label text', ({ before, label, text }: Built) => select(text(before), 0, text(label), 0)],
+    ['ending at the start of the label element', ({ before, label, text }: Built) => select(text(before), 0, label, 0)],
+    [
+      'starting at the end of the label text',
+      ({ label, value, text }: Built) => select(text(label), LABEL.length, text(value))
+    ],
+    ['starting at the end of the label element', ({ label, after, text }: Built) => select(label, 1, text(after))]
+  ])('leaves a selection %s to the browser', (_name, make) => {
+    const built = build();
+    const selection = make(built);
+    expect(selection.isCollapsed).toBe(false);
+    expect(selection.getRangeAt(0).intersectsNode(built.label)).toBe(true);
+    expect(selection.toString()).not.toContain('作成');
+    const { event, written } = dispatchCopy(built.before);
+    expect(event.defaultPrevented).toBe(false);
+    expect(written).toEqual({});
+  });
+
+  it('covers a selection holding only the first or last character of the label', () => {
+    const { before, label, value, text } = build();
+    select(text(before), 0, text(label), 1);
+    let copied = dispatchCopy(before);
+    expect(copied.event.defaultPrevented).toBe(true);
+    expect(copied.written['text/plain']).toContain('作');
+    select(text(label), LABEL.length - 1, text(value));
+    copied = dispatchCopy(label);
+    expect(copied.event.defaultPrevented).toBe(true);
+    expect(copied.written['text/plain']).toBe(': 2026/9/28');
   });
 
   it('leaves a copy with a collapsed selection to the browser', () => {
