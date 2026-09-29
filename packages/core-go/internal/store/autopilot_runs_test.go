@@ -292,6 +292,97 @@ func TestMySQLBeginAutopilotRunSerializes(t *testing.T) {
 	raceStarts(t, a, b, proj.ID, 30)
 }
 
+// mysqlTestTableExists reports whether table exists in the test database.
+func mysqlTestTableExists(t *testing.T, repo *MySQLRepository, table string) bool {
+	t.Helper()
+	var n int
+	if err := repo.db.QueryRow(`SELECT COUNT(*) FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`, table).Scan(&n); err != nil {
+		t.Fatalf("looking up table %s: %v", table, err)
+	}
+	return n > 0
+}
+
+// The MySQL counterpart of TestSQLiteAutopilotRunsFollowProjectNotTicket:
+// deleting the project deletes its run records (fk_autopilot_runs_project is
+// ON DELETE CASCADE); deleting the root ticket neither fails nor takes the
+// record with it (root_ticket_id has no foreign key). The count is narrowed
+// to the project because the MySQL test database is shared between tests.
+func TestMySQLAutopilotRunsFollowProjectNotTicket(t *testing.T) {
+	repo := newTestMySQLRepo(t)
+	proj, err := repo.CreateProject("Runs", "RUN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tk, err := repo.CreateTicket(proj.ID, domain.Ticket{Title: "root", Status: domain.TicketTODO})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveAutopilotRun(runRecord(proj.ID, "run-1", tk.ID, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteTicket(tk.ID); err != nil {
+		t.Fatalf("DeleteTicket with a run record rooted at it: %v", err)
+	}
+	if findRecord(t, repo, proj.ID, "run-1") == nil {
+		t.Fatal("deleting the root ticket removed the run record")
+	}
+	if err := repo.DeleteProject(proj.ID); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := repo.db.QueryRow(`SELECT COUNT(*) FROM autopilot_runs WHERE project_id = ?`, proj.ID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("%d run record(s) left after deleting the project (%v)", n, err)
+	}
+}
+
+// The MySQL counterpart of TestSQLiteInitAddsAutopilotRunsToAnExistingDB:
+// Init on a DB from before DFLT-00326 adds the table and keeps the data.
+// Beyond the SQLite test it also checks the ticket is kept, the project
+// foreign key (and so the cascade) comes back, and a second Init is a no-op.
+// Dropping the table does not leak into later tests: newTestMySQLRepo runs
+// Init, which creates it again.
+func TestMySQLInitAddsAutopilotRunsToAnExistingDB(t *testing.T) {
+	repo := newTestMySQLRepo(t)
+	proj, err := repo.CreateProject("Old", "OLD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tk, err := repo.CreateTicket(proj.ID, domain.Ticket{Title: "existing", Status: domain.TicketTODO})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.db.Exec(`DROP TABLE autopilot_runs`); err != nil {
+		t.Fatal(err)
+	}
+	if mysqlTestTableExists(t, repo, "autopilot_runs") {
+		t.Fatal("autopilot_runs still exists after DROP TABLE")
+	}
+	for i := 0; i < 2; i++ {
+		if err := repo.Init(); err != nil {
+			t.Fatalf("Init #%d on an existing DB: %v", i+1, err)
+		}
+	}
+	if !mysqlTestTableExists(t, repo, "autopilot_runs") {
+		t.Fatal("Init did not add autopilot_runs")
+	}
+	if ok, err := repo.mysqlForeignKeyExists("autopilot_runs", "fk_autopilot_runs_project"); err != nil || !ok {
+		t.Fatalf("fk_autopilot_runs_project after Init: exists=%v err=%v", ok, err)
+	}
+	if got, err := repo.GetProject(proj.ID); err != nil || got == nil || got.Name != "Old" {
+		t.Fatalf("existing project changed: %+v %v", got, err)
+	}
+	if got, err := repo.GetTicket(tk.ID); err != nil || got == nil || got.Title != "existing" {
+		t.Fatalf("existing ticket changed: %+v %v", got, err)
+	}
+	if err := repo.SaveAutopilotRun(runRecord(proj.ID, "run-1", tk.ID, 1)); err != nil {
+		t.Fatalf("the added table is not usable: %v", err)
+	}
+	if findRecord(t, repo, proj.ID, "run-1") == nil {
+		t.Fatal("the record saved to the added table is not listed")
+	}
+}
+
 func TestHTTPAutopilotRunsProtocol12(t *testing.T) {
 	p, srv := startPlugin(t, testToken)
 	repo := openHTTP(t, srv.URL, testToken)
