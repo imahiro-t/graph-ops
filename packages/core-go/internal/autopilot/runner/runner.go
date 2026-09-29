@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/graph-ops/core-go/internal/autopilot"
@@ -92,7 +93,7 @@ type Service struct {
 	HomeDir string
 	// Now is the clock; nil means time.Now. The registry uses the same one.
 	Now func() time.Time
-	// PollInterval is how often Wait re-checks; 0 means 30 seconds.
+	// PollInterval is how often Wait re-checks; 0 means DefaultPollInterval.
 	PollInterval time.Duration
 	// Sleep waits between polls; nil means time.Sleep. Tests replace it to
 	// advance a fake clock instead of sleeping.
@@ -105,7 +106,24 @@ type Service struct {
 	// to a new window); nil discards them. The CLI sends them to stderr, out
 	// of the one-line JSON on stdout.
 	Logf func(format string, args ...any)
+	// ResolveActor says who is acting in this process (DFLT-00326): the
+	// name and machine ID a started run is stamped with. It is called at
+	// most once per Service, and only by what needs it (Start, Runs). nil
+	// means nobody in particular: runs are not stamped, and every local run
+	// counts as this machine's.
+	ResolveActor func() (*autopilot.StartedBy, error)
+
+	actorOnce sync.Once
+	actorVal  *autopilot.StartedBy
+	actorErr  error
 }
+
+// DefaultPollInterval is how often Wait re-checks a session. Every check
+// saves the run's heartbeat (and, with shared runs, its shared copy), so it
+// is also the longest a waiting run goes without a heartbeat -- far inside
+// autopilot.ActiveThreshold, past which other members stop counting the run
+// as active (DFLT-00326).
+const DefaultPollInterval = 30 * time.Second
 
 // Options are what New needs to build a Service from the runtime config.
 type Options struct {
@@ -134,12 +152,20 @@ func RegistryRoot(homeDir string) string {
 // the team autopilot.yaml) on every call, and the real terminal launcher.
 func New(o Options) *Service {
 	s := &Service{
-		Repo:        o.Repo,
-		HomeDir:     o.HomeDir,
-		Registry:    &autopilot.Registry{Root: RegistryRoot(o.HomeDir), Logf: o.Logf},
-		Launcher:    TerminalLauncher{Config: terminal.Config{TerminalCommand: o.TerminalCommand}, ClaudeBin: o.ClaudeBinary},
-		TerminalTTY: terminal.DetectAppleTerminalTTY,
-		Logf:        o.Logf,
+		Repo:         o.Repo,
+		HomeDir:      o.HomeDir,
+		Registry:     &autopilot.Registry{Root: RegistryRoot(o.HomeDir), Logf: o.Logf},
+		Launcher:     TerminalLauncher{Config: terminal.Config{TerminalCommand: o.TerminalCommand}, ClaudeBin: o.ClaudeBinary},
+		TerminalTTY:  terminal.DetectAppleTerminalTTY,
+		Logf:         o.Logf,
+		ResolveActor: IdentityActor(o.HomeDir),
+	}
+	// Runs are shared with the other members of the data source when it can
+	// keep them (DFLT-00326): both SQL backends, and an HTTP data source of
+	// protocol 1.2 or newer (an older one answers
+	// ErrAutopilotRunsUnsupported, and runs stay local).
+	if rs, ok := o.Repo.(store.AutopilotRunStore); ok {
+		s.Registry.Shared = StoreSharedRuns{Store: rs, Logf: o.Logf}
 	}
 	s.Settings = func(projectID string) (autopilot.Settings, error) {
 		fileCfg, _ := runtimeconfig.LoadHomeConfig(o.HomeDir)
@@ -336,9 +362,12 @@ func (s *Service) withRun(runID string, fn func(tx *autopilot.Tx, run *autopilot
 	return s.withRunIn(projectID, runID, fn)
 }
 
-// withRunIn is withRun for a run whose project is already known.
+// withRunIn is withRun for a run whose project is already known. Once the
+// run is saved and the lock released, its shared copy is written too
+// (DFLT-00326), so its state and heartbeat reach the other members.
 func (s *Service) withRunIn(projectID, runID string, fn func(tx *autopilot.Tx, run *autopilot.Run) error) error {
-	return s.registry().WithLock(projectID, func(tx *autopilot.Tx) error {
+	var saved *autopilot.Run
+	err := s.registry().WithLock(projectID, func(tx *autopilot.Tx) error {
 		run, err := tx.Load(runID)
 		if err != nil {
 			return err
@@ -349,8 +378,16 @@ func (s *Service) withRunIn(projectID, runID string, fn func(tx *autopilot.Tx, r
 		if err := fn(tx, run); err != nil {
 			return err
 		}
-		return tx.Save(run)
+		if err := tx.Save(run); err != nil {
+			return err
+		}
+		saved = run
+		return nil
 	})
+	if err == nil {
+		s.shareRun(saved)
+	}
+	return err
 }
 
 func ticketState(run *autopilot.Run, ticketID string) (*autopilot.TicketState, error) {
@@ -424,6 +461,15 @@ func (s *Service) Start(ticketID, mode, runID string, reserve bool) (StartResult
 	if !reserve && s.TerminalTTY != nil {
 		tty = s.TerminalTTY()
 	}
+	// Who starts the run. Without it nothing is written to a shared data
+	// source: a run nobody can be told to own, or whose own machine could
+	// not take it over again, is worse than no start (a broken
+	// $HOME/.graph-ops/machine-id, say).
+	actor, err := s.actor()
+	if err != nil && s.registry().Shared != nil {
+		return StartResult{}, fmt.Errorf("autopilot start: cannot tell who is starting the run: %w", err)
+	}
+	s.registry().Actor = actor
 	res, err := s.registry().Begin(autopilot.BeginRequest{
 		RootID: root.ID, ProjectID: root.ProjectID, RootStatus: root.Status,
 		Mode: mode, RunID: runID, Reserve: reserve, Settings: settings, Descendants: descendants,
@@ -912,7 +958,7 @@ func (w WaitResult) Reported() bool { return w.State == "reported" }
 func (s *Service) Wait(runID, ticketID string, timeout time.Duration) (WaitResult, error) {
 	interval := s.PollInterval
 	if interval <= 0 {
-		interval = 30 * time.Second
+		interval = DefaultPollInterval
 	}
 	sleep := s.Sleep
 	if sleep == nil {

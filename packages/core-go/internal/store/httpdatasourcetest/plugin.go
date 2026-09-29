@@ -1,6 +1,6 @@
 // Package httpdatasourcetest is an in-memory reference implementation of the
 // HTTP custom data source protocol (docs/http-datasource/openapi.yaml,
-// protocol version 1.1), for tests. It is an http.Handler: wrap it in an
+// protocol version 1.2), for tests. It is an http.Handler: wrap it in an
 // httptest.Server and point store.Open at that server's URL.
 //
 // It deliberately lives in a regular (non-_test.go) internal package and
@@ -36,7 +36,7 @@ const (
 	// and store.HTTPDataSourceProtocolVersion (restated here because this
 	// package must not import internal/store).
 	ProtocolName   = "graph-ops-datasource"
-	DefaultVersion = "1.1"
+	DefaultVersion = "1.2"
 )
 
 // RecordedRequest is one request the plugin received, for assertions.
@@ -71,6 +71,8 @@ type Plugin struct {
 	labels         []*domain.Label
 	currentProject string
 	idSeq          int
+	// autopilotRuns holds the autopilot run records (protocol 1.2), by ID.
+	autopilotRuns map[string]domain.AutopilotRunRecord
 
 	mux *http.ServeMux
 }
@@ -84,6 +86,7 @@ func New(token string) *Plugin {
 		ticketSeq:      map[string]int{},
 		ticketLabelIDs: map[string][]string{},
 		nodeSeq:        map[string]int{},
+		autopilotRuns:  map[string]domain.AutopilotRunRecord{},
 	}
 	p.routes()
 	return p
@@ -171,6 +174,10 @@ func (p *Plugin) routes() {
 	h("GET /projects/{projectId}/labels", p.listLabels)
 	h("PATCH /labels/{labelId}", p.updateLabel)
 	h("DELETE /labels/{labelId}", p.deleteLabel)
+
+	h("GET /projects/{projectId}/autopilot-runs", p.listAutopilotRuns)
+	h("PUT /autopilot-runs/{runId}", p.putAutopilotRun)
+	h("DELETE /autopilot-runs/{runId}", p.deleteAutopilotRun)
 
 	h("GET /current-project", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"project_id": p.currentProject})
@@ -335,6 +342,11 @@ func (p *Plugin) deleteProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	p.labels = keptLabels
+	for rid, rec := range p.autopilotRuns {
+		if rec.ProjectID == id {
+			delete(p.autopilotRuns, rid)
+		}
+	}
 	var kept []*domain.Project
 	for _, pr := range p.projects {
 		if pr.ID != id {
@@ -342,6 +354,82 @@ func (p *Plugin) deleteProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	p.projects = kept
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- autopilot runs (protocol 1.2) ---
+
+// speaksAutopilotRuns reports whether the plugin's Version has the
+// autopilot-runs endpoints (1.2 or newer). With Version set to "1.1" they
+// answer 404, like a real 1.1 plugin that has never heard of them.
+func (p *Plugin) speaksAutopilotRuns() bool {
+	major, minor := 0, 0
+	if _, err := fmt.Sscanf(p.Version, "%d.%d", &major, &minor); err != nil {
+		return false
+	}
+	return major > 1 || (major == 1 && minor >= 2)
+}
+
+// AutopilotRuns returns a copy of the stored autopilot run records, for
+// assertions.
+func (p *Plugin) AutopilotRuns() map[string]domain.AutopilotRunRecord {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make(map[string]domain.AutopilotRunRecord, len(p.autopilotRuns))
+	for k, v := range p.autopilotRuns {
+		out[k] = v
+	}
+	return out
+}
+
+func (p *Plugin) listAutopilotRuns(w http.ResponseWriter, r *http.Request) {
+	if !p.speaksAutopilotRuns() {
+		http.NotFound(w, r)
+		return
+	}
+	id := r.PathValue("projectId")
+	if p.findProject(id) == nil {
+		writeAPIErr(w, notFound(domain.ErrCodeProjectNotFound, "project", id))
+		return
+	}
+	out := []domain.AutopilotRunRecord{}
+	for _, rec := range p.autopilotRuns {
+		if rec.ProjectID == id {
+			out = append(out, rec)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	writeJSON(w, http.StatusOK, out)
+}
+
+// putAutopilotRun upserts a record, ignoring one whose revision is not
+// greater than the stored one's (still 200), as the protocol allows.
+func (p *Plugin) putAutopilotRun(w http.ResponseWriter, r *http.Request) {
+	if !p.speaksAutopilotRuns() {
+		http.NotFound(w, r)
+		return
+	}
+	var rec domain.AutopilotRunRecord
+	if !decode(w, r, &rec) {
+		return
+	}
+	rec.ID = r.PathValue("runId")
+	if p.findProject(rec.ProjectID) == nil {
+		writeAPIErr(w, notFound(domain.ErrCodeProjectNotFound, "project", rec.ProjectID))
+		return
+	}
+	if cur, ok := p.autopilotRuns[rec.ID]; !ok || rec.Revision > cur.Revision {
+		p.autopilotRuns[rec.ID] = rec
+	}
+	writeJSON(w, http.StatusOK, p.autopilotRuns[rec.ID])
+}
+
+func (p *Plugin) deleteAutopilotRun(w http.ResponseWriter, r *http.Request) {
+	if !p.speaksAutopilotRuns() {
+		http.NotFound(w, r)
+		return
+	}
+	delete(p.autopilotRuns, r.PathValue("runId"))
 	w.WriteHeader(http.StatusNoContent)
 }
 

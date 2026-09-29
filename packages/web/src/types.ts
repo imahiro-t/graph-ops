@@ -660,6 +660,20 @@ export interface AutopilotRun {
   // enter (beyond maxDepth/maxTickets, under a ticket in progress elsewhere
   // or a failed one) are left out. Empty for an inactive run.
   pending: string[];
+  // Who started the run (DFLT-00326), absent for a run from before that or
+  // from an older server. The name is for display only.
+  started_by?: AutopilotStarter;
+  // Whether the run is this machine's (so it can be resumed here). false for
+  // another member's run on a shared database; absent from an older server,
+  // which only ever lists this machine's runs -- treat that as true.
+  mine?: boolean;
+}
+
+// Who started an autopilot run. name_is_fallback: the name is
+// "<OS user>@<host>" because the member has not set their name.
+export interface AutopilotStarter {
+  name: string;
+  name_is_fallback: boolean;
 }
 
 // POST /api/tickets/{id}/autopilot's answer.

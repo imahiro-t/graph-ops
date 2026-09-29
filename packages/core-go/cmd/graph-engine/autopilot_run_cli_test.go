@@ -361,3 +361,18 @@ func TestAutopilotCLI_UntrustedFolderNotice(t *testing.T) {
 		})
 	}
 }
+
+// DFLT-00326: other members count a run as active only while its heartbeat
+// is within ActiveThreshold. `wait` saves the heartbeat at every poll
+// (runner.DefaultPollInterval), the last one included, so one call never
+// leaves a longer gap than a poll -- and its own timeout does not exceed the
+// threshold either, so a run whose orchestrator is between two waits is not
+// taken for interrupted.
+func TestAutopilotWaitKeepsTheHeartbeatWithinTheActiveThreshold(t *testing.T) {
+	if runner.DefaultPollInterval >= autopilot.ActiveThreshold {
+		t.Fatalf("poll interval %s is not below ActiveThreshold %s", runner.DefaultPollInterval, autopilot.ActiveThreshold)
+	}
+	if autopilotWaitDefaultTimeout > autopilot.ActiveThreshold {
+		t.Fatalf("wait's default timeout %s exceeds ActiveThreshold %s", autopilotWaitDefaultTimeout, autopilot.ActiveThreshold)
+	}
+}

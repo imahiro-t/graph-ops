@@ -1052,6 +1052,9 @@ func TestOpenAPI_OperationIDsMatchGraphRepository(t *testing.T) {
 	for _, n := range graphRepositoryMethodNames() {
 		want = append(want, lowerCamel(n))
 	}
+	// Protocol 1.2's autopilot-runs endpoints (AutopilotRunStore, not
+	// GraphRepository; BeginAutopilotRun is a list followed by a save).
+	want = append(want, "listAutopilotRuns", "saveAutopilotRun", "deleteAutopilotRun")
 	sort.Strings(want)
 	if !reflect.DeepEqual(ops, want) {
 		t.Fatalf("operationIds %v\nwant %v", ops, want)

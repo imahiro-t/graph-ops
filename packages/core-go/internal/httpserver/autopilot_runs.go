@@ -171,7 +171,12 @@ func (s *Server) handleStartAutopilot(w http.ResponseWriter, r *http.Request) {
 // state within the run, and, for an active run, the tickets it owns
 // (members), whose autopilot buttons the Web UI disables. Other projects'
 // runs are never included: the registry keeps each project in its own
-// directory.
+// directory. Other members' runs are (DFLT-00326): the runs the data source
+// shares are merged in, each with who started it (started_by) and whether it
+// is this machine's (mine) -- the Web UI names the member whose run blocks a
+// start, and offers "resume" only for its own runs. When the data source
+// cannot be read the answer is still 200, with this machine's runs alone
+// (see runner.Service.Runs).
 func (s *Server) handleListAutopilotRuns(w http.ResponseWriter, r *http.Request) {
 	projectID := r.URL.Query().Get("project_id")
 	if projectID == "" {

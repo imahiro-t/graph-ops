@@ -12,6 +12,7 @@ The autopilot takes a ticket from refinement to release without a person in the 
 - [Settings](#settings)
 - [Interrupting, resuming and unresponsive sessions](#interrupting-resuming-and-unresponsive-sessions)
 - [The run registry](#the-run-registry)
+  - [Runs shared between members](#runs-shared-between-members)
 - [The `graph-engine autopilot` CLI](#the-graph-engine-autopilot-cli)
 - [Error and reason codes](#error-and-reason-codes)
 - [HTTP API](#http-api)
@@ -123,7 +124,8 @@ The session you type this in becomes the orchestrator, so it runs with your own 
 
 | Badge | Shown on |
 | --- | --- |
-| "Autopilot running" | the root ticket of an active run |
+| "Autopilot running" | the root ticket of an active run of yours |
+| "<name> is running" | the root ticket of another member's active run (on a shared database), with "(name not set)" after the name when that member has no display name set and `<OS user>@<host>` is shown instead |
 | "Processing" | the ticket whose session is running now |
 | "Waiting for a person" | the running ticket, when its session waits for your decision (the hover text and the expanded ticket say what it waits for) |
 | "Waiting" | tickets the run is still going to process |
@@ -133,6 +135,8 @@ A mode whose start would be refused cannot be chosen: in the dialog its choice i
 - the ticket belongs to an active run (it is that run's root, or in tree mode one of its descendants): both modes;
 - a descendant of the ticket is the root of an active run: the tree only;
 - the ticket is `DONE` or `CLOSED`, unless the latest run of that mode from this ticket is stopped or interrupted -- then choosing that mode resumes the run (the dialog's title, text and confirm button say so; this is decided for each mode separately). Only the five most recent inactive runs of the project are considered here; an older stopped run can still be resumed from the CLI (run the same slash command again).
+
+The active runs include other members' runs on a shared database (see [Runs shared between members](#runs-shared-between-members)); the reason then names the member whose run blocks the start. Only your own stopped or interrupted runs are offered for resuming: another member's is neither resumed nor in the way.
 
 ## Which tickets a run processes
 
@@ -168,6 +172,11 @@ An existing worktree or branch of that name is reused (this is how a resumed run
 - A child ticket processed on its own (by `autopilot-ticket` or `process-ticket`) is not tied to its parent: it branches off the default branch as usual.
 
 Do not move the tree's branches by hand while a run is going: a commit on an ancestor's branch turns the next fast-forward into a merge session.
+
+**Git branches are not shared between members.** On a shared database, runs that overlap in time are refused, but the branches a run creates live in the git repository of the machine that ran it. If another member finishes part of a tree first -- say a descendant's subtree, run on its own -- a later run of an ancestor's tree finds those tickets `DONE` and skips them as `already_done`, and their work reaches your tree only if it is already in your local default branch. So:
+
+- whoever runs first reflects the work into the shared default branch: set `mainReflection` to `pull_request` (and merge the pull request) or `merge`. A branch left with `branch` exists only on that member's machine, and nobody else's run can take it in;
+- whoever runs later brings the local default branch up to date with the remote (for example `git pull` on it) before starting.
 
 ## Automatic decisions
 
@@ -229,13 +238,13 @@ A key the team file sets is **locked**: the Web UI shows it read-only as "Fixed 
 
 ## Interrupting, resuming and unresponsive sessions
 
-- **Resuming**: if the orchestrator is interrupted (the terminal closed, the session ended), run the same command again -- `/graph-ops:autopilot-tree <root>` or `/graph-ops:autopilot-ticket <root>`, or the same Web UI button. A run is active while its heartbeat is less than 10 minutes old; the orchestrator's commands (`start`, `next`, `launch`, `wait`, `merge-up`) refresh it, and a waiting `wait` refreshes it every 30 seconds. Once the heartbeat is older, the latest run with the same root and mode is taken over: the same run continues, with the settings as they are now, and the work to do is recomputed from the database. A stopped run is taken over the same way. A child session that was still marked running is waited for first, not relaunched. **Close the child terminals left over from the interrupted run before resuming**, so that no ticket is worked on twice.
+- **Resuming**: a run is resumed only on the machine that started it (see [Runs shared between members](#runs-shared-between-members)). If the orchestrator is interrupted (the terminal closed, the session ended), run the same command again -- `/graph-ops:autopilot-tree <root>` or `/graph-ops:autopilot-ticket <root>`, or the same Web UI button. A run is active while its heartbeat is less than 10 minutes old; the orchestrator's commands (`start`, `next`, `launch`, `wait`, `merge-up`) refresh it, and a waiting `wait` refreshes it every 30 seconds. Once the heartbeat is older, the latest run with the same root and mode is taken over: the same run continues, with the settings as they are now, and the work to do is recomputed from the database. A stopped run is taken over the same way. A child session that was still marked running is waited for first, not relaunched. **Close the child terminals left over from the interrupted run before resuming**, so that no ticket is worked on twice.
 - **Unresponsive sessions**: a child terminal is not a process the engine can watch, so a session that ends without reporting (a crash, a closed terminal, a refused permission, a question to a person, an overflowing context) is detected from the absence of activity. Activity is any `graph-engine autopilot` call of the child session, any change to the ticket, its nodes or its artifacts in the database, and any change to its worktree (new commits, changed or new files). When none of these changes for `stallTimeoutMinutes`, the ticket is failed with reason `unresponsive` and `onFailure` applies; the summary names the worktree and asks you to check the terminal if it is still open. A report that arrives after that is kept as a late report in the summary and does not change the run.
 - **`wait` never blocks forever**: it returns after `--timeout` (10 minutes by default) with exit code 2, and the orchestrator goes back to `next`, so every wait ends within `stallTimeoutMinutes` plus the timeout.
 
 ## The run registry
 
-Runs are kept in local files, not in the database, per project:
+Each machine keeps its runs in local files, per project:
 
 ```
 $HOME/.graph-ops/autopilot/<projectId>/runs/<runId>.json   one file per run
@@ -245,10 +254,25 @@ $HOME/.graph-ops/autopilot/terminal-tab.lock                 serializes Terminal
 
 Every project has its own directory and lock, so runs in different projects never interfere. Within a project, a start is refused with `AUTOPILOT_ALREADY_RUNNING` when an active run owns the ticket (the run's root and, for a tree run, all of its descendants) or, for a tree start, when an active run's root is among the ticket's descendants.
 
-- **The lock** is held for milliseconds (reading, deciding and writing run files; git, database and network work happen outside it). Its holder refreshes it every 10 seconds, and a lock not refreshed for 2 minutes is treated as left behind by a process that is gone and removed (the removal is logged). A command that cannot get the lock within 60 seconds, or finds it was taken over while it held it, fails with `AUTOPILOT_REGISTRY_LOCKED` and saves nothing; run it again.
+- **The lock** is held for milliseconds (reading, deciding and writing run files; git, database and network work happen outside it -- except the one short database transaction a start makes to decide together with the shared runs, see below). Its holder refreshes it every 10 seconds, and a lock not refreshed for 2 minutes is treated as left behind by a process that is gone and removed (the removal is logged). A command that cannot get the lock within 60 seconds, or finds it was taken over while it held it, fails with `AUTOPILOT_REGISTRY_LOCKED` and saves nothing; run it again.
 - **Old runs are pruned** whenever a new run is created: of the settled runs -- finished ones, and ones replaced by a newer run with the same root and mode -- the newest 20 are kept. The latest run for each root and mode that is stopped or interrupted is kept however old it is, because running the same command again resumes it. So a stopped run you do not intend to resume stays until you delete it: when it is not active (check with `graph-engine autopilot status`), delete its `runs/<runId>.json` by hand. A ticket that a deleted run left `IN PROGRESS` then counts as "in progress elsewhere" for later runs.
 - **Terminal.app fields**: a run file also keeps `terminal_tty`, the tty of the orchestrator's Terminal.app tab, and `terminal_tab_disabled`, the reason the tab was disabled for the run, both left out when empty (see [Terminal.app: child sessions as tabs](#terminalapp-child-sessions-as-tabs)). Run files written by an earlier version are read as having neither.
 - **A run file that cannot be read** is skipped with a warning naming its path (on stderr as `graph-engine: warning: ...` for the CLI, in the server log with `event=autopilot_registry` for the Web UI), and every start in that project is refused with `AUTOPILOT_REGISTRY_CORRUPT` until you repair or delete the file, since the duplicate-run check cannot be made without it.
+- **Who started a run**: a run file also keeps `started_by` (the display name and the machine ID of whoever started, took over or adopted it) and `revision` (a number that grows with every save). Run files written by an earlier version have neither and are read as this machine's.
+
+### Runs shared between members
+
+With a database several members share -- MySQL, a shared SQLite file, or an HTTP data source of protocol 1.2 or newer -- every run is also kept in the database's `autopilot_runs` table (the HTTP data source's `autopilot-runs` endpoints), so each member's graph-engine sees the others' runs:
+
+- **What is shared**: the run's ID, project, root, mode, state, heartbeat, who started it (name and machine ID), its revision, and a snapshot of the run -- its tickets and their states, the settings, the stops. What only means something on the machine running it is not: the terminal tty and tab state, worktree paths, branch names, fingerprints, and the local registry's lock. The local run file stays the source of truth for your own runs; every time it is saved (so at least every 30 seconds while a run waits for a session) its shared copy is written too. A shared copy that arrives late never overwrites a newer one (the revision decides).
+- **Duplicate starts across members**: `autopilot start` and the Web UI's launch judge overlaps on your runs and the shared ones together, and refuse an overlap with another member's active run with `AUTOPILOT_ALREADY_RUNNING`, naming that member (`started_by` in `details`, and in the message). On MySQL and SQLite the decision and the saving of the new run are one transaction, so two members starting overlapping runs at the same moment never both pass. An HTTP data source cannot do that (a list and a save are two requests), so there two starts at the very same moment may both pass.
+- **Expiry**: another member's run blocks you only while its heartbeat is less than 10 minutes old. A run whose heartbeat is older is treated as interrupted: it no longer blocks anyone, and nothing rewrites its state -- it stays as its machine left it until that machine resumes it. Heartbeats are compared with each member's own clock, so this assumes the members' clocks are not minutes apart.
+- **Resuming is per machine**: a stopped or interrupted run is taken over only by a start on the machine that started it. Another member's stopped or interrupted run with the same root and mode does not block you, but is not taken over either: your start creates a new run. Naming it with `--run` is refused with `AUTOPILOT_INVALID_STATE` (or `AUTOPILOT_ALREADY_RUNNING` while it is active). The machine is identified by a random ID kept in `$HOME/.graph-ops/machine-id`, created the first time it is needed: if you delete it, your machine gets a new ID and can no longer resume its interrupted runs; if you copy your home directory to another machine, both machines have the same ID. A machine-id file that is not a valid ID is never replaced silently: until you restore or delete it, starts fail (the runs list still works).
+- **Display names**: the name shown is your `myName` (App Settings), or `<OS user>@<host>` with "(name not set)" when it is empty. It is only displayed, never used to tell members apart.
+- **When the database cannot be read**: a start fails (it cannot tell whether it would duplicate a run). The Web UI's runs list, by contrast, still answers with your own runs only, so while the database is down other members' runs do not show and their tickets' buttons look enabled; a start there is refused all the same.
+- **When a write to the database fails**: a failure to write a run's shared copy after a local save is only logged -- the run goes on, and other members may see it as interrupted until a later save gets through. When a start's local save fails after its shared record was written, or a cancelled Web UI launch cannot put its record back, the record is undone on a best-effort basis; if even that fails, the record left behind blocks overlapping starts by other members until its heartbeat is 10 minutes old.
+- **HTTP data sources older than 1.2** (including the Jira sample, which speaks 1.1) do not share runs: each machine judges from its own runs only, so duplicate starts by other members are not detected. graph-engine says so once per process (on stderr for the CLI, in the server log for the Web UI).
+- **Everyone updates together**: an older graph-engine neither writes nor reads the shared runs, so a member still on it neither sees nor is seen by the others.
 
 ## The `graph-engine autopilot` CLI
 
@@ -288,11 +312,11 @@ Errors of the CLI and the HTTP API (HTTP status in parentheses):
 
 | Code | Meaning |
 | --- | --- |
-| `AUTOPILOT_ALREADY_RUNNING` (409) | An active run overlaps the ticket or its tree. `details` names the run. |
+| `AUTOPILOT_ALREADY_RUNNING` (409) | An active run overlaps the ticket or its tree. `details` names the run (`run_id`, `root_ticket_id`) and, when known, who started it (`started_by`, and `name_is_fallback` when that name is the `<OS user>@<host>` fallback); the message names them too. |
 | `AUTOPILOT_ROOT_FINISHED` (409) | A new run cannot start from a `DONE` or `CLOSED` ticket. |
 | `AUTOPILOT_REGISTRY_CORRUPT` (409) | A run file of the project cannot be read; repair or delete it (its path is in the warning and in `details`). |
 | `AUTOPILOT_REGISTRY_LOCKED` (409) | The project's lock could not be taken within 60 seconds, or was taken over; nothing was saved. Run the command again. |
-| `AUTOPILOT_INVALID_STATE` (409) | The command does not fit the run's current state (for example `next` on a run the Web UI reserved but no orchestrator has adopted yet). |
+| `AUTOPILOT_INVALID_STATE` (409) | The command does not fit the run's current state (for example `next` on a run the Web UI reserved but no orchestrator has adopted yet, or `start --run` naming another member's stopped or interrupted run, which only its own machine can resume; `details` then has `run_id` and `started_by`). |
 | `AUTOPILOT_RUN_NOT_FOUND` (404) | No run with that ID in any project's registry. |
 | `AUTOPILOT_SETTING_LOCKED` (400) | A settings save contained a key the team file sets. |
 | `PROJECT_LOCAL_PATH_NOT_SET` (400) | The project has no local path in this environment. From the Web UI nothing is reserved. During a run, a `launch` fails with it and counts as a failed launch, so the second one in a row records the ticket as `launch_failed`. |
@@ -312,7 +336,9 @@ Reasons in a run (in `next`, `wait`, `status`, the summary and the Web UI):
 The Web UI uses these endpoints of the local UI server. Like every state-changing route, `POST` and `PUT` require the CSRF header and the loopback checks the server already applies.
 
 - `POST /api/tickets/{id}/autopilot` with `{"mode":"ticket"|"tree"}`: checks the mode (`400 VALIDATION_ERROR`), the ticket (`404 TICKET_NOT_FOUND`) and the project's local path (`400 PROJECT_LOCAL_PATH_NOT_SET`) before reserving anything; then reserves a run through the same check as `autopilot start` -- taking over the latest stopped or interrupted run of the same root and mode, then refusing a new run from a `DONE` / `CLOSED` ticket, then refusing an overlap (the 409 codes above) -- and opens the orchestrator's terminal. If the terminal does not open, the reservation is undone (a taken-over run returns to its previous state) and the answer is `500`. On success: `{"run_id","mode","root","state","created","resumed"}`, plus `untrusted_folder` when Claude Code has not trusted the project's local path (it never changes whether the run starts). Launches and launch failures are logged (`event=autopilot_launched` / `autopilot_launch_failed`).
-- `GET /api/autopilot/runs?project_id=<id>`: a JSON array of the project's active runs and its five most recent other runs, newest first. Each has the fields of `autopilot status` plus:
+- `GET /api/autopilot/runs?project_id=<id>`: a JSON array of the project's active runs and its five most recent other runs, newest first -- other members' runs on a shared database included. Each has the fields of `autopilot status` plus:
+  - `started_by`: `{"name","name_is_fallback"}`, who started the run; left out for a run file from an earlier version. The machine ID is never sent.
+  - `mine`: whether the run is this machine's (and so can be resumed here). With a data source that does not share runs, every run is `mine`.
   - `members`: every ticket an active run owns -- the root and, for a tree run, all of its descendants as the database has them now, including those not reached yet. This is the set the duplicate-start check uses, and the Web UI disables the "Autopilot" button on those tickets. `[]` for a run that is not active.
   - `pending`: the members the run may still launch as `work`, in processing order -- leaving out `DONE` / `CLOSED` tickets and tickets beyond the limits, under a ticket in progress elsewhere, or under a failed ticket. The Web UI's "Waiting" badge. `[]` for a run that is not active.
 - `GET /api/projects/{id}/autopilot-settings` and `PUT /api/projects/{id}/autopilot-settings`: see [Settings](#settings). `GET` answers in the shape `autopilot settings` prints.
@@ -321,7 +347,8 @@ The Web UI uses these endpoints of the local UI server. Like every state-changin
 
 - **Trust the project's folder before the first run.** In a folder Claude Code does not trust yet, the first session the autopilot opens in a new terminal stops at the workspace trust prompt and the run does not go on by itself. Open the folder in Claude Code once and accept the prompt; the ticket worktrees under it are not asked again, but a repository cloned under a trusted folder that is not itself a repository is. The autopilot tells you (`untrusted_folder`) when it can tell that the folder is not trusted, but only on a best-effort basis and never stopping the start. See [Starting a run](#starting-a-run), which also says when there is no notice and what to do when a session is already waiting there.
 - **Shared backends run other people's tickets with your permissions.** With MySQL, Jira or another HTTP data source, `autopilot-tree` processes every unfinished descendant in the database -- including child tickets other people created, even while the run is going -- on your machine, with your child sessions' permission mode, and with approval gates decided automatically. Use tree mode on a shared backend only when you trust whoever can create tickets under the root, and do not combine it with `permissionMode: bypassPermissions`.
-- **Do not start from a ticket someone is working on elsewhere.** Descendants that are `IN PROGRESS` elsewhere are skipped, but the root is not, since you named it explicitly: starting from a ticket that is being worked on on another machine works on it a second time.
+- **Do not start from a ticket someone is working on elsewhere.** On a shared database, a start that overlaps another member's active autopilot run is refused (see [Runs shared between members](#runs-shared-between-members)), but work done by hand -- `process-ticket` in someone's session -- is not detected. Descendants that are `IN PROGRESS` elsewhere are skipped, but the root is not, since you named it explicitly: starting from a ticket that is being worked on on another machine by hand works on it a second time.
+- **Git branches are not shared.** Another member's finished part of a tree reaches your run only through the shared default branch; see [Branches](#branches).
 - **Check the permission mode before `pull_request` or `merge`.** Pushing and opening or merging a pull request run `git push` and `gh` in the child session. If its permission mode refuses them (the default `auto` may), the session reports `failed` with `permission_denied` (or stops at the last stage that worked). Make sure your permission settings allow those commands for the child sessions before choosing these values.
 - **Close leftover terminals before resuming**, and do not move the tree's branches by hand while a run is going (see above).
 - **Untracked files and the dirty check**: `PARENT_WORKTREE_DIRTY` looks only at uncommitted changes to tracked files; untracked files in the parent's worktree are ignored unless the fast-forward would overwrite them, in which case git fails.

@@ -133,6 +133,27 @@ type Run struct {
 	// opens its sessions in new windows without trying a tab. Cleared by the
 	// same starts that set TerminalTTY.
 	TerminalTabDisabled string `json:"terminal_tab_disabled,omitempty"`
+	// StartedBy is who started the run, or last took it over or adopted it
+	// (DFLT-00326): the name other members see, and the machine that alone
+	// may take the run over. nil in a run file written before DFLT-00326,
+	// which is read as this machine's.
+	StartedBy *StartedBy `json:"started_by,omitempty"`
+	// Revision numbers the saves of the run (see Tx.Save): the data source
+	// keeps the shared copy with the highest revision, so copies that reach
+	// it out of order never roll it back. 0 in a run file written before
+	// DFLT-00326.
+	Revision int64 `json:"revision,omitempty"`
+}
+
+// StartedBy is who started a run (see identity.Actor, which it copies: this
+// package cannot import that one).
+type StartedBy struct {
+	// Name is for display only; it is never compared.
+	Name           string `json:"name"`
+	NameIsFallback bool   `json:"name_is_fallback,omitempty"`
+	// MachineID is the starting machine's ID: only that machine takes the
+	// run over.
+	MachineID string `json:"machine_id,omitempty"`
 }
 
 // Reservation remembers what a reservation replaced.

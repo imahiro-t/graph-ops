@@ -5,7 +5,7 @@ a system of their own choosing -- an issue tracker, a document database, an
 internal service -- instead of the built-in SQLite or MySQL backends.
 
 - **Protocol specification:** [`openapi.yaml`](openapi.yaml) (OpenAPI 3.1,
-  protocol version `1.1`). It is the normative contract; this manual explains
+  protocol version `1.2`). It is the normative contract; this manual explains
   it and how to work with it.
 - **Sample plugin:** [`examples/jira-datasource`](../../examples/jira-datasource/README.md),
   a complete plugin that stores everything in Jira Cloud.
@@ -212,6 +212,7 @@ in lowerCamelCase.
 | Projects | `POST/GET /projects`, `GET/PATCH/DELETE /projects/{projectId}` |
 | Labels | `POST/GET /projects/{projectId}/labels`, `GET/PATCH/DELETE /labels/{labelId}` |
 | Current project | `GET/PUT /current-project` (**deprecated**) |
+| Autopilot runs (1.2) | `GET /projects/{projectId}/autopilot-runs`, `PUT/DELETE /autopilot-runs/{runId}` |
 
 `/current-project` is deprecated: the current project is a per-user choice, so
 graph-engine now keeps it in each user's home config file
@@ -236,11 +237,14 @@ spaces); decode them before use.
 ### Handshake and versioning
 
 `info.version` in the spec is the protocol version, `MAJOR.MINOR` (currently
-`1.1`). `GET /protocol` must answer:
+`1.2`). `GET /protocol` must answer:
 
 ```json
-{ "protocol": "graph-ops-datasource", "version": "1.1" }
+{ "protocol": "graph-ops-datasource", "version": "1.2" }
 ```
+
+(with the version your plugin implements -- a plugin that implements 1.1
+answers `"1.1"`, and graph-engine adapts, see the table below).
 
 graph-engine stops at startup with a clear error if `protocol` is anything
 else, if the endpoint is missing or does not return this JSON, or if the MAJOR
@@ -255,6 +259,7 @@ What each minor version added:
 |---|---|
 | 1.0 | The initial protocol. |
 | 1.1 | `Ticket.parent_ticket_id` (optional, nullable): the ticket a ticket was derived from, set only by `createTicket`. graph-engine sends the key only when there is a parent, and when the plugin reports `1.0` it refuses a ticket with a parent with `PARENT_TICKET_UNSUPPORTED` before sending anything, so the parent is never silently dropped. Tickets without a parent work exactly as before on a 1.0 plugin. There is no children endpoint: graph-engine derives a ticket's children from `listTicketsByProject`, so on a large project `get-ticket` costs one project listing more. A plugin must keep the value as given (graph-engine has already checked that the parent exists and is in the same project) and may answer `VALIDATION_ERROR` for a parent it does not manage. |
+| 1.2 | **Autopilot runs shared between members** (`autopilot-runs` tag). `GET /projects/{projectId}/autopilot-runs` (`listAutopilotRuns`) lists a project's run records, `PUT /autopilot-runs/{runId}` (`saveAutopilotRun`) creates or replaces one, `DELETE /autopilot-runs/{runId}` (`deleteAutopilotRun`) removes one (a missing one is a no-op). A record (`AutopilotRun`) has `id`, `project_id`, `root_ticket_id`, `mode`, `state`, `heartbeat`, `created_at`, `updated_at`, `started_by_name`, `machine_id`, `revision` and `snapshot`. Store `snapshot` as opaque JSON and return it unchanged. When the stored record's `revision` is equal to or greater than a `PUT`'s, keep the stored one and still answer 200 (a copy that arrived late). Never change `state` or `heartbeat` yourself: a run whose heartbeat is more than 10 minutes old simply stops counting as active. graph-engine judges a start by listing and then saving -- two requests, not atomic -- so two members starting overlapping runs at the same moment may both pass against an HTTP data source (SQLite and MySQL serialize it). Against a plugin that reports 1.1 or 1.0, graph-engine sends none of these requests: each machine judges from its own runs only (duplicate starts by other members are not detected) and says so once per process. |
 
 ### Errors
 

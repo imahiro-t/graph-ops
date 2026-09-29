@@ -42,7 +42,13 @@ import (
 // files: the git, DB and network work of a command (fingerprints,
 // fast-forwards, the ticket tree, artifacts) is done before or after it (see
 // runner), so the lock is held for milliseconds and a waiter's LockTimeout
-// is never spent behind a slow git hook or a remote backend.
+// is never spent behind a slow git hook or a remote backend. There is one
+// exception (DFLT-00326): Begin, with Shared set, makes its decision inside
+// one short data source transaction (SharedRuns.Begin) while holding the
+// lock, so the local and the shared runs are judged as one. Every other
+// write to the data source -- a saved run's shared copy, Begin's
+// compensation, pruned runs, a cancelled reservation -- happens after the
+// lock is released.
 //
 // Writes of a run file go to a temp file in the same directory and are
 // renamed over the target, so a reader never sees half a file -- which is
@@ -58,6 +64,19 @@ type Registry struct {
 	// nil discards it. The CLI writes it to stderr, the HTTP server to its
 	// logger.
 	Logf func(format string, args ...any)
+	// Shared, when set, is where runs are shared with other members
+	// (DFLT-00326): Begin decides on the local runs and the shared ones
+	// together and records the run there too. nil keeps runs local.
+	Shared SharedRuns
+	// Actor is who is starting runs in this process; Begin stamps it on the
+	// run it starts, takes over or adopts. Its MachineID also limits what
+	// Begin takes over to this machine's runs. nil stamps nothing and takes
+	// over any local run (as before DFLT-00326).
+	Actor *StartedBy
+
+	// failSave, when set, makes Begin's local save fail with its error
+	// (tests of the compensation).
+	failSave func(run *Run) error
 }
 
 // StaleLockAge is how long a lock file may go unrefreshed before it is
@@ -294,8 +313,41 @@ func (tx *Tx) Load(runID string) (*Run, error) { return tx.g.Load(tx.projectID, 
 // List reads every run of the transaction's project, oldest first.
 func (tx *Tx) List() ([]*Run, error) { return tx.g.List(tx.projectID) }
 
-// Save writes run (stamping UpdatedAt) atomically.
+// Save writes run atomically, stamping UpdatedAt and the next Revision:
+// one more than the larger of the revision already on disk for this run and
+// run's own. Taking the disk's into account is what makes a run restored
+// from an older copy -- CancelReservation's Reservation.Previous -- outrank
+// the reservation it replaces, so its shared copy is not ignored as stale.
 func (tx *Tx) Save(run *Run) error {
+	disk := int64(0)
+	if cur, err := tx.Load(run.ID); err == nil && cur != nil {
+		disk = cur.Revision
+	}
+	rev := run.Revision
+	if disk > rev {
+		rev = disk
+	}
+	run.Revision = rev + 1
+	run.UpdatedAt = tx.g.now()
+	return tx.write(run)
+}
+
+// saveExact writes run as it is, Revision and UpdatedAt included: Begin has
+// already given it the revision its shared record carries, so both copies
+// agree. A revision not above the one on disk is refused.
+func (tx *Tx) saveExact(run *Run) error {
+	if tx.g.failSave != nil {
+		if err := tx.g.failSave(run); err != nil {
+			return err
+		}
+	}
+	if cur, err := tx.Load(run.ID); err == nil && cur != nil && run.Revision <= cur.Revision {
+		return fmt.Errorf("autopilot run %s: revision %d is not above the saved %d", run.ID, run.Revision, cur.Revision)
+	}
+	return tx.write(run)
+}
+
+func (tx *Tx) write(run *Run) error {
 	if run.ProjectID != tx.projectID {
 		return fmt.Errorf("run %s belongs to project %s, not %s", run.ID, run.ProjectID, tx.projectID)
 	}
@@ -306,7 +358,6 @@ func (tx *Tx) Save(run *Run) error {
 	if err := tx.checkOwned(); err != nil {
 		return err
 	}
-	run.UpdatedAt = tx.g.now()
 	data, err := json.MarshalIndent(run, "", "  ")
 	if err != nil {
 		return err

@@ -132,6 +132,28 @@ CREATE TABLE IF NOT EXISTS ticket_labels (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ticket_labels_label ON ticket_labels(label_id);
+
+-- Autopilot runs shared between members (DFLT-00326; see autopilot_runs.go).
+-- A new table only, so Init on an existing DB just adds it. root_ticket_id is
+-- deliberately not a foreign key: deleting a ticket must neither fail nor
+-- take the run's record with it (a listing ignores a root that is gone).
+CREATE TABLE IF NOT EXISTS autopilot_runs (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	root_ticket_id TEXT NOT NULL,
+	mode TEXT NOT NULL,
+	state TEXT NOT NULL,
+	heartbeat TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	started_by_name TEXT NOT NULL DEFAULT '',
+	machine_id TEXT NOT NULL DEFAULT '',
+	revision INTEGER NOT NULL DEFAULT 0,
+	snapshot TEXT NOT NULL,
+	FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_autopilot_runs_project ON autopilot_runs(project_id);
 `
 
 // sqliteDialect is the shared label/ticket-update code's view of SQLite: no

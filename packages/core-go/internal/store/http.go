@@ -31,7 +31,7 @@ const (
 	// (MAJOR.MINOR). It is also openapi.yaml's info.version -- a test keeps the
 	// two equal. A plugin whose MAJOR differs is refused at startup; a
 	// different MINOR is accepted (minor versions only add optional things).
-	HTTPDataSourceProtocolVersion = "1.1"
+	HTTPDataSourceProtocolVersion = "1.2"
 	// HTTPDataSourceProtocolHeader carries HTTPDataSourceProtocolVersion on
 	// every request, so a plugin can adapt to (or refuse) an older client.
 	HTTPDataSourceProtocolHeader = "GraphOps-Protocol-Version"
@@ -147,7 +147,8 @@ type HTTPRepository struct {
 	maxResponseBytes int64
 	// serverMinor is the MINOR of the protocol version the plugin reported
 	// in the handshake. Features added in a minor version are only used
-	// against a plugin that speaks it (e.g. parent_ticket_id needs 1.1).
+	// against a plugin that speaks it (e.g. parent_ticket_id needs 1.1, the
+	// autopilot-runs endpoints 1.2).
 	serverMinor int
 }
 

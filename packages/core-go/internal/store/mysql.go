@@ -183,6 +183,26 @@ var mysqlSchemaStatements = []string{
 	CONSTRAINT fk_ticket_labels_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
 	CONSTRAINT fk_ticket_labels_label FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
+
+	// Autopilot runs shared between members (DFLT-00326), see schemaDDL's
+	// autopilot_runs. snapshot is MEDIUMTEXT: a large tree's shared view can
+	// pass TEXT's 64KiB.
+	`CREATE TABLE IF NOT EXISTS autopilot_runs (
+	id VARCHAR(191) PRIMARY KEY,
+	project_id VARCHAR(191) NOT NULL,
+	root_ticket_id VARCHAR(191) NOT NULL,
+	mode VARCHAR(32) NOT NULL,
+	state VARCHAR(32) NOT NULL,
+	heartbeat VARCHAR(64) NOT NULL,
+	created_at VARCHAR(64) NOT NULL,
+	updated_at VARCHAR(64) NOT NULL,
+	started_by_name VARCHAR(255) NOT NULL DEFAULT '',
+	machine_id VARCHAR(64) NOT NULL DEFAULT '',
+	revision BIGINT NOT NULL DEFAULT 0,
+	snapshot MEDIUMTEXT NOT NULL,
+	KEY idx_autopilot_runs_project (project_id),
+	CONSTRAINT fk_autopilot_runs_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
 }
 
 // mysqlErDupEntry is MySQL's ER_DUP_ENTRY: a UNIQUE/PRIMARY KEY violation.

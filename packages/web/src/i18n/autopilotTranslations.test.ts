@@ -41,3 +41,21 @@ describe('autopilot untrusted-folder translations', () => {
     }
   });
 });
+
+// DFLT-00326: the texts that name another member exist in both languages
+// with their placeholders.
+describe('autopilot shared-run translations', () => {
+  it('define the member-naming texts in ja and en', () => {
+    for (const tree of [ja as Tree, en as Tree]) {
+      const entries = new Map(flatten(tree));
+      for (const key of ['autopilot.blockedBy', 'autopilot.blockedDescendantBy']) {
+        expect(entries.get(key)).toContain('{{name}}');
+        expect(entries.get(key)).toContain('{{root}}');
+      }
+      for (const key of ['autopilot.badges.runningBy', 'autopilot.fallbackName', 'autopilot.alreadyRunningBy']) {
+        expect(entries.get(key)).toContain('{{name}}');
+      }
+      expect(entries.get('autopilot.unknownMember')?.trim()).toBeTruthy();
+    }
+  });
+});
