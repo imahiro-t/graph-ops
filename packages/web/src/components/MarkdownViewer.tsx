@@ -231,11 +231,11 @@ const components: Components = {
   code: ({ className, children, ...props }) => {
     const isBlock = /language-/.test(className || '');
     return isBlock ? (
-      <code className={`block font-mono text-[11px] whitespace-pre ${className || ''}`} {...props}>
+      <code className={`block font-mono text-[0.6875rem] whitespace-pre ${className || ''}`} {...props}>
         {children}
       </code>
     ) : (
-      <code className="font-mono text-[11px] bg-slate-100 dark:bg-slate-800 rounded-sm px-1 py-0.5" {...props}>
+      <code className="font-mono text-[0.6875rem] bg-slate-100 dark:bg-slate-800 rounded-sm px-1 py-0.5" {...props}>
         {children}
       </code>
     );
@@ -249,7 +249,7 @@ const components: Components = {
   hr: () => <hr className="border-slate-200 dark:border-slate-800 my-3" />,
   table: ({ children }) => (
     <div className="overflow-x-auto mb-2">
-      <table className="min-w-full border-collapse text-[11px]">{children}</table>
+      <table className="min-w-full border-collapse text-[0.6875rem]">{children}</table>
     </div>
   ),
   thead: ({ children }) => <thead className="bg-slate-100 dark:bg-slate-800">{children}</thead>,

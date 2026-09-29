@@ -1382,7 +1382,7 @@ export const App: React.FC = () => {
                                 4.76:1 on white and 4.55:1 on the slate-50 hover; slate-400 is 6.96:1
                                 on slate-900 and 5.71:1 on the slate-800 hover. The light hover margin
                                 is thin: recompute if the item backgrounds get darker. */}
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{p.prefix}</span>
+                            <span className="text-[0.625rem] text-slate-500 dark:text-slate-400 font-mono">{p.prefix}</span>
                           </span>
                         </button>
                       );
