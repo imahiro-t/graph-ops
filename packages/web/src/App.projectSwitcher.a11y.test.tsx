@@ -23,6 +23,13 @@
 // Tailwind classes; the ratios themselves are recorded next to the markup in
 // App.tsx.
 //
+// DFLT-00285: the button is an IconButton named by its text (the project
+// name) and described by the local path alone (or "not set"), with a visible
+// tooltip of the name and the path on hover and keyboard focus instead of a
+// title attribute. The tooltip stays closed while the popup is open, so one
+// Escape closes the popup even right after Enter opened it from the keyboard
+// (with a tooltip open, IconButton would take that Escape).
+//
 // fetch is served by test/fakeBackend.ts.
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -31,6 +38,7 @@ import i18n from './i18n';
 import App from './App';
 import { Project } from './types';
 import { FakeBackend, createFakeBackend, installFakeBackend } from './test/fakeBackend';
+import { openIconButtonTooltip, openIconButtonTooltips } from './test/iconButtonTooltip';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'AAA', local_path: '/work/alpha', created_at: '', updated_at: '' };
 const beta: Project = { id: 'p-beta', name: 'Beta', prefix: 'BBB', local_path: '/work/beta', created_at: '', updated_at: '' };
@@ -144,6 +152,76 @@ describe('project switcher accessibility', () => {
       const user = await renderApp();
       await user.click(switcher());
       expect(screen.getByRole('dialog', { name: 'Switch project' })).toBeInTheDocument();
+    });
+  });
+
+  describe('name, description and tooltip (DFLT-00285)', () => {
+    async function tabToSwitcher(user: ReturnType<typeof userEvent.setup>) {
+      for (let i = 0; i < 10 && document.activeElement !== switcher(); i++) await user.tab();
+      expect(switcher()).toHaveFocus();
+      expect(switcher().matches(':focus-visible')).toBe(true);
+    }
+
+    it.each([
+      ['ja', alpha, '/work/alpha'],
+      ['en', alpha, '/work/alpha'],
+      ['ja', { ...beta, local_path: '' }, '未設定'],
+      ['en', { ...beta, local_path: '' }, 'Not set']
+    ] as const)('(%s) names %s by its text and describes it by the local path alone', async (lng, project, description) => {
+      backend = createFakeBackend({
+        projects: [alpha, project.id === beta.id ? project : beta],
+        currentProjectId: project.id,
+        labels: [],
+        tickets: [{ id: `${project.prefix}-00001`, project_id: project.id, title: 'チケット', status: 'TODO', priority: 'HIGH', labelIds: [] }]
+      });
+      fetchMock = installFakeBackend(backend);
+      await i18n.changeLanguage(lng);
+      render(<App />);
+      await screen.findByText(`${project.prefix}-00001`);
+      const button = switcher(project.name);
+      expect(button).not.toHaveAttribute('title');
+      expect(button).not.toHaveAttribute('aria-label');
+      expect(button).toHaveAccessibleName(project.name);
+      expect(button).toHaveAccessibleDescription(description);
+      expect(button).not.toHaveAccessibleDescription(expect.stringContaining(project.name));
+    });
+
+    it('opens the tooltip of the name and the path on keyboard focus', async () => {
+      const user = await renderApp();
+      await tabToSwitcher(user);
+      const tooltip = openIconButtonTooltip();
+      expect(Array.from(tooltip.children).map(l => l.textContent)).toEqual(['Alpha', '/work/alpha']);
+      expect(tooltip).toHaveAttribute('aria-hidden', 'true');
+      expect(switcher()).toHaveAccessibleDescription('/work/alpha');
+    });
+
+    it('closes the popup on one Escape right after Enter opened it from the keyboard, with no tooltip while it is open', async () => {
+      const user = await renderApp();
+      await tabToSwitcher(user);
+      expect(openIconButtonTooltips()).toHaveLength(1);
+
+      await user.keyboard('{Enter}');
+      expect(popup()).not.toBeNull();
+      expect(switcher()).toHaveFocus();
+      expect(openIconButtonTooltips()).toHaveLength(0);
+
+      await user.keyboard('{Escape}');
+      expect(popup()).toBeNull();
+      expect(switcher()).toHaveFocus();
+    });
+
+    it('shows no tooltip while a popup opened by a mouse click is open, and one Escape closes it', async () => {
+      const user = await renderApp();
+      await user.hover(switcher());
+      expect(openIconButtonTooltip()).toHaveTextContent('Alpha');
+
+      await user.click(switcher());
+      expect(popup()).not.toBeNull();
+      expect(openIconButtonTooltips()).toHaveLength(0);
+
+      await user.keyboard('{Escape}');
+      expect(popup()).toBeNull();
+      expect(switcher()).toHaveFocus();
     });
   });
 

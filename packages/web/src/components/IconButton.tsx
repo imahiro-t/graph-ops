@@ -71,6 +71,23 @@
 //   see Submitting.tsx): aria-busy="true" and the shared "(submitting)"
 //   suffix joined to the aria-label. The visible tooltip keeps the plain
 //   label (or `tooltip`), so nothing on screen changes.
+//
+// DFLT-00285 options, for a button that shows its own name as text (the
+// header's project switcher) rather than an icon alone:
+//
+// - `nameFromContent`: no aria-label; the accessible name comes from the
+//   button's content, like any text button. `label` is then optional and
+//   only serves as the default tooltip text.
+// - `tooltip` may be any node, so a tooltip can have more than one line
+//   (block-level spans inside it).
+// - `tooltipDisabled`: the tooltip does not open, and `open` itself stays
+//   false, so no positioning, no portal and no Escape handling happen either
+//   -- a tooltip hidden only by looks would still preventDefault an Escape
+//   pressed on the focused button and keep, say, a popup the button opened
+//   from closing on that press. Hover and focus are still tracked, so when
+//   it goes back to false while the pointer is over the button or the
+//   button has keyboard focus, the tooltip opens again, as it would on any
+//   other IconButton that the pointer or focus comes back to.
 import React, { forwardRef, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { submittingProps, useSubmittingLabel } from './Submitting';
@@ -81,11 +98,15 @@ const GAP = 6;
 
 type ButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'title' | 'aria-label'>;
 
-export interface IconButtonProps extends ButtonProps {
-  // The accessible name (aria-label).
-  label: string;
-  // The visible tooltip text; defaults to `label`.
-  tooltip?: string;
+// Either the accessible name is `label` (as aria-label), or, with
+// nameFromContent, the button's own content names it.
+type NameProps = { label: string; nameFromContent?: false } | { label?: string; nameFromContent: true };
+
+export type IconButtonProps = ButtonProps & NameProps & {
+  // The visible tooltip; defaults to `label`.
+  tooltip?: React.ReactNode;
+  // Keep the tooltip closed (see the header comment).
+  tooltipDisabled?: boolean;
   // Expose the tooltip as the button's description (aria-describedby). Only
   // for a tooltip carrying information the name does not.
   describeWithTooltip?: boolean;
@@ -94,7 +115,7 @@ export interface IconButtonProps extends ButtonProps {
   // The user's own action is being sent (the button shows a spinner):
   // adds aria-busy and the "(submitting)" suffix to the accessible name.
   busy?: boolean;
-}
+};
 
 interface Position {
   left: number;
@@ -122,7 +143,9 @@ function isDismissKey(e: KeyboardEvent): boolean {
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
   {
     label,
+    nameFromContent = false,
     tooltip,
+    tooltipDisabled = false,
     describeWithTooltip = false,
     tooltipSide = 'bottom',
     wrapperClassName,
@@ -135,12 +158,12 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
   },
   forwardedRef
 ) {
-  const tooltipText = tooltip ?? label;
+  const tooltipContent = tooltip ?? label;
   const submittingLabel = useSubmittingLabel();
   const tooltipId = useId();
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const open = hovered || focused;
+  const open = !tooltipDisabled && tooltipContent != null && (hovered || focused);
   const [position, setPosition] = useState<Position | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const tooltipRef = useRef<HTMLSpanElement | null>(null);
@@ -221,7 +244,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       window.removeEventListener('scroll', updatePosition, true);
       window.removeEventListener('resize', updatePosition);
     };
-  }, [open, tooltipText, updatePosition]);
+  }, [open, tooltipContent, updatePosition]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLSpanElement>) => {
     if (!open || !isDismissKey(e.nativeEvent)) return;
@@ -269,7 +292,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       <button
         ref={setButtonRef}
         type={type ?? 'button'}
-        aria-label={submittingLabel(label, busy)}
+        aria-label={nameFromContent || label === undefined ? undefined : submittingLabel(label, busy)}
         aria-describedby={describedBy}
         {...submittingProps(busy)}
         {...buttonProps}
@@ -298,7 +321,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
             onMouseUp={stopPropagation}
             onPointerDown={stopPropagation}
           >
-            {tooltipText}
+            {tooltipContent}
           </span>,
           document.body
         )}
