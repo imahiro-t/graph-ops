@@ -53,6 +53,11 @@ const CONTROLS: Record<AutopilotSettingKey, Control> = {
   stallTimeoutMinutes: { kind: 'number', min: 15, max: 1440 }
 };
 
+// A row's controls. Select rows add upto-15rem:flex-wrap and
+// upto-15rem:justify-end so the reset button drops under the select. Kept a
+// complete string literal (and never glued to a `${`) so Tailwind finds it.
+const CONTROLS_CLASS = 'flex items-center gap-2 shrink-0 narrow:shrink narrow:min-w-0 narrow:w-full';
+
 // A draft entry is the local value being edited: a string for select and
 // number fields (a number field keeps what was typed, so an invalid entry
 // reaches the server's validation instead of being silently dropped), a
@@ -298,9 +303,9 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
                     </p>
                   </div>
                   <div
-                    className={`flex items-center gap-2 shrink-0 narrow:shrink narrow:min-w-0 narrow:w-full ${
-                      isSelect ? 'upto-15rem:flex-wrap upto-15rem:justify-end' : ''
-                    }`}
+                    className={
+                      isSelect ? `${CONTROLS_CLASS} upto-15rem:flex-wrap upto-15rem:justify-end` : CONTROLS_CLASS
+                    }
                   >
                     {renderControl(it, inputId, `${hintId} ${sourceId}`)}
                     {!it.locked && (

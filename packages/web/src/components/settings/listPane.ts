@@ -9,13 +9,13 @@
 //
 // The list's heading is sticky, so the list's scroll padding (scroll-pt-12,
 // 3rem -- taller than the heading's 1rem padding + one 0.6875rem line + its
-// 1px border; all but the border scale with the root font size, so this
-// holds at any font size) keeps an item
-// that keyboard focus scrolls into view -- e.g. by Shift+Tab -- below the
-// heading instead of under it, and z-10 keeps scrolled rows (and, in the node
-// types list, their delete buttons) painted beneath the heading. It matters
-// most below 48rem, where the list is capped at max-h-40 and scrolls
-// (DFLT-00261 A-1); the padding only affects scroll-into-view, not the layout.
+// 1px border; all but the border scale with the root font size, so this holds
+// at any font size) keeps an item that keyboard focus scrolls into view --
+// e.g. by Shift+Tab -- below the heading instead of under it, and z-10 keeps
+// scrolled rows (and, in the node types list, their delete buttons) painted
+// beneath the heading. It matters most below 48rem, where the list is capped
+// at max-h-40 and scrolls (DFLT-00261 A-1); the padding only affects
+// scroll-into-view, not the layout.
 
 // Root of the editor: list and editor side by side, stacked below 48rem.
 export const LIST_LAYOUT_CLASS = 'flex h-full min-h-0 gap-4 narrow:flex-col narrow:h-auto';

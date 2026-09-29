@@ -331,6 +331,8 @@ describe('AutopilotSettingsEditor select stacking at the narrowest size (DFLT-00
     expect(select).toHaveClass('upto-15rem:basis-full', 'upto-15rem:w-full');
     const controls = select.parentElement as HTMLElement;
     expect(controls).toHaveClass('upto-15rem:flex-wrap', 'upto-15rem:justify-end');
+    const selectCls = controls.getAttribute('class') ?? '';
+    expect(selectCls).toBe(selectCls.trim());
     const reset = screen.getByRole('button', { name: i18n.t('settings.autopilot.clearLocalFor', { key: label(key) }) });
     expect(controls).toContainElement(reset);
     const row = controls.parentElement as HTMLElement;
@@ -346,6 +348,9 @@ describe('AutopilotSettingsEditor select stacking at the narrowest size (DFLT-00
       const controls = input.parentElement as HTMLElement;
       expect(controls).not.toHaveClass('upto-15rem:flex-wrap');
       expect(controls).not.toHaveClass('upto-15rem:justify-end');
+      // No trailing space left by the unused select-only classes (DFLT-00297).
+      const cls = controls.getAttribute('class') ?? '';
+      expect(cls).toBe(cls.trim());
       expect(input).not.toHaveClass('upto-15rem:basis-full');
     }
   });
