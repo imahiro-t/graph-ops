@@ -49,8 +49,8 @@ const ranges = (selection: Selection): Range[] => {
 // styles inline instead of classes. Pasted into rich text, the clone then
 // held icons, label chips and screen-reader text, and pasted into this page
 // its Tailwind classes came back to life (a title cut short by "truncate").
-// So the copy is rebuilt here by walking the original DOM (a clone cannot
-// be matched against it afterwards), with these rules for what it holds:
+// So the copy is rebuilt here by walking the original DOM, which is surer
+// than matching a clone back to it, with these rules for what it holds:
 // - An element whose computed user-select is none is left out, and so are
 //   its descendants, unless one of them turns selection back on (text, all,
 //   contain) -- the header row is select-none but its ticket ID and title
@@ -79,12 +79,6 @@ const selectionHtml = (doc: Document, rs: Range[]): string => {
     const wrap = rangeHtml(doc, range, styles);
     if (wrap) container.appendChild(wrap);
   }
-  const walker = doc.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    const text = node.nodeValue ?? '';
-    const stripped = stripInvisible(text);
-    if (stripped !== text) node.nodeValue = stripped;
-  }
   return container.innerHTML;
 };
 
@@ -108,28 +102,39 @@ const SELECTABLE = new Set(['text', 'all', 'contain']);
 const userSelectOf = (style: CSSStyleDeclaration | null): string =>
   style?.getPropertyValue('user-select') || style?.getPropertyValue('-webkit-user-select') || '';
 
-// An element's selectability from its computed user-select: none turns it
-// off, text / all / contain turn it back on, and anything else (auto, or
-// empty where the value is not computed) keeps `inherited`.
-const selectable = (style: CSSStyleDeclaration | null, inherited: boolean): boolean => {
+// What a computed user-select says about selectability: none turns it off,
+// text / all / contain turn it back on, and anything else (auto, or empty
+// where the value is not computed) says nothing -- undefined.
+const explicitSelectable = (style: CSSStyleDeclaration | null): boolean | undefined => {
   const value = userSelectOf(style);
   if (value === 'none') return false;
   if (SELECTABLE.has(value)) return true;
-  return inherited;
+  return undefined;
 };
+
+// An element's selectability: its own user-select, or `inherited`.
+const selectable = (style: CSSStyleDeclaration | null, inherited: boolean): boolean =>
+  explicitSelectable(style) ?? inherited;
 
 // Whether `el` is selectable, from the nearest of it and its ancestors that
 // sets user-select; selectable when none does.
 const selectableFrom = (el: Element, styleOf: StyleOf): boolean => {
   for (let node: Element | null = el; node; node = node.parentElement) {
-    const value = userSelectOf(styleOf(node));
-    if (value === 'none') return false;
-    if (SELECTABLE.has(value)) return true;
+    const value = explicitSelectable(styleOf(node));
+    if (value !== undefined) return value;
   }
   return true;
 };
 
 const isSrOnly = (el: Element): boolean => el.classList.contains('sr-only');
+
+// Whether `el` or one of its ancestors is sr-only.
+const withinSrOnly = (el: Element): boolean => {
+  for (let node: Element | null = el; node; node = node.parentElement) {
+    if (isSrOnly(node)) return true;
+  }
+  return false;
+};
 
 const INHERITED_STYLES = ['font-weight', 'font-style', 'color'] as const;
 
@@ -158,7 +163,7 @@ const setInlineStyle = (el: Element, style: string): void => {
 const rangeHtml = (doc: Document, range: Range, styleOf: StyleOf): Element | null => {
   const common = range.commonAncestorContainer;
   const base = common.nodeType === Node.ELEMENT_NODE ? (common as Element) : common.parentElement;
-  if (!base || base.closest('.sr-only')) return null;
+  if (!base || withinSrOnly(base)) return null;
   const on = selectableFrom(base, styleOf);
   const wrap = doc.createElement('span');
   if (common === base) {
@@ -176,14 +181,19 @@ const rangeHtml = (doc: Document, range: Range, styleOf: StyleOf): Element | nul
   return wrap;
 };
 
-// Text, CDATA section, processing instruction and comment nodes.
-const CHARACTER_DATA = new Set([3, 4, 7, 8]);
+const CHARACTER_DATA = new Set<number>([
+  Node.TEXT_NODE,
+  Node.CDATA_SECTION_NODE,
+  Node.PROCESSING_INSTRUCTION_NODE,
+  Node.COMMENT_NODE,
+]);
 
 // The copy of `node`'s part in `range`, or null when none of it is copied.
 // Like Range.cloneContents, a node the range only partly holds is copied
 // shallow with its held part inside, and character data is cut at the
-// range's ends. `on` is the parent's selectability and `parent` the source
-// element whose styles the copy is written against.
+// range's ends; a text's copy is also rid of U+200B / U+2060. `on` is the
+// parent's selectability and `parent` the source element whose styles the
+// copy is written against.
 const copyNode = (
   range: Range,
   node: Node,
@@ -199,8 +209,10 @@ const copyNode = (
       const data = (node as CharacterData).data;
       const start = node === range.startContainer ? range.startOffset : 0;
       const end = node === range.endContainer ? range.endOffset : data.length;
-      (copy as CharacterData).data = data.slice(start, end);
-      if (node.nodeType === Node.TEXT_NODE && start >= end) return null;
+      const part = data.slice(start, end);
+      if (node.nodeType !== Node.TEXT_NODE) (copy as CharacterData).data = part;
+      else if (start >= end) return null;
+      else (copy as CharacterData).data = stripInvisible(part);
     }
     return copy;
   }
