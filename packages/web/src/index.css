@@ -39,11 +39,16 @@
    below-80rem / upto-15rem have been ahead of @container since DFLT-00260;
    below-64rem / from-64rem / from-80rem moved ahead of @container in
    DFLT-00281, and from-64rem / from-80rem also moved ahead of
-   [@media(max-width:200px)]: (below-64rem already was). No element sets
-   the same property through one of these and an arbitrary variant at the
-   moment (below-64rem / from-64rem / from-80rem are only used in
-   TicketItem.tsx, which uses [@media(max-width:200px)]: only for p-2 and
-   no [@container(...)]: at all), so nothing renders differently.
+   [@media(max-width:200px)]: (below-64rem already was). When DFLT-00281
+   made that move, no element set the same property through one of these
+   and an arbitrary variant, so nothing rendered differently.
+   DFLT-00293 relies on the order: in a window of 200px or less the detail
+   panel's sections pad and wrap through [@media(max-width:200px)]: on
+   elements that also set the same property through a named variant
+   (upto-15rem:p-3 / upto-15rem:px-2 with [@media(max-width:200px)]:px-1,
+   from-64rem:px-4 on the artifact tabs, max-lg:wrap-anywhere with
+   [@media(max-width:200px)]:wrap-break-word), and the arbitrary variant is
+   meant to win there. TicketItem.tsx still uses no [@container(...)]:.
    tailwindVariants.test.ts pins this order down. */
 @custom-variant below-80rem (@media not all and (min-width: 80rem));
 @custom-variant upto-15rem (@media (max-width: 15rem));

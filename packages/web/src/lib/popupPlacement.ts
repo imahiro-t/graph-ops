@@ -31,6 +31,13 @@ export interface PopupPlacementInput {
   preferredWidth: number;
   // The space to keep between the popup and each edge of the window, px.
   margin: number;
+  // DFLT-00293: the edges to keep the popup inside, in viewport
+  // coordinates, px -- 0 and viewportWidth when left out, i.e. the window.
+  // LabelSelect passes the part of the window inside the ticket card, whose
+  // overflow clip would otherwise cut the popup off. The margin is kept
+  // from these edges instead.
+  boundsLeft?: number;
+  boundsRight?: number;
 }
 
 export interface PopupPlacement {
@@ -40,13 +47,21 @@ export interface PopupPlacement {
   left: number;
 }
 
-export function fitPopupHorizontally({ viewportWidth, anchorLeft, preferredWidth, margin }: PopupPlacementInput): PopupPlacement {
-  const maxWidth = Math.max(0, viewportWidth - 2 * margin);
+export function fitPopupHorizontally({
+  viewportWidth,
+  anchorLeft,
+  preferredWidth,
+  margin,
+  boundsLeft = 0,
+  boundsRight = viewportWidth
+}: PopupPlacementInput): PopupPlacement {
+  const maxWidth = Math.max(0, boundsRight - boundsLeft - 2 * margin);
   const width = Math.min(preferredWidth, maxWidth);
   let left = 0;
-  const rightLimit = viewportWidth - margin;
+  const rightLimit = boundsRight - margin;
+  const leftLimit = boundsLeft + margin;
   if (anchorLeft + width > rightLimit) left = rightLimit - width - anchorLeft;
-  if (anchorLeft + left < margin) left = margin - anchorLeft;
+  if (anchorLeft + left < leftLimit) left = leftLimit - anchorLeft;
   return { maxWidth, left };
 }
 

@@ -149,4 +149,31 @@ describe('named rem media-query variants (index.css)', () => {
       expect(idx(c)).toBeLessThan(max200);
     }
   });
+
+  // DFLT-00293: in a window of 200px or less the detail panel's sections
+  // set padding and overflow-wrap through [@media(max-width:200px)]: on
+  // elements that also set them through upto-15rem:, from-64rem: or the core
+  // max-lg:, and LabelSelect's narrow panel overrides unprefixed utilities
+  // through group-data-narrow:. Both overrides depend on the later rule.
+  it('emits max-width:200px after upto-15rem, from-64rem and max-lg (DFLT-00293 relies on it)', async () => {
+    const classes = [v(UPTO, 'px-2'), v(FROM64, 'px-4'), v('max-lg', 'wrap-anywhere'), v(ARB_MAX200, 'px-1'), v(ARB_MAX200, 'wrap-break-word')];
+    const conditions = atRuleConditions(await buildCss(classes));
+    const idx = (c: string) => conditions.indexOf(c);
+    const max200 = idx('@media(max-width:200px)');
+    expect(max200).toBeGreaterThanOrEqual(0);
+    for (const c of ['@media(max-width:15rem)', '@media(min-width:64rem)', '@media(width<1024px)']) {
+      expect(idx(c)).toBeGreaterThanOrEqual(0);
+      expect(idx(c)).toBeLessThan(max200);
+    }
+  });
+
+  it('emits group-data-narrow: rules after the plain utilities they override (DFLT-00293)', async () => {
+    const narrow = (u: string) => v(['group', 'data', 'narrow'].join('-'), u);
+    const css = await buildCss(['px-3', 'whitespace-nowrap', 'truncate', narrow('px-2'), narrow('whitespace-normal'), narrow('overflow-visible')]);
+    const at = (needle: string) => css.indexOf(needle);
+    expect(at('[data-narrow]')).toBeGreaterThan(at('.px-3'));
+    expect(at('[data-narrow]')).toBeGreaterThan(at('.whitespace-nowrap'));
+    expect(at('[data-narrow]')).toBeGreaterThan(at('.truncate'));
+    expect(css).toMatch(/:where\(\.group\)\[data-narrow\]/);
+  });
 });

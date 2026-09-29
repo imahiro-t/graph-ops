@@ -46,6 +46,7 @@ import { POPUP_VIEWPORT_MARGIN_REM, PROJECT_MENU_WIDTH_REM, PopupPlacement, fitP
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from './lib/focusAfterRemoval';
 import { useLatest } from './hooks/useLatest';
 import { useTransientAnnouncement } from './hooks/useTransientAnnouncement';
+import { useMediaQuery } from './hooks/useMediaQuery';
 
 // Cycles through the three-way theme preference in a fixed order, used by
 // the header toggle button (light -> dark -> system -> light -> ...).
@@ -236,6 +237,27 @@ export const App: React.FC = () => {
         </>
       ),
     [currentProjectName, currentProjectPathLabel]
+  );
+  // DFLT-00293: a window of 200 CSS px or less, the same query as the
+  // header's [@media(max-width:200px)]: classes, so the text labels are
+  // hidden (CSS) and the tooltips that stand in for them are enabled (here)
+  // at the same width, the boundary included.
+  const isTinyWindow = useMediaQuery('(max-width: 200px)');
+  // The New Ticket button's reason for being disabled (no project yet): its
+  // description at every width (the hidden span next to the button), and
+  // the second line of its visible tooltip in a tiny window.
+  const newTicketDescriptionId = useId();
+  const newTicketLabel = t('header.newTicket');
+  const newTicketDisabledReason = currentProject ? undefined : t('projectSwitcher.selectFirst');
+  const newTicketTooltip = useMemo(
+    () =>
+      newTicketDisabledReason === undefined ? newTicketLabel : (
+        <>
+          <span className="block">{newTicketLabel}</span>
+          <span className="block">{newTicketDisabledReason}</span>
+        </>
+      ),
+    [newTicketLabel, newTicketDisabledReason]
   );
   // Per-project count of tickets awaiting approval, badged on the switcher's
   // menu items (DFLT-00144). Refetched every time the menu opens; empty
@@ -1209,13 +1231,21 @@ export const App: React.FC = () => {
           button labels are spans of their own so the icons keep their size
           (shrink-0); the text is still the buttons' accessible name. On top
           of that, only for looks, in a window of 200 CSS px or less (at any
-          text size, so also at 100% there) the header pads with px-2, the Launch
-          Claude, language and New Ticket buttons may put the label on a
-          line of its own under the icon, and the project switcher and those
-          buttons pad less, so a label breaks between words rather than
-          letter by letter and the switcher's arrow stays inside its frame (a
-          px query: the 15rem one also matches 320-336px with a 32px default
-          font, where the header must not change). The
+          text size, so also at 100% there) the header pads with px-2 and the
+          project switcher and the buttons pad less (a px query: the 15rem
+          one also matches 320-336px with a 32px default font, where the
+          header must not change).
+          DFLT-00293: there, too, the header shows icons only. The "GraphOps"
+          name, the subtitle, the project name and the Launch Claude,
+          language and New Ticket labels are sr-only -- visually hidden but
+          still read, and still the buttons' accessible names -- so no word
+          is broken letter by letter ("GraphO / ps") any more; the logo
+          stays. Launch Claude and New Ticket are IconButtons whose visible
+          tooltip (hover and keyboard focus) is on only at that width
+          (isTinyWindow, the same query in script), so the label can still
+          be read; the language button always had its tooltip, and the
+          switcher's tooltip gives the project name. Wider than 200px they
+          look and behave as before. The
           "updated" row does not wrap: its time shrinks and wraps inside
           itself next to the refresh button, as it already did in English
           at 320-328px with a 32px root (letting the row wrap moved the time
@@ -1230,10 +1260,10 @@ export const App: React.FC = () => {
                 background, so it stays visible on both light and dark headers without `dark:` variants.
                 Decorative: the adjacent "GraphOps" text already names the app. */}
             <img src="/favicon.svg" alt="" aria-hidden="true" className="w-6 h-6 shrink-0" />
-            <span className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-slate-100 min-w-0 wrap-anywhere">
+            <span className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-slate-100 min-w-0 wrap-anywhere [@media(max-width:200px)]:sr-only">
               GraphOps
             </span>
-            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium min-w-0 wrap-anywhere">{t('header.subtitle')}</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium min-w-0 wrap-anywhere [@media(max-width:200px)]:sr-only">{t('header.subtitle')}</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 min-w-0">
@@ -1291,7 +1321,7 @@ export const App: React.FC = () => {
                 className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 [@media(max-width:200px)]:gap-1 [@media(max-width:200px)]:px-2 transition min-w-0 max-w-full"
               >
                 <FolderOpen aria-hidden="true" className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
-                <span className="truncate">
+                <span className="truncate [@media(max-width:200px)]:sr-only">
                   {currentProject ? currentProject.name : t('projectSwitcher.noProject')}
                 </span>
                 {/* DFLT-00163: WCAG 1.4.11 (3:1). The arrow is the only sign that this opens a menu.
@@ -1408,13 +1438,17 @@ export const App: React.FC = () => {
               )}
             </div>
 
-            <button
+            <IconButton
+              nameFromContent
+              label={t('header.launchClaude')}
+              tooltipDisabled={!isTinyWindow}
+              wrapperClassName="min-w-0 max-w-full"
               onClick={() => setIsClaudeGlobalOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-700 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 [@media(max-width:200px)]:flex-wrap [@media(max-width:200px)]:justify-center [@media(max-width:200px)]:px-2 transition min-w-0 max-w-full"
+              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-700 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 [@media(max-width:200px)]:px-2 transition min-w-0 max-w-full"
             >
               <Terminal aria-hidden="true" className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-              <span className="min-w-0 wrap-anywhere">{t('header.launchClaude')}</span>
-            </button>
+              <span className="min-w-0 wrap-anywhere [@media(max-width:200px)]:sr-only">{t('header.launchClaude')}</span>
+            </IconButton>
 
             {/* The language, theme and settings buttons name themselves
                 through IconButton's aria-label and show that name as a
@@ -1425,10 +1459,10 @@ export const App: React.FC = () => {
               onClick={() => i18n.changeLanguage(currentLanguage === 'ja' ? 'en' : 'ja')}
               label={t('header.language.toggleTitle', { lang: t(`header.language.${currentLanguage}`) })}
               wrapperClassName="min-w-0 max-w-full"
-              className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 transition flex items-center gap-1.5 [@media(max-width:200px)]:flex-wrap [@media(max-width:200px)]:justify-center min-w-0 max-w-full"
+              className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 transition flex items-center gap-1.5 min-w-0 max-w-full"
             >
               <Languages aria-hidden="true" className="w-4 h-4 shrink-0" />
-              <span className="text-xs font-semibold min-w-0 wrap-anywhere">{t(`header.language.${currentLanguage}`)}</span>
+              <span className="text-xs font-semibold min-w-0 wrap-anywhere [@media(max-width:200px)]:sr-only">{t(`header.language.${currentLanguage}`)}</span>
             </IconButton>
 
             <IconButton
@@ -1447,8 +1481,30 @@ export const App: React.FC = () => {
               <SettingsIcon aria-hidden="true" className="w-4 h-4" />
             </IconButton>
 
-            <button
+            {/* DFLT-00293: IconButton so that in a window of 200px or less,
+                where the label is hidden, the visible tooltip shows it (on
+                hover and keyboard focus). Without a project the button is
+                natively disabled and explains why:
+                - Its description is the reason alone, at every width: the
+                  hidden span below, referenced by aria-describedby. With
+                  aria-describedby set, the title (below) is not used as the
+                  description, so the name is never repeated in it.
+                - Wider than 200px it keeps the native title tooltip, as
+                  before, and has no visible tooltip.
+                - At 200px or less it has no title (two tooltips would show),
+                  and the visible tooltip has two lines: the name and the
+                  reason. A natively disabled button cannot take keyboard
+                  focus, so that tooltip opens on hover only -- the same
+                  limit the title always had. aria-disabled (focusable)
+                  would add a stop to the header's Tab order at every width,
+                  so it is not used. */}
+            <IconButton
               ref={newTicketButtonRef}
+              nameFromContent
+              label={newTicketLabel}
+              tooltip={newTicketTooltip}
+              tooltipDisabled={!isTinyWindow}
+              wrapperClassName="min-w-0 max-w-full"
               onClick={() => {
                 // Clear any leftover status message from a previous create
                 // attempt before the form reopens -- the form's own request
@@ -1459,12 +1515,16 @@ export const App: React.FC = () => {
                 setIsCreateOpen(true);
               }}
               disabled={!currentProject}
-              title={currentProject ? undefined : t('projectSwitcher.selectFirst')}
-              className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 [@media(max-width:200px)]:flex-wrap [@media(max-width:200px)]:justify-center [@media(max-width:200px)]:px-2 transition min-w-0 max-w-full"
+              title={isTinyWindow ? undefined : newTicketDisabledReason}
+              aria-describedby={newTicketDisabledReason === undefined ? undefined : newTicketDescriptionId}
+              className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 [@media(max-width:200px)]:px-2 transition min-w-0 max-w-full"
             >
               <Plus aria-hidden="true" className="w-4 h-4 shrink-0" />
-              <span className="min-w-0 wrap-anywhere">{t('header.newTicket')}</span>
-            </button>
+              <span className="min-w-0 wrap-anywhere [@media(max-width:200px)]:sr-only">{newTicketLabel}</span>
+            </IconButton>
+            <span id={newTicketDescriptionId} hidden>
+              {newTicketDisabledReason}
+            </span>
           </div>
         </div>
 
@@ -1582,7 +1642,7 @@ export const App: React.FC = () => {
           15rem query stays: with a very large default font (over about 267%)
           it still matches above 640px. From sm up, at a normal default font
           size, nothing changes. */}
-      <main className="max-w-7xl mx-auto px-6 max-sm:px-3 upto-15rem:px-3 py-6 space-y-6">
+      <main className="max-w-7xl mx-auto px-6 max-sm:px-3 upto-15rem:px-3 [@media(max-width:200px)]:px-1 py-6 space-y-6">
         {/* Simple Summary Metrics. DFLT-00251: both children are min-w-0
             max-w-full so neither can be wider than the card; the numbers
             already wrap between items (flex-wrap). Each item is min-w-0

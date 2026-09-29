@@ -78,6 +78,16 @@
 // - `nameFromContent`: no aria-label; the accessible name comes from the
 //   button's content, like any text button. `label` is then optional and
 //   only serves as the default tooltip text.
+// - DFLT-00293: with `nameFromContent`, and only then, the button also
+//   takes `title`, passed through to the <button> as is. The name comes
+//   from the content, so a title can never become the name (the duplicate
+//   name the type otherwise guards against), and a caller that already
+//   shows a native title tooltip (the header's New Ticket button, disabled
+//   with no project, where it explains why) keeps it where the visible
+//   tooltip is disabled. Such a caller should point aria-describedby at
+//   its own description: when it is set, accessible name computation takes
+//   the description from it and not from the title, so the description
+//   stays the same whether a title is set or not.
 // - `tooltip` may be any node, so a tooltip can have more than one line
 //   (block-level spans inside it). Pass a stable reference (useMemo) when
 //   it is an element: the positioning effect re-runs whenever the content
@@ -110,7 +120,8 @@ type ButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'title' |
 
 // Either the accessible name is `label` (as aria-label), or, with
 // nameFromContent, the button's own content names it.
-type NameProps = { label: string; nameFromContent?: false } | { label?: string; nameFromContent: true };
+// A title only with nameFromContent (see the header comment).
+type NameProps = { label: string; nameFromContent?: false; title?: never } | { label?: string; nameFromContent: true; title?: string };
 
 export type IconButtonProps = ButtonProps & NameProps & {
   // The visible tooltip; defaults to `label`.

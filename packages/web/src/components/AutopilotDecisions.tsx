@@ -37,18 +37,23 @@ export const AutopilotDecisions: React.FC<Props> = ({ artifacts, nodes }) => {
   if (items.length === 0) return null;
   const nodeName = new Map(nodes.map(n => [n.id, n.name]));
 
+  // DFLT-00293: in a window of 200px or less the card pads less and each
+  // item stacks its parts (flex-col), each no wider than the card and
+  // breaking inside a word only when that word is wider than the line.
   return (
     <section
       data-testid="autopilot-decisions"
       aria-labelledby={headingId}
-      className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 text-xs"
+      className="bg-white dark:bg-slate-900 p-4 [@media(max-width:200px)]:px-1 [@media(max-width:200px)]:py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs"
     >
       <h3
         id={headingId}
-        className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-2"
+        className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 [@media(max-width:200px)]:flex-wrap mb-2"
       >
         <Bot className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" aria-hidden="true" />
-        {t('autopilot.decisions.title', { count: items.length })}
+        <span className="[@media(max-width:200px)]:min-w-0 [@media(max-width:200px)]:wrap-break-word">
+          {t('autopilot.decisions.title', { count: items.length })}
+        </span>
       </h3>
       <ul className="space-y-1.5">
         {items.map(a => {
@@ -57,7 +62,7 @@ export const AutopilotDecisions: React.FC<Props> = ({ artifacts, nodes }) => {
           const node = nodeName.get(a.node_id);
           const href = `/artifacts/${a.id}/preview?type=${a.type}&name=${encodeURIComponent(a.name)}`;
           return (
-            <li key={a.id} data-testid="autopilot-decision" className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <li key={a.id} data-testid="autopilot-decision" className="flex flex-wrap items-center gap-x-3 gap-y-1 [@media(max-width:200px)]:flex-col [@media(max-width:200px)]:items-start [@media(max-width:200px)]:wrap-break-word [@media(max-width:200px)]:*:max-w-full">
               <span className="font-semibold text-slate-800 dark:text-slate-200">{label}</span>
               <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400">{a.name}</span>
               {node && <span className="text-slate-600 dark:text-slate-400">{node}</span>}
