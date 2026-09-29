@@ -217,8 +217,8 @@ const components: Components = {
   h3: ({ children }) => <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-2.5 mb-1 first:mt-0">{children}</h3>,
   h4: ({ children }) => <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-2 mb-1 first:mt-0">{children}</h4>,
   p: ({ children }) => <p className="text-slate-700 dark:text-slate-300 leading-relaxed mb-2 last:mb-0">{children}</p>,
-  ul: ({ children }) => <ul className="list-disc list-outside pl-5 [@media(max-width:200px)]:list-inside [@media(max-width:200px)]:pl-0 space-y-0.5 mb-2">{children}</ul>,
-  ol: ({ children }) => <ol className="list-decimal list-outside pl-5 [@media(max-width:200px)]:list-inside [@media(max-width:200px)]:pl-0 space-y-0.5 mb-2">{children}</ol>,
+  ul: ({ children }) => <ul className="list-disc list-outside pl-5 upto-200px:list-inside upto-200px:pl-0 space-y-0.5 mb-2">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal list-outside pl-5 upto-200px:list-inside upto-200px:pl-0 space-y-0.5 mb-2">{children}</ol>,
   li: ({ children }) => <li className="text-slate-700 dark:text-slate-300">{children}</li>,
   a: ({ href, children }) => (
     <a href={href} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">
@@ -231,11 +231,11 @@ const components: Components = {
   code: ({ className, children, ...props }) => {
     const isBlock = /language-/.test(className || '');
     return isBlock ? (
-      <code className={`block font-mono text-[11px] whitespace-pre ${className || ''}`} {...props}>
+      <code className={`block font-mono text-[0.6875rem] whitespace-pre ${className || ''}`} {...props}>
         {children}
       </code>
     ) : (
-      <code className="font-mono text-[11px] bg-slate-100 dark:bg-slate-800 rounded-sm px-1 py-0.5" {...props}>
+      <code className="font-mono text-[0.6875rem] bg-slate-100 dark:bg-slate-800 rounded-sm px-1 py-0.5" {...props}>
         {children}
       </code>
     );
@@ -249,7 +249,7 @@ const components: Components = {
   hr: () => <hr className="border-slate-200 dark:border-slate-800 my-3" />,
   table: ({ children }) => (
     <div className="overflow-x-auto mb-2">
-      <table className="min-w-full border-collapse text-[11px]">{children}</table>
+      <table className="min-w-full border-collapse text-[0.6875rem]">{children}</table>
     </div>
   ),
   thead: ({ children }) => <thead className="bg-slate-100 dark:bg-slate-800">{children}</thead>,
@@ -280,7 +280,7 @@ export const MarkdownViewer: React.FC<Props> = ({ content, scrollable = false, l
       // inside, see ul/ol), so at 160px / 200% text a description or an
       // artifact inside the ticket's nested cards keeps three characters a
       // line rather than one.
-      className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3 [@media(max-width:200px)]:px-0.5 [@media(max-width:200px)]:py-1 text-xs overflow-x-auto inset-shadow-sm ${
+      className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3 upto-200px:px-0.5 upto-200px:py-1 text-xs overflow-x-auto inset-shadow-sm ${
         scrollable ? 'max-h-64 overflow-y-auto focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500' : ''
       }`}
       tabIndex={scrollable ? 0 : undefined}

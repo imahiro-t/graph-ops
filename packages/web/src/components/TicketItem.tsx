@@ -100,7 +100,7 @@ const MAX_HEADER_LABELS = 3;
 // 2048px at 32px), so large text gets the wrapping layout instead of a
 // single line that ran up to 480px past the panel (see the tab row below).
 const artifactTabClass = (active: boolean) =>
-  `below-64rem:min-w-0 py-3 px-3 from-64rem:px-4 upto-15rem:px-2 upto-15rem:py-2 [@media(max-width:200px)]:px-1 text-xs font-bold border-b-2 flex upto-15rem:flex-wrap items-center gap-x-2 gap-y-1 transition ${
+  `below-64rem:min-w-0 py-3 px-3 from-64rem:px-4 upto-15rem:px-2 upto-15rem:py-2 upto-200px:px-1 text-xs font-bold border-b-2 flex upto-15rem:flex-wrap items-center gap-x-2 gap-y-1 transition ${
     active
       ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
       : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
@@ -1916,7 +1916,7 @@ export const TicketItem: React.FC<Props> = ({
       {isExpanded && (
         <div
           data-testid="ticket-details"
-          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 max-sm:p-3 upto-15rem:p-3 [@media(max-width:200px)]:p-2 [@media(max-width:200px)]:px-1 space-y-6"
+          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 max-sm:p-3 upto-15rem:p-3 upto-200px:p-2 upto-200px:px-1 space-y-6"
         >
           {/* Metadata Bar */}
           <div className="flex flex-wrap items-center gap-y-2 gap-x-6 text-xs text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800 pb-3">
@@ -2012,7 +2012,7 @@ export const TicketItem: React.FC<Props> = ({
               padding is p-3 instead of p-4 -- the same pair as the detail
               panel and the artifact card -- so at 200% text on a 320px
               screen the header row and the body get 16px more width. */}
-          <div className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 [@media(max-width:200px)]:px-1 [@media(max-width:200px)]:py-2 rounded-xl border border-slate-200 dark:border-slate-800">
+          <div className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 upto-200px:px-1 upto-200px:py-2 rounded-xl border border-slate-200 dark:border-slate-800">
             {/* DFLT-00239: the header row and its right-hand group wrap on a
                 narrow line (200% text size on a 320px screen) instead of
                 squeezing or pushing the refined time and the expand button
@@ -2027,18 +2027,18 @@ export const TicketItem: React.FC<Props> = ({
                 time wrap instead of the FileText and History icons being
                 squeezed (to 0px for History at 200% on 320px). */}
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mb-2">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 min-w-0 wrap-anywhere [@media(max-width:200px)]:flex-wrap [@media(max-width:200px)]:wrap-break-word">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 min-w-0 wrap-anywhere upto-200px:flex-wrap upto-200px:wrap-break-word">
                 <FileText aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
-                <span className="min-w-0 wrap-anywhere [@media(max-width:200px)]:wrap-break-word">{t('ticketItem.description.title')}</span>
+                <span className="min-w-0 wrap-anywhere upto-200px:wrap-break-word">{t('ticketItem.description.title')}</span>
               </span>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
                 {/* DFLT-00262: text-[0.625rem] rather than text-[10px] -- the
                     same 10px at a 16px root, but it follows the browser's
                     default font size (WCAG 1.4.4). */}
                 {ticket.refined_at && (
-                  <span className="text-[0.625rem] text-slate-500 dark:text-slate-400 flex items-center gap-1 min-w-0 [@media(max-width:200px)]:flex-wrap">
+                  <span className="text-[0.625rem] text-slate-500 dark:text-slate-400 flex items-center gap-1 min-w-0 upto-200px:flex-wrap">
                     <History aria-hidden="true" className="w-3 h-3 shrink-0" />
-                    <span className="min-w-0 wrap-anywhere [@media(max-width:200px)]:wrap-break-word">
+                    <span className="min-w-0 wrap-anywhere upto-200px:wrap-break-word">
                       {t('ticketItem.description.refinedAt', { time: formatDateTime(ticket.refined_at, i18n.language) })}
                     </span>
                   </span>
@@ -2078,7 +2078,7 @@ export const TicketItem: React.FC<Props> = ({
                       aria-hidden="true"
                       className={`w-3 h-3 shrink-0 motion-safe:transition-transform ${isDescriptionExpanded ? 'rotate-180' : ''}`}
                     />
-                    <span className="min-w-0 wrap-anywhere [@media(max-width:200px)]:wrap-break-word">{t('ticketItem.description.fullText')}</span>
+                    <span className="min-w-0 wrap-anywhere upto-200px:wrap-break-word">{t('ticketItem.description.fullText')}</span>
                   </button>
                 )}
               </div>
@@ -2144,8 +2144,8 @@ export const TicketItem: React.FC<Props> = ({
                 inside the panel instead of the page. mx-auto rather than
                 the container's items-center keeps the graph's left edge
                 reachable in that case. */}
-            <div ref={graphPanelRef} className="lg:col-span-4 min-w-0 bg-white dark:bg-slate-900 p-4 [@media(max-width:200px)]:px-1 [@media(max-width:200px)]:py-2 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col min-h-128">
-              <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 w-full text-left flex items-center justify-between shrink-0 max-lg:flex-wrap max-lg:gap-x-2 max-lg:wrap-anywhere [@media(max-width:200px)]:wrap-break-word">
+            <div ref={graphPanelRef} className="lg:col-span-4 min-w-0 bg-white dark:bg-slate-900 p-4 upto-200px:px-1 upto-200px:py-2 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col min-h-128">
+              <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 w-full text-left flex items-center justify-between shrink-0 max-lg:flex-wrap max-lg:gap-x-2 max-lg:wrap-anywhere upto-200px:wrap-break-word">
                 <span id={graphTitleId} className="max-lg:min-w-0">{t('ticketItem.graphTitle')}</span>
                 <span className="text-[0.625rem] text-indigo-600 dark:text-indigo-400 font-semibold">{t('ticketItem.progress', { percent: progressPercent })}</span>
               </div>
@@ -2296,7 +2296,7 @@ export const TicketItem: React.FC<Props> = ({
                 </div>
               )}
               </div>
-              <div className="w-full mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.6875rem] text-slate-500 dark:text-slate-400 shrink-0 max-lg:wrap-anywhere [@media(max-width:200px)]:wrap-break-word">
+              <div className="w-full mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.6875rem] text-slate-500 dark:text-slate-400 shrink-0 max-lg:wrap-anywhere upto-200px:wrap-break-word">
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> {t('ticketItem.legend.done')}</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> {t('ticketItem.legend.inProgress')}</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500" /> {t('ticketItem.legend.review')}</span>
@@ -2357,7 +2357,7 @@ export const TicketItem: React.FC<Props> = ({
                   a real browser (see the tickets' implementation notes). */}
               <div
                 data-testid="ticket-artifact-tabs"
-                className="flex flex-wrap from-80rem:flex-nowrap items-center justify-between gap-y-1 border-b border-slate-200 dark:border-slate-800 px-4 upto-15rem:px-2 [@media(max-width:200px)]:px-1 pb-2 from-80rem:pb-0 bg-slate-50 dark:bg-slate-800 shrink-0"
+                className="flex flex-wrap from-80rem:flex-nowrap items-center justify-between gap-y-1 border-b border-slate-200 dark:border-slate-800 px-4 upto-15rem:px-2 upto-200px:px-1 pb-2 from-80rem:pb-0 bg-slate-50 dark:bg-slate-800 shrink-0"
               >
               <div
                 role="tablist"
@@ -2411,7 +2411,7 @@ export const TicketItem: React.FC<Props> = ({
               {ticket.artifacts.length > 0 && (
                 <a
                   href={`/api/tickets/${ticket.id}/artifacts/download`}
-                  className="ml-auto min-w-0 from-64rem:shrink-0 flex upto-15rem:flex-wrap items-center gap-1.5 px-3 upto-15rem:px-2 [@media(max-width:200px)]:px-1 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:border-indigo-400 dark:hover:border-indigo-500 transition"
+                  className="ml-auto min-w-0 from-64rem:shrink-0 flex upto-15rem:flex-wrap items-center gap-1.5 px-3 upto-15rem:px-2 upto-200px:px-1 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:border-indigo-400 dark:hover:border-indigo-500 transition"
                   title={t('ticketItem.downloadAllArtifacts')}
                 >
                   <Download aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />
@@ -2436,7 +2436,7 @@ export const TicketItem: React.FC<Props> = ({
                 id={artifactPanelId}
                 aria-labelledby={artifactTabId(activeTab)}
                 tabIndex={0}
-                className="p-4 upto-15rem:p-3 [@media(max-width:200px)]:px-0.5 [@media(max-width:200px)]:py-2 flex-1 min-h-0 overflow-y-auto focus:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+                className="p-4 upto-15rem:p-3 upto-200px:px-0.5 upto-200px:py-2 flex-1 min-h-0 overflow-y-auto focus:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
               >
                 {/* 1. Nodes with Expandable Artifacts */}
                 {activeTab === 'nodes' && (
@@ -2512,7 +2512,7 @@ export const TicketItem: React.FC<Props> = ({
                               "AWAITING" on a line of their own. */}
                           <div
                             onClick={() => toggleNodeExpand(node.id)}
-                            className="flex flex-wrap items-center justify-between gap-x-1 gap-y-2 p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none below-80rem:gap-x-3 upto-15rem:px-1 upto-15rem:py-2 [@media(max-width:200px)]:px-0.5"
+                            className="flex flex-wrap items-center justify-between gap-x-1 gap-y-2 p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none below-80rem:gap-x-3 upto-15rem:px-1 upto-15rem:py-2 upto-200px:px-0.5"
                           >
                             {/* From 80rem up, flex-1 min-w-0 lets node.name
                                 (below) shrink and truncate first --
@@ -2585,7 +2585,7 @@ export const TicketItem: React.FC<Props> = ({
                               <NodeTypeBadge
                                 type={node.type}
                                 theme="light"
-                                className="shrink-0 below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full [@media(max-width:200px)]:flex-wrap [@media(max-width:200px)]:px-1"
+                                className="shrink-0 below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full upto-200px:flex-wrap upto-200px:px-1"
                                 labelClassName="below-80rem:whitespace-normal below-80rem:wrap-anywhere"
                               />
                               <span className="font-semibold text-slate-800 dark:text-slate-200 truncate min-w-0 from-80rem:w-0 from-80rem:basis-[content] below-80rem:whitespace-normal below-80rem:wrap-anywhere">
@@ -2607,7 +2607,7 @@ export const TicketItem: React.FC<Props> = ({
                                 </span>
                               )}
                               {nodeArtifacts.length > 0 && (
-                                <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold border border-indigo-200 dark:border-indigo-800 flex items-center gap-1 shrink-0 whitespace-nowrap below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:wrap-anywhere [@media(max-width:200px)]:flex-wrap [@media(max-width:200px)]:px-1">
+                                <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-semibold border border-indigo-200 dark:border-indigo-800 flex items-center gap-1 shrink-0 whitespace-nowrap below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:wrap-anywhere upto-200px:flex-wrap upto-200px:px-1">
                                   <Layers aria-hidden="true" className="w-3 h-3 shrink-0" />
                                   {t('ticketItem.artifactsCount', { count: nodeArtifacts.length })}
                                 </span>
@@ -2940,7 +2940,7 @@ export const TicketItem: React.FC<Props> = ({
               dark:border-slate-700 won over focus:border-indigo-500. */}
           <div
             data-testid="ticket-action-footer"
-            className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 [@media(max-width:200px)]:p-2 [@media(max-width:200px)]:px-1 rounded-xl border border-slate-200 dark:border-slate-800"
+            className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 upto-200px:p-2 upto-200px:px-1 rounded-xl border border-slate-200 dark:border-slate-800"
           >
             {/* The action row (DFLT-00181): the regular actions (refine, then
                 run) on the left, and at its right end, set apart from them,
@@ -2965,7 +2965,7 @@ export const TicketItem: React.FC<Props> = ({
                       onClick={() => handleRunClaude(t('claudePrompts.refineTicket', { ticketId: ticket.id }), ticket.id)}
                       disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
                       {...submittingProps(isRunning)}
-                      className="px-3 [@media(max-width:200px)]:px-1.5 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
+                      className="px-3 upto-200px:px-1.5 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
                     >
                       {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-600" />}
                       {t('ticketItem.actions.refine')}
@@ -2975,7 +2975,7 @@ export const TicketItem: React.FC<Props> = ({
                       onClick={() => handleRunClaude(t('claudePrompts.processTicket', { ticketId: ticket.id }), ticket.id)}
                       disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
                       {...submittingProps(isRunning)}
-                      className="px-3 [@media(max-width:200px)]:px-1.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition"
+                      className="px-3 upto-200px:px-1.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition"
                     >
                       {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />}
                       {t('ticketItem.actions.run')}
@@ -3021,7 +3021,7 @@ export const TicketItem: React.FC<Props> = ({
                 onClick={handleSendPrompt}
                 disabled={isRunning || !promptText.trim()}
                 {...submittingProps(isRunning)}
-                className="px-4 max-sm:px-3 [@media(max-width:200px)]:px-1.5 max-sm:py-2 max-sm:ml-auto max-w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center justify-center gap-1.5 transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
+                className="px-4 max-sm:px-3 upto-200px:px-1.5 max-sm:py-2 max-sm:ml-auto max-w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center justify-center gap-1.5 transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
               >
                 {isRunning ? <Loader2 aria-hidden="true" className="w-4 h-4 shrink-0 animate-spin" /> : <Send aria-hidden="true" className="w-4 h-4 shrink-0" />}
                 {t('ticketItem.send')}

@@ -322,10 +322,11 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       >
         {children}
       </button>
-      {/* The tooltip's text size is in rem (0.6875rem = 11px at a 16px root)
-          so it follows the root and browser font size: in a window of 200px
-          or less it stands in for labels the header hides, and a 200% text
-          size must enlarge it as it did those labels (DFLT-00293). */}
+      {/* The tooltip's text size is in rem (0.6875rem = 11px at a 16px root,
+          DFLT-00294) so it follows the root and browser font size. The
+          header relies on that: in a window of 200px or less the tooltip
+          stands in for labels the header hides, and a 200% text size must
+          enlarge it as it did those labels (DFLT-00293). */}
       {renderTooltip &&
         createPortal(
           <span

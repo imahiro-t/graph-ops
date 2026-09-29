@@ -6,7 +6,7 @@
 // detail panel, the card, the Markdown box / tab panel / node row, then a
 // button's own padding), left the text a column of 14-46px at a 32px root.
 //
-// Only in a window of 200 CSS px or less ([@media(max-width:200px)]:, a px
+// Only in a window of 200 CSS px or less (upto-200px:, index.css, a px
 // query: the 15rem one also matches 320-336px with a 32px default font):
 // - the nested boxes pad less (the detail panel and the cards px-1, the
 //   Markdown box px-0.5, the tab panel and the node rows px-0.5, the tabs,
@@ -32,7 +32,7 @@ import i18n from '../i18n';
 import { Artifact, GraphNode, TicketDetail } from '../types';
 import { TicketItem } from './TicketItem';
 
-const T = '[@media(max-width:200px)]:';
+const T = 'upto-200px:';
 
 const node = (id: string, name: string, type: GraphNode['type'], status: GraphNode['status']): GraphNode => ({
   id,

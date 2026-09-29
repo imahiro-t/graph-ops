@@ -205,7 +205,7 @@ const UNDER_80REM = 'below-80rem:';
 const FROM_80REM = 'from-80rem:';
 const NARROW_LARGE_TEXT = 'upto-15rem:';
 // DFLT-00293: a window of 200 CSS px or less (160px at 200% text).
-const TINY_WINDOW = '[@media(max-width:200px)]:';
+const TINY_WINDOW = 'upto-200px:';
 
 const expectNoneOf = (el: Element, classes: string[]) => {
   for (const cls of classes) expect(el).not.toHaveClass(cls);

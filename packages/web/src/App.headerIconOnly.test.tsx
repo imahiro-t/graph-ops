@@ -1,7 +1,7 @@
 // DFLT-00293: in a window of 200 CSS px or less the top header shows icons
 // only. The "GraphOps" name, the subtitle, the project name and the Launch
 // Claude, language and New Ticket labels are visually hidden
-// ([@media(max-width:200px)]:sr-only) but stay the buttons' accessible
+// (upto-200px:sr-only) but stay the buttons' accessible
 // names, and Launch Claude and New Ticket become IconButtons whose visible
 // tooltip (hover and keyboard focus) is on only at that width -- the script
 // asks matchMedia('(max-width: 200px)'), the same query as the CSS. Wider
@@ -32,7 +32,7 @@ import { openIconButtonTooltip, openIconButtonTooltips } from './test/iconButton
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 
 const TINY_QUERY = '(max-width: 200px)';
-const SR_ONLY = '[@media(max-width:200px)]:sr-only';
+const SR_ONLY = 'upto-200px:sr-only';
 
 // matches only for the tiny-window query, and only when `tiny`; every other
 // query (the theme's prefers-color-scheme, prefers-reduced-motion) stays
@@ -180,7 +180,7 @@ describe.each(['ja', 'en'] as const)('top header in a window of 200px or less (%
 it('pads the page less only in a window of 200px or less', async () => {
   seed({ tiny: true });
   await renderApp();
-  expect(screen.getByRole('main')).toHaveClass('px-6', 'max-sm:px-3', 'upto-15rem:px-3', '[@media(max-width:200px)]:px-1');
+  expect(screen.getByRole('main')).toHaveClass('px-6', 'max-sm:px-3', 'upto-15rem:px-3', 'upto-200px:px-1');
 });
 
 describe.each(['ja', 'en'] as const)('top header wider than 200px (%s)', lng => {

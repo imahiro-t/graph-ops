@@ -18,7 +18,7 @@
 export const PROJECT_MENU_WIDTH_REM = 16;
 
 // 0.5rem: the header's padding in its narrowest layout
-// ([@media(max-width:200px)]:px-2), so a 160px window with a 32px root font
+// (upto-200px:px-2, max-width: 200px), so a 160px window with a 32px root font
 // still leaves the popup 128px.
 export const POPUP_VIEWPORT_MARGIN_REM = 0.5;
 

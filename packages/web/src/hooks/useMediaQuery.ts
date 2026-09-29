@@ -12,8 +12,9 @@ function matches(query: string): boolean {
 // never matches.
 //
 // Use the same query string as the CSS it pairs with -- e.g. App's
-// `(max-width: 200px)` next to Tailwind's `[@media(max-width:200px)]:` -- so
-// the script and the styles switch at the same width, the boundary included.
+// `(max-width: 200px)` next to the `upto-200px:` variant, which is
+// `@media (max-width: 200px)` (index.css) -- so the script and the styles
+// switch at the same width, the boundary included.
 export function useMediaQuery(query: string): boolean {
   const [value, setValue] = useState(() => matches(query));
 

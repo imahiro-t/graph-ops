@@ -745,8 +745,10 @@ describe('project switcher accessibility', () => {
         expect(prefix).toHaveClass('text-slate-500', 'dark:text-slate-400');
         expect(prefix).not.toHaveClass('text-slate-400');
         expect(prefix).not.toHaveClass('dark:text-slate-500');
-        // Size and typeface are unchanged.
-        expect(prefix).toHaveClass('text-[10px]', 'font-mono');
+        // Same typeface; the size is 0.625rem since DFLT-00294 (10px at the
+        // default 16px, so it looks the same, and it follows the browser's
+        // default font size).
+        expect(prefix).toHaveClass('text-[0.625rem]', 'font-mono');
       }
     });
   });

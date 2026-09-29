@@ -245,7 +245,7 @@ export const App: React.FC = () => {
     [currentProjectName, currentProjectPathLabel, noProjectLabel]
   );
   // DFLT-00293: a window of 200 CSS px or less, the same query as the
-  // header's [@media(max-width:200px)]: classes, so the text labels are
+  // header's upto-200px: classes (index.css), so the text labels are
   // hidden (CSS) and the tooltips that stand in for them are enabled (here)
   // at the same width, the boundary included.
   const isTinyWindow = useMediaQuery('(max-width: 200px)');
@@ -1258,7 +1258,7 @@ export const App: React.FC = () => {
           under the button there). */}
       <header
         ref={headerRef}
-        className={`bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 [@media(max-width:200px)]:px-2 lg:px-6 py-3.5 relative ${headerFitsSticky ? 'lg:sticky lg:top-0' : ''} z-30`}
+        className={`bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 upto-200px:px-2 lg:px-6 py-3.5 relative ${headerFitsSticky ? 'lg:sticky lg:top-0' : ''} z-30`}
       >
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
@@ -1266,10 +1266,10 @@ export const App: React.FC = () => {
                 background, so it stays visible on both light and dark headers without `dark:` variants.
                 Decorative: the adjacent "GraphOps" text already names the app. */}
             <img src="/favicon.svg" alt="" aria-hidden="true" className="w-6 h-6 shrink-0" />
-            <span className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-slate-100 min-w-0 wrap-anywhere [@media(max-width:200px)]:sr-only">
+            <span className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-slate-100 min-w-0 wrap-anywhere upto-200px:sr-only">
               GraphOps
             </span>
-            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium min-w-0 wrap-anywhere [@media(max-width:200px)]:sr-only">{t('header.subtitle')}</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium min-w-0 wrap-anywhere upto-200px:sr-only">{t('header.subtitle')}</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 min-w-0">
@@ -1327,10 +1327,10 @@ export const App: React.FC = () => {
                 aria-expanded={isProjectMenuOpen}
                 aria-haspopup="dialog"
                 aria-controls={isProjectMenuOpen ? PROJECT_MENU_ID : undefined}
-                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 [@media(max-width:200px)]:gap-1 [@media(max-width:200px)]:px-2 transition min-w-0 max-w-full"
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 upto-200px:gap-1 upto-200px:px-2 transition min-w-0 max-w-full"
               >
                 <FolderOpen aria-hidden="true" className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
-                <span className="truncate [@media(max-width:200px)]:sr-only">
+                <span className="truncate upto-200px:sr-only">
                   {currentProject ? currentProject.name : t('projectSwitcher.noProject')}
                 </span>
                 {/* DFLT-00163: WCAG 1.4.11 (3:1). The arrow is the only sign that this opens a menu.
@@ -1364,8 +1364,9 @@ export const App: React.FC = () => {
                       the content box, over the button; top: 100% plus mt-1.5
                       is where the static position put it while the wrapper
                       was a block. The popup is a size container
-                      (@container): where it is narrower than 8rem (a 160-
-                      200px window with a 24-32px root font, say), each item
+                      (@container): where it is narrower than 8rem
+                      (cq-below-8rem:, index.css; a 160-200px window with a
+                      24-32px root font, say), each item
                       pads less and puts the badge and the prefix on a
                       second line, so the name keeps the first line's width
                       after the check mark and never shrinks to nothing. The
@@ -1398,7 +1399,7 @@ export const App: React.FC = () => {
                           key={p.id}
                           onClick={() => switchToProject(p)}
                           aria-current={isCurrent ? 'true' : undefined}
-                          className="w-full text-left px-3 [@container(width<8rem)]:px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 flex [@container(width<8rem)]:flex-wrap items-center gap-2 text-slate-700 dark:text-slate-300"
+                          className="w-full text-left px-3 cq-below-8rem:px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 flex cq-below-8rem:flex-wrap items-center gap-2 text-slate-700 dark:text-slate-300"
                         >
                           <Check
                             aria-hidden="true"
@@ -1412,8 +1413,8 @@ export const App: React.FC = () => {
                               of the first line (flex-1 basis-0) and the group
                               on the right fills a line of its own
                               (basis-full), still right-aligned. */}
-                          <span className="min-w-0 wrap-anywhere [@container(width<8rem)]:flex-1 [@container(width<8rem)]:basis-0">{p.name}</span>
-                          <span className="ml-auto flex items-center gap-2 shrink-0 [@container(width<8rem)]:basis-full [@container(width<8rem)]:justify-end">
+                          <span className="min-w-0 wrap-anywhere cq-below-8rem:flex-1 cq-below-8rem:basis-0">{p.name}</span>
+                          <span className="ml-auto flex items-center gap-2 shrink-0 cq-below-8rem:basis-full cq-below-8rem:justify-end">
                             {pendingApprovalCounts[p.id] > 0 && (
                               <PendingApprovalBadge count={pendingApprovalCounts[p.id]} />
                             )}
@@ -1421,7 +1422,7 @@ export const App: React.FC = () => {
                                 4.76:1 on white and 4.55:1 on the slate-50 hover; slate-400 is 6.96:1
                                 on slate-900 and 5.71:1 on the slate-800 hover. The light hover margin
                                 is thin: recompute if the item backgrounds get darker. */}
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{p.prefix}</span>
+                            <span className="text-[0.625rem] text-slate-500 dark:text-slate-400 font-mono">{p.prefix}</span>
                           </span>
                         </button>
                       );
@@ -1453,10 +1454,10 @@ export const App: React.FC = () => {
               tooltipDisabled={!isTinyWindow}
               wrapperClassName="min-w-0 max-w-full"
               onClick={() => setIsClaudeGlobalOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-700 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 [@media(max-width:200px)]:px-2 transition min-w-0 max-w-full"
+              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-700 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 upto-200px:px-2 transition min-w-0 max-w-full"
             >
               <Terminal aria-hidden="true" className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-              <span className="min-w-0 wrap-anywhere [@media(max-width:200px)]:sr-only">{t('header.launchClaude')}</span>
+              <span className="min-w-0 wrap-anywhere upto-200px:sr-only">{t('header.launchClaude')}</span>
             </IconButton>
 
             {/* The language, theme and settings buttons name themselves
@@ -1471,7 +1472,7 @@ export const App: React.FC = () => {
               className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 transition flex items-center gap-1.5 min-w-0 max-w-full"
             >
               <Languages aria-hidden="true" className="w-4 h-4 shrink-0" />
-              <span className="text-xs font-semibold min-w-0 wrap-anywhere [@media(max-width:200px)]:sr-only">{t(`header.language.${currentLanguage}`)}</span>
+              <span className="text-xs font-semibold min-w-0 wrap-anywhere upto-200px:sr-only">{t(`header.language.${currentLanguage}`)}</span>
             </IconButton>
 
             <IconButton
@@ -1526,10 +1527,10 @@ export const App: React.FC = () => {
               disabled={!currentProject}
               title={isTinyWindow ? undefined : newTicketDisabledReason}
               aria-describedby={newTicketDisabledReason === undefined ? undefined : newTicketDescriptionId}
-              className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 [@media(max-width:200px)]:px-2 transition min-w-0 max-w-full"
+              className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 upto-200px:px-2 transition min-w-0 max-w-full"
             >
               <Plus aria-hidden="true" className="w-4 h-4 shrink-0" />
-              <span className="min-w-0 wrap-anywhere [@media(max-width:200px)]:sr-only">{newTicketLabel}</span>
+              <span className="min-w-0 wrap-anywhere upto-200px:sr-only">{newTicketLabel}</span>
             </IconButton>
             <span id={newTicketDescriptionId} hidden>
               {newTicketDisabledReason}
@@ -1651,7 +1652,7 @@ export const App: React.FC = () => {
           15rem query stays: with a very large default font (over about 267%)
           it still matches above 640px. From sm up, at a normal default font
           size, nothing changes. */}
-      <main className="max-w-7xl mx-auto px-6 max-sm:px-3 upto-15rem:px-3 [@media(max-width:200px)]:px-1 py-6 space-y-6">
+      <main className="max-w-7xl mx-auto px-6 max-sm:px-3 upto-15rem:px-3 upto-200px:px-1 py-6 space-y-6">
         {/* Simple Summary Metrics. DFLT-00251: both children are min-w-0
             max-w-full so neither can be wider than the card; the numbers
             already wrap between items (flex-wrap). Each item is min-w-0
@@ -1702,10 +1703,10 @@ export const App: React.FC = () => {
               container: its width comes from <main>, not from its content. */}
           <div
             data-testid="summary-heading"
-            className="flex upto-15rem:flex-wrap [@container(max-width:12rem)]:flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 max-w-full"
+            className="flex upto-15rem:flex-wrap cq-upto-12rem:flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 max-w-full"
           >
-            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm upto-15rem:min-w-0 upto-15rem:wrap-anywhere [@container(max-width:12rem)]:min-w-0 [@container(max-width:12rem)]:wrap-anywhere">{t('summary.title')}</span>
-            <span className="text-xs text-slate-500 dark:text-slate-400 upto-15rem:min-w-0 upto-15rem:wrap-anywhere [@container(max-width:12rem)]:min-w-0 [@container(max-width:12rem)]:wrap-anywhere">{t('summary.subtitle')}</span>
+            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm upto-15rem:min-w-0 upto-15rem:wrap-anywhere cq-upto-12rem:min-w-0 cq-upto-12rem:wrap-anywhere">{t('summary.title')}</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 upto-15rem:min-w-0 upto-15rem:wrap-anywhere cq-upto-12rem:min-w-0 cq-upto-12rem:wrap-anywhere">{t('summary.subtitle')}</span>
           </div>
 
           <div
@@ -1714,28 +1715,28 @@ export const App: React.FC = () => {
           >
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold wrap-anywhere text-slate-800 dark:text-slate-200">{totalCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:wrap-anywhere">{t('summary.total')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 upto-200px:wrap-anywhere">{t('summary.total')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold wrap-anywhere text-blue-600 dark:text-blue-400">{inProgressCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:wrap-anywhere">{t('summary.inProgress')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 upto-200px:wrap-anywhere">{t('summary.inProgress')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold wrap-anywhere text-purple-600 dark:text-purple-400">{inReviewCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:wrap-anywhere">{t('summary.inReview')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 upto-200px:wrap-anywhere">{t('summary.inReview')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold wrap-anywhere text-emerald-600 dark:text-emerald-400">{doneCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:wrap-anywhere">{t('summary.done')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 upto-200px:wrap-anywhere">{t('summary.done')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div
                 data-testid="summary-node-progress"
                 className="text-lg font-bold wrap-anywhere text-slate-800 dark:text-slate-200"
               >
-                <span className="whitespace-nowrap [@media(max-width:200px)]:whitespace-normal">{doneNodesCount}/</span><wbr /><span className="whitespace-nowrap [@media(max-width:200px)]:whitespace-normal">{totalNodesCount}</span>
+                <span className="whitespace-nowrap upto-200px:whitespace-normal">{doneNodesCount}/</span><wbr /><span className="whitespace-nowrap upto-200px:whitespace-normal">{totalNodesCount}</span>
               </div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:wrap-anywhere">{t('summary.nodeProgress')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 upto-200px:wrap-anywhere">{t('summary.nodeProgress')}</div>
             </div>
           </div>
         </div>

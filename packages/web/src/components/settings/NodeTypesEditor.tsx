@@ -329,7 +329,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 {!hasOverride && info.has_default && (
                   <span
                     title={t('settings.nodeTypes.defaultBadgeHint')}
-                    className="shrink-0 text-[9px] font-semibold px-1 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 upto-15rem:ml-[1.375rem]"
+                    className="shrink-0 text-[0.5625rem] font-semibold px-1 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 upto-15rem:ml-[1.375rem]"
                   >
                     {t('settings.nodeTypes.defaultBadge')}
                   </span>
