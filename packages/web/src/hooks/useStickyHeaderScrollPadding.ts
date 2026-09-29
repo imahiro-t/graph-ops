@@ -5,6 +5,14 @@ import { RefObject, useLayoutEffect } from 'react';
 // index.css's @theme.
 export const LG_MEDIA_QUERY = '(min-width: 1024px)';
 
+// DFLT-00278: the gap left between the pinned header's bottom edge and what
+// the browser scrolls into view. See the comment on the hook.
+export const STICKY_HEADER_FOCUS_GAP = '0.5rem';
+
+// The scroll-padding-top used while the header is pinned: its real height
+// plus STICKY_HEADER_FOCUS_GAP.
+export const pinnedScrollPadding = (height: number) => `calc(${height}px + ${STICKY_HEADER_FOCUS_GAP})`;
+
 // DFLT-00268: while the app header is pinned to the top of the window, gives
 // the page's scroll container (<html>) a scroll-padding-top of the header's
 // real height, so what the browser scrolls into view -- the element focused
@@ -21,7 +29,7 @@ export const LG_MEDIA_QUERY = '(min-width: 1024px)';
 // 0 (nothing laid out, as in jsdom); a missing matchMedia counts as "not lg".
 // A missing ResizeObserver, or a matchMedia result without addEventListener,
 // only means fewer triggers to recompute on: with a measurable header and a
-// matching query the padding is still the header's height.
+// matching query the padding is still the header's height plus the gap.
 //
 // Recomputed when the header resizes (ResizeObserver; only observe() and
 // disconnect() are called, like useFitsSticky), when the window resizes,
@@ -29,6 +37,17 @@ export const LG_MEDIA_QUERY = '(min-width: 1024px)';
 // Written straight to the DOM (no state, no re-render); the header's height
 // does not depend on it, so nothing feeds back. The previous value is put
 // back on unmount.
+//
+// DFLT-00278: the padding is the header's height plus STICKY_HEADER_FOCUS_GAP
+// (0.5rem), not the height alone. With the height alone, WebKit (Option+Tab)
+// stopped a focused button's top edge exactly at the header's bottom edge
+// (114px), so the part of the focus indicator drawn outside the button
+// (ring-2, or the browser's default outline and outline-offset) could be
+// hidden under the header by a few pixels. The gap is in rem so it grows with
+// the root font size (16px at a 32px root). It only moves where things stop
+// when scrolled into view; whether the header is pinned (useFitsSticky) is
+// not affected. The value is written as calc(), which browsers and jsdom
+// both keep as is.
 export function useStickyHeaderScrollPadding(ref: RefObject<HTMLElement | null>, pinnable: boolean) {
   useLayoutEffect(() => {
     const el = ref.current;
@@ -40,7 +59,7 @@ export function useStickyHeaderScrollPadding(ref: RefObject<HTMLElement | null>,
     const update = () => {
       const height = el.offsetHeight;
       const pinned = pinnable && (mql?.matches ?? false) && height > 0;
-      root.style.scrollPaddingTop = pinned ? `${height}px` : '';
+      root.style.scrollPaddingTop = pinned ? pinnedScrollPadding(height) : '';
     };
     update();
 

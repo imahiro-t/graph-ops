@@ -944,7 +944,8 @@ export const App: React.FC = () => {
     if (el) {
       const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
       // block 'start' honours <html>'s scroll-padding-top, which holds the
-      // pinned header's height (useStickyHeaderScrollPadding, DFLT-00268).
+      // pinned header's height plus a 0.5rem gap
+      // (useStickyHeaderScrollPadding, DFLT-00268 / DFLT-00278).
       el.scrollIntoView?.({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' });
       el.focus({ preventScroll: true });
     }
@@ -1054,6 +1055,8 @@ export const App: React.FC = () => {
   // real height, so the element focused with Tab and the card opened by
   // handleOpenTicket's scrollIntoView stop below it rather than under it
   // (WCAG 2.4.11) -- in a low window the 114px header otherwise hid them.
+  // DFLT-00278: plus a 0.5rem gap, so the focus ring outside a focused button
+  // is not clipped by the header either.
   // Unpinned, the padding is 0 as before.
   const headerRef = useRef<HTMLElement>(null);
   const headerFitsSticky = useFitsSticky(headerRef, 0.25, 128);
@@ -1396,7 +1399,9 @@ export const App: React.FC = () => {
                 // (WCAG 2.4.7). blue-500 is 3.52:1 on the slate-50 input and 3.68:1 on the white
                 // toolbar; blue-400 is 5.75:1 on the slate-800 input and 7.02:1 on the slate-900
                 // toolbar (WCAG 1.4.11). Text fields match :focus-visible on a click as well.
-                className="pl-8 pr-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs focus:outline-hidden focus:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 w-56 max-w-full text-slate-900 dark:text-slate-100"
+                // DFLT-00276: dark:focus:border-blue-400, or dark:border-slate-700 kept the
+                // border slate-700 on focus; blue-400 matches the dark ring and the other inputs.
+                className="pl-8 pr-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs focus:outline-hidden focus:border-blue-500 dark:focus:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 w-56 max-w-full text-slate-900 dark:text-slate-100"
               />
             </div>
 

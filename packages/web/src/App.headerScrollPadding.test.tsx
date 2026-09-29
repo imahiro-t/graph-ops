@@ -1,8 +1,12 @@
 // DFLT-00268: while the app header is pinned (from lg up, and while
-// useFitsSticky lets it be), <html> gets a scroll-padding-top of the header's
-// real height, so the element focused with Tab and the card opened by
-// handleOpenTicket's scrollIntoView({ block: 'start' }) stop below the header
-// instead of under it (WCAG 2.4.11). Unpinned, the padding stays empty (0).
+// useFitsSticky lets it be), <html> gets a scroll-padding-top, so the element
+// focused with Tab and the card opened by handleOpenTicket's
+// scrollIntoView({ block: 'start' }) stop below the header instead of under it
+// (WCAG 2.4.11). Unpinned, the padding stays empty (0).
+// DFLT-00278: the padding is the header's real height plus a 0.5rem gap
+// (calc(<height>px + 0.5rem)), so the focus ring drawn outside a focused
+// button is not clipped by the header either. pinned() below spells the
+// expected value out in one place.
 //
 // jsdom computes no layout and evaluates no media queries, so the header's
 // offsetHeight, innerHeight, ResizeObserver and matchMedia are stubbed. That
@@ -37,6 +41,8 @@ function seed() {
 const classesOf = (el: Element) => el.className.split(/\s+/).filter(Boolean);
 const padding = () => document.documentElement.style.scrollPaddingTop;
 const stickyClasses = ['lg:sticky', 'lg:top-0'];
+// The expected scroll-padding-top while the header is pinned at `height`.
+const pinned = (height: number) => `calc(${height}px + 0.5rem)`;
 
 describe('App header scroll padding (DFLT-00268)', () => {
   let headerHeight = 0;
@@ -128,35 +134,35 @@ describe('App header scroll padding (DFLT-00268)', () => {
     [1280, 400],
     [1024, 300],
     [1440, 900]
-  ])('is the header height while pinned at %ix%i', async (_width, height) => {
+  ])('is the header height plus 0.5rem while pinned at %ix%i', async (_width, height) => {
     vi.stubGlobal('innerHeight', height);
     headerHeight = 114;
     render(<App />);
     // Right after the first commit: set in a layout effect, before paint.
     const header = screen.getByRole('banner');
     expect(classesOf(header)).toEqual(expect.arrayContaining(stickyClasses));
-    expect(padding()).toBe('114px');
+    expect(padding()).toBe(pinned(114));
     await screen.findByText('ALP-00001');
-    expect(padding()).toBe('114px');
+    expect(padding()).toBe(pinned(114));
   });
 
   it('follows the header height while it stays pinned', async () => {
     vi.stubGlobal('innerHeight', 900);
     headerHeight = 114;
     const { header } = await renderHeader();
-    expect(padding()).toBe('114px');
+    expect(padding()).toBe(pinned(114));
 
     headerHeight = 150; // 150 <= 900 * 0.25
     fireHeaderResize(header);
     expect(classesOf(header)).toEqual(expect.arrayContaining(stickyClasses));
-    expect(padding()).toBe('150px');
+    expect(padding()).toBe(pinned(150));
   });
 
   it('clears when the header grows past the threshold and unpins', async () => {
     vi.stubGlobal('innerHeight', 400);
     headerHeight = 114;
     const { header } = await renderHeader();
-    expect(padding()).toBe('114px');
+    expect(padding()).toBe(pinned(114));
 
     headerHeight = 150; // > 128 and > 400 * 0.25
     fireHeaderResize(header);
@@ -180,7 +186,7 @@ describe('App header scroll padding (DFLT-00268)', () => {
     expect(padding()).toBe('');
 
     setLg(true);
-    expect(padding()).toBe('114px');
+    expect(padding()).toBe(pinned(114));
     setLg(false);
     expect(padding()).toBe('');
   });
@@ -199,7 +205,7 @@ describe('App header scroll padding (DFLT-00268)', () => {
       window.dispatchEvent(new Event('resize'));
     });
     expect(classesOf(header)).toEqual(expect.arrayContaining(stickyClasses));
-    expect(padding()).toBe('532px');
+    expect(padding()).toBe(pinned(532));
   });
 
   it('stays empty where nothing is laid out (offsetHeight 0, jsdom)', async () => {
@@ -211,13 +217,14 @@ describe('App header scroll padding (DFLT-00268)', () => {
   it('puts the old value back and unsubscribes on unmount', async () => {
     vi.stubGlobal('innerHeight', 400);
     headerHeight = 114;
+    document.documentElement.style.scrollPaddingTop = '8px';
     const removeSpy = vi.spyOn(window, 'removeEventListener');
     const { header, unmount } = await renderHeader();
-    expect(padding()).toBe('114px');
+    expect(padding()).toBe(pinned(114));
     expect(lg.listeners.size).toBeGreaterThan(0);
 
     unmount();
-    expect(padding()).toBe('');
+    expect(padding()).toBe('8px');
     expect(lg.listeners.size).toBe(0);
     expect(observers.some(o => o.targets.includes(header))).toBe(false);
     expect(removeSpy).toHaveBeenCalledWith('resize', expect.any(Function));
@@ -225,8 +232,8 @@ describe('App header scroll padding (DFLT-00268)', () => {
 
   // The card the family link opens is scrolled with block 'start', which
   // the browser lines up with <html>'s scroll padding: the header's height
-  // while it is pinned.
-  it('scrolls the opened ticket into view while the padding holds the pinned header height', async () => {
+  // plus 0.5rem while it is pinned.
+  it('scrolls the opened ticket into view while the padding holds the pinned header height plus the gap', async () => {
     vi.stubGlobal('innerHeight', 400);
     headerHeight = 114;
     const calls: { id: string; options: unknown; padding: string }[] = [];
@@ -247,7 +254,7 @@ describe('App header scroll padding (DFLT-00268)', () => {
       const opened = calls.filter(c => c.id === 'ticket-ALP-00002');
       expect(opened).toHaveLength(1);
       expect(opened[0].options).toEqual(expect.objectContaining({ block: 'start' }));
-      expect(opened[0].padding).toBe('114px');
+      expect(opened[0].padding).toBe(pinned(114));
     } finally {
       if (original) Object.defineProperty(Element.prototype, 'scrollIntoView', original);
       else delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
