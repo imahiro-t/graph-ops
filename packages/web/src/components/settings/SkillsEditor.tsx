@@ -16,6 +16,7 @@ import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 import { submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
+import { LIST_HEADING_CLASS, LIST_ITEM_FOCUS_CLASS, LIST_LAYOUT_CLASS, LIST_PANE_CLASS } from './listPane';
 
 interface Props {
   onDirtyChange: (dirty: boolean) => void;
@@ -125,18 +126,12 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   };
 
   return (
-    <div className="flex h-full min-h-0 gap-4 narrow:flex-col narrow:h-auto">
+    <div className={LIST_LAYOUT_CLASS}>
       {confirmDialog}
-      {/* Left: skill list. Its heading is sticky, so the list's scroll
-          padding (3rem, taller than the heading's 1rem padding + one 11px
-          line at any default font size) keeps an item that keyboard focus
-          scrolls into view -- e.g. by Shift+Tab -- below the heading instead
-          of under it, and z-10 keeps scrolled rows (and their delete
-          buttons) painted beneath the heading. It matters most below 48rem,
-          where the list is capped at max-h-40 and scrolls (DFLT-00261 A-1);
-          the padding only affects scroll-into-view, not the layout. */}
-      <div className="w-56 shrink-0 border border-slate-200 dark:border-slate-800 rounded-lg overflow-y-auto scroll-pt-12 bg-slate-50 dark:bg-slate-800 narrow:w-full narrow:max-h-40">
-        <div className="px-3 py-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10 bg-slate-50 dark:bg-slate-800">
+      {/* Left: skill list. See listPane.ts for why the heading is sticky
+          and the list has scroll padding. */}
+      <div className={LIST_PANE_CLASS}>
+        <div className={LIST_HEADING_CLASS}>
           {t('settings.skills.listTitle')}
         </div>
         {skills.map(info => {
@@ -151,7 +146,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
             <button
               key={info.name}
               onClick={() => void select(info.name)}
-              className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 border-b border-slate-100 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-900 transition ${
+              className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 border-b border-slate-100 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-900 transition ${LIST_ITEM_FOCUS_CLASS} ${
                 selected === info.name ? 'bg-white dark:bg-slate-900 font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'
               }`}
             >
@@ -166,7 +161,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
       {/* Right: editor */}
       <div className="flex-1 min-w-0 flex flex-col gap-3">
-        {error && <ErrorBox className="p-2.5 text-[11px]">{error}</ErrorBox>}
+        {error && <ErrorBox className="p-2.5 text-[0.6875rem]">{error}</ErrorBox>}
         {loading ? (
           <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
             <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> {t('settings.common.loading')}
@@ -183,7 +178,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 role="region"
                 aria-labelledby={mergedPreviewLabelId}
                 tabIndex={0}
-                className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 max-h-40 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
+                className="whitespace-pre-wrap text-[0.6875rem] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 max-h-40 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
               >
                 {mergedText || t('settings.skills.emptyMergedHint')}
               </pre>
@@ -197,7 +192,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 placeholder={t('settings.skills.tierTextPlaceholder')}
                 className="flex-1 min-h-40 w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
               />
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">{t('settings.skills.emptyOverrideHint')}</p>
+              <p className="text-[0.625rem] text-slate-500 dark:text-slate-400 mt-1">{t('settings.skills.emptyOverrideHint')}</p>
             </div>
             <div className="flex justify-end items-center gap-2 narrow:flex-wrap">
               {savedFlash && (

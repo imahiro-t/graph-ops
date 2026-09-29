@@ -829,8 +829,13 @@ describe('NodeTypesEditor narrow reflow (DFLT-00261)', () => {
     expect(root).toHaveClass('flex', 'h-full', 'min-h-0', 'gap-4', 'narrow:flex-col', 'narrow:h-auto');
     const list = root.querySelector('.w-56') as HTMLElement;
     expect(list).toHaveClass('w-56', 'shrink-0', 'overflow-y-auto', 'narrow:w-full', 'narrow:max-h-40');
-    for (const name of list.querySelectorAll('span.truncate')) {
-      expect(name).toHaveClass('narrow:whitespace-normal', 'narrow:wrap-anywhere');
+    // DFLT-00287: the names no longer wrap below 48rem -- they stay on one
+    // line, cut off with an ellipsis (see the DFLT-00287 block below).
+    const names = list.querySelectorAll('span.truncate');
+    expect(names.length).toBe(TYPES.length);
+    for (const name of names) {
+      expect(name).not.toHaveClass('narrow:whitespace-normal');
+      expect(name).not.toHaveClass('narrow:wrap-anywhere');
     }
     const saveRow = screen.getByRole('button', { name: i18n.t('settings.common.save') }).parentElement as HTMLElement;
     expect(saveRow).toHaveClass('flex', 'justify-end', 'narrow:flex-wrap');
@@ -846,5 +851,186 @@ describe('NodeTypesEditor narrow reflow (DFLT-00261)', () => {
     expect(list).toHaveClass('overflow-y-auto', 'scroll-pt-12');
     expect(list.firstElementChild).toHaveTextContent(i18n.t('settings.nodeTypes.listTitle'));
     expect(list.firstElementChild).toHaveClass('sticky', 'top-0', 'z-10');
+  });
+});
+
+// DFLT-00287: at a 200% font on a 320px screen the node type names broke
+// every letter or two ("Pla/n"), because the name had next to no width left
+// on its row and wrap-anywhere let it break anywhere. Now a name is always one
+// line with an ellipsis (never broken mid-word); its full text stays in the
+// button's accessible name and the title tooltip, and the editor heading
+// shows it in full once the type is selected. At the narrowest size the
+// "default" badge / override dot move under the name so it gets the row.
+// jsdom does no layout or media queries, so the classes and the heading are
+// pinned here; the widths were measured in a real browser (implementation
+// notes).
+describe('NodeTypesEditor names cut off with an ellipsis, full name in the editor heading (DFLT-00287)', () => {
+  const MIXED: SettingsNodeTypeInfo[] = [
+    { type: 'implementation', has_default: true, has_user_override: false },
+    { type: 'gherkin_spec', has_default: true, has_user_override: true },
+    { type: 'security_review_extended', has_default: false, has_user_override: true }
+  ];
+
+  beforeEach(async () => {
+    await i18n.changeLanguage('en');
+    mockedFetchTypes.mockReset();
+    mockedFetchType.mockReset();
+    mockedFetchTypes.mockResolvedValue(MIXED);
+    stubFetchType();
+  });
+
+  afterEach(async () => {
+    await i18n.changeLanguage('ja');
+  });
+
+  const itemButton = (name: string) => screen.getByRole('button', { name: new RegExp(`^${name}`) });
+  const nameSpan = (name: string) => itemButton(name).querySelector('span.truncate') as HTMLElement;
+  const editorHeading = () => screen.getByRole('heading', { level: 3 });
+
+  it('keeps every name on one line with an ellipsis and its full text in the title', async () => {
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    const name = nameSpan('Implementation');
+    expect(name).toHaveTextContent(/^Implementation$/);
+    expect(name).toHaveClass('truncate');
+    expect(name).not.toHaveClass('narrow:whitespace-normal');
+    expect(name).not.toHaveClass('narrow:wrap-anywhere');
+    expect(name).not.toHaveClass('wrap-anywhere');
+    expect(name).toHaveAttribute('title', 'Implementation');
+    expect(nameSpan('security_review_extended')).toHaveAttribute('title', 'security_review_extended');
+  });
+
+  it('moves the "default" badge and the override dot under the name at the narrowest size', async () => {
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    for (const label of ['Implementation', 'Gherkin Spec', 'security_review_extended']) {
+      const button = itemButton(label);
+      expect(button).toHaveClass('upto-15rem:flex-wrap', 'upto-15rem:gap-y-0.5');
+      expect(nameSpan(label)).toHaveClass('flex-1', 'upto-15rem:basis-[calc(100%-1.375rem)]');
+    }
+    const badge = screen.getByText(i18n.t('settings.nodeTypes.defaultBadge'));
+    expect(itemButton('Implementation')).toContainElement(badge);
+    expect(badge).toHaveClass('upto-15rem:ml-[1.375rem]');
+    // The 9px badge text is out of scope for DFLT-00287 (only 10px / 11px).
+    expect(badge).toHaveClass('text-[9px]');
+    const dot = itemButton('Gherkin Spec').querySelector(`[title="${i18n.t('settings.nodeTypes.overrideBadge')}"]`);
+    expect(dot).toHaveClass('upto-15rem:ml-[1.375rem]');
+  });
+
+  it('keeps the full name in the item button and delete button accessible names', async () => {
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    expect(itemButton('Implementation')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^security_review_extended$/ })).toBeInTheDocument();
+    const del = screen.getByRole('button', {
+      name: i18n.t('settings.nodeTypes.deleteTypeAriaLabel', { name: 'Implementation' })
+    });
+    expect(del.getAttribute('aria-label') ?? del.textContent).toContain('Implementation');
+  });
+
+  it.each([
+    ['click', 'Implementation', 'implementation'],
+    ['keyboard Enter', 'Gherkin Spec', 'gherkin_spec']
+  ] as const)('shows a default type\'s full name and its id in the editor heading (%s)', async (how, label, type) => {
+    const user = userEvent.setup();
+    // Start on the custom type so selecting the default one is a change.
+    mockedFetchTypes.mockResolvedValue([MIXED[2], MIXED[0], MIXED[1]]);
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('security_review_extended-tier-text');
+
+    if (how === 'click') {
+      await user.click(itemButton(label));
+    } else {
+      itemButton(label).focus();
+      await user.keyboard('{Enter}');
+    }
+    await screen.findByDisplayValue(`${type}-tier-text`);
+
+    const heading = editorHeading();
+    expect(heading.tagName).toBe('H3');
+    expect(heading).toHaveTextContent(label);
+    const id = heading.querySelector('code');
+    expect(id).not.toBeNull();
+    expect(id).toHaveTextContent(new RegExp(`^${type}$`));
+    expect(id).toHaveClass('font-mono');
+    expect(id?.textContent).not.toBe(heading.querySelector('span')?.textContent);
+  });
+
+  // DFLT-00287 (Gherkin review carry-over): a label that differs from the id
+  // only in case ("Plan" for plan) still counts as different, so the id is
+  // shown.
+  it('shows the id even when the label differs from it only in case', async () => {
+    mockedFetchTypes.mockResolvedValue([{ type: 'plan', has_default: true, has_user_override: false }]);
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('plan-tier-text');
+
+    const heading = editorHeading();
+    expect(heading.querySelector('span')).toHaveTextContent(/^Plan$/);
+    expect(heading.querySelector('code')).toHaveTextContent(/^plan$/);
+  });
+
+  it.each(['click', 'keyboard Enter'] as const)('shows a custom type\'s id only once in the editor heading (%s)', async how => {
+    const user = userEvent.setup();
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    const button = screen.getByRole('button', { name: /^security_review_extended$/ });
+    if (how === 'click') {
+      await user.click(button);
+    } else {
+      button.focus();
+      await user.keyboard('{Enter}');
+    }
+    await screen.findByDisplayValue('security_review_extended-tier-text');
+
+    const heading = editorHeading();
+    expect(heading).toHaveTextContent(/^security_review_extended$/);
+    expect(heading.textContent?.split('security_review_extended').length).toBe(2);
+    expect(heading.querySelector('code')).toBeNull();
+  });
+
+  it('shows the selected name in the heading while its text is still loading', async () => {
+    const user = userEvent.setup();
+    mockedFetchTypes.mockResolvedValue([MIXED[1], MIXED[0]]);
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('gherkin_spec-tier-text');
+
+    let resolve: (value: { type: string; tier_text: string; merged_text: string }) => void = () => {};
+    mockedFetchType.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+    await user.click(itemButton('Implementation'));
+
+    expect(await screen.findByText(i18n.t('settings.common.loading'))).toBeInTheDocument();
+    expect(editorHeading()).toHaveTextContent('Implementation');
+
+    await act(async () => {
+      resolve({ type: 'implementation', tier_text: 'implementation-tier-text', merged_text: 'implementation-merged-text' });
+    });
+    await screen.findByDisplayValue('implementation-tier-text');
+    expect(screen.queryByText(i18n.t('settings.common.loading'))).not.toBeInTheDocument();
+    expect(editorHeading()).toHaveTextContent('Implementation');
+  });
+
+  it('uses the settings heading level and styling, wrapping only between words where it can', async () => {
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    const heading = editorHeading();
+    expect(heading.tagName).toBe('H3');
+    // Same size and weight as AppSettingsEditor's section headings.
+    expect(heading).toHaveClass('text-xs', 'font-bold', 'wrap-break-word');
+    expect(heading).not.toHaveClass('wrap-anywhere');
+  });
+
+  it('shows the translated name in the Japanese UI with the id beside it', async () => {
+    await i18n.changeLanguage('ja');
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    const heading = editorHeading();
+    expect(heading.querySelector('span')).toHaveTextContent(i18n.t('nodeType.implementation'));
+    expect(heading.querySelector('code')).toHaveTextContent('implementation');
   });
 });

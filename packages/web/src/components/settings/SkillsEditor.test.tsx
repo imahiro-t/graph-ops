@@ -63,7 +63,7 @@ describe('SkillsEditor', () => {
     await screen.findByDisplayValue('create-ticket-tier-text');
 
     const hint = screen.getByText(i18n.t('settings.skills.emptyOverrideHint'));
-    expect(hint).toHaveClass('text-slate-500', 'dark:text-slate-400', 'text-[10px]');
+    expect(hint).toHaveClass('text-slate-500', 'dark:text-slate-400', 'text-[0.625rem]');
     expect(hint).not.toHaveClass('text-slate-400');
     expect(hint).not.toHaveClass('dark:text-slate-500');
   });

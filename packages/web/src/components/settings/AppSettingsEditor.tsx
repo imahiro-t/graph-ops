@@ -575,13 +575,13 @@ export const AppSettingsEditor: React.FC<Props> = ({
       {/* Outside the project list, which swaps to its empty state when the
           last project is deleted and would take the region with it. */}
       <StatusLiveRegion message={projectDeleteNotice} />
-      {error && <ErrorBox aria-hidden="true" className="p-2.5 text-[11px] whitespace-pre-wrap">{error}</ErrorBox>}
+      {error && <ErrorBox aria-hidden="true" className="p-2.5 text-[0.6875rem] whitespace-pre-wrap">{error}</ErrorBox>}
 
       {/* Where a save lands. The server answers '' when it has no home
           directory to resolve, so name the file in words rather than
           printing an empty path -- and a save in that state fails with
           HOME_CONFIG_UNAVAILABLE rather than silently going nowhere. */}
-      <div className="p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[11px] rounded-lg border border-slate-200 dark:border-slate-700 wrap-anywhere">
+      <div className="p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[0.6875rem] rounded-lg border border-slate-200 dark:border-slate-700 wrap-anywhere">
         {configPath
           ? t('settings.appSettings.restartNote', { path: configPath })
           : t('settings.appSettings.restartNoteNoPath')}
@@ -598,7 +598,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
           which is exactly when config_path is non-empty (accessibility
           review A-3). */}
       {warnings.includes(APP_SETTINGS_WARNINGS.homeConfigUnreadable) && (
-        <div className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[11px] rounded-lg border border-amber-200 dark:border-amber-900 wrap-anywhere">
+        <div className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 text-[0.6875rem] rounded-lg border border-amber-200 dark:border-amber-900 wrap-anywhere">
           {t('settings.appSettings.homeConfigUnreadable', { path: configPath })}
         </div>
       )}
@@ -608,7 +608,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
         <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('settings.appSettings.storage.title')}</h3>
 
         <div>
-          <span id={`${fieldId}-db-backend`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+          <span id={`${fieldId}-db-backend`} className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
             {t('settings.appSettings.storage.dbBackendLabel')}
           </span>
           <div role="radiogroup" aria-labelledby={`${fieldId}-db-backend`} className="flex gap-3 narrow:flex-wrap narrow:gap-y-1">
@@ -627,13 +627,13 @@ export const AppSettingsEditor: React.FC<Props> = ({
               </label>
             ))}
           </div>
-          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{t('settings.appSettings.storage.dbBackendSwitchHint')}</p>
-          {effective && <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 wrap-anywhere">{t('settings.appSettings.currentlyInEffect', { value: effective.dbBackend })}</p>}
+          <p className="text-[0.625rem] text-slate-500 dark:text-slate-400 mt-0.5">{t('settings.appSettings.storage.dbBackendSwitchHint')}</p>
+          {effective && <p className="text-[0.625rem] text-slate-500 dark:text-slate-400 mt-0.5 wrap-anywhere">{t('settings.appSettings.currentlyInEffect', { value: effective.dbBackend })}</p>}
         </div>
 
         {form.dbBackend === 'sqlite' ? (
           <div>
-            <label htmlFor={`${fieldId}-db-path`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.dbPathLabel')}</label>
+            <label htmlFor={`${fieldId}-db-path`} className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.dbPathLabel')}</label>
             <input
               id={`${fieldId}-db-path`}
               value={form.dbPath}
@@ -641,13 +641,13 @@ export const AppSettingsEditor: React.FC<Props> = ({
               placeholder={effective?.dbPath}
               className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
             />
-            {effective && <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 wrap-anywhere">{t('settings.appSettings.currentlyInEffect', { value: effective.dbPath })}</p>}
+            {effective && <p className="text-[0.625rem] text-slate-500 dark:text-slate-400 mt-0.5 wrap-anywhere">{t('settings.appSettings.currentlyInEffect', { value: effective.dbPath })}</p>}
           </div>
         ) : form.dbBackend === 'mysql' ? (
           <div className="space-y-2 border border-slate-100 dark:border-slate-800 rounded-lg p-2.5 bg-slate-50/50 dark:bg-slate-900/50">
             <div className="grid grid-cols-3 gap-2 narrow:grid-cols-1">
               <div className="col-span-2 narrow:col-span-1">
-                <label htmlFor="mysql-host" className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.mysqlHostLabel')}</label>
+                <label htmlFor="mysql-host" className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.mysqlHostLabel')}</label>
                 <input
                   id="mysql-host"
                   value={form.mysqlHost}
@@ -658,7 +658,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 />
               </div>
               <div>
-                <label htmlFor="mysql-port" className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.mysqlPortLabel')}</label>
+                <label htmlFor="mysql-port" className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.mysqlPortLabel')}</label>
                 <input
                   id="mysql-port"
                   type="number"
@@ -669,7 +669,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
               </div>
             </div>
             <div>
-              <label htmlFor="mysql-database" className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.mysqlDatabaseLabel')}</label>
+              <label htmlFor="mysql-database" className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.mysqlDatabaseLabel')}</label>
               <input
                 id="mysql-database"
                 value={form.mysqlDatabase}
@@ -680,7 +680,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
               />
             </div>
             <div>
-              <label htmlFor="mysql-user" className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.mysqlUserLabel')}</label>
+              <label htmlFor="mysql-user" className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.mysqlUserLabel')}</label>
               <input
                 id="mysql-user"
                 value={form.mysqlUser}
@@ -691,7 +691,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
               />
             </div>
             <div>
-              <label htmlFor="mysql-password" className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.mysqlPasswordLabel')}</label>
+              <label htmlFor="mysql-password" className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.mysqlPasswordLabel')}</label>
               {/* A stored password is never sent to this UI, so in the
                   'redacted' state the field renders empty (with a "already
                   saved" placeholder) even though the form state still holds
@@ -708,7 +708,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 aria-describedby={mysqlPasswordRetypeRequired ? 'mysql-password-retype-hint' : undefined}
                 className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
               />
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+              <p className="text-[0.625rem] text-slate-500 dark:text-slate-400 mt-0.5">
                 {mysqlPasswordState === 'redacted'
                   ? t('settings.appSettings.storage.mysqlPasswordSavedHint')
                   : mysqlPasswordEnvVar
@@ -718,14 +718,14 @@ export const AppSettingsEditor: React.FC<Props> = ({
               {/* 読み上げと aria-describedby の参照先は、Storage セクション末尾の
                   常時マウントの live region が担当する（SC 4.1.3）。 */}
               {mysqlPasswordRetypeMessage && (
-                <p aria-hidden="true" className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5">
+                <p aria-hidden="true" className="text-[0.625rem] text-amber-700 dark:text-amber-400 mt-0.5">
                   {mysqlPasswordRetypeMessage}
                 </p>
               )}
             </div>
 
             <div>
-              <span id="mysql-tls-label" className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+              <span id="mysql-tls-label" className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
                 {t('settings.appSettings.storage.mysqlTlsLabel')}
               </span>
               <div role="radiogroup" aria-labelledby="mysql-tls-label" className="flex flex-col gap-1">
@@ -748,7 +748,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
               </div>
               <p
                 id="mysql-tls-mode-hint"
-                className={`text-[10px] mt-0.5 ${
+                className={`text-[0.625rem] mt-0.5 ${
                   form.mysqlTls === 'disabled' ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'
                 }`}
               >
@@ -764,7 +764,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
 
             {form.mysqlTls !== 'disabled' && (
               <div>
-                <label htmlFor="mysql-tls-ca" className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+                <label htmlFor="mysql-tls-ca" className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
                   {t('settings.appSettings.storage.mysqlTlsCaLabel')}
                 </label>
                 <input
@@ -775,10 +775,10 @@ export const AppSettingsEditor: React.FC<Props> = ({
                   aria-describedby={mysqlTlsCaInvalid ? 'mysql-tls-ca-required-hint' : undefined}
                   className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
                 />
-                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{t('settings.appSettings.storage.mysqlTlsCaHint')}</p>
+                <p className="text-[0.625rem] text-slate-500 dark:text-slate-400 mt-0.5">{t('settings.appSettings.storage.mysqlTlsCaHint')}</p>
                 {/* 読み上げは Storage セクション末尾の常時マウントの live region（SC 4.1.3）。 */}
                 {mysqlTlsCaRequiredMessage && (
-                  <p aria-hidden="true" className="text-[10px] text-red-600 dark:text-red-400 mt-0.5">
+                  <p aria-hidden="true" className="text-[0.625rem] text-red-600 dark:text-red-400 mt-0.5">
                     {mysqlTlsCaRequiredMessage}
                   </p>
                 )}
@@ -787,7 +787,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
 
             {/* 読み上げは Storage セクション末尾の常時マウントの live region（SC 4.1.3）。 */}
             {mysqlRequiredFieldsMessage && (
-              <p aria-hidden="true" className="text-[10px] text-red-600 dark:text-red-400">{mysqlRequiredFieldsMessage}</p>
+              <p aria-hidden="true" className="text-[0.625rem] text-red-600 dark:text-red-400">{mysqlRequiredFieldsMessage}</p>
             )}
 
             <div className="flex items-center gap-2 pt-1 narrow:flex-wrap">
@@ -810,7 +810,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                       ? 'mysql-password-retype-hint'
                       : undefined
                 }
-                className={`px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1 transition ${
+                className={`px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded text-[0.6875rem] font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1 transition ${
                   testConnectionBlocked ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-200 dark:hover:bg-slate-700'
                 }`}
               >
@@ -821,7 +821,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
               {connectionTestResult && connectionTestMessage && (
                 <span
                   aria-hidden="true"
-                  className={`text-[11px] flex items-center gap-1 min-w-0 wrap-anywhere ${connectionTestResult.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}
+                  className={`text-[0.6875rem] flex items-center gap-1 min-w-0 wrap-anywhere ${connectionTestResult.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}
                 >
                   {connectionTestResult.ok ? <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0" /> : <XCircle aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />}
                   {connectionTestResult.message}
@@ -832,7 +832,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
         ) : (
           <div className="space-y-2 border border-slate-100 dark:border-slate-800 rounded-lg p-2.5 bg-slate-50/50 dark:bg-slate-900/50">
             <div>
-              <label htmlFor={`${fieldId}-http-url`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+              <label htmlFor={`${fieldId}-http-url`} className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
                 {t('settings.appSettings.storage.httpUrlLabel')}
               </label>
               <input
@@ -845,17 +845,17 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 aria-describedby={`${fieldId}-http-url-hint${httpProblem && httpProblem !== 'tokenRequired' ? ` ${fieldId}-http-problem` : ''}`}
                 className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
               />
-              <p id={`${fieldId}-http-url-hint`} className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+              <p id={`${fieldId}-http-url-hint`} className="text-[0.625rem] text-slate-500 dark:text-slate-400 mt-0.5">
                 {t('settings.appSettings.storage.httpUrlHint')}
               </p>
               {effective?.httpDataSourceUrl && (
-                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 wrap-anywhere">
+                <p className="text-[0.625rem] text-slate-500 dark:text-slate-400 mt-0.5 wrap-anywhere">
                   {t('settings.appSettings.currentlyInEffect', { value: effective.httpDataSourceUrl })}
                 </p>
               )}
             </div>
             <div>
-              <label htmlFor={`${fieldId}-http-token`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+              <label htmlFor={`${fieldId}-http-token`} className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
                 {t('settings.appSettings.storage.httpTokenLabel')}
               </label>
               {/* Same 'redacted' handling as the MySQL password field: the
@@ -874,7 +874,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 aria-describedby={`${fieldId}-http-token-hint${httpTokenRetypeNeeded ? ` ${fieldId}-http-token-retype` : ''}${httpProblem === 'tokenRequired' ? ` ${fieldId}-http-problem` : ''}`}
                 className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
               />
-              <p id={`${fieldId}-http-token-hint`} className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+              <p id={`${fieldId}-http-token-hint`} className="text-[0.625rem] text-slate-500 dark:text-slate-400 mt-0.5">
                 {httpTokenState === 'redacted'
                   ? t('settings.appSettings.storage.httpTokenSavedHint')
                   : httpTokenEnvVar
@@ -883,14 +883,14 @@ export const AppSettingsEditor: React.FC<Props> = ({
               </p>
               {/* 読み上げは Storage セクション末尾の常時マウントの live region（SC 4.1.3）。 */}
               {httpTokenRetypeMessage && (
-                <p aria-hidden="true" className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5">
+                <p aria-hidden="true" className="text-[0.625rem] text-amber-700 dark:text-amber-400 mt-0.5">
                   {httpTokenRetypeMessage}
                 </p>
               )}
             </div>
             {/* 読み上げは Storage セクション末尾の常時マウントの live region（SC 4.1.3）。 */}
             {httpProblemMessage && (
-              <p aria-hidden="true" className="text-[10px] text-red-600 dark:text-red-400">
+              <p aria-hidden="true" className="text-[0.625rem] text-red-600 dark:text-red-400">
                 {httpProblemMessage}
               </p>
             )}
@@ -911,8 +911,8 @@ export const AppSettingsEditor: React.FC<Props> = ({
         <StatusLiveRegion id={`${fieldId}-http-problem`} message={httpProblemMessage} />
 
         <div>
-          <label htmlFor={`${fieldId}-artifacts-dir`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.artifactsDirLabel')}</label>
-          <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-1">{t('settings.appSettings.storage.artifactsDirHint')}</p>
+          <label htmlFor={`${fieldId}-artifacts-dir`} className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.storage.artifactsDirLabel')}</label>
+          <p className="text-[0.625rem] text-slate-500 dark:text-slate-400 mb-1">{t('settings.appSettings.storage.artifactsDirHint')}</p>
           <input
             id={`${fieldId}-artifacts-dir`}
             value={form.artifactsDir}
@@ -920,7 +920,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
             placeholder={effective?.artifactsDir}
             className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs font-mono text-slate-900 dark:text-slate-100"
           />
-          {effective && <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 wrap-anywhere">{t('settings.appSettings.currentlyInEffect', { value: effective.artifactsDir })}</p>}
+          {effective && <p className="text-[0.625rem] text-slate-500 dark:text-slate-400 mt-0.5 wrap-anywhere">{t('settings.appSettings.currentlyInEffect', { value: effective.artifactsDir })}</p>}
         </div>
       </div>
 
@@ -929,9 +929,9 @@ export const AppSettingsEditor: React.FC<Props> = ({
           effect immediately (see handleSave's onMyNameChanged call). */}
       <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2">
         <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('settings.appSettings.myProfile.title')}</h3>
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.appSettings.myProfile.description')}</p>
+        <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('settings.appSettings.myProfile.description')}</p>
         <div>
-          <label htmlFor={`${fieldId}-my-name`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.myProfile.nameLabel')}</label>
+          <label htmlFor={`${fieldId}-my-name`} className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.myProfile.nameLabel')}</label>
           <input
             id={`${fieldId}-my-name`}
             value={form.myName}
@@ -946,7 +946,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
       <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2">
         <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('settings.appSettings.pagination.title')}</h3>
         <div>
-          <label htmlFor={`${fieldId}-page-size`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.pagination.pageSizeLabel')}</label>
+          <label htmlFor={`${fieldId}-page-size`} className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">{t('settings.appSettings.pagination.pageSizeLabel')}</label>
           <input
             id={`${fieldId}-page-size`}
             type="number"
@@ -955,7 +955,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
             onChange={e => setForm(f => ({ ...f, paginationPageSize: Number(e.target.value) }))}
             className="w-24 narrow:max-w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs text-slate-900 dark:text-slate-100"
           />
-          {pageSizeInvalid && <p className="text-[10px] text-red-600 dark:text-red-400 mt-0.5">{t('settings.appSettings.pagination.invalidPageSize')}</p>}
+          {pageSizeInvalid && <p className="text-[0.625rem] text-red-600 dark:text-red-400 mt-0.5">{t('settings.appSettings.pagination.invalidPageSize')}</p>}
         </div>
       </div>
 
@@ -965,7 +965,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
           says otherwise, and a save leaves it alone. */}
       <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 space-y-2">
         <h3 id={`${fieldId}-team-extensions-dir`} className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('settings.appSettings.teamExtensionsDir.title')}</h3>
-        <p id={`${fieldId}-team-extensions-dir-description`} className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.appSettings.teamExtensionsDir.description')}</p>
+        <p id={`${fieldId}-team-extensions-dir-description`} className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('settings.appSettings.teamExtensionsDir.description')}</p>
         <input
           aria-labelledby={`${fieldId}-team-extensions-dir`}
           aria-describedby={`${fieldId}-team-extensions-dir-description${teamDirInvalid ? ` ${fieldId}-team-extensions-dir-invalid` : ''}`}
@@ -979,12 +979,12 @@ export const AppSettingsEditor: React.FC<Props> = ({
             担当する（SC 4.1.3）。見た目側は aria-hidden。 */}
         <StatusLiveRegion id={`${fieldId}-team-extensions-dir-invalid`} message={teamDirInvalidMessage} />
         {teamDirInvalidMessage && (
-          <p aria-hidden="true" className="text-[10px] text-red-600 dark:text-red-400 mt-0.5">
+          <p aria-hidden="true" className="text-[0.625rem] text-red-600 dark:text-red-400 mt-0.5">
             {teamDirInvalidMessage}
           </p>
         )}
         {effective && (
-          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 wrap-anywhere">
+          <p className="text-[0.625rem] text-slate-500 dark:text-slate-400 mt-0.5 wrap-anywhere">
             {t('settings.appSettings.currentlyInEffect', {
               value: effective.teamExtensionsDir || t('settings.appSettings.teamExtensionsDir.notSet')
             })}
@@ -1002,7 +1002,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
           </span>
         )}
         {saveBlockedReason && (
-          <span id="save-blocked-reason" className={`text-[11px] text-right ${formDirty ? 'text-amber-700 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}`}>
+          <span id="save-blocked-reason" className={`text-[0.6875rem] text-right ${formDirty ? 'text-amber-700 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}`}>
             {saveBlockedReason}
           </span>
         )}
@@ -1042,8 +1042,8 @@ export const AppSettingsEditor: React.FC<Props> = ({
         >
           <FolderCog aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.appSettings.projects.title')}
         </h3>
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.appSettings.projects.description')}</p>
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.appSettings.projects.localPathHint')}</p>
+        <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('settings.appSettings.projects.description')}</p>
+        <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('settings.appSettings.projects.localPathHint')}</p>
         {projects.length === 0 ? (
           <div className="text-center text-slate-500 dark:text-slate-400 text-xs py-6 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
             {t('settings.appSettings.projects.empty')}
@@ -1060,11 +1060,11 @@ export const AppSettingsEditor: React.FC<Props> = ({
                     are not squeezed to a character or two next to the
                     badge or the Save button. */}
                 <div className="flex items-end gap-2 narrow:flex-wrap">
-                  <span className="mb-1 font-mono text-[10px] px-1.5 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-sm shrink-0">
+                  <span className="mb-1 font-mono text-[0.625rem] px-1.5 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-sm shrink-0">
                     {p.prefix}
                   </span>
                   <div className="flex-1 min-w-0 flex flex-col narrow:basis-full">
-                    <label htmlFor={`${fieldId}-project-${p.id}-name`} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+                    <label htmlFor={`${fieldId}-project-${p.id}-name`} className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
                       {t('settings.appSettings.projects.nameLabel')}
                     </label>
                     <input
@@ -1090,7 +1090,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
                 </div>
                 <div className="flex items-end gap-2 narrow:flex-wrap">
                   <div className="flex-1 min-w-0 flex flex-col narrow:basis-full">
-                    <label htmlFor={`${fieldId}-project-${p.id}-local-path`} className="flex items-center gap-2 text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+                    <label htmlFor={`${fieldId}-project-${p.id}-local-path`} className="flex items-center gap-2 text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
                       {t('settings.appSettings.projects.localPathLabel')}
                       {!localPathValue(p) && (
                         <span className="px-1.5 py-0.5 rounded-sm bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-medium">
@@ -1110,14 +1110,14 @@ export const AppSettingsEditor: React.FC<Props> = ({
                     onClick={() => handleSaveProject(p)}
                     disabled={!isProjectDirty(p) || isProjectInvalid(p) || projectSavingId === p.id}
                     {...submittingProps(projectSavingId === p.id)}
-                    className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 rounded-sm text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1 shrink-0 transition"
+                    className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 rounded-sm text-[0.6875rem] font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1 shrink-0 transition"
                   >
                     {projectSavingId === p.id ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <Save aria-hidden="true" className="w-3 h-3" />}
                     {t('settings.common.save')}
                     <SubmittingText busy={projectSavingId === p.id} />
                   </button>
                 </div>
-                {projectErrors[p.id] && <p className="text-[10px] text-red-600 dark:text-red-400">{projectErrors[p.id]}</p>}
+                {projectErrors[p.id] && <p className="text-[0.625rem] text-red-600 dark:text-red-400">{projectErrors[p.id]}</p>}
               </div>
             ))}
           </div>
