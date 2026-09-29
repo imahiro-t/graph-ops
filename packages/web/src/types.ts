@@ -187,6 +187,18 @@ export interface GraphNode {
   config_id?: string | null;
   created_at: string;
   updated_at: string;
+  // DFLT-00327: who claimed a node that is IN PROGRESS / IN REVIEW (with
+  // get-executable) and whether they are still at it. The server sends them
+  // only for a claimed node; the claim token itself is never sent here.
+  claimed_by_name?: string;
+  // true when claimed_by_name is the "<OS user>@<host>" stand-in for an
+  // unset name.
+  claimed_by_name_is_fallback?: boolean;
+  claim_session_id?: string;
+  claimed_at?: string;
+  // The claimer's session's (or autopilot run's) last heartbeat.
+  claim_heartbeat?: string;
+  claim_lease?: 'live' | 'expired' | 'unknown' | 'legacy';
 }
 
 export interface GraphEdge {

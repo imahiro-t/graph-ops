@@ -5,6 +5,7 @@
 import { TFunction } from 'i18next';
 import { AutopilotMode, AutopilotRun, AutopilotStarter, AutopilotStartResponse } from '../types';
 import { apiFetch } from './apiFetch';
+import { memberLabel } from './memberName';
 import { localizedApiErrorMessage, parseApiError, translateErrorCode } from './apiError';
 
 export async function fetchAutopilotRuns(t: TFunction, projectId: string): Promise<AutopilotRun[]> {
@@ -191,6 +192,5 @@ export function ticketAutopilotView(
 // starterLabel is how a run's starter is named on screen: the name, with
 // "(name not set)" after a "<OS user>@<host>" fallback.
 export function starterLabel(t: TFunction, starter: AutopilotStarter): string {
-  const name = starter.name || t('autopilot.unknownMember');
-  return starter.name_is_fallback ? t('autopilot.fallbackName', { name }) : name;
+  return memberLabel(t, starter.name, starter.name_is_fallback);
 }

@@ -28,6 +28,7 @@ import { getStatusMeta, TODO_META } from '../statusMeta';
 import { GherkinViewer } from './GherkinViewer';
 import { MarkdownViewer } from './MarkdownViewer';
 import { NodeTypeBadge } from './NodeTypeBadge';
+import { NodeClaimLine } from './NodeClaimLine';
 import { PrioritySelect } from './PrioritySelect';
 import { LabelChip } from './LabelChip';
 import { LabelSelect } from './LabelSelect';
@@ -2692,6 +2693,13 @@ export const TicketItem: React.FC<Props> = ({
                               </span>
                             </div>
                           </div>
+
+                          {/* Who is running the node right now
+                              (DFLT-00327), on a line of its own under the
+                              header row so it never competes with the row's
+                              badges for width. Outside the clickable row: it
+                              is text to read, not a toggle. */}
+                          <NodeClaimLine node={node} />
 
                           {/* Reject-with-reason prompt (DFLT-00016). A free-
                               text reason is required -- the confirm button
