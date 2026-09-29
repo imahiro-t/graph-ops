@@ -173,8 +173,9 @@ describe('project switcher accessibility', () => {
     it.each([
       ['ja', alpha, '/work/alpha'],
       ['en', alpha, '/work/alpha'],
-      ['ja', { ...beta, local_path: '' }, '未設定'],
-      ['en', { ...beta, local_path: '' }, 'Not set']
+      // DFLT-00321: a missing path says what is not set.
+      ['ja', { ...beta, local_path: '' }, 'ローカルパス: 未設定'],
+      ['en', { ...beta, local_path: '' }, 'Local path: Not set']
     ] as const)('(%s) names %s by its text and describes it by the local path alone', async (lng, project, description) => {
       backend = createFakeBackend({
         projects: [alpha, project.id === beta.id ? project : beta],
@@ -192,6 +193,27 @@ describe('project switcher accessibility', () => {
       expect(button).toHaveAccessibleName(project.name);
       expect(button).toHaveAccessibleDescription(description);
       expect(button).not.toHaveAccessibleDescription(expect.stringContaining(project.name));
+    });
+
+    // DFLT-00321: the tooltip's second line and the description are the
+    // same text, so a missing path reads "Local path: Not set" in both.
+    it.each([
+      ['ja', 'ローカルパス: 未設定'],
+      ['en', 'Local path: Not set']
+    ] as const)('(%s) shows the same "local path not set" text in the tooltip as in the description', async (lng, text) => {
+      backend = createFakeBackend({
+        projects: [{ ...alpha, local_path: '' }, beta],
+        currentProjectId: alpha.id,
+        labels: [],
+        tickets: [{ id: 'AAA-00001', project_id: alpha.id, title: 'チケット', status: 'TODO', priority: 'HIGH', labelIds: [] }]
+      });
+      fetchMock = installFakeBackend(backend);
+      await i18n.changeLanguage(lng);
+      const user = await renderApp();
+      await tabToSwitcher(user);
+      const tooltip = openIconButtonTooltip();
+      expect(Array.from(tooltip.children).map(l => l.textContent)).toEqual(['Alpha', text]);
+      expect(switcher()).toHaveAccessibleDescription(text);
     });
 
     it('opens the tooltip of the name and the path on keyboard focus', async () => {

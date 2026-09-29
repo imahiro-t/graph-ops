@@ -78,7 +78,8 @@
     "loadFailed": "Could not load the current project setting. Check your home config file (~/.graph-ops/config.json) and try again.",
     "retry": "Retry",
     "pendingApprovals_one": "{{count}} ticket awaiting approval",
-    "pendingApprovals_other": "{{count}} tickets awaiting approval"
+    "pendingApprovals_other": "{{count}} tickets awaiting approval",
+    "localPathNotSet": "Local path: Not set"
   },
   "createProjectModal": {
     "title": "Create New Project",

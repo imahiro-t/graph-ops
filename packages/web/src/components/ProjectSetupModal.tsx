@@ -33,12 +33,12 @@
 // `returnFocusRef`.
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2 } from 'lucide-react';
 import { Project } from '../types';
 import { apiFetch } from '../lib/apiFetch';
 import { errorMessage, localizedApiErrorMessage, parseApiError, translateErrorCode } from '../lib/apiError';
 import { useModalDialog } from '../hooks/useModalDialog';
 import { SubmittingText, submittingProps } from './Submitting';
+import { Spinner } from './Spinner';
 
 type Mode = 'create' | 'existing';
 
@@ -279,7 +279,7 @@ export const ProjectSetupModal: React.FC<Props> = ({
         {...submittingProps(saving)}
         className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white transition flex items-center gap-1.5 max-w-full wrap-break-word"
       >
-        {saving && <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" aria-hidden="true" />}
+        {saving && <Spinner className="w-3.5 h-3.5 shrink-0" />}
         {submitLabel}
         <SubmittingText busy={saving} />
       </button>

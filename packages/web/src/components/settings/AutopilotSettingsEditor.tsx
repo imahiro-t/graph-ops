@@ -12,7 +12,7 @@
 // counts, and its 400 is shown translated.
 import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, CheckCircle2, Loader2, Lock, RotateCcw, Save } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Lock, RotateCcw, Save } from 'lucide-react';
 import { StatusLiveRegion } from '../StatusLiveRegion';
 import { IconButton } from '../IconButton';
 import {
@@ -29,6 +29,7 @@ import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 import { submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
+import { Spinner } from '../Spinner';
 
 interface Props {
   // The project whose settings are edited ('' when none is selected).
@@ -262,7 +263,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
 
       {loading && !data ? (
         <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
-          <Loader2 className="w-4 h-4 motion-safe:animate-spin" aria-hidden="true" /> {t('settings.common.loading')}
+          <Spinner className="w-4 h-4" /> {t('settings.common.loading')}
         </div>
       ) : (
         <>
@@ -350,7 +351,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
               className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
             >
               {saving ? (
-                <Loader2 className="w-3.5 h-3.5 motion-safe:animate-spin" aria-hidden="true" />
+                <Spinner className="w-3.5 h-3.5" />
               ) : (
                 <Save className="w-3.5 h-3.5" aria-hidden="true" />
               )}

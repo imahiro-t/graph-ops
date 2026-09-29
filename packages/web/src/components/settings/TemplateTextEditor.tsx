@@ -11,13 +11,14 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Save, CheckCircle2 } from 'lucide-react';
+import { Save, CheckCircle2 } from 'lucide-react';
 import { SettingsTemplateTextResponse } from '../../types';
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 import { submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
+import { Spinner } from '../Spinner';
 
 export type TemplateFetcher = (
   t: TFunction
@@ -120,7 +121,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
       )}
       {loading ? (
         <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
-          <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> {t('settings.common.loading')}
+          <Spinner className="w-4 h-4" /> {t('settings.common.loading')}
         </div>
       ) : (
         <>
@@ -168,7 +169,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
               {...submittingProps(saving)}
               className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
             >
-              {saving ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Save aria-hidden="true" className="w-3.5 h-3.5" />}
+              {saving ? <Spinner className="w-3.5 h-3.5" /> : <Save aria-hidden="true" className="w-3.5 h-3.5" />}
               {saving ? t('settings.common.saving') : t('settings.common.save')}
             </button>
           </div>
