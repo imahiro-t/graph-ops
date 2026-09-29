@@ -106,7 +106,7 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
         // rounded rectangle rather than an ellipse; on one line its radius
         // (0.75rem) is at least half the button's height, so it looks the
         // same as rounded-full.
-        className="px-2 py-0.5 rounded-full upto-15rem:rounded-xl border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 text-[11px] font-semibold flex flex-wrap items-center gap-1 transition min-w-0 max-w-full wrap-break-word text-left"
+        className="px-2 py-0.5 rounded-full upto-15rem:rounded-xl border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 text-[0.6875rem] font-semibold flex flex-wrap items-center gap-1 transition min-w-0 max-w-full wrap-break-word text-left"
       >
         {saving ? <Loader2 className="w-3 h-3 shrink-0 animate-spin" aria-hidden="true" /> : <Tag className="w-3 h-3 shrink-0" aria-hidden="true" />}
         {/* ticket.labels.editVisible is ticket.labels.edit with its break
@@ -124,7 +124,7 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
           breaks inside a word when it cannot fit, instead of running past the
           card. It used to inherit this from the metadata bar's labels item. */}
       {error && (
-        <span role="alert" className="text-red-600 dark:text-red-400 font-medium text-[11px] min-w-0 max-w-full wrap-anywhere">
+        <span role="alert" className="text-red-600 dark:text-red-400 font-medium text-[0.6875rem] min-w-0 max-w-full wrap-anywhere">
           {error}
         </span>
       )}

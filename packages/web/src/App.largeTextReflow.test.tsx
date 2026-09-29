@@ -44,7 +44,7 @@ import { PROJECT_MENU_WIDTH_REM } from './lib/popupPlacement';
 
 // The container-query variant for a popup narrower than 8rem (DFLT-00285).
 // Assembled at run time so Tailwind does not pick up extra classes from here.
-const BELOW_8REM = ['[@container(width<8rem)]', ''].join(':');
+const BELOW_8REM = ['cq-below-8rem', ''].join(':');
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 
@@ -284,7 +284,7 @@ describe.each(['ja', 'en'] as const)('summary card numbers with large text (%s)'
 // DFLT-00258: the rest of DFLT-00251's backlog on the summary card.
 describe.each(['ja', 'en'] as const)('summary card with a root font size set on the page (%s)', lng => {
   const NARROW = 'upto-15rem:';
-  const CARD_NARROW = '[@container(max-width:12rem)]:';
+  const CARD_NARROW = 'cq-upto-12rem:';
 
   beforeEach(async () => {
     seed();

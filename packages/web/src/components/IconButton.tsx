@@ -319,7 +319,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
             aria-hidden="true"
             hidden={!open}
             data-icon-button-tooltip=""
-            className="fixed z-60 max-w-[min(20rem,calc(100%-8px))] rounded-sm px-2 py-1 text-[11px] font-medium leading-snug shadow-xs bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 whitespace-normal wrap-anywhere text-left"
+            className="fixed z-60 max-w-[min(20rem,calc(100%-8px))] rounded-sm px-2 py-1 text-[0.6875rem] font-medium leading-snug shadow-xs bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 whitespace-normal wrap-anywhere text-left"
             style={{
               left: position?.left ?? 0,
               top: position?.top ?? 0,

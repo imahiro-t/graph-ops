@@ -1903,7 +1903,7 @@ export const TicketItem: React.FC<Props> = ({
       {isExpanded && (
         <div
           data-testid="ticket-details"
-          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 max-sm:p-3 upto-15rem:p-3 [@media(max-width:200px)]:p-2 space-y-6"
+          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 max-sm:p-3 upto-15rem:p-3 upto-200px:p-2 space-y-6"
         >
           {/* Metadata Bar */}
           <div className="flex flex-wrap items-center gap-y-2 gap-x-6 text-xs text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800 pb-3">
@@ -2926,7 +2926,7 @@ export const TicketItem: React.FC<Props> = ({
               dark:border-slate-700 won over focus:border-indigo-500. */}
           <div
             data-testid="ticket-action-footer"
-            className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 [@media(max-width:200px)]:p-2 rounded-xl border border-slate-200 dark:border-slate-800"
+            className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 upto-200px:p-2 rounded-xl border border-slate-200 dark:border-slate-800"
           >
             {/* The action row (DFLT-00181): the regular actions (refine, then
                 run) on the left, and at its right end, set apart from them,

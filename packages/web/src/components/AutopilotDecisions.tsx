@@ -59,7 +59,7 @@ export const AutopilotDecisions: React.FC<Props> = ({ artifacts, nodes }) => {
           return (
             <li key={a.id} data-testid="autopilot-decision" className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="font-semibold text-slate-800 dark:text-slate-200">{label}</span>
-              <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400">{a.name}</span>
+              <span className="font-mono text-[0.625rem] text-slate-500 dark:text-slate-400">{a.name}</span>
               {node && <span className="text-slate-600 dark:text-slate-400">{node}</span>}
               <span className="text-slate-500 dark:text-slate-400">{formatDateTime(a.created_at, i18n.language)}</span>
               <a
@@ -67,7 +67,7 @@ export const AutopilotDecisions: React.FC<Props> = ({ artifacts, nodes }) => {
                 target="_blank"
                 rel="noreferrer"
                 aria-label={t('autopilot.decisions.open', { name: label })}
-                className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 text-[11px]"
+                className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 text-[0.6875rem]"
               >
                 <ExternalLink className="w-3 h-3" aria-hidden="true" />
                 {t('ticketItem.openInNewTab')}

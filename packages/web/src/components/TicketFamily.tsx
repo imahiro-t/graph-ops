@@ -32,7 +32,7 @@ export const TicketFamily: React.FC<Props> = ({ parent, childTickets = [], onOpe
       >
         <span className="font-mono text-indigo-600 dark:text-indigo-400 font-semibold">{ref.id}</span>
         <span className="text-slate-700 dark:text-slate-300 truncate min-w-0 max-w-md">{ref.title}</span>
-        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-xs ${meta.chip.bg} ${meta.chip.text}`}>
+        <span className={`text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-xs ${meta.chip.bg} ${meta.chip.text}`}>
           {t(meta.labelKey)}
         </span>
       </button>
