@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { plainText, WBR_MARK, withBreaks, WORD_JOINER, ZWSP } from './wbr';
+import { plainText, stripInvisible, WBR_MARK, withBreaks, WORD_JOINER, ZWSP } from './wbr';
 
 describe('wbr marks in translations (DFLT-00292, DFLT-00295)', () => {
   it('replaces each mark with a zero width space in one string', () => {
@@ -29,6 +29,25 @@ describe('wbr marks in translations (DFLT-00292, DFLT-00295)', () => {
     ['Edit labels', 'Edit labels']
   ])('removes the marks and invisible characters from %j', (input, expected) => {
     expect(plainText(input)).toBe(expected);
+  });
+
+  it.each([
+    [`作成${ZWSP}日時${WORD_JOINER}:`, '作成日時:'],
+    [`ラベルを${ZWSP}編集`, 'ラベルを編集'],
+    [`Created${WORD_JOINER}:`, 'Created:'],
+    [`${ZWSP}${WORD_JOINER}${ZWSP}`, '']
+  ])('strips only the invisible characters from %j (DFLT-00310)', (input, expected) => {
+    expect(stripInvisible(input)).toBe(expected);
+  });
+
+  it('keeps a "<wbr/>" string, which drawn text never holds (DFLT-00310)', () => {
+    expect(stripInvisible(`a${WBR_MARK}b`)).toBe(`a${WBR_MARK}b`);
+    expect(stripInvisible(`${WBR_MARK}${ZWSP}x`)).toBe(`${WBR_MARK}x`);
+  });
+
+  it('returns a text without invisible characters unchanged (DFLT-00310)', () => {
+    expect(stripInvisible('Edit labels')).toBe('Edit labels');
+    expect(stripInvisible('')).toBe('');
   });
 
   it('defines the invisible characters by their code points', () => {

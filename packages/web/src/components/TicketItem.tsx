@@ -46,6 +46,7 @@ import { localizedApiErrorMessage, errorMessage } from '../lib/apiError';
 import { apiFetch } from '../lib/apiFetch';
 import { isSubmitShortcut } from '../lib/keyboardShortcuts';
 import { focusIfLost } from '../lib/focusAfterRemoval';
+import { plainCopyProps } from '../lib/plainCopy';
 import { withBreaks, WORD_JOINER } from '../lib/wbr';
 
 interface Props {
@@ -391,8 +392,11 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
 // label is inline; in the other items it is a flex item. No min-w-0 and never
 // wrap-anywhere, on the label or its ancestors: the label's box then matches
 // its text, so measurements show where it really ends.
+// DFLT-00310: plainCopyProps marks the label so that a copy touching it puts
+// the text on the clipboard without U+200B / U+2060 (lib/plainCopy); the
+// drawn text and its one text node are unchanged.
 const MetaLabel: React.FC<{ text: string }> = ({ text }) => (
-  <span className="inline-block max-w-[calc(100%+var(--details-pad))] break-keep wrap-break-word">{`${withBreaks(text)}${WORD_JOINER}:`}</span>
+  <span {...plainCopyProps} className="inline-block max-w-[calc(100%+var(--details-pad))] break-keep wrap-break-word">{`${withBreaks(text)}${WORD_JOINER}:`}</span>
 );
 
 export const TicketItem: React.FC<Props> = ({

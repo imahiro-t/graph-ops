@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Loader2, Tag } from 'lucide-react';
 import { Label } from '../types';
 import { setTicketLabels } from '../lib/labelsApi';
+import { plainCopyProps } from '../lib/plainCopy';
 import { withBreaks } from '../lib/wbr';
 import { errorMessage } from '../lib/apiError';
 import { submittingProps, useSubmittingLabel } from './Submitting';
@@ -171,8 +172,10 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
               The mark is drawn by lib/wbr, as the metadata bar's labels are,
               never rendered as is. The aria-label above still comes from
               ticket.labels.edit. DFLT-00295: withBreaks draws the mark as
-              U+200B in one string, as the metadata bar's labels do. */}
-          <span className="min-w-0 break-keep">{withBreaks(t('ticket.labels.editVisible'))}</span>
+              U+200B in one string, as the metadata bar's labels do.
+              DFLT-00310: plainCopyProps has a copy take it to the clipboard
+              without the U+200B (lib/plainCopy). */}
+          <span {...plainCopyProps} className="min-w-0 break-keep">{withBreaks(t('ticket.labels.editVisible'))}</span>
         </button>
 
         {isOpen && (

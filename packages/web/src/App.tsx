@@ -44,6 +44,7 @@ import { fetchPendingApprovalCounts } from './lib/pendingApprovals';
 import { fetchAppSettings } from './lib/settingsApi';
 import { POPUP_VIEWPORT_MARGIN_REM, PROJECT_MENU_WIDTH_REM, PopupPlacement, fitPopupHorizontally, rootFontSizePx } from './lib/popupPlacement';
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from './lib/focusAfterRemoval';
+import { installPlainCopy } from './lib/plainCopy';
 import { useLatest } from './hooks/useLatest';
 import { useTransientAnnouncement } from './hooks/useTransientAnnouncement';
 
@@ -870,6 +871,12 @@ export const App: React.FC = () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [currentProject?.id, fetchAllTickets]);
+
+  // DFLT-00310: a copy that touches a metadata bar label or the "Edit
+  // labels" name puts it on the clipboard without the U+200B / U+2060 they
+  // are drawn with (lib/plainCopy). Listened for on the document, so a
+  // selection starting outside the metadata bar is covered too.
+  useEffect(() => installPlainCopy(document), []);
 
   // Consumes the `?newProject=1&workDir=<dir>` query the `graph-engine ui`
   // CLI command (the `/ui` slash command's backend) appends to the root URL

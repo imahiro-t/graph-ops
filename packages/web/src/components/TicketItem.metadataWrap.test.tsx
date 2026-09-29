@@ -53,6 +53,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { formatDateTime } from '../i18n/formatDate';
+import { PLAIN_COPY_ATTR } from '../lib/plainCopy';
 import { plainText, WORD_JOINER, ZWSP } from '../lib/wbr';
 import { Label, TicketDetail } from '../types';
 import { TicketItem } from './TicketItem';
@@ -109,6 +110,8 @@ const expectMetaLabel = (label: HTMLElement, text: string, words: string[] = [te
   // its item plus the details panel's padding.
   expect(label).toHaveClass('inline-block', 'break-keep', 'wrap-break-word', 'max-w-[calc(100%+var(--details-pad))]');
   for (const cls of ['wrap-anywhere', 'min-w-0']) expect(label).not.toHaveClass(cls);
+  // A copy takes it to the clipboard without U+200B / U+2060 (DFLT-00310).
+  expect(label).toHaveAttribute(PLAIN_COPY_ATTR);
 };
 
 // The label text a test expects, from its *Visible key, which must also read
@@ -227,6 +230,8 @@ describe.each(['ja', 'en'])('TicketItem metadata bar wrapping (%s)', lng => {
     expect(text.childNodes).toHaveLength(1);
     expect(plainText(text.textContent ?? '')).toBe(editName);
     expect(text.textContent).not.toContain('wbr');
+    // A copy takes it to the clipboard without U+200B (DFLT-00310).
+    expect(text).toHaveAttribute(PLAIN_COPY_ATTR);
     const parts = (text.textContent ?? '').split(ZWSP);
     if (lng === 'ja') {
       // "ラベルを / 編集" is the only break opportunity under keep-all.

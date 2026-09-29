@@ -31,7 +31,12 @@ export const WORD_JOINER = '\u2060';
 // `text` with each "<wbr/>" mark replaced by ZWSP (unchanged without marks).
 export const withBreaks = (text: string): string => text.split(WBR_MARK).join(ZWSP);
 
+// `text` without ZWSP and WORD_JOINER, but with any "<wbr/>" string left as
+// it is (DFLT-00310). This is what a copy puts on the clipboard (see
+// lib/plainCopy): drawn text never holds the mark, so a "<wbr/>" in a copied
+// selection is a person's own text (a ticket description, say) and is kept.
+export const stripInvisible = (text: string): string => text.split(ZWSP).join('').split(WORD_JOINER).join('');
+
 // `text` without the "<wbr/>" marks, ZWSP and WORD_JOINER: the words as a
 // person reads them. For comparing drawn text with its translation in tests.
-export const plainText = (text: string): string =>
-  text.split(WBR_MARK).join('').split(ZWSP).join('').split(WORD_JOINER).join('');
+export const plainText = (text: string): string => stripInvisible(text.split(WBR_MARK).join(''));
