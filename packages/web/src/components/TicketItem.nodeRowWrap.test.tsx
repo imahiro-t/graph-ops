@@ -98,6 +98,39 @@
 // 32px x 320/336/375px or 16px x 160px, the badges stay inside the row with
 // no horizontal scroll, one-line badges are still pills, 80rem up is
 // unchanged (rounded-full), and in Japanese every badge is one line.
+//
+// DFLT-00290: with a 32px default font in a 160px window (5rem), the nested
+// padding left the node row 26px wide with 0px of content width: every
+// badge stood one character per line (16px wide), and the IN PROGRESS dot
+// (display: inline-block under 80rem, as DFLT-00280 made it) ran past the
+// badge's right edge (dot x 83-95, badge x 75-91). Around the node list,
+// the ticket family and autopilot decision cards ran 3-84px past the
+// viewport and were cut off by the ticket card's clip. The fix is a new
+// named variant, `upto-7_5rem:` (`@media (max-width: 7.5rem)`, index.css;
+// a "." is not allowed in a Tailwind v4 variant name): from 7.5rem down
+// (240px and below at a 32px default font, 120px and below at 16px) the
+// page (main), the expanded details, the Action Footer card and the node
+// list's panel body pad 0.25rem, the node row 0.125rem at the sides, and
+// the row's update time may wrap at its space ("06:59" / "AM"; it still
+// never breaks inside "06:59"). The details and the Action Footer set p-2
+// through [@media(max-width:200px)]:, an arbitrary variant that is emitted
+// after every named one and so would have beaten upto-7_5rem:p-1; it is the
+// named upto-200px:p-2 (same px condition) declared before upto-7_5rem.
+// Measured in a real browser (Chrome, default font 32px, 160px, en/ja):
+// no horizontal scroll (scrollWidth 160), the node row is 106px wide, every
+// status badge and the approve/reject buttons sit inside their row and
+// node card, the badge is 98px wide ("IN" / "PROGR" / "ESS": "PROGRESS" is
+// 116px, wider than the whole row, so it still breaks inside the word
+// there), the dot is inside the badge, and the only element past the
+// viewport is the graph's <svg>, inside its own sideways-scrolling box
+// (DFLT-00241). At 16px x 160-201px and 32px x 320-375px nothing changes:
+// the badge sizes, paddings and the untrusted-folder notice match
+// fb8483c. At 16px x 160px the room left for "PROGRESS" in the IN PROGRESS
+// badge was 12.1px (SF), 7.3px (Verdana) and 11.7px (Arial), so no badge
+// wraps inside a word there and nothing was changed for that size.
+// The IN PROGRESS dots (this badge's, and the header's IN PROGRESS and
+// awaiting-approval ticks) stop pulsing under prefers-reduced-motion:
+// reduce (motion-reduce:animate-none; WCAG 2.3.3).
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
@@ -206,6 +239,8 @@ const FROM_80REM = 'from-80rem:';
 const NARROW_LARGE_TEXT = 'upto-15rem:';
 // DFLT-00293: a window of 200 CSS px or less (160px at 200% text).
 const TINY_WINDOW = 'upto-200px:';
+// DFLT-00290: a 32px default font in a 160px window (7.5rem and below).
+const EXTREME = 'upto-7_5rem:';
 
 const expectNoneOf = (el: Element, classes: string[]) => {
   for (const cls of classes) expect(el).not.toHaveClass(cls);
@@ -232,11 +267,21 @@ const ADDED = {
   // under 80rem gap-x-3 overrides it.
   // Under 15rem the row pads 0.5rem above and below and 0.25rem at the
   // sides (DFLT-00280; 0.5rem all round before), so the status badge has
-  // room for one word per line at 200% x 320px and 16px x 160px.
+  // room for one word per line at 200% x 320px and 16px x 160px. From
+  // 7.5rem down it pads 0.125rem at the sides (DFLT-00290).
   // DFLT-00293: 0.125rem at the sides in a window of 200px or less, so at
   // 160px / 200% the badges and the status keep at least three characters
   // a line.
-  row: ['flex-wrap', 'gap-x-1', 'gap-y-2', `${UNDER_80REM}gap-x-3`, `${NARROW_LARGE_TEXT}px-1`, `${NARROW_LARGE_TEXT}py-2`, `${TINY_WINDOW}px-0.5`],
+  row: [
+    'flex-wrap',
+    'gap-x-1',
+    'gap-y-2',
+    `${UNDER_80REM}gap-x-3`,
+    `${NARROW_LARGE_TEXT}px-1`,
+    `${NARROW_LARGE_TEXT}py-2`,
+    `${TINY_WINDOW}px-0.5`,
+    `${EXTREME}px-0.5`
+  ],
   // Without basis-auto the left group keeps flex-1's 0% basis and the right
   // group never wraps to the next line, so this one is essential.
   // From 80rem the left group is at least as wide as its parts other than
@@ -254,7 +299,10 @@ const ADDED = {
   // From 80rem the name adds nothing to the left group's min-content width
   // (width 0) but is still laid out at its content width (content basis).
   name: [`${FROM_80REM}w-0`, `${FROM_80REM}basis-[content]`, `${UNDER_80REM}whitespace-normal`, `${UNDER_80REM}wrap-anywhere`],
-  time: ['whitespace-nowrap'],
+  // From 7.5rem down the time may wrap at its space (DFLT-00290): in a
+  // 160px window at a 32px default font "06:59 AM" (106px) is wider than
+  // the row's 98px of content.
+  time: ['whitespace-nowrap', `${EXTREME}whitespace-normal`],
   approvalButtons: [`${UNDER_80REM}flex-wrap`, `${UNDER_80REM}min-w-0`, `${UNDER_80REM}max-w-full`],
   // DFLT-00253: each approve/reject button and the type badge may shrink
   // under 80rem, and the buttons pad less under 15rem.
@@ -291,7 +339,7 @@ const ADDED = {
   ]
 };
 // A prefix is allowed for an added class only if it is one of these.
-const ALLOWED_PREFIXES = [UNDER_80REM, FROM_80REM, NARROW_LARGE_TEXT, TINY_WINDOW];
+const ALLOWED_PREFIXES = [UNDER_80REM, FROM_80REM, NARROW_LARGE_TEXT, TINY_WINDOW, EXTREME];
 // px breakpoints, which do not follow the browser's default font size; none
 // of them may come back on a node row (DFLT-00253).
 const PX_PREFIXES = ['max-lg:', 'max-xl:', 'lg:', 'xl:', 'max-2xl:', '2xl:'];
@@ -361,7 +409,8 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     expectNoneOf(status, ['min-w-0', 'max-w-full', 'whitespace-normal', 'wrap-anywhere', 'wrap-break-word', 'rounded-xl', 'px-1']);
     // DFLT-00280: `anywhere` broke "IN PROGRESS" inside its words.
     expectNoneOf(status, [`${UNDER_80REM}wrap-anywhere`]);
-    expect(time).toHaveClass('whitespace-nowrap');
+    expect(time).toHaveClass('whitespace-nowrap', `${EXTREME}whitespace-normal`);
+    expectNoneOf(time, ['whitespace-normal', 'wrap-anywhere', 'wrap-break-word', `${EXTREME}wrap-anywhere`, `${EXTREME}wrap-break-word`]);
   });
 
   it.each(NODES.map(n => [n.id, n] as const))('%s: keeps every class it had before, so from 80rem up only the 0.25rem gap is new', (_id, n) => {
@@ -472,6 +521,7 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
       'shrink-0',
       'rounded-full',
       'animate-pulse',
+      'motion-reduce:animate-none',
       `${UNDER_80REM}inline-block`,
       `${UNDER_80REM}mr-1`,
       `${UNDER_80REM}align-middle`
@@ -481,6 +531,50 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     expect(label).toHaveClass('min-w-0');
     expect(label).toHaveTextContent(i18n.t(getStatusMeta('IN PROGRESS').labelKey));
     expect(status.children).toHaveLength(2);
+  });
+
+  // DFLT-00290 (WCAG 2.3.3): every pulsing dot stops under
+  // prefers-reduced-motion: reduce -- the IN PROGRESS badge's, and the
+  // header's ticks for an IN PROGRESS node (blue) and a gate awaiting
+  // approval (amber).
+  it('the pulsing dots do not pulse under prefers-reduced-motion: reduce', () => {
+    const { container } = renderTicket();
+    const inProgress = NODES.find(x => x.status === 'IN PROGRESS')!;
+    const awaitingApproval = NODES.find(x => x.type === 'approval_gate')!;
+    const done = NODES.find(x => x.status === 'DONE')!;
+    const dot = rowParts(inProgress).status.firstElementChild as HTMLElement;
+    expect(dot).toHaveClass('animate-pulse', 'motion-reduce:animate-none');
+    const tick = (n: GraphNode) => {
+      const ticks = Array.from(container.querySelectorAll<HTMLElement>('div[title]')).filter(el => el.getAttribute('title')!.startsWith(`${n.name} (`));
+      expect(ticks).toHaveLength(1);
+      return ticks[0];
+    };
+    expect(tick(inProgress)).toHaveClass('bg-blue-500', 'animate-pulse', 'motion-reduce:animate-none');
+    expect(tick(awaitingApproval)).toHaveClass('bg-amber-400', 'animate-pulse', 'motion-reduce:animate-none');
+    // The ticks that do not pulse carry neither.
+    expectNoneOf(tick(done), ['animate-pulse', 'motion-reduce:animate-none']);
+    // No element pulses without the reduced-motion override.
+    for (const el of container.querySelectorAll('.animate-pulse')) expect(el).toHaveClass('motion-reduce:animate-none');
+  });
+
+  // DFLT-00290: from 7.5rem down (a 32px default font in a 160px window) the
+  // row pads 0.125rem at the sides and the panel body 0.25rem, so the status
+  // badge and the dot stay inside it; the badge and the dot themselves keep
+  // their classes.
+  it.each(NODES.map(n => [n.id, n] as const))('%s: from 7.5rem down the row pads less and the badge keeps its classes', (_id, n) => {
+    renderTicket();
+    const { row, status } = rowParts(n);
+    expect(row).toHaveClass(`${NARROW_LARGE_TEXT}px-1`, `${EXTREME}px-0.5`);
+    expectNoneOf(row, ['px-0.5', `${EXTREME}px-0`, `${EXTREME}p-0`]);
+    // The node list's scrolling panel body pads 0.25rem there too.
+    const body = row.closest('.overflow-y-auto') as HTMLElement;
+    expect(body).toHaveClass('p-4', `${NARROW_LARGE_TEXT}p-3`, `${EXTREME}p-1`);
+    expectNoneOf(body, ['p-1', 'p-3']);
+    expect(classList(status).filter(c => c.startsWith(EXTREME))).toEqual([]);
+    if (n.status === 'IN PROGRESS') {
+      const dot = status.firstElementChild as HTMLElement;
+      expect(classList(dot).filter(c => c.startsWith(EXTREME))).toEqual([]);
+    }
   });
 
   it('the other status badges keep their label as plain text', () => {

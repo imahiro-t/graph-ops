@@ -220,6 +220,8 @@ describe.each<TicketStatus>(['IN REVIEW', 'DONE'])('TicketItem approval gate on 
     const tick = gateTick(container);
     expect(tick.className).toContain('bg-amber-400');
     expect(tick.className).toContain('animate-pulse');
+    // DFLT-00290: it stops under prefers-reduced-motion: reduce (WCAG 2.3.3).
+    expect(tick.classList).toContain('motion-reduce:animate-none');
     expect(tick.getAttribute('title')).toBe(`${GATE_NAME} (${pendingLabel()})`);
 
     expect(approveButton()).not.toBeNull();

@@ -12,6 +12,7 @@ import i18n from './i18n';
 import App from './App';
 import { Project } from './types';
 import { FakeBackend, FakePendingApprovals, createFakeBackend, installFakeBackend } from './test/fakeBackend';
+import { trackBodyReads } from './test/waitForAnswers';
 import { PENDING_APPROVAL_BADGE_CLASSES } from './components/PendingApprovalBadge';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'AAA', local_path: '/work/alpha', created_at: '', updated_at: '' };
@@ -73,10 +74,17 @@ function badgeIn(p: Project) {
   return within(menuItem(p)).queryByRole('img');
 }
 
+// The menu's items are the project list (GET /api/projects), a request of
+// its own that seeing a ticket does not imply has been answered -- and until
+// it is, the open menu has no project items at all. So besides the first
+// ticket, wait for the app to read that list and let it reach the state and
+// the render, before any test opens the menu (DFLT-00296).
 async function renderApp() {
   const user = userEvent.setup();
+  const projectListRead = trackBodyReads(backend, (url, method) => url === '/api/projects' && method === 'GET');
   render(<App />);
   await screen.findByText('AAA-00001');
+  await projectListRead();
   return user;
 }
 
@@ -279,21 +287,10 @@ describe('project switcher pending-approval badges', () => {
   // not at the counts cleared when the menu opened: a failure that throws
   // (a non-2xx status, a network error, a body that is not JSON) is logged;
   // a malformed 200 is read to the end and parsed to no counts, silently.
-  let bodyRead: ReturnType<typeof held>;
+  let countsRead: () => Promise<void>;
 
   function malformed200(body: unknown): FakePendingApprovals {
-    return () => {
-      const res = jsonResponse(body);
-      const json = res.json.bind(res);
-      res.json = async () => {
-        try {
-          return await json();
-        } finally {
-          bodyRead.release(res);
-        }
-      };
-      return res;
-    };
+    return () => jsonResponse(body);
   }
 
   async function answerHandled(handled: 'logged' | 'parsed') {
@@ -303,11 +300,7 @@ describe('project switcher pending-approval badges', () => {
       );
       return;
     }
-    await act(async () => {
-      await bodyRead.promise;
-      // Let the parsed counts reach the state and the render.
-      await new Promise(r => setTimeout(r, 0));
-    });
+    await countsRead();
     expect(console.error).not.toHaveBeenCalledWith('Failed to load pending approval counts', expect.anything());
   }
 
@@ -325,8 +318,8 @@ describe('project switcher pending-approval badges', () => {
     ['a 200 with "counts": null', malformed200({ counts: null }), 'parsed']
   ])('when the counts request fails with %s', (_, failing, handled) => {
     beforeEach(() => {
-      bodyRead = held();
       seed(failing);
+      countsRead = trackBodyReads(backend, (url, method) => url === PATH && method === 'GET');
       vi.spyOn(console, 'error').mockImplementation(() => {});
     });
 

@@ -77,6 +77,16 @@
 @custom-variant cq-below-8rem (@container (width < 8rem));
 @custom-variant upto-200px (@media (max-width: 200px));
 
+/* DFLT-00290: upto-7_5rem is a 7.5rem max-width query (240px and below at a
+   32px default font, 120px and below at 16px) for a large default font in a
+   very narrow window ("." is not allowed in a variant name). It is declared
+   last, after upto-200px, so that on the same property it wins over
+   upto-15rem and upto-200px: `upto-15rem:p-3 upto-200px:p-2 upto-7_5rem:p-1`
+   gives p-1 in a window of 7.5rem or less. An arbitrary variant on the same
+   property still wins over it. tailwindVariants.test.ts pins this order
+   down. */
+@custom-variant upto-7_5rem (@media (max-width: 7.5rem));
+
 /* v3 values, pinned: breakpoints, text line heights and the color palette.
    v4 redefines the default colors in OKLCH, and they differ slightly from
    v3's hex values. The contrast ratios quoted in comments and asserted in

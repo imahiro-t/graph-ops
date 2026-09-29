@@ -166,12 +166,12 @@ export const App: React.FC = () => {
   //   3. Writes. A request already in flight when the header moves still
   //      comes back. fetchAllTickets drops it (a newer run, or a different
   //      current project, supersedes it), as refreshProjectLabels does for
-  //      labels. (1) already stops such a response from being *shown*; (3)
-  //      stops it from knocking the current project's loaded list back to
-  //      "loading" until the next poll. An expanded ticket's detail
-  //      response (DFLT-00112) only ever replaces a ticket with the same id
-  //      inside the loaded list, so one for a project the user has left
-  //      matches nothing (see fetchTicketDetail).
+  //      labels (DFLT-00296). (1) already stops such a response from being
+  //      *shown*; (3) stops it from knocking the current project's loaded
+  //      list back to "loading" until the next poll. An expanded ticket's
+  //      detail response (DFLT-00112) only ever replaces a ticket with the
+  //      same id inside the loaded list, so one for a project the user has
+  //      left matches nothing (see fetchTicketDetail).
   //
   // What is NOT promised: that the header follows a switch made in another
   // tab of the same environment. It shows this window's own choice until a
@@ -475,6 +475,12 @@ export const App: React.FC = () => {
   // Tagged like ticketList, so the previous project's labels are never
   // offered (or drawn on tickets) under the new project's header while the
   // new ones load.
+  //
+  // Re-fetches overlap (a poll, a manual refresh and a settings change can
+  // each start one), and their answers may come back in any order. Like
+  // fetchAllTickets, each call takes a sequence number and only the latest
+  // call's answer is applied, so an older answer arriving last cannot put
+  // an older list back over a newer one (DFLT-00296).
   const [labelList, setLabelList] = useState<ProjectScoped<Label[]> | null>(null);
   const currentProjectId = currentProject?.id ?? '';
   const projectLabels = useMemo(
@@ -482,16 +488,23 @@ export const App: React.FC = () => {
     [currentProjectId, labelList]
   );
   const currentProjectIdRef = useLatest(currentProjectId);
+  const labelFetchSeqRef = useRef(0);
   const refreshProjectLabels = useCallback(
     async (projectId: string = currentProjectIdRef.current) => {
+      // Taken before the no-project case too: clearing the list supersedes
+      // any request still in flight, which must not fill it back in.
+      const seq = ++labelFetchSeqRef.current;
       if (!projectId) {
         setLabelList(null);
         return;
       }
       try {
         const labels = await fetchLabels(tRef.current, projectId);
-        // Ignore a response for a project that is no longer current.
-        if (projectId === currentProjectIdRef.current) setLabelList({ projectId, value: labels });
+        // Ignore a response a later call has superseded, or one for a
+        // project that is no longer current.
+        if (seq === labelFetchSeqRef.current && projectId === currentProjectIdRef.current) {
+          setLabelList({ projectId, value: labels });
+        }
       } catch (e) {
         // Keep the previous list: clearing it would also clear the filter.
         console.error('Failed to load labels', e);
@@ -1671,8 +1684,12 @@ export const App: React.FC = () => {
           at 320/360px the Send button's label broke onto several lines. The
           15rem query stays: with a very large default font (over about 267%)
           it still matches above 640px. From sm up, at a normal default font
-          size, nothing changes. */}
-      <main className="max-w-7xl mx-auto px-6 max-sm:px-3 upto-15rem:px-3 upto-200px:px-1 py-6 space-y-6">
+          size, nothing changes. DFLT-00290: from 7.5rem down (a 32px default
+          font in a 240px window or narrower, 120px or narrower at 16px) it
+          pads with px-1, so the expanded ticket's node rows keep room for
+          their status badges (see TicketItem.tsx). DFLT-00293 pads px-1 in a
+          window of 200px or less as well. */}
+      <main className="max-w-7xl mx-auto px-6 max-sm:px-3 upto-15rem:px-3 upto-200px:px-1 upto-7_5rem:px-1 py-6 space-y-6">
         {/* Simple Summary Metrics. DFLT-00251: both children are min-w-0
             max-w-full so neither can be wider than the card; the numbers
             already wrap between items (flex-wrap). Each item is min-w-0

@@ -40,11 +40,14 @@ export const AutopilotDecisions: React.FC<Props> = ({ artifacts, nodes }) => {
   // DFLT-00293: in a window of 200px or less the card pads less and each
   // item stacks its parts (flex-col), each no wider than the card and
   // breaking inside a word only when that word is wider than the line.
+  // DFLT-00290: from 7.5rem down (a 32px default font in a 240px window or
+  // narrower) the <section> card below pads 0.25rem (upto-7_5rem:p-1), so
+  // its labels and dates wrap inside it.
   return (
     <section
       data-testid="autopilot-decisions"
       aria-labelledby={headingId}
-      className="bg-white dark:bg-slate-900 p-4 upto-200px:px-1 upto-200px:py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs"
+      className="bg-white dark:bg-slate-900 p-4 upto-200px:px-1 upto-200px:py-2 upto-7_5rem:p-1 rounded-xl border border-slate-200 dark:border-slate-800 text-xs"
     >
       <h3
         id={headingId}

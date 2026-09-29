@@ -7,7 +7,7 @@
 // fetch is served by test/fakeBackend.ts, a small in-memory fake of the
 // backend shared with App.filters.test.tsx, so a change made through the UI
 // is visible in the next read.
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
@@ -92,9 +92,11 @@ async function openLabelsSettings(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('App label filter', () => {
+  let fetchMock: ReturnType<typeof installFakeBackend>;
+
   beforeEach(() => {
     seedBackground();
-    installFakeBackend(backend);
+    fetchMock = installFakeBackend(backend);
   });
 
   afterEach(() => {
@@ -252,5 +254,72 @@ describe('App label filter', () => {
         expect(chip).toHaveAttribute('data-label-color', 'pink');
       });
     }
+  });
+  // DFLT-00296: two label re-fetches in flight at once. The older one's
+  // answer arrives last but must not replace the newer list.
+  it('keeps the newer label list when an older label request answers last', async () => {
+    const labelsURL = `/api/projects/${alpha.id}/labels`;
+    // Startup asks for the labels twice: once from the current-project
+    // effect and once from the lastFetchedAt effect after the first ticket
+    // fetch (App.tsx). Hold nothing until both have been made, so the second
+    // startup request cannot be mistaken for the one this test holds.
+    const STARTUP_LABEL_CALLS = 2;
+    let labelCalls = 0;
+    let armed = false;
+    let heldReached = false;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => (release = resolve));
+    let heldPromise: Promise<Response> | null = null;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) !== labelsURL) return backend.fetch(input, init);
+      labelCalls++;
+      if (!armed || heldPromise) return backend.fetch(input, init);
+      heldPromise = (async () => {
+        // Build the answer now, from the data as it is at request time, and
+        // only then wait: the held request answers with the OLD list.
+        const res = await backend.fetch(input, init);
+        heldReached = true;
+        await gate;
+        return res;
+      })();
+      return heldPromise;
+    });
+
+    const user = await renderApp();
+    const refreshButton = screen.getByRole('button', { name: i18n.t('toolbar.refreshTitle') });
+    await user.click(labelFilterButton());
+    await within(screen.getByRole('group', { name: i18n.t('toolbar.labelGroupLabel') })).findByRole('checkbox', { name: 'UI' });
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(refreshButton).toBeEnabled();
+      expect(labelCalls).toBe(STARTUP_LABEL_CALLS);
+    });
+    armed = true;
+
+    // Request A: the labels re-fetch that follows this refresh's ticket
+    // fetch. Wait until it has reached the backend and been answered with
+    // the current (old) list, and is held there.
+    await user.click(refreshButton);
+    await waitFor(() => expect(heldReached).toBe(true));
+
+    // Only now change the data, so A's answer is the old list.
+    backend.labels.find(l => l.id === 'label-ui')!.name = '画面';
+
+    // Request B: a later refresh, whose labels request is not held.
+    await waitFor(() => expect(refreshButton).toBeEnabled());
+    await user.click(refreshButton);
+    await user.click(labelFilterButton());
+    const panel = screen.getByRole('group', { name: i18n.t('toolbar.labelGroupLabel') });
+    await within(panel).findByRole('checkbox', { name: '画面' });
+
+    // Let A answer, and let whatever follows its await run to completion.
+    await act(async () => {
+      release();
+      await heldPromise;
+    });
+    await act(async () => {});
+
+    expect(within(panel).getByRole('checkbox', { name: '画面' })).toBeInTheDocument();
+    expect(within(panel).queryByRole('checkbox', { name: 'UI' })).not.toBeInTheDocument();
   });
 });
