@@ -1876,7 +1876,7 @@ export const TicketItem: React.FC<Props> = ({
           the 15rem one also matches 320-336px with a 32px default font.
           DFLT-00290: that is the named upto-200px: now (same condition; the
           arbitrary [@media(max-width:200px)]: came out after every named
-          variant and would have beaten the next one), and from 7.5rem down
+          variant and would have beaten upto-7_5rem:p-1), and from 7.5rem down
           (a 32px default font in a 240px window or narrower, 120px or
           narrower at 16px) both pad with p-1, like the page, the node list's
           panel body and the node rows, so a node row keeps room for its

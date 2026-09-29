@@ -36,9 +36,10 @@ export const AutopilotDecisions: React.FC<Props> = ({ artifacts, nodes }) => {
   const items = artifacts.filter(a => a.name.startsWith(AUTOPILOT_ARTIFACT_PREFIX));
   if (items.length === 0) return null;
   const nodeName = new Map(nodes.map(n => [n.id, n.name]));
-  // DFLT-00290: from 7.5rem down (a 32px default font in a 240px window or
-  // narrower) the card pads 0.25rem, so its labels and dates wrap inside it.
 
+  // DFLT-00290: from 7.5rem down (a 32px default font in a 240px window or
+  // narrower) the <section> card below pads 0.25rem (upto-7_5rem:p-1), so
+  // its labels and dates wrap inside it.
   return (
     <section
       data-testid="autopilot-decisions"

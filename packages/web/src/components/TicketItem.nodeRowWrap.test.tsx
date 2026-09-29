@@ -534,6 +534,8 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
   it('the pulsing dots do not pulse under prefers-reduced-motion: reduce', () => {
     const { container } = renderTicket();
     const inProgress = NODES.find(x => x.status === 'IN PROGRESS')!;
+    const awaitingApproval = NODES.find(x => x.type === 'approval_gate')!;
+    const done = NODES.find(x => x.status === 'DONE')!;
     const dot = rowParts(inProgress).status.firstElementChild as HTMLElement;
     expect(dot).toHaveClass('animate-pulse', 'motion-reduce:animate-none');
     const tick = (n: GraphNode) => {
@@ -542,9 +544,9 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
       return ticks[0];
     };
     expect(tick(inProgress)).toHaveClass('bg-blue-500', 'animate-pulse', 'motion-reduce:animate-none');
-    expect(tick(NODES[2])).toHaveClass('bg-amber-400', 'animate-pulse', 'motion-reduce:animate-none');
+    expect(tick(awaitingApproval)).toHaveClass('bg-amber-400', 'animate-pulse', 'motion-reduce:animate-none');
     // The ticks that do not pulse carry neither.
-    expectNoneOf(tick(NODES[0]), ['animate-pulse', 'motion-reduce:animate-none']);
+    expectNoneOf(tick(done), ['animate-pulse', 'motion-reduce:animate-none']);
     // No element pulses without the reduced-motion override.
     for (const el of container.querySelectorAll('.animate-pulse')) expect(el).toHaveClass('motion-reduce:animate-none');
   });

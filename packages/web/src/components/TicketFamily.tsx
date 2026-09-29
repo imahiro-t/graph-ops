@@ -21,8 +21,8 @@ export const TicketFamily: React.FC<Props> = ({ parent, childTickets = [], onOpe
   if (!parent && childTickets.length === 0) return null;
 
   // DFLT-00290: from 7.5rem down (a 32px default font in a 240px window or
-  // narrower) the card pads 0.25rem and a link may wrap onto several lines;
-  // at 160px the label and the status chip ran past the viewport.
+  // narrower) a link may wrap onto several lines (upto-7_5rem:flex-wrap); at
+  // 160px its label and status chip ran past the viewport.
   const link = (ref: TicketRef, testId: string) => {
     const meta = getStatusMeta(ref.status);
     return (
@@ -42,6 +42,9 @@ export const TicketFamily: React.FC<Props> = ({ parent, childTickets = [], onOpe
     );
   };
 
+  // DFLT-00290: from 7.5rem down (a 32px default font in a 240px window or
+  // narrower) the card pads 0.25rem (upto-7_5rem:p-1), leaving its links
+  // room to wrap inside it.
   return (
     <div
       data-testid="ticket-family"
