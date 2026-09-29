@@ -270,7 +270,8 @@ describe.each(['ja', 'en'] as const)('summary card figures (%s)', lng => {
 // whole button group, so it no longer checked New Ticket itself. It now
 // checks the button on its own: no hover wrapper around it, a description
 // that is the hidden reason span and no tooltip element, and no tooltip
-// after pointer events aimed at the button and at the element holding it.
+// after hovering the button itself and sending pointer and mouse events to
+// it directly.
 describe.each(['ja', 'en'] as const)('New Ticket and the Tab order in a 320px window at 200%% (%s)', lng => {
   beforeEach(async () => {
     await i18n.changeLanguage(lng);
@@ -317,14 +318,12 @@ describe.each(['ja', 'en'] as const)('New Ticket and the Tab order in a 320px wi
     // rendered while none is open.
     expect(allIconButtonTooltips()).toHaveLength(0);
 
-    // Hover the group's child that holds the button (the button itself, or
-    // a wrapper around it if one came back), never the whole group.
-    const holder = Array.from(group.children).find(child => child.contains(button)) as HTMLElement;
-    await user.hover(holder);
-    // user-event sends no mouse events to a disabled element, while some
-    // browsers do. Send them to the button directly: React then calls no
-    // onMouseEnter of the disabled button itself, but does call those of the
-    // elements around it, where IconButton tracks hover.
+    // Hover the button itself, never the whole group.
+    await user.hover(button);
+    // user-event may hold back mouse events from a disabled element, while
+    // some browsers deliver them. Send them to the button directly too: React
+    // then calls no onMouseEnter of the disabled button itself, but does call
+    // those of the elements around it, where IconButton tracks hover.
     fireEvent.pointerOver(button);
     fireEvent.mouseOver(button);
     await waitForHoverOpenDelay();
