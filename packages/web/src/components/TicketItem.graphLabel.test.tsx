@@ -161,7 +161,7 @@ describe('graphNodeLabel', () => {
       // W counts as 1em (0.94em in Arial Bold), so 3 W's + "…" = 4em.
       expect(graphNodeLabel('WWWWWWWWWW', opts)).toEqual({ text: 'WWW…', truncated: true });
       // Q, A (0.8em each) + レ (1em) + … (1em) = 3.6em.
-      expect(graphNodeLabel('QAレビュー', opts)).toEqual({ text: 'QAレ…', truncated: true });
+      expect(graphNodeLabel(QA_REVIEW, opts)).toEqual({ text: 'QAレ…', truncated: true });
       expect(graphNodeLabel('review', opts)).toEqual({ text: 'review', truncated: false });
     });
 
