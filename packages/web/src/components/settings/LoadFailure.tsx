@@ -78,19 +78,24 @@ export function LoadFailure({ message, retrying, onRetry, failureKey }: Props) {
 // the user has moved it somewhere else meanwhile (focusIfLost). While the
 // element is missing (the form is still loading) or disabled, the move waits
 // for a later render, the same rule as LabelsEditor's pendingFocus.
+//
+// getTarget may be an inline arrow or a memoized function: the hook does
+// not depend on its identity (see the effect below).
 export function useFocusAfterRetry(getTarget: () => HTMLElement | null | undefined): () => void {
   const [pending, setPending] = useState(false);
   // The target may only appear (or be enabled) a few renders after the
-  // retry, so while the move is pending every render checks again. Callers
-  // pass getTarget as an inline arrow, a new function on each render, so
-  // listing it re-runs the effect on every render, which is what is wanted
-  // here; the effect does nothing while no move is pending.
+  // retry, and those renders are caused by the caller's own state, not by
+  // anything this hook can list. So the effect has no dependency array: it
+  // runs after every render, calls the getTarget of that render, and does
+  // nothing while no move is pending. It cannot loop: it sets state only
+  // once, when the move is done, and then stops at `!pending`.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately runs after every render, see above
   useEffect(() => {
     if (!pending) return;
     const el = getTarget();
     if (!el || (el as HTMLButtonElement | HTMLInputElement).disabled) return;
     focusIfLost(el);
     setPending(false);
-  }, [pending, getTarget]);
+  });
   return useCallback(() => setPending(true), []);
 }
