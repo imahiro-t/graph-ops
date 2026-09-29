@@ -1294,7 +1294,7 @@ func cmdUpdateTicket(repo store.GraphRepository, args []string) error {
 // (DFLT-00142, see engine.GetTicketDetailWithFamily).
 func cmdGetTicket(eng *engine.GraphEngine, args []string) error {
 	const usage = "usage: graph-engine get-ticket <ticketId> [--session <sessionId>]"
-	session, args, err := takeFlagValue(args, "--session", usage)
+	session, args, err := takeSessionFlag(args, usage)
 	if err != nil {
 		return err
 	}
@@ -1322,7 +1322,7 @@ func cmdListTickets(repo store.GraphRepository) error {
 
 func cmdGetExecutable(eng *engine.GraphEngine, repo store.GraphRepository, rc runtimeConfig, args []string) error {
 	const usage = `usage: graph-engine get-executable <ticketId> [--language <code>] [--session <sessionId>]`
-	session, args, err := takeFlagValue(args, "--session", usage)
+	session, args, err := takeSessionFlag(args, usage)
 	if err != nil {
 		return err
 	}
@@ -1442,11 +1442,11 @@ func cmdCompleteNode(eng *engine.GraphEngine, repo store.GraphRepository, args [
 	// --reason's value is never mistaken for one of them: they are only
 	// taken as flags, and a reason that is literally "--claim" has to go
 	// through the Web UI.
-	session, args, err := takeFlagValue(args, "--session", usage)
+	session, args, err := takeSessionFlag(args, usage)
 	if err != nil {
 		return err
 	}
-	claimToken, args, err := takeFlagValue(args, "--claim", usage)
+	claimToken, args, err := takeIDFlag(args, "--claim", usage)
 	if err != nil {
 		return err
 	}
@@ -1610,7 +1610,7 @@ func cmdGrantIterations(eng *engine.GraphEngine, args []string) error {
 // without being able to vouch for it comes with a warning on stderr.
 func cmdUnstickNode(eng *engine.GraphEngine, rc runtimeConfig, args []string) error {
 	const usage = `usage: graph-engine unstick-node <nodeId> [--session <sessionId>] [--force]`
-	session, args, err := takeFlagValue(args, "--session", usage)
+	session, args, err := takeSessionFlag(args, usage)
 	if err != nil {
 		return err
 	}
@@ -1674,7 +1674,7 @@ func cmdAddArtifact(eng *engine.GraphEngine, repo store.GraphRepository, artifac
 	// --allow-outside-artifacts-dir and --session can appear anywhere after
 	// the required positional args; stripping them out first keeps the
 	// positional-argument parsing beneath unaware of flags entirely.
-	session, args, err := takeFlagValue(args, "--session", usage)
+	session, args, err := takeSessionFlag(args, usage)
 	if err != nil {
 		return err
 	}

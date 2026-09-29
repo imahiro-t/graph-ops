@@ -1,5 +1,7 @@
 package domain
 
+import "github.com/graph-ops/core-go/internal/displayname"
+
 // NodeClaim is what a claim records on a node (DFLT-00327): see GraphNode's
 // Claimed*/Claim* fields. SessionID is "" when the claim was made outside a
 // processing session.
@@ -29,6 +31,11 @@ const (
 	ClaimLeaseLegacy = "legacy"
 )
 
+// SessionTimestampLayout is how a processing session's heartbeat is written:
+// RFC3339 in UTC with a fixed nine fractional digits, so that two heartbeats
+// compare as strings the way they do as times.
+const SessionTimestampLayout = "2006-01-02T15:04:05.000000000Z"
+
 // ProcessingSession is one run of process-ticket over a ticket
 // (DFLT-00327), created by `graph-engine begin-session`. Its heartbeat --
 // moved by every graph-engine call made with --session -- is what tells
@@ -52,4 +59,30 @@ type ProcessingSession struct {
 	RunID               string `json:"run_id,omitempty"`
 	StartedAt           string `json:"started_at"`
 	Heartbeat           string `json:"heartbeat"`
+}
+
+// SanitizeClaimName passes the claimer's name, which may have been written
+// by another member's client (or straight into the data source), through
+// displayname.Sanitize (DFLT-00336), like the autopilot starter's name. A
+// name that becomes "" is an unknown name, never a stand-in one. Every read
+// of a node from a data source calls it; it is idempotent, so the display
+// paths call it again to be safe.
+func (n *GraphNode) SanitizeClaimName() {
+	if n.ClaimedByName == nil {
+		return
+	}
+	name := displayname.Sanitize(*n.ClaimedByName)
+	n.ClaimedByName = &name
+	if name == "" && n.ClaimedByNameIsFallback != nil {
+		f := false
+		n.ClaimedByNameIsFallback = &f
+	}
+}
+
+// SanitizeActorName is SanitizeClaimName for a processing session's owner.
+func (s *ProcessingSession) SanitizeActorName() {
+	s.ActorName = displayname.Sanitize(s.ActorName)
+	if s.ActorName == "" {
+		s.ActorNameIsFallback = false
+	}
 }

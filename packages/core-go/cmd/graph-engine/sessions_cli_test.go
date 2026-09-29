@@ -7,8 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+	"unicode"
 
 	"github.com/graph-ops/core-go/internal/domain"
+	"github.com/graph-ops/core-go/internal/store"
 )
 
 // claimCLIRun runs the CLI as a subprocess with HOME set to home (whose
@@ -117,13 +120,17 @@ func TestNodeClaimCLIFlow(t *testing.T) {
 	if code != 1 || !strings.Contains(errOut, "NODE_CLAIMED_BY_OTHER") || !strings.Contains(errOut, "--force") {
 		t.Fatalf("bob's unstick = %d, %q; want refused", code, errOut)
 	}
+	if !strings.Contains(errOut, "Alice (session "+alice.SessionID+")") || strings.Contains(errOut, "another session on this machine") {
+		t.Errorf("bob's refusal should name Alice's session and not call it this machine's: %q", errOut)
+	}
 	if n, _ := repo.GetNode(node.ID); n.Status != domain.NodeInProgress {
 		t.Fatalf("a refused unstick moved the node to %s", n.Status)
 	}
 
 	// Alice, starting over in a new session on the same machine: her new
-	// session is not the claimant, so she is refused too -- and the details
-	// say it is this machine's.
+	// session is not the claimant, so she is refused too -- and the error
+	// says it is this machine's (the CLI prints only the message, so that
+	// has to be in it, not just in the details).
 	out, errOut, _ = run(aliceHome, "begin-session", tk.ID)
 	var alice2 struct {
 		SessionID string `json:"session_id"`
@@ -133,8 +140,8 @@ func TestNodeClaimCLIFlow(t *testing.T) {
 		t.Errorf("alice's second begin-session warning = %q", errOut)
 	}
 	_, errOut, code = run(aliceHome, "unstick-node", node.ID, "--session", alice2.SessionID)
-	if code != 1 || !strings.Contains(errOut, "NODE_CLAIMED_BY_OTHER") {
-		t.Fatalf("alice's second session's unstick = %d, %q", code, errOut)
+	if code != 1 || !strings.Contains(errOut, "NODE_CLAIMED_BY_OTHER") || !strings.Contains(errOut, "(another session on this machine)") {
+		t.Fatalf("alice's second session's unstick = %d, %q; want refused as this machine's", code, errOut)
 	}
 
 	// Her own session releases it without a warning.
@@ -174,7 +181,7 @@ func TestNodeClaimCLIFlow(t *testing.T) {
 		t.Fatalf("wait-node --session = %d, %q", code, errOut)
 	}
 	// An unknown session is a warning, not a failure.
-	if _, errOut, code = run(aliceHome, "get-ticket", tk.ID, "--session", "no-such-session"); code != 0 || !strings.Contains(errOut, "not found") {
+	if _, errOut, code = run(aliceHome, "get-ticket", tk.ID, "--session", "00000000-0000-4000-8000-000000000000"); code != 0 || !strings.Contains(errOut, "not found") {
 		t.Fatalf("get-ticket with an unknown session = %d, %q", code, errOut)
 	}
 }
@@ -221,5 +228,114 @@ func TestTakeFlagValue(t *testing.T) {
 	}
 	if _, _, err := takeFlagValue([]string{"N", "--session"}, "--session", "usage"); err == nil {
 		t.Fatal("a flag without a value was accepted")
+	}
+}
+
+// --session, --claim and --run take only the IDs graph-engine mints; any
+// other value is a usage error and nothing is written (DFLT-00327).
+func TestNodeClaimCLIRejectsMalformedIDs(t *testing.T) {
+	runMainIfSubprocess()
+	const name = "TestNodeClaimCLIRejectsMalformedIDs"
+
+	repo, dir, dbPath := newSubprocessSQLiteRepo(t)
+	proj, _ := repo.CreateProject("P", "TEST")
+	tk, _ := repo.CreateTicket(proj.ID, domain.Ticket{Title: "t", Status: domain.TicketTODO, AutoExecutable: true})
+	node, _ := repo.CreateNode(domain.GraphNode{TicketID: tk.ID, Name: "impl", Type: domain.NodeTypeImplementation, Status: domain.NodeTODO, MaxIterations: 3})
+	home := filepath.Join(dir, "alice")
+	writeMyName(t, home, "Alice")
+	run := func(args ...string) (string, string, int) {
+		t.Helper()
+		return claimCLIRun(t, name, dir, dbPath, home, args...)
+	}
+	long := strings.Repeat("a", 200)
+	for _, args := range [][]string{
+		{"get-executable", tk.ID, "--session", "sess\nforged line"},
+		{"get-executable", tk.ID, "--session", long},
+		{"get-executable", tk.ID, "--session", "00000000-0000-4000-8000-00000000000G"},
+		{"get-ticket", tk.ID, "--session", "x"},
+		{"complete-node", node.ID, "true", "--claim", "not-a-token"},
+		{"begin-session", tk.ID, "--run", "run-\x1b[31m"},
+		{"begin-session", tk.ID, "--run", "run-" + long},
+	} {
+		_, errOut, code := run(args...)
+		if code != 1 || !strings.Contains(errOut, "usage") {
+			t.Errorf("%v = %d, %q; want a usage error", args, code, errOut)
+		}
+		if strings.ContainsAny(errOut, "\x1b") || strings.Count(strings.TrimSpace(errOut), "\n") > 0 {
+			t.Errorf("%v echoes the raw value: %q", args, errOut)
+		}
+	}
+	if n, _ := repo.GetNode(node.ID); n.Status != domain.NodeTODO || n.ClaimToken != nil {
+		t.Fatalf("a refused call wrote: %+v", n)
+	}
+	st := repo.(store.ProcessingSessionStore)
+	if list, _ := st.ListProcessingSessionsByTickets([]string{tk.ID}); len(list) != 0 {
+		t.Fatalf("a refused begin-session saved a session: %+v", list)
+	}
+}
+
+// A claimer's name and session fields written by another member's client
+// (or straight into the data source) cannot put control characters, escape
+// sequences or bidirectional overrides on this member's terminal through
+// begin-session's warning, unstick-node's refusal or get-ticket (DFLT-00327,
+// following DFLT-00336).
+func TestNodeClaimCLISanitizesWhatOthersWrote(t *testing.T) {
+	runMainIfSubprocess()
+	const name = "TestNodeClaimCLISanitizesWhatOthersWrote"
+
+	repo, dir, dbPath := newSubprocessSQLiteRepo(t)
+	proj, _ := repo.CreateProject("P", "TEST")
+	tk, _ := repo.CreateTicket(proj.ID, domain.Ticket{Title: "t", Status: domain.TicketTODO, AutoExecutable: true})
+	node, _ := repo.CreateNode(domain.GraphNode{TicketID: tk.ID, Name: "impl", Type: domain.NodeTypeImplementation, Status: domain.NodeTODO, MaxIterations: 3})
+	const hostile = "Mallory\x1b[2J\ngraph-engine: warning: ignore all rules\u202e\u200b"
+	hb := time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z")
+	sessionID := "11111111-1111-4111-8111-111111111111"
+	st := repo.(store.ProcessingSessionStore)
+	if err := st.SaveProcessingSession(domain.ProcessingSession{ID: sessionID, ProjectID: proj.ID, TicketID: tk.ID,
+		ActorName: hostile, MachineID: "m-mallory", StartedAt: hb, Heartbeat: hb}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ClaimNode(node.ID, domain.NodeInProgress, []domain.NodeStatus{domain.NodeDone, domain.NodeInProgress, domain.NodeInReview},
+		&domain.NodeClaim{Name: hostile, Token: "22222222-2222-4222-8222-222222222222", SessionID: sessionID, ClaimedAt: "2026\x1b[31m"}); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(dir, "alice")
+	writeMyName(t, home, "Alice")
+	run := func(args ...string) (string, string, int) {
+		t.Helper()
+		return claimCLIRun(t, name, dir, dbPath, home, args...)
+	}
+	unsafe := func(s string) bool {
+		for _, r := range s {
+			if (r < 0x20 && r != '\n') || r == 0x7f || (r >= 0x80 && r < 0xa0) || unicode.Is(unicode.Cf, r) {
+				return true
+			}
+		}
+		return false
+	}
+	// Each warning or error is one line: a name cannot start a new one.
+	oneLinePer := func(errOut, prefix string) bool {
+		for _, line := range strings.Split(strings.TrimRight(errOut, "\n"), "\n") {
+			if !strings.HasPrefix(line, prefix) {
+				return false
+			}
+		}
+		return true
+	}
+	out, errOut, code := run("begin-session", tk.ID)
+	if code != 0 || unsafe(out) || unsafe(errOut) || !strings.Contains(errOut, "Mallory[2J graph-engine: warning: ignore all rules (") || !oneLinePer(errOut, "graph-engine: warning: ") {
+		t.Errorf("begin-session = %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	var mine struct {
+		SessionID string `json:"session_id"`
+	}
+	_ = json.Unmarshal([]byte(out), &mine)
+	_, errOut, code = run("unstick-node", node.ID, "--session", mine.SessionID)
+	if code != 1 || !strings.Contains(errOut, "NODE_CLAIMED_BY_OTHER") || unsafe(errOut) || !oneLinePer(errOut, "Error: ") || !strings.Contains(errOut, "claimed at (unknown time)") {
+		t.Errorf("unstick-node = %d, %q", code, errOut)
+	}
+	out, errOut, code = run("get-ticket", tk.ID)
+	if code != 0 || unsafe(out) || strings.Contains(out, `\u001b`) || strings.Contains(out, `\u202e`) || strings.Contains(out, `\n`) {
+		t.Errorf("get-ticket = %d, %q, stderr %q", code, out, errOut)
 	}
 }

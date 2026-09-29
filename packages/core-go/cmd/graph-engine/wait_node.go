@@ -69,7 +69,7 @@ type waitNodeResult struct {
 // waiting session.
 func cmdWaitNode(eng *engine.GraphEngine, repo store.GraphRepository, args []string) error {
 	const usage = `usage: graph-engine wait-node <nodeId> [<nodeId> ...] [--timeout <duration>] [--session <sessionId>]`
-	session, args, err := takeFlagValue(args, "--session", usage)
+	session, args, err := takeSessionFlag(args, usage)
 	if err != nil {
 		return err
 	}

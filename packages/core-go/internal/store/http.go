@@ -668,6 +668,7 @@ func (r *HTTPRepository) nodeFromWire(w httpNodeWire) domain.GraphNode {
 	if !r.supportsClaims() {
 		n.ClaimedByName, n.ClaimedByNameIsFallback, n.ClaimToken, n.ClaimSessionID, n.ClaimedAt = nil, nil, nil, nil, nil
 	}
+	n.SanitizeClaimName()
 	return n
 }
 

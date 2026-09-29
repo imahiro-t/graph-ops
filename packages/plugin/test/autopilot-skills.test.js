@@ -254,6 +254,7 @@ test('process-ticket, autopilot-worker and graph-node-agent carry the processing
     '`NODE_CLAIMED_BY_OTHER`',
     '**only after a person has confirmed that nobody is working on that node any more**',
     '`same_machine: true`',
+    '`(another session on this machine)`',
     'the nodes it claims are not protected at all'
   ]);
   assertAll(read('skills/autopilot-worker/SKILL.md'), 'autopilot-worker', [

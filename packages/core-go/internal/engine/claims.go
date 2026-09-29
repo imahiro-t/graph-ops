@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/graph-ops/core-go/internal/autopilot"
+	"github.com/graph-ops/core-go/internal/displayname"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/identity"
 	"github.com/graph-ops/core-go/internal/store"
@@ -62,7 +61,7 @@ type Claimer struct {
 // SQL backends' TouchProcessingSession relies on that). It is still an
 // RFC3339 timestamp every reader parses.
 func sessionTimestamp(t time.Time) string {
-	return t.UTC().Format("2006-01-02T15:04:05.000000000Z")
+	return t.UTC().Format(domain.SessionTimestampLayout)
 }
 
 func (e *GraphEngine) now() time.Time {
@@ -76,7 +75,7 @@ func (e *GraphEngine) now() time.Time {
 func (e *GraphEngine) SetClock(clock func() time.Time) { e.clock = clock }
 
 // SetLogf sets where the engine's warnings go; nil restores the default
-// (stderr).
+// (stderr). The Web UI server points it at its structured logger.
 func (e *GraphEngine) SetLogf(logf func(format string, args ...any)) { e.logf = logf }
 
 func (e *GraphEngine) warnf(format string, args ...any) {
@@ -86,6 +85,31 @@ func (e *GraphEngine) warnf(format string, args ...any) {
 	}
 	fmt.Fprintf(os.Stderr, "graph-engine: warning: "+format+"\n", args...)
 }
+
+// warnEvery is warnf for a warning that can recur on every call -- the Web
+// UI server lists tickets every few seconds per open tab -- said at most
+// once per every for the same key (every == 0: once per engine). The
+// throttle belongs to the engine, so each engine (and its SetLogf sink)
+// gets its own first warning.
+func (e *GraphEngine) warnEvery(key string, every time.Duration, format string, args ...any) {
+	now := e.now()
+	e.warnMu.Lock()
+	last, said := e.warned[key]
+	if said && (every == 0 || now.Sub(last) < every) {
+		e.warnMu.Unlock()
+		return
+	}
+	if e.warned == nil {
+		e.warned = map[string]time.Time{}
+	}
+	e.warned[key] = now
+	e.warnMu.Unlock()
+	e.warnf(format, args...)
+}
+
+// repeatedWarningInterval is how often a warning that repeats on every
+// listing (a data source that keeps failing) is said again.
+const repeatedWarningInterval = 5 * time.Minute
 
 // sessionStore is the repository's ProcessingSessionStore, nil when it has
 // none (a test fake).
@@ -100,18 +124,17 @@ func sessionsUnsupported(err error) bool {
 	return errors.Is(err, store.ErrProcessingSessionsUnsupported)
 }
 
-// sessionsUnsupportedWarned makes warnSessionsUnsupported say its piece
-// once per process.
-var sessionsUnsupportedWarned sync.Once
-
+// warnSessionsUnsupported says, once per engine, that the data source keeps
+// no processing sessions.
 func (e *GraphEngine) warnSessionsUnsupported() {
-	sessionsUnsupportedWarned.Do(func() {
-		e.warnf("this data source cannot keep processing sessions (an HTTP data source needs protocol 1.2 or newer), so whether another member is still working on a claimed node cannot be told; unstick-node releases such nodes without that check")
-	})
+	e.warnEvery("sessions-unsupported", 0, "this data source cannot keep processing sessions (an HTTP data source needs protocol 1.2 or newer), so whether another member is still working on a claimed node cannot be told; unstick-node releases such nodes without that check")
 }
 
-// isClaimedStatus reports whether a node at status can hold a claim.
-func isClaimedStatus(status domain.NodeStatus) bool {
+// holdsClaim reports whether a node at status is claimed -- somebody took it
+// with get-executable and has not finished it -- so that it can carry claim
+// information (IN PROGRESS / IN REVIEW). Compare isUnclaimable in engine.go,
+// which also counts DONE.
+func holdsClaim(status domain.NodeStatus) bool {
 	return status == domain.NodeInProgress || status == domain.NodeInReview
 }
 
@@ -307,10 +330,18 @@ func (e *GraphEngine) BeginSession(ticketID, runID string, actor identity.Actor)
 		return BeginSessionResult{}, err
 	}
 
-	runs := e.runRecords(append(runProjects(existing), runProjectsOf(self)...))
+	// Only the lease of an existing session of an autopilot run needs its
+	// run's record, and all of them are of this ticket's project.
+	var runs map[string]domain.AutopilotRunRecord
+	for _, s := range existing {
+		if s.RunID != "" {
+			runs = e.runRecords([]string{detail.ProjectID})
+			break
+		}
+	}
 	claimsBySession := map[string][]string{}
 	for _, n := range detail.Nodes {
-		if isClaimedStatus(n.Status) && n.ClaimSessionID != nil {
+		if holdsClaim(n.Status) && n.ClaimSessionID != nil {
 			claimsBySession[*n.ClaimSessionID] = append(claimsBySession[*n.ClaimSessionID], n.ID)
 		}
 	}
@@ -325,7 +356,7 @@ func (e *GraphEngine) BeginSession(ticketID, runID string, actor identity.Actor)
 				len(claimsBySession[s.ID]) == 0 && deleted < sessionRetentionDeleteLimit {
 				deleted++
 				if err := st.DeleteProcessingSession(s.ID); err != nil {
-					res.Warnings = append(res.Warnings, fmt.Sprintf("deleting the old processing session %s failed (it is retried by a later begin-session): %v", s.ID, err))
+					res.Warnings = append(res.Warnings, fmt.Sprintf("deleting the old processing session %s failed (it is retried by a later begin-session): %v", displayname.ID(s.ID), err))
 				}
 			}
 			continue
@@ -334,11 +365,18 @@ func (e *GraphEngine) BeginSession(ticketID, runID string, actor identity.Actor)
 		if nodes == nil {
 			nodes = []string{}
 		}
+		// Everything here was read from the shared data source and ends up
+		// on the caller's terminal: the name is sanitized and the ID and time
+		// fields are shown only when they have the shape they should.
+		s.SanitizeActorName()
 		peer := SessionPeer{
-			SessionID: s.ID, Name: s.ActorName, NameIsFallback: s.ActorNameIsFallback, NodeIDs: nodes,
-			Heartbeat: hb, RunID: s.RunID,
+			SessionID: displayname.ID(s.ID), Name: s.ActorName, NameIsFallback: s.ActorNameIsFallback, NodeIDs: nodes,
+			Heartbeat:   displayname.Timestamp(hb),
 			SameMachine: s.MachineID != "" && s.MachineID == actor.MachineID,
 			SameRun:     runID != "" && s.RunID == runID,
+		}
+		if s.RunID != "" {
+			peer.RunID = displayname.ID(s.RunID)
 		}
 		if peer.SameRun {
 			res.SameRun = append(res.SameRun, peer)
@@ -349,13 +387,6 @@ func (e *GraphEngine) BeginSession(ticketID, runID string, actor identity.Actor)
 	sort.Slice(res.Others, func(i, j int) bool { return res.Others[i].SessionID < res.Others[j].SessionID })
 	sort.Slice(res.SameRun, func(i, j int) bool { return res.SameRun[i].SessionID < res.SameRun[j].SessionID })
 	return res, nil
-}
-
-func runProjectsOf(s domain.ProcessingSession) []string {
-	if s.RunID == "" {
-		return nil
-	}
-	return []string{s.ProjectID}
 }
 
 // TouchSession records a heartbeat of sessionID, returning what the caller
@@ -390,7 +421,7 @@ func (e *GraphEngine) AnnotateClaims(nodeLists ...[]domain.GraphNode) {
 	var ticketIDs []string
 	for _, nodes := range nodeLists {
 		for _, n := range nodes {
-			if isClaimedStatus(n.Status) && n.ClaimSessionID != nil {
+			if holdsClaim(n.Status) && n.ClaimSessionID != nil {
 				ticketIDs = append(ticketIDs, n.TicketID)
 			}
 		}
@@ -403,7 +434,7 @@ func (e *GraphEngine) AnnotateClaims(nodeLists ...[]domain.GraphNode) {
 		case sessionsUnsupported(err):
 			e.warnSessionsUnsupported()
 		case err != nil:
-			e.warnf("reading the processing sessions of claimed nodes failed; their leases are shown as unknown: %v", err)
+			e.warnEvery("sessions-read-failed", repeatedWarningInterval, "reading the processing sessions of claimed nodes failed; their leases are shown as unknown (repeated at most every %s while it keeps failing): %v", repeatedWarningInterval, err)
 		default:
 			for _, s := range list {
 				sessions[s.ID] = s
@@ -415,12 +446,32 @@ func (e *GraphEngine) AnnotateClaims(nodeLists ...[]domain.GraphNode) {
 	for _, nodes := range nodeLists {
 		for i := range nodes {
 			n := &nodes[i]
-			if !isClaimedStatus(n.Status) {
+			if !holdsClaim(n.Status) {
 				n.ClaimLease, n.ClaimHeartbeat = "", nil
 				continue
 			}
 			n.ClaimLease, n.ClaimHeartbeat = evaluateLease(*n, sessions, runs, now)
+			sanitizeClaimForDisplay(n)
 		}
+	}
+}
+
+// sanitizeClaimForDisplay makes the claim fields of n that were read from
+// the shared data source safe to print (get-ticket, the Web UI's API): the
+// name is sanitized, a time that does not parse is dropped, and a session ID
+// that does not look like one is replaced. The lease has been judged
+// already, from the stored values.
+func sanitizeClaimForDisplay(n *domain.GraphNode) {
+	n.SanitizeClaimName()
+	if n.ClaimHeartbeat != nil && displayname.Timestamp(*n.ClaimHeartbeat) == displayname.UnknownTime {
+		n.ClaimHeartbeat = nil
+	}
+	if n.ClaimedAt != nil && displayname.Timestamp(*n.ClaimedAt) == displayname.UnknownTime {
+		n.ClaimedAt = nil
+	}
+	if n.ClaimSessionID != nil {
+		id := displayname.ID(*n.ClaimSessionID)
+		n.ClaimSessionID = &id
 	}
 }
 
@@ -471,10 +522,11 @@ func (e *GraphEngine) checkUnstick(node *domain.GraphNode, opts UnstickOptions) 
 			return nil, err
 		}
 	}
+	node.SanitizeClaimName()
 	who := claimDescription(node)
 	if isOwnClaim(*node, opts.SessionID, caller, claimant) {
 		if claimant != nil && claimant.ID != opts.SessionID {
-			return []string{fmt.Sprintf("node %s was claimed by session %s of the same autopilot run (%s); released it as this run's own claim", node.ID, claimant.ID, claimant.RunID)}, nil
+			return []string{fmt.Sprintf("node %s was claimed by session %s of the same autopilot run (%s); released it as this run's own claim", node.ID, displayname.ID(claimant.ID), displayname.ID(claimant.RunID))}, nil
 		}
 		return nil, nil
 	}
@@ -482,55 +534,60 @@ func (e *GraphEngine) checkUnstick(node *domain.GraphNode, opts UnstickOptions) 
 		return []string{fmt.Sprintf("node %s was claimed by %s without a processing session that can be found, so whether somebody is still working on it cannot be told; it was released", node.ID, who)}, nil
 	}
 	sessions := map[string]domain.ProcessingSession{claimant.ID: *claimant}
-	runs := e.runRecords(runProjectsOf(*claimant))
-	lease, hb := evaluateLease(*node, sessions, runs, e.now())
+	var runs map[string]domain.AutopilotRunRecord
+	if claimant.RunID != "" {
+		runs = e.runRecords([]string{claimant.ProjectID})
+	}
+	lease, hbRaw := evaluateLease(*node, sessions, runs, e.now())
+	// The times, like the name and IDs, come from the shared data source and
+	// are printed: only well-formed ones are shown.
+	hb, claimedAt := displayname.Timestamp(deref(hbRaw)), displayname.Timestamp(deref(node.ClaimedAt))
 	switch lease {
 	case domain.ClaimLeaseLive:
 		if opts.Force {
-			return []string{fmt.Sprintf("node %s was released by --force although %s is still active (last heartbeat %s): make sure that session does not complete it", node.ID, who, deref(hb))}, nil
+			return []string{fmt.Sprintf("node %s was released by --force although %s is still active (last heartbeat %s): make sure that session does not complete it", node.ID, who, hb)}, nil
 		}
 		sameMachine := claimant.MachineID != "" && claimant.MachineID == opts.MachineID
 		details := map[string]any{
 			"node_id":          node.ID,
 			"claimed_by_name":  deref(node.ClaimedByName),
 			"name_is_fallback": node.ClaimedByNameIsFallback != nil && *node.ClaimedByNameIsFallback,
-			"claimed_at":       deref(node.ClaimedAt),
-			"heartbeat":        deref(hb),
-			"session_id":       claimant.ID,
+			"claimed_at":       claimedAt,
+			"heartbeat":        hb,
+			"session_id":       displayname.ID(claimant.ID),
 			"same_machine":     sameMachine,
 		}
+		// The message carries what the details do, since the CLI prints only
+		// the message: whether the claim is this machine's (a person's own
+		// earlier conversation, possibly) and the autopilot run it belongs to.
+		var where string
+		if sameMachine {
+			where += " (another session on this machine)"
+		}
 		if claimant.RunID != "" {
-			details["run_id"] = claimant.RunID
+			details["run_id"] = displayname.ID(claimant.RunID)
+			where += " (autopilot run " + displayname.ID(claimant.RunID) + ")"
 		}
 		return nil, domain.NewAPIError(domain.ErrCodeNodeClaimedByOther,
-			"NODE_CLAIMED_BY_OTHER: node %s is being worked on by %s (claimed at %s, last heartbeat %s), so it was not released. "+
+			"NODE_CLAIMED_BY_OTHER: node %s is being worked on by %s%s (claimed at %s, last heartbeat %s), so it was not released. "+
 				"Only if you have made sure nobody is working on it any more, run `graph-engine unstick-node %s --force`",
-			node.ID, who, deref(node.ClaimedAt), deref(hb), node.ID).WithDetails(details)
+			node.ID, who, where, claimedAt, hb, node.ID).WithDetails(details)
 	case domain.ClaimLeaseExpired:
-		return []string{fmt.Sprintf("node %s was claimed by %s, whose last heartbeat (%s) is older than its lease; it was released", node.ID, who, deref(hb))}, nil
+		return []string{fmt.Sprintf("node %s was claimed by %s, whose last heartbeat (%s) is older than its lease; it was released", node.ID, who, hb)}, nil
 	default:
 		return []string{fmt.Sprintf("node %s was claimed by %s, whose liveness cannot be told; it was released", node.ID, who)}, nil
 	}
 }
 
 // claimDescription names a claim's holder for messages: "<name> (session
-// <id>)", with "(name not set)" for a stand-in name.
+// <id>)", the name as displayname.MemberLabel gives it and the ID only when
+// it looks like one.
 func claimDescription(n *domain.GraphNode) string {
-	name := deref(n.ClaimedByName)
-	if name == "" {
-		name = "an unnamed member"
-	} else if n.ClaimedByNameIsFallback != nil && *n.ClaimedByNameIsFallback {
-		name += " (name not set)"
-	}
-	var parts []string
-	parts = append(parts, name)
+	name := displayname.MemberLabel(deref(n.ClaimedByName), n.ClaimedByNameIsFallback != nil && *n.ClaimedByNameIsFallback)
 	if n.ClaimSessionID != nil {
-		parts = append(parts, "session "+*n.ClaimSessionID)
+		return name + " (session " + displayname.ID(*n.ClaimSessionID) + ")"
 	}
-	if len(parts) == 1 {
-		return parts[0]
-	}
-	return parts[0] + " (" + strings.Join(parts[1:], ", ") + ")"
+	return name
 }
 
 func deref(s *string) string {

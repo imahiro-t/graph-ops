@@ -286,8 +286,8 @@ func (r *SQLiteRepository) Init() error {
 	if err := r.addTicketParentColumn(); err != nil {
 		return err
 	}
-	if err := addNodeClaimColumns("sqlite", func(column string) (bool, error) {
-		return r.sqliteColumnExists("nodes", column)
+	if err := addNodeClaimColumns("sqlite", func() (map[string]bool, error) {
+		return r.sqliteColumns("nodes")
 	}, func(column, sqlType string) error {
 		_, err := r.db.Exec(`ALTER TABLE nodes ADD COLUMN ` + column + ` ` + sqlType)
 		return err
@@ -355,12 +355,22 @@ func (r *SQLiteRepository) projectsHasWorkDir() (bool, error) {
 // sqliteColumnExists reports whether table has column (PRAGMA table_info).
 // table is always a constant of this package, never user input.
 func (r *SQLiteRepository) sqliteColumnExists(table, column string) (bool, error) {
-	rows, err := r.db.Query(`PRAGMA table_info(` + table + `)`)
+	cols, err := r.sqliteColumns(table)
 	if err != nil {
 		return false, err
 	}
+	return cols[column], nil
+}
+
+// sqliteColumns returns the set of table's columns, with one PRAGMA
+// table_info. table is always a constant of this package, never user input.
+func (r *SQLiteRepository) sqliteColumns(table string) (map[string]bool, error) {
+	rows, err := r.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
-	found := false
+	out := map[string]bool{}
 	for rows.Next() {
 		var (
 			cid        int
@@ -370,16 +380,11 @@ func (r *SQLiteRepository) sqliteColumnExists(table, column string) (bool, error
 			primaryKey int
 		)
 		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &primaryKey); err != nil {
-			return false, err
+			return nil, err
 		}
-		if name == column {
-			found = true
-		}
+		out[name] = true
 	}
-	if err := rows.Err(); err != nil {
-		return false, err
-	}
-	return found, nil
+	return out, rows.Err()
 }
 
 func shortUUID() string {
@@ -640,6 +645,7 @@ func scanNode(row interface {
 		b := claimedByFallback.Int64 != 0
 		n.ClaimedByNameIsFallback = &b
 	}
+	n.SanitizeClaimName()
 	if assignee.Valid {
 		n.Assignee = &assignee.String
 	}

@@ -197,6 +197,11 @@ func validUUID(s string) bool {
 	return err == nil && u.String() == strings.ToLower(s)
 }
 
+// ValidSessionID reports whether s has the shape NewSessionID gives (a
+// lowercase UUID). graph-engine checks every session ID and claim token a
+// caller passes with it before storing or comparing it.
+func ValidSessionID(s string) bool { return validUUID(s) }
+
 // NewSessionID returns a fresh random session ID (a UUID v4), for one
 // acquisition or start. Two calls never return the same value in practice.
 func NewSessionID() string { return uuid.NewString() }

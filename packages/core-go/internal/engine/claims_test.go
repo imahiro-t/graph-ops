@@ -191,10 +191,12 @@ func TestUnstickNodeWith_Rules(t *testing.T) {
 		other := f.begin(t, "Bob", "m-2", "run-1")
 		f.claim(t, "Bob", other.SessionID)
 		me := f.begin(t, "Alice", "m-1", "run-2")
-		if _, err := f.e.UnstickNodeWith(f.nodeID, UnstickOptions{SessionID: me.SessionID}); err == nil {
+		if _, err := f.e.UnstickNodeWith(f.nodeID, UnstickOptions{SessionID: me.SessionID, MachineID: "m-1"}); err == nil {
 			t.Fatal("released another run's live claim")
-		} else if _, ok := claimedByOther(err); !ok {
+		} else if apiErr, ok := claimedByOther(err); !ok {
 			t.Fatalf("err = %v, want NODE_CLAIMED_BY_OTHER", err)
+		} else if !strings.Contains(apiErr.Message, "(autopilot run run-1)") || strings.Contains(apiErr.Message, "this machine") || apiErr.Details["run_id"] != "run-1" {
+			t.Errorf("message should name the run and not this machine: %s / %+v", apiErr.Message, apiErr.Details)
 		}
 	})
 	t.Run("another member's live manual session: refused with details, --force releases", func(t *testing.T) {
@@ -211,8 +213,8 @@ func TestUnstickNodeWith_Rules(t *testing.T) {
 		if apiErr.Details["claimed_by_name"] != "Bob" || apiErr.Details["session_id"] != other.SessionID || apiErr.Details["same_machine"] != true {
 			t.Errorf("details = %+v", apiErr.Details)
 		}
-		if !strings.Contains(apiErr.Message, "--force") {
-			t.Errorf("message does not point at --force: %s", apiErr.Message)
+		if !strings.Contains(apiErr.Message, "--force") || !strings.Contains(apiErr.Message, "Bob (session "+other.SessionID+") (another session on this machine)") {
+			t.Errorf("message does not name the claim as this machine's or point at --force: %s", apiErr.Message)
 		}
 		n, _ := f.repo.GetNode(f.nodeID)
 		if n.Status != domain.NodeInProgress || n.ClaimToken == nil {
@@ -328,6 +330,47 @@ func TestBeginSession(t *testing.T) {
 		got, _ := f.repo.(store.ProcessingSessionStore).GetProcessingSession(s.SessionID)
 		if want := sessionTimestamp(f.now.Add(5 * time.Minute)); got.Heartbeat != want {
 			t.Errorf("heartbeat = %s, want %s", got.Heartbeat, want)
+		}
+	})
+	t.Run("a heartbeat under 30 seconds old is not rewritten", func(t *testing.T) {
+		f := newClaimFixture(t)
+		s := f.begin(t, "Alice", "m-1", "")
+		st := f.repo.(store.ProcessingSessionStore)
+		first := sessionTimestamp(f.now)
+		f.now = f.now.Add(20 * time.Second)
+		if warns := f.e.TouchSession(s.SessionID); len(warns) != 0 {
+			t.Fatalf("TouchSession warned: %v", warns)
+		}
+		if got, _ := st.GetProcessingSession(s.SessionID); got.Heartbeat != first {
+			t.Errorf("heartbeat rewritten after 20s: %s, want %s kept", got.Heartbeat, first)
+		}
+		f.now = f.now.Add(15 * time.Second)
+		f.e.TouchSession(s.SessionID)
+		if got, _ := st.GetProcessingSession(s.SessionID); got.Heartbeat != sessionTimestamp(f.now) {
+			t.Errorf("heartbeat after 35s = %s, want %s", got.Heartbeat, sessionTimestamp(f.now))
+		}
+	})
+	t.Run("throttled warnings: once per engine, a repeated failure every interval", func(t *testing.T) {
+		f := newClaimFixture(t)
+		var got []string
+		f.e.SetLogf(func(format string, args ...any) { got = append(got, format) })
+		f.e.warnSessionsUnsupported()
+		f.e.warnSessionsUnsupported()
+		f.e.warnEvery("k", repeatedWarningInterval, "failed")
+		f.now = f.now.Add(repeatedWarningInterval - time.Second)
+		f.e.warnEvery("k", repeatedWarningInterval, "failed")
+		f.now = f.now.Add(2 * time.Second)
+		f.e.warnEvery("k", repeatedWarningInterval, "failed")
+		if len(got) != 3 {
+			t.Fatalf("warnings = %q, want the unsupported one once and the failure twice", got)
+		}
+		// Another engine in the same process has its own first warning.
+		other := New(f.repo)
+		var otherGot int
+		other.SetLogf(func(string, ...any) { otherGot++ })
+		other.warnSessionsUnsupported()
+		if otherGot != 1 {
+			t.Errorf("a second engine's sink got %d warnings, want 1", otherGot)
 		}
 	})
 }

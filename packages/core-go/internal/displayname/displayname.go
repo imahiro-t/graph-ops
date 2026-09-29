@@ -6,9 +6,9 @@
 // that everybody else's CLI, error messages and Web UI then print.
 //
 // The package depends on the standard library only, and must stay that
-// way: identity, autopilot and autopilot/runner all use it, and identity
-// already depends on autopilot (through runtimeconfig), so a dependency on
-// any of them here would be an import cycle.
+// way: domain, identity, autopilot and autopilot/runner all use it, and
+// identity already depends on autopilot (through runtimeconfig), so a
+// dependency on any of them here would be an import cycle.
 package displayname
 
 import (

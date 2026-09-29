@@ -548,8 +548,8 @@ func (r *MySQLRepository) Init() error {
 	if err := r.addTicketParentColumn(); err != nil {
 		return err
 	}
-	if err := addNodeClaimColumns("mysql", func(column string) (bool, error) {
-		return r.mysqlColumnExists("nodes", column)
+	if err := addNodeClaimColumns("mysql", func() (map[string]bool, error) {
+		return r.mysqlColumnsIn("nodes", nodeClaimColumns)
 	}, func(column, sqlType string) error {
 		_, err := r.db.Exec("ALTER TABLE nodes ADD COLUMN " + column + " " + sqlType)
 		return err
@@ -644,6 +644,29 @@ func (r *MySQLRepository) mysqlForeignKeyExists(table, constraint string) (bool,
 // mysqlColumnExists checks INFORMATION_SCHEMA.COLUMNS for the current
 // database (DATABASE()). Used by Init's legacy-column migration and by tests
 // to assert whether a schema has a given column.
+// mysqlColumnsIn reports which of columns table has, in one
+// INFORMATION_SCHEMA query.
+func (r *MySQLRepository) mysqlColumnsIn(table string, columns []string) (map[string]bool, error) {
+	ph, args := inPlaceholders(columns)
+	rows, err := r.db.Query(
+		`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME IN (`+ph+`)`,
+		append([]any{table}, args...)...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out[name] = true
+	}
+	return out, rows.Err()
+}
+
 func (r *MySQLRepository) mysqlColumnExists(table, column string) (bool, error) {
 	var count int
 	row := r.db.QueryRow(

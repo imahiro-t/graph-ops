@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/graph-ops/core-go/internal/domain"
 )
@@ -32,7 +33,10 @@ type ProcessingSessionStore interface {
 	SaveProcessingSession(s domain.ProcessingSession) error
 	// TouchProcessingSession moves the session's heartbeat to heartbeat,
 	// unless the stored one is already that late or later (then it changes
-	// nothing and still succeeds). found is false when there is no such
+	// nothing and still succeeds). The SQL backends also leave a heartbeat
+	// less than SessionTouchInterval old as it is, so that the many
+	// graph-engine calls of a session and its subagents do not each take the
+	// database's write lock. found is false when there is no such
 	// session. heartbeat must be written with a fixed number of fractional
 	// digits (see domain.ProcessingSession), since the SQL backends compare
 	// it with the stored one as a string.
@@ -67,6 +71,7 @@ func scanProcessingSession(row interface{ Scan(dest ...any) error }) (domain.Pro
 	if runID.Valid {
 		s.RunID = runID.String
 	}
+	s.SanitizeActorName()
 	return s, nil
 }
 
@@ -96,19 +101,32 @@ func saveProcessingSession(db *sql.DB, s domain.ProcessingSession) error {
 	return nil
 }
 
+// SessionTouchInterval is how stale a stored heartbeat has to be before the
+// SQL backends write a new one. It is far below the shortest lease (an
+// autopilot run's 10 minutes is judged by the run, not the session; a manual
+// session's is 60), so skipping the write costs nothing a lease could notice.
+const SessionTouchInterval = 30 * time.Second
+
+// touchProcessingSession reads the stored heartbeat first and writes only
+// when it is at least SessionTouchInterval older than heartbeat: most calls
+// are then one read and no write. The write keeps its "heartbeat < ?"
+// condition, so a concurrent later heartbeat is never moved back.
 func touchProcessingSession(db *sql.DB, id, heartbeat string) (bool, error) {
-	res, err := db.Exec(`UPDATE processing_sessions SET heartbeat = ? WHERE id = ? AND heartbeat < ?`, heartbeat, id, heartbeat)
-	if err != nil {
-		return false, fmt.Errorf("updating the heartbeat of processing session %s: %w", id, err)
-	}
-	if affected, err := res.RowsAffected(); err == nil && affected > 0 {
-		return true, nil
-	}
-	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM processing_sessions WHERE id = ?`, id).Scan(&n); err != nil {
+	var stored string
+	switch err := db.QueryRow(`SELECT heartbeat FROM processing_sessions WHERE id = ?`, id).Scan(&stored); {
+	case err == sql.ErrNoRows:
+		return false, nil
+	case err != nil:
 		return false, fmt.Errorf("reading processing session %s: %w", id, err)
 	}
-	return n > 0, nil
+	if t, err := time.Parse(time.RFC3339Nano, heartbeat); err == nil &&
+		stored >= t.Add(-SessionTouchInterval).UTC().Format(domain.SessionTimestampLayout) {
+		return true, nil
+	}
+	if _, err := db.Exec(`UPDATE processing_sessions SET heartbeat = ? WHERE id = ? AND heartbeat < ?`, heartbeat, id, heartbeat); err != nil {
+		return false, fmt.Errorf("updating the heartbeat of processing session %s: %w", id, err)
+	}
+	return true, nil
 }
 
 func getProcessingSession(db *sql.DB, id string) (*domain.ProcessingSession, error) {
@@ -266,6 +284,7 @@ func (r *HTTPRepository) GetProcessingSession(id string) (*domain.ProcessingSess
 		}
 		return nil, err
 	}
+	out.SanitizeActorName()
 	return &out, nil
 }
 
@@ -285,6 +304,9 @@ func (r *HTTPRepository) ListProcessingSessionsByTickets(ticketIDs []string) ([]
 		var page []domain.ProcessingSession
 		if err := r.do(http.MethodGet, "/processing-sessions?"+q.Encode(), nil, &page); err != nil {
 			return nil, err
+		}
+		for i := range page {
+			page[i].SanitizeActorName()
 		}
 		out = append(out, page...)
 	}

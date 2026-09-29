@@ -107,20 +107,22 @@ var nodeClaimColumns = []string{"claimed_by_name", "claimed_by_name_is_fallback"
 // migration that adds the claim columns to the nodes of a DB created before
 // them: each missing column is added (as NULL-able, so existing rows read
 // back as unclaimed -- a node already IN PROGRESS then counts as claimed by
-// an older client). Like ensureTicketParentColumn, a failed ALTER is
+// an older client). Init runs on every graph-engine call, so the nodes
+// columns are read once (existingColumns, one round trip) and nothing else
+// is read on a migrated DB. Like ensureTicketParentColumn, a failed ALTER is
 // forgiven when the column exists afterwards (a concurrent Init added it).
-func addNodeClaimColumns(backend string, columnExists func(column string) (bool, error), addColumn func(column, sqlType string) error, types map[string]string) error {
+func addNodeClaimColumns(backend string, existingColumns func() (map[string]bool, error), addColumn func(column, sqlType string) error, types map[string]string) error {
+	have, err := existingColumns()
+	if err != nil {
+		return fmt.Errorf("inspecting nodes columns: %w", err)
+	}
 	for _, column := range nodeClaimColumns {
-		has, err := columnExists(column)
-		if err != nil {
-			return fmt.Errorf("inspecting nodes columns: %w", err)
-		}
-		if has {
+		if have[column] {
 			continue
 		}
 		if addErr := addColumn(column, types[column]); addErr != nil {
-			nowHas, checkErr := columnExists(column)
-			if checkErr != nil || !nowHas {
+			now, checkErr := existingColumns()
+			if checkErr != nil || !now[column] {
 				return fmt.Errorf("adding nodes.%s column (%s): %w", column, backend, addErr)
 			}
 		}

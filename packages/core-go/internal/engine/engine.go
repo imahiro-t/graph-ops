@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/graph-ops/core-go/internal/config"
@@ -21,6 +22,10 @@ type GraphEngine struct {
 	// SetClock / SetLogf in claims.go); nil means time.Now and stderr.
 	clock func() time.Time
 	logf  func(format string, args ...any)
+	// warnMu guards warned, when each throttled warning (warnEvery) was
+	// last said: the Web UI server's handlers share one engine.
+	warnMu sync.Mutex
+	warned map[string]time.Time
 }
 
 func New(repo store.GraphRepository) *GraphEngine {
@@ -596,7 +601,10 @@ func allNonLoopPrereqsDone(nodeID string, byID map[string]domain.GraphNode, edge
 // enforces are one definition rather than two that can drift apart.
 var claimableExclusions = []domain.NodeStatus{domain.NodeDone, domain.NodeInProgress, domain.NodeInReview}
 
-func isClaimed(status domain.NodeStatus) bool {
+// isUnclaimable reports whether a node at status cannot be handed out by
+// get-executable (it is in claimableExclusions). Not to be confused with
+// holdsClaim (claims.go): a DONE node is unclaimable but holds no claim.
+func isUnclaimable(status domain.NodeStatus) bool {
 	for _, s := range claimableExclusions {
 		if status == s {
 			return true
@@ -689,7 +697,7 @@ func (e *GraphEngine) GetExecutableNodesAs(ticketID string, catalog config.Catal
 	// claims mirrors executable with what releaseClaims needs to undo it.
 	var claims []nodeClaim
 	for _, n := range detail.Nodes {
-		if isClaimed(n.Status) {
+		if isUnclaimable(n.Status) {
 			continue
 		}
 		if n.IsManual {
@@ -1686,7 +1694,7 @@ func (e *GraphEngine) UnstickNodeWith(nodeID string, opts UnstickOptions) (Unsti
 	if node == nil {
 		return UnstickResult{}, fmt.Errorf("node %s not found", nodeID)
 	}
-	if node.Status != domain.NodeInProgress && node.Status != domain.NodeInReview {
+	if !holdsClaim(node.Status) {
 		return UnstickResult{}, fmt.Errorf("node %s is %s, not IN PROGRESS or IN REVIEW; only a claimed-but-unworked node can be unstuck", nodeID, node.Status)
 	}
 	warnings, err := e.checkUnstick(node, opts)

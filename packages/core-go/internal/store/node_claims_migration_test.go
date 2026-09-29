@@ -80,7 +80,13 @@ func TestSQLiteInit_AddsNodeClaimColumnsAndSessionsIdempotently(t *testing.T) {
 
 func TestAddNodeClaimColumns_ConcurrentAddIsNotAnError(t *testing.T) {
 	added := map[string]bool{}
-	exists := func(col string) (bool, error) { return added[col], nil }
+	exists := func() (map[string]bool, error) {
+		out := map[string]bool{}
+		for k, v := range added {
+			out[k] = v
+		}
+		return out, nil
+	}
 	err := addNodeClaimColumns("test", exists, func(col, _ string) error {
 		added[col] = true // another Init got there first
 		return errors.New("duplicate column name: " + col)
@@ -88,9 +94,25 @@ func TestAddNodeClaimColumns_ConcurrentAddIsNotAnError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an ALTER that lost the race must not fail Init: %v", err)
 	}
-	err = addNodeClaimColumns("test", func(string) (bool, error) { return false, nil }, func(string, string) error { return errors.New("disk full") }, sqliteNodeClaimColumnTypes)
+	err = addNodeClaimColumns("test", func() (map[string]bool, error) { return map[string]bool{}, nil }, func(string, string) error { return errors.New("disk full") }, sqliteNodeClaimColumnTypes)
 	if err == nil || !strings.Contains(err.Error(), "disk full") {
 		t.Fatalf("a real ALTER failure must be returned, got %v", err)
+	}
+}
+
+// On a DB that already has every claim column -- every graph-engine call
+// after the first -- the migration is one read of the columns and nothing
+// else (a remote MySQL pays a round trip per query).
+func TestAddNodeClaimColumns_MigratedDBIsOneRead(t *testing.T) {
+	reads := 0
+	all := map[string]bool{}
+	for _, c := range nodeClaimColumns {
+		all[c] = true
+	}
+	err := addNodeClaimColumns("test", func() (map[string]bool, error) { reads++; return all, nil },
+		func(col, _ string) error { t.Errorf("ALTER for %s on a migrated DB", col); return nil }, sqliteNodeClaimColumnTypes)
+	if err != nil || reads != 1 {
+		t.Fatalf("err=%v reads=%d, want nil and 1", err, reads)
 	}
 }
 

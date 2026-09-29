@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/graph-ops/core-go/internal/autopilot"
+	"github.com/graph-ops/core-go/internal/displayname"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/identity"
@@ -44,6 +46,36 @@ func takeFlagValue(args []string, flag, usage string) (string, []string, error) 
 		i++
 	}
 	return value, rest, nil
+}
+
+// takeSessionFlag is takeFlagValue for --session, whose value must be a
+// session ID begin-session printed.
+func takeSessionFlag(args []string, usage string) (string, []string, error) {
+	return takeIDFlag(args, "--session", usage)
+}
+
+// takeIDFlag is takeFlagValue for a flag whose value is a session ID or a
+// claim token -- both UUIDs graph-engine minted. Anything else is refused
+// before a thing is written: it would otherwise be stored (and later shown
+// to other members) as it is.
+func takeIDFlag(args []string, flag, usage string) (string, []string, error) {
+	v, rest, err := takeFlagValue(args, flag, usage)
+	if err != nil || v == "" {
+		return v, rest, err
+	}
+	if !identity.ValidSessionID(v) {
+		return "", nil, fmt.Errorf("%s: %s takes the ID graph-engine printed (a lowercase UUID); %q is not one", usage, flag, truncateForError(v))
+	}
+	return v, rest, nil
+}
+
+// truncateForError shortens a refused value for its error message.
+func truncateForError(v string) string {
+	const max = 80
+	if len(v) > max {
+		return v[:max] + "..."
+	}
+	return v
 }
 
 // touchSession records a heartbeat of the caller's processing session
@@ -88,6 +120,9 @@ func cmdBeginSession(eng *engine.GraphEngine, rc runtimeConfig, args []string) e
 	if err != nil {
 		return err
 	}
+	if runID != "" && !autopilot.ValidRunID(runID) {
+		return fmt.Errorf("%s: --run takes an autopilot run ID (run-...); %q is not one", usage, truncateForError(runID))
+	}
 	if len(rest) != 1 || strings.HasPrefix(rest[0], "-") {
 		return fmt.Errorf(usage)
 	}
@@ -112,16 +147,13 @@ func cmdBeginSession(eng *engine.GraphEngine, rc runtimeConfig, args []string) e
 
 // othersWarning is begin-session's warning that other sessions are
 // processing the ticket, naming each: who, which nodes, how long ago it was
-// last heard from.
+// last heard from. The peers' fields come from the shared data source; the
+// engine has already reduced them to displayable values, and the name and
+// IDs go through displayname again here (both are idempotent).
 func othersWarning(ticketID string, others []engine.SessionPeer, now time.Time) string {
 	parts := make([]string, 0, len(others))
 	for _, o := range others {
-		name := o.Name
-		if name == "" {
-			name = "an unnamed member"
-		} else if o.NameIsFallback {
-			name += " (name not set)"
-		}
+		name := displayname.MemberLabel(o.Name, o.NameIsFallback)
 		if o.SameMachine {
 			name += " (another session on this machine)"
 		}
@@ -132,17 +164,18 @@ func othersWarning(ticketID string, others []engine.SessionPeer, now time.Time) 
 			detail = append(detail, "no node claimed right now")
 		}
 		detail = append(detail, "last heartbeat "+agoText(o.Heartbeat, now))
-		detail = append(detail, "session "+o.SessionID)
+		detail = append(detail, "session "+displayname.ID(o.SessionID))
 		parts = append(parts, name+" ("+strings.Join(detail, "; ")+")")
 	}
 	return fmt.Sprintf("ticket %s is being processed by another session: %s. Carrying on is allowed, but do not unstick or redo the nodes they hold", ticketID, strings.Join(parts, "; "))
 }
 
-// agoText renders how long ago ts was, in whole minutes.
+// agoText renders how long ago ts was, in whole minutes; "at an unknown
+// time" when ts does not parse (it is never echoed as it is).
 func agoText(ts string, now time.Time) string {
 	t, err := time.Parse(time.RFC3339Nano, ts)
 	if err != nil {
-		return ts
+		return "at an unknown time"
 	}
 	m := int(now.Sub(t) / time.Minute)
 	if m < 1 {

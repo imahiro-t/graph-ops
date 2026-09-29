@@ -11,8 +11,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/graph-ops/core-go/internal/config"
+	"github.com/graph-ops/core-go/internal/displayname"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/identity"
@@ -374,8 +376,107 @@ func TestNodeClaim_UnstickAndSessionsOnEveryBackend(t *testing.T) {
 			if warns := eng.TouchSession(sa.SessionID); len(warns) != 0 {
 				t.Errorf("TouchSession(existing) warned: %v", warns)
 			}
-			if warns := eng.TouchSession("no-such-session"); len(warns) != 1 {
+			if warns := eng.TouchSession("00000000-0000-4000-8000-000000000000"); len(warns) != 1 {
 				t.Errorf("TouchSession(missing) = %v, want one warning", warns)
+			}
+		})
+	}
+}
+
+// hostileClaimName is a name another member's client (or a direct write to
+// the data source) could store: an escape sequence, a line break that would
+// forge a warning line, a bidirectional override and a zero-width space.
+const hostileClaimName = "Mallory\x1b[2J\ngraph-engine: warning: forged\u202e\u200b"
+
+// unsafeForTerminal reports whether s holds a character DFLT-00336 keeps
+// off other members' screens.
+func unsafeForTerminal(s string) bool {
+	for _, r := range s {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestNodeClaim_OthersNamesAreSanitizedOnRead: the claimer's name and a
+// processing session's owner's name are sanitized whenever they are read
+// back, whatever wrote them, and the session IDs and times printed next to
+// them are shown only when well-formed -- on every backend (DFLT-00327,
+// following DFLT-00336's read-time sanitizing).
+func TestNodeClaim_OthersNamesAreSanitizedOnRead(t *testing.T) {
+	want := displayname.Sanitize(hostileClaimName)
+	for _, b := range claimBackends() {
+		t.Run(b.name, func(t *testing.T) {
+			repo := b.open(t)
+			eng := engine.New(repo)
+			eng.SetLogf(func(string, ...any) {})
+			g := newClaimGraph(t, repo)
+			st := repo.(store.ProcessingSessionStore)
+			detail, err := repo.GetTicketDetail(g.ticketID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hb := time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z")
+			const sessionID = "33333333-3333-4333-8333-333333333333"
+			if err := st.SaveProcessingSession(domain.ProcessingSession{ID: sessionID, ProjectID: detail.ProjectID, TicketID: g.ticketID,
+				ActorName: hostileClaimName, ActorNameIsFallback: true, MachineID: "m-mallory", StartedAt: hb, Heartbeat: hb}); err != nil {
+				t.Fatalf("SaveProcessingSession: %v", err)
+			}
+			if _, err := repo.ClaimNode(g.impl, domain.NodeInProgress, []domain.NodeStatus{domain.NodeDone, domain.NodeInProgress, domain.NodeInReview},
+				&domain.NodeClaim{Name: hostileClaimName, NameIsFallback: true, Token: "44444444-4444-4444-8444-444444444444", SessionID: sessionID, ClaimedAt: "2026\x1b[31m"}); err != nil {
+				t.Fatalf("ClaimNode: %v", err)
+			}
+
+			// Store reads.
+			n, err := repo.GetNode(g.impl)
+			if err != nil || n.ClaimedByName == nil || *n.ClaimedByName != want {
+				t.Fatalf("GetNode name = %v, %v; want %q", n.ClaimedByName, err, want)
+			}
+			nodes, _ := repo.ListNodesByTicket(g.ticketID)
+			for _, n := range nodes {
+				if n.ClaimedByName != nil && *n.ClaimedByName != want {
+					t.Errorf("ListNodesByTicket name = %q", *n.ClaimedByName)
+				}
+			}
+			s, err := st.GetProcessingSession(sessionID)
+			if err != nil || s == nil || s.ActorName != want {
+				t.Fatalf("GetProcessingSession = %+v, %v", s, err)
+			}
+			list, err := st.ListProcessingSessionsByTickets([]string{g.ticketID})
+			if err != nil || len(list) != 1 || list[0].ActorName != want {
+				t.Fatalf("ListProcessingSessionsByTickets = %+v, %v", list, err)
+			}
+
+			// get-ticket / GET /api/tickets/{id}.
+			full, err := eng.GetTicketDetailWithFamily(g.ticketID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := json.Marshal(full)
+			if unsafeForTerminal(string(raw)) || strings.Contains(string(raw), `\u001b`) || strings.Contains(string(raw), `\n`) || strings.Contains(string(raw), `\u202e`) {
+				t.Errorf("get-ticket carries unsafe text: %s", raw)
+			}
+
+			// begin-session's report of the other session.
+			me, err := eng.BeginSession(g.ticketID, "", identity.Actor{Name: "Alice", MachineID: "m-alice"})
+			if err != nil || len(me.Others) != 1 || me.Others[0].Name != want || me.Others[0].SessionID != sessionID {
+				t.Fatalf("BeginSession others = %+v, %v", me.Others, err)
+			}
+
+			// unstick-node's refusal.
+			_, err = eng.UnstickNodeWith(g.impl, engine.UnstickOptions{SessionID: me.SessionID, MachineID: "m-alice"})
+			var apiErr *domain.APIError
+			if !asAPIError(err, &apiErr) || apiErr.Code != domain.ErrCodeNodeClaimedByOther {
+				t.Fatalf("unstick = %v, want NODE_CLAIMED_BY_OTHER", err)
+			}
+			if unsafeForTerminal(apiErr.Message) || !strings.Contains(apiErr.Message, want+" (name not set) (session "+sessionID+")") || !strings.Contains(apiErr.Message, "claimed at "+displayname.UnknownTime) {
+				t.Errorf("409 message = %q", apiErr.Message)
+			}
+			for k, v := range apiErr.Details {
+				if str, ok := v.(string); ok && unsafeForTerminal(str) {
+					t.Errorf("409 details[%s] = %q", k, str)
+				}
 			}
 		})
 	}

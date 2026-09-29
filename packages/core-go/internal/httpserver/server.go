@@ -6,6 +6,7 @@ package httpserver
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -90,6 +91,15 @@ func New(repo store.GraphRepository, eng *engine.GraphEngine, cfg Config) *Serve
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
+	}
+	// The engine's warnings (reading the processing sessions of claimed
+	// nodes failed, a data source that keeps none -- DFLT-00327) go to the
+	// server's log like its own, not bare onto stderr. The engine throttles
+	// the ones that would otherwise repeat on every poll.
+	if eng != nil {
+		eng.SetLogf(func(format string, args ...any) {
+			logger.Warn(fmt.Sprintf(format, args...), slog.String("event", "node_claims"))
+		})
 	}
 	return &Server{repo: repo, engine: eng, cfg: cfg, rejectLog: newRejectLogger(logger), logger: logger}
 }
