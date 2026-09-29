@@ -79,6 +79,30 @@ func (n *GraphNode) SanitizeClaimName() {
 	}
 }
 
+// NodeDecision is what a manual node's completion records on it
+// (DFLT-00329): see GraphNode's Decided* fields.
+type NodeDecision struct {
+	Name           string `json:"name"`
+	NameIsFallback bool   `json:"name_is_fallback"`
+	DecidedAt      string `json:"decided_at"`
+	Autopilot      bool   `json:"autopilot"`
+}
+
+// SanitizeDecisionName is SanitizeClaimName for the decider's name, which
+// may likewise have been written by another member's client or straight
+// into the data source. Every read of a node from a data source calls it.
+func (n *GraphNode) SanitizeDecisionName() {
+	if n.DecidedByName == nil {
+		return
+	}
+	name := displayname.Sanitize(*n.DecidedByName)
+	n.DecidedByName = &name
+	if name == "" && n.DecidedByNameIsFallback != nil {
+		f := false
+		n.DecidedByNameIsFallback = &f
+	}
+}
+
 // SanitizeActorName is SanitizeClaimName for a processing session's owner.
 func (s *ProcessingSession) SanitizeActorName() {
 	s.ActorName = displayname.Sanitize(s.ActorName)

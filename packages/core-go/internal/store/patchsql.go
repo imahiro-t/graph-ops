@@ -59,6 +59,12 @@ func nodePatchAssignments(patch NodePatch) ([]string, []any) {
 		cols, vals := claimColumnAssignments(*patch.Status, nil)
 		sets = append(sets, cols...)
 		args = append(args, vals...)
+		// Nor a decision (DFLT-00329): only a node transition records one,
+		// so this status write clears the decision columns too
+		// (decisionFieldsFor).
+		cols, vals = decisionColumnAssignments(nil)
+		sets = append(sets, cols...)
+		args = append(args, vals...)
 	}
 	if patch.IterationCount != nil {
 		add("iteration_count=?", *patch.IterationCount)
@@ -167,6 +173,11 @@ func updateProjectColumns(db *sql.DB, getProject func(string) (*domain.Project, 
 // -- the same rule UpdateNode applies (claimFieldsFor).
 func claimNodeCAS(db *sql.DB, getNode func(string) (*domain.GraphNode, error), id string, newStatus domain.NodeStatus, excluded []domain.NodeStatus, claim *domain.NodeClaim) (*domain.GraphNode, error) {
 	cols, vals := claimColumnAssignments(newStatus, claim)
+	// A claim, a release or a rewind is never a decision: it clears the
+	// decision columns (decisionFieldsFor).
+	dcols, dvals := decisionColumnAssignments(nil)
+	cols = append(cols, dcols...)
+	vals = append(vals, dvals...)
 	query := `UPDATE nodes SET status=?, ` + strings.Join(cols, ", ") + `, updated_at=? WHERE id=?`
 	args := append([]any{string(newStatus)}, vals...)
 	args = append(args, time.Now().UTC().Format(time.RFC3339Nano), id)
@@ -239,4 +250,50 @@ func claimColumnAssignments(status domain.NodeStatus, claim *domain.NodeClaim) (
 	}
 	return []string{"claimed_by_name=?", "claimed_by_name_is_fallback=?", "claim_token=?", "claim_session_id=?", "claimed_at=?"},
 		[]any{nullableString(f.Name), fallback, nullableString(f.Token), nullableString(f.SessionID), nullableString(f.ClaimedAt)}
+}
+
+// decisionFields is what a status write stores in a node's four decision
+// columns (DFLT-00329). A nil field is stored as NULL.
+type decisionFields struct {
+	Name           *string
+	NameIsFallback *bool
+	DecidedAt      *string
+	Autopilot      *bool
+}
+
+// decisionFieldsFor is the one rule every backend applies to the decision
+// columns whenever it writes a node's status, next to claimFieldsFor: a
+// decision is written only by the status write that records it -- a node
+// transition step carrying both SetStatus and Decision, i.e. a manual
+// node's completion -- and every other status write (a rewind, a reopen,
+// an unstick, a claim, a status-only UpdateNode) clears all four. Nothing
+// writes the decision columns without also writing the status (NodePatch
+// has no decision fields, and a transition step with a Decision but no
+// SetStatus is refused), so a decision cannot outlive the status it set:
+// a rewound approval_gate is back at TODO with no decider on it.
+//
+// The SQL backends turn the result into assignments
+// (decisionColumnAssignments) and the HTTP data source into PATCH / node
+// transition fields (addDecisionPatchFields), so the rule is written once.
+func decisionFieldsFor(decision *domain.NodeDecision) decisionFields {
+	if decision == nil {
+		return decisionFields{}
+	}
+	name, fallback, at, autopilot := decision.Name, decision.NameIsFallback, decision.DecidedAt, decision.Autopilot
+	return decisionFields{Name: &name, NameIsFallback: &fallback, DecidedAt: &at, Autopilot: &autopilot}
+}
+
+// decisionColumnAssignments is decisionFieldsFor as SQL assignments, always
+// all four columns.
+func decisionColumnAssignments(decision *domain.NodeDecision) ([]string, []any) {
+	f := decisionFieldsFor(decision)
+	var fallback, autopilot any
+	if f.NameIsFallback != nil {
+		fallback = boolToInt(*f.NameIsFallback)
+	}
+	if f.Autopilot != nil {
+		autopilot = boolToInt(*f.Autopilot)
+	}
+	return []string{"decided_by_name=?", "decided_by_name_is_fallback=?", "decided_at=?", "decided_by_autopilot=?"},
+		[]any{nullableString(f.Name), fallback, nullableString(f.DecidedAt), autopilot}
 }

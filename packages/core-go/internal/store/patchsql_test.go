@@ -26,8 +26,12 @@ func TestNodePatchAssignments_OnlyNamesTheFieldsThePatchSets(t *testing.T) {
 	gateID, criteria := "gate-1", "does it hold up"
 	// A status write always clears the five claim columns (DFLT-00327,
 	// claimFieldsFor): UpdateNode never carries a claim.
-	claimSets := []string{"claimed_by_name=?", "claimed_by_name_is_fallback=?", "claim_token=?", "claim_session_id=?", "claimed_at=?"}
-	claimCleared := []any{sql.NullString{}, nil, sql.NullString{}, sql.NullString{}, sql.NullString{}}
+	// And the four decision columns (DFLT-00329, decisionFieldsFor): only a
+	// node transition records a decision.
+	claimSets := []string{"claimed_by_name=?", "claimed_by_name_is_fallback=?", "claim_token=?", "claim_session_id=?", "claimed_at=?",
+		"decided_by_name=?", "decided_by_name_is_fallback=?", "decided_at=?", "decided_by_autopilot=?"}
+	claimCleared := []any{sql.NullString{}, nil, sql.NullString{}, sql.NullString{}, sql.NullString{},
+		sql.NullString{}, nil, sql.NullString{}, nil}
 
 	for _, tc := range []struct {
 		name     string
@@ -54,7 +58,8 @@ func TestNodePatchAssignments_OnlyNamesTheFieldsThePatchSets(t *testing.T) {
 			},
 			append(append([]string{"name=?", "type=?", "status=?"}, claimSets...), "iteration_count=?", "max_iterations=?", "assignee=?", "is_manual=?", "gate_id=?", "criteria=?"),
 			[]any{
-				"n", "review", "IN REVIEW", sql.NullString{}, nil, sql.NullString{}, sql.NullString{}, sql.NullString{}, 2, 5,
+				"n", "review", "IN REVIEW", sql.NullString{}, nil, sql.NullString{}, sql.NullString{}, sql.NullString{},
+				sql.NullString{}, nil, sql.NullString{}, nil, 2, 5,
 				sql.NullString{String: "alice", Valid: true}, 1,
 				sql.NullString{String: "gate-1", Valid: true},
 				sql.NullString{String: "does it hold up", Valid: true},

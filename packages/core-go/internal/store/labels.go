@@ -507,6 +507,13 @@ func updateTicket(db *sql.DB, d sqlDialect, id string, patch TicketPatch) (domai
 	if cur == nil {
 		return domain.Ticket{}, domain.NewAPIError(domain.ErrCodeTicketNotFound, "ticket %s not found", id)
 	}
+	// The check and the write share this transaction, and cur was read
+	// under the ticket row's lock (FOR UPDATE on MySQL, the write lock
+	// IMMEDIATE takes on SQLite), so nobody can change the status between
+	// the comparison and the UPDATE below (DFLT-00329).
+	if patch.IfStatus != nil && cur.Status != *patch.IfStatus {
+		return domain.Ticket{}, ticketStatusChanged(id, *patch.IfStatus, cur.Status)
+	}
 	if patch.Title != nil {
 		cur.Title = *patch.Title
 	}
@@ -572,6 +579,14 @@ func updateTicket(db *sql.DB, d sqlDialect, id string, patch TicketPatch) (domai
 		return domain.Ticket{}, err
 	}
 	return *cur, nil
+}
+
+// ticketStatusChanged is the TICKET_STATUS_CHANGED error a TicketPatch with
+// IfStatus answers when the stored status is not the expected one.
+func ticketStatusChanged(id string, want, got domain.TicketStatus) error {
+	return domain.NewAPIError(domain.ErrCodeTicketStatusChanged,
+		"ticket %s is %s, not %s as this write expected; somebody else changed its status first, so nothing was written", id, got, want).
+		WithDetails(map[string]any{"expected_status": string(want), "current_status": string(got)})
 }
 
 // labelIDsOf extracts the IDs CreateTicket attaches from its input ticket.

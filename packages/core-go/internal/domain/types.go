@@ -505,6 +505,26 @@ type GraphNode struct {
 	// constants. Both are empty on a node that is not claimed.
 	ClaimHeartbeat *string `json:"claim_heartbeat,omitempty"`
 	ClaimLease     string  `json:"claim_lease,omitempty"`
+
+	// The decision (DFLT-00329): who judged this manual node (an
+	// approval_gate, a release, a custom is_manual node) and when. Written
+	// only together with the status the decision set -- DONE, REJECTED or
+	// AWAITING FIX -- and cleared by every other status write
+	// (store.decisionFieldsFor), so a node rewound to TODO carries no stale
+	// decision: only the latest decision is kept. All four are nil on an
+	// automatic node, on a manual node nobody has judged since, and on
+	// every node of an HTTP data source older than protocol 1.2.
+	//
+	// DecidedByName is the decider's display name (identity.DisplayName),
+	// resolved by the graph-engine process that recorded the decision --
+	// never taken from a client. It is for people to read and is never
+	// compared. DecidedByNameIsFallback says it is the "<OS user>@<host>"
+	// stand-in for an unset myName; DecidedByAutopilot says the decision
+	// was made inside an autopilot run's processing session.
+	DecidedByName           *string `json:"decided_by_name,omitempty"`
+	DecidedByNameIsFallback *bool   `json:"decided_by_name_is_fallback,omitempty"`
+	DecidedAt               *string `json:"decided_at,omitempty"`
+	DecidedByAutopilot      *bool   `json:"decided_by_autopilot,omitempty"`
 }
 
 type GraphEdge struct {

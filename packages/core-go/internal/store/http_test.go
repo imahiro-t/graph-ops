@@ -1061,6 +1061,9 @@ func TestOpenAPI_OperationIDsMatchGraphRepository(t *testing.T) {
 		"listProcessingSessionsByTickets", "deleteProcessingSession")
 	// Protocol 1.2's graph batch endpoint (GraphBatchCreator, DFLT-00328).
 	want = append(want, "createGraphBatch")
+	// Protocol 1.2's node transition endpoint (NodeTransitionApplier,
+	// DFLT-00329).
+	want = append(want, "applyNodeTransition")
 	sort.Strings(want)
 	if !reflect.DeepEqual(ops, want) {
 		t.Fatalf("operationIds %v\nwant %v", ops, want)

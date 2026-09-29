@@ -73,6 +73,28 @@ info:
       `createEdge` at a time, as before -- which is not atomic: two sessions
       starting the same ticket at once can both create nodes, and a failure
       halfway leaves a partial graph.
+    - 1.2 also adds node transitions and decisions (`applyNodeTransition`,
+      tag `nodes`): one request that checks a node's state and writes a
+      completion, a loop-back, a reopen, a grant or an unstick -- the
+      artifacts, the node statuses, the loop target's counter and the
+      ticket's blocked flag -- only if every condition still holds, and
+      atomically. It is what keeps two members who approve and reject the
+      same approval gate at once from both getting through. With it come
+      four nullable decision fields on `GraphNode` and `NodePatch`
+      (`decided_by_name`, `decided_by_name_is_fallback`, `decided_at`,
+      `decided_by_autopilot`), which record who judged a manual node, and
+      `if_status` on `TicketPatch`, which makes a ticket status write
+      conditional (409 `TICKET_STATUS_CHANGED`). They were added to 1.2
+      before any release shipped it, so the version stayed 1.2. A plugin
+      reporting 1.2 must implement the endpoint (graph-engine does not fall
+      back when it answers 404) and `if_status`. Against 1.1 or 1.0
+      graph-engine never sends them and completes, reopens, grants and
+      unsticks one `updateNode` / `createArtifact` / `updateTicket` at a
+      time, as before -- which is not atomic: approve and reject of the same
+      gate can both get through, a completion without `--claim` cannot tell
+      a node that was rewound and handed out again since it was read, and
+      no decision is recorded. It reads the ticket before a conditional
+      status write instead of sending `if_status`.
 
     ## Transport and authentication
 
@@ -148,6 +170,14 @@ info:
       value = set it. graph-engine sends all five with every node PATCH that
       carries `status` (and never without it): values when the PATCH claims
       the node, all `null` otherwise.
+    - The four decision fields of a node (since 1.2) have the same three
+      states. graph-engine sends all four, `null`, with every node PATCH
+      that carries `status` (and never without it); a decision is only ever
+      written by `applyNodeTransition`.
+    - `if_status` (tickets, since 1.2) is a condition, not a field: when
+      present, write nothing unless the ticket's current status is exactly
+      that value, and answer 409 `TICKET_STATUS_CHANGED` otherwise. Check
+      and write atomically.
 
     ## Errors
 
@@ -160,8 +190,10 @@ info:
        graph-engine raises its own domain error with that code and message,
        regardless of the HTTP status (so `500` with `INTERNAL_ERROR` is still
        read as `INTERNAL_ERROR`). Use the status the code suggests anyway
-       (404 for `*_NOT_FOUND`, 409 for `*_TAKEN` and `GRAPH_CHANGED`, 400 for
-       validation codes, 500 for `INTERNAL_ERROR`).
+       (404 for `*_NOT_FOUND`, 409 for `*_TAKEN`, `GRAPH_CHANGED`,
+       `INVALID_NODE_STATE`, `TICKET_STATUS_CHANGED` and
+       `CONCURRENT_WRITE_CONFLICT`, 400 for validation codes, 500 for
+       `INTERNAL_ERROR`).
     3. Anything else (an unknown code, a body that is not this JSON, an empty
        body) becomes a generic error naming the method, path and status.
 
@@ -521,6 +553,85 @@ paths:
           description: Created (no body).
         "409":
           description: "`GRAPH_CHANGED`: the check in step 2 failed; nothing was written."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /tickets/{ticketId}/node-transition:
+    parameters: [{ $ref: "#/components/parameters/ticketId" }]
+    post:
+      operationId: applyNodeTransition
+      tags: [nodes]
+      summary: "Since 1.2. Check a ticket's nodes and write a node state transition in one atomic step."
+      x-since: "1.2"
+      description: |
+        graph-engine sends this instead of separate `createArtifact` /
+        `updateNode` / `updateTicket` calls whenever it completes a node
+        (`complete-node`, the Web UI's approve / reject), and for
+        `reopen-nodes`, `grant-iterations` and `unstick-node`. The request
+        carries the writes together with the state graph-engine decided
+        them on, and must be processed atomically, serialized with every
+        other request that writes the same ticket's nodes:
+
+        1. If the ticket does not exist, answer `TICKET_NOT_FOUND`.
+        2. Check the ticket: with `require_ticket_open`, it must not be
+           `CLOSED`; with `if_blocked`, its `blocked` must equal it.
+        3. Go through `steps` in order. A step's conditions are
+           `if_status_in` (the node's status is one of them),
+           `if_status_not_in` (it is none of them), `check_claim_token`
+           (its `claim_token` equals `if_claim_token`, or is unset when
+           `if_claim_token` is absent or `null`), `if_iteration_count` and
+           `if_updated_at` (its `updated_at` is exactly that string: the
+           node has not been written since graph-engine read it); an
+           absent condition is not checked. A `required` step also
+           requires the node to exist. When a condition of a `required`
+           step does not hold, or a ticket condition of step 2 did not,
+           write nothing and answer 409 `INVALID_NODE_STATE`. When a
+           condition of any other step does not hold, skip that step only
+           (`applied` false). Later steps see what earlier steps of the
+           same request wrote.
+        4. Create `artifacts` as `createArtifact` would, keeping their `id`.
+        5. Apply each applied step's writes: `set_status` writes the status
+           and, in the same write, clears the five claim fields and writes
+           `decision` into the four decision fields (`name` ->
+           `decided_by_name`, `name_is_fallback` ->
+           `decided_by_name_is_fallback`, `decided_at` -> `decided_at`,
+           `autopilot` -> `decided_by_autopilot`) or clears them when there
+           is no `decision`; `increment_iteration` adds 1 to
+           `iteration_count`; `add_max_iterations` adds that many to
+           `max_iterations`. Add to the stored value -- never write back a
+           value computed from an earlier read. `touch` writes only
+           `updated_at` (graph-engine uses it when a decision on a manual
+           node blocks the ticket without changing the node's status, so
+           that a concurrent decision conditioned on `if_updated_at` loses).
+           Every step with a write sets `updated_at`; a step with none of
+           these writes nothing, not even `updated_at`.
+        6. With `set_blocked`, write the ticket's `blocked`.
+
+        A step with `decision` but no `set_status`, a node of another
+        ticket, or an artifact of another ticket is `VALIDATION_ERROR`. In
+        every error case nothing may have been written. graph-engine turns
+        409 `INVALID_NODE_STATE` into the same code for the user ("another
+        member decided or completed the node first"). If the plugin cannot
+        complete the request because of other writes it is racing (a
+        database deadlock that its own retries did not resolve), it may
+        answer 409 `CONCURRENT_WRITE_CONFLICT` with nothing written; the
+        user can then simply run the command again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NodeTransition" }
+      responses:
+        "200":
+          description: Every condition held (for required steps) and every write was made.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NodeTransitionResult" }
+        "409":
+          description: "`INVALID_NODE_STATE`: a condition of a required step or of the ticket did not hold; nothing was written. `CONCURRENT_WRITE_CONFLICT`: nothing was written; the same request may be sent again."
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
@@ -1120,6 +1231,9 @@ components:
         - VALIDATION_ERROR
         - INTERNAL_ERROR
         - GRAPH_CHANGED
+        - INVALID_NODE_STATE
+        - TICKET_STATUS_CHANGED
+        - CONCURRENT_WRITE_CONFLICT
 
     ErrorResponse:
       type: object
@@ -1238,6 +1352,16 @@ components:
         graph_expanded_at: { $ref: "#/components/schemas/Timestamp" }
         priority: { $ref: "#/components/schemas/TicketPriority" }
         label_ids: { type: array, items: { type: string } }
+        if_status:
+          $ref: "#/components/schemas/TicketStatus"
+          x-since: "1.2"
+          description: |
+            Since 1.2. A condition, not a field: write nothing unless the
+            ticket's current status is exactly this, and answer 409
+            `TICKET_STATUS_CHANGED` otherwise (check and write atomically).
+            graph-engine sends it when it brings a ticket's status in line
+            with its nodes, so that a status derived from a stale read never
+            overwrites another member's `CLOSED`.
 
     GraphNode:
       type: object
@@ -1289,6 +1413,30 @@ components:
           type: [string, "null"]
           x-since: "1.2"
           description: When the node was claimed (RFC 3339 in UTC), from the claimer's clock.
+        decided_by_name:
+          type: [string, "null"]
+          x-since: "1.2"
+          description: |
+            Since 1.2 (like the other three decision fields below). The
+            display name of whoever last decided this manual node (approved
+            or rejected an approval gate, completed a release or another
+            manual node), resolved by the graph-engine that recorded it. For
+            display only. Written by `applyNodeTransition` together with the
+            status the decision set, and cleared (all four `null`) by every
+            other status write; store them as given and return them
+            unchanged.
+        decided_by_name_is_fallback:
+          type: [boolean, "null"]
+          x-since: "1.2"
+          description: "`true` when `decided_by_name` is `<OS user>@<host>` because the decider set no name (shown as \"(name not set)\")."
+        decided_at:
+          type: [string, "null"]
+          x-since: "1.2"
+          description: When the decision was made (RFC 3339 in UTC), from the decider's clock.
+        decided_by_autopilot:
+          type: [boolean, "null"]
+          x-since: "1.2"
+          description: "`true` when the decision was made by an autopilot run rather than a person."
 
     NodePatch:
       type: object
@@ -1315,6 +1463,10 @@ components:
         claim_token: { type: [string, "null"], x-since: "1.2" }
         claim_session_id: { type: [string, "null"], x-since: "1.2" }
         claimed_at: { type: [string, "null"], x-since: "1.2", description: RFC 3339 timestamp in UTC. }
+        decided_by_name: { type: [string, "null"], x-since: "1.2" }
+        decided_by_name_is_fallback: { type: [boolean, "null"], x-since: "1.2" }
+        decided_at: { type: [string, "null"], x-since: "1.2", description: RFC 3339 timestamp in UTC. }
+        decided_by_autopilot: { type: [boolean, "null"], x-since: "1.2" }
 
     GraphEdge:
       type: object
@@ -1371,6 +1523,64 @@ components:
       properties:
         nodes: { type: array, items: { $ref: "#/components/schemas/GraphNode" } }
         edges: { type: array, items: { $ref: "#/components/schemas/GraphEdge" } }
+
+    NodeDecision:
+      type: object
+      x-since: "1.2"
+      required: [name, name_is_fallback, decided_at, autopilot]
+      properties:
+        name: { type: string }
+        name_is_fallback: { type: boolean }
+        decided_at: { $ref: "#/components/schemas/Timestamp" }
+        autopilot: { type: boolean }
+
+    NodeStep:
+      type: object
+      x-since: "1.2"
+      required: [node_id]
+      description: One node's conditions and writes; see `applyNodeTransition`.
+      properties:
+        node_id: { type: string }
+        required: { type: boolean, description: "A condition that does not hold refuses the whole request (true) or skips this step only (false or absent)." }
+        if_status_in: { type: array, items: { $ref: "#/components/schemas/NodeStatus" } }
+        if_status_not_in: { type: array, items: { $ref: "#/components/schemas/NodeStatus" } }
+        check_claim_token: { type: boolean }
+        if_claim_token: { type: [string, "null"] }
+        if_iteration_count: { type: integer }
+        if_updated_at: { type: string, description: "The node's `updated_at` exactly as graph-engine read it." }
+        set_status: { $ref: "#/components/schemas/NodeStatus" }
+        increment_iteration: { type: boolean }
+        add_max_iterations: { type: integer, minimum: 0 }
+        decision: { $ref: "#/components/schemas/NodeDecision" }
+        touch: { type: boolean, description: "Write `updated_at` even when nothing else is written." }
+
+    NodeTransition:
+      type: object
+      x-since: "1.2"
+      required: [steps, artifacts]
+      properties:
+        require_ticket_open: { type: boolean }
+        if_blocked: { type: boolean }
+        set_blocked: { type: boolean }
+        steps: { type: array, items: { $ref: "#/components/schemas/NodeStep" } }
+        artifacts:
+          type: array
+          description: Created as by `createArtifact`, keeping each `id` (minted by graph-engine).
+          items: { $ref: "#/components/schemas/Artifact" }
+
+    NodeTransitionResult:
+      type: object
+      x-since: "1.2"
+      required: [applied, nodes]
+      properties:
+        applied:
+          type: array
+          description: One flag per step, in order -- whether its conditions held and its writes were made.
+          items: { type: boolean }
+        nodes:
+          type: array
+          description: Every node the steps name, as stored after the writes.
+          items: { $ref: "#/components/schemas/GraphNode" }
 
     Artifact:
       type: object

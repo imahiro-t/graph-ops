@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"time"
@@ -117,6 +118,10 @@ var mysqlSchemaStatements = []string{
 	claim_token VARCHAR(64) NULL,
 	claim_session_id VARCHAR(64) NULL,
 	claimed_at VARCHAR(64) NULL,
+	decided_by_name VARCHAR(255) NULL,
+	decided_by_name_is_fallback TINYINT(1) NULL,
+	decided_at VARCHAR(64) NULL,
+	decided_by_autopilot TINYINT(1) NULL,
 	KEY idx_nodes_ticket (ticket_id),
 	CONSTRAINT fk_nodes_ticket FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`,
@@ -260,6 +265,55 @@ func explainMySQLGraphBatchError(err error) error {
 	return fmt.Errorf("%w (GraphOps creates a ticket's graph in a READ COMMITTED transaction on MySQL, "+
 		"which a server writing binary logs with binlog_format=STATEMENT refuses; "+
 		"set the server's binlog_format to ROW (the default since MySQL 8.0) or MIXED)", err)
+}
+
+// mysqlErDeadlock is MySQL's ER_LOCK_DEADLOCK: InnoDB found two
+// transactions waiting on each other's locks and rolled this one back.
+const mysqlErDeadlock = 1213
+
+// isMySQLDeadlock reports whether err is (or wraps) a MySQL error 1213.
+func isMySQLDeadlock(err error) bool {
+	var myErr *mysqldriver.MySQLError
+	return errors.As(err, &myErr) && myErr.Number == mysqlErDeadlock
+}
+
+// mysqlDeadlockAttempts is how many times retryMySQLDeadlock runs a write
+// that keeps ending in a deadlock before giving up.
+const mysqlDeadlockAttempts = 3
+
+// mysqlDeadlockBackoff is the pause before retrying a deadlocked write: a
+// few tens of milliseconds, random, so that the two parties of a deadlock
+// do not collide again in lockstep. A variable so tests can make it zero.
+var mysqlDeadlockBackoff = func() time.Duration {
+	return time.Duration(10+rand.Intn(40)) * time.Millisecond
+}
+
+// retryMySQLDeadlock runs run -- one whole transaction, or one autocommit
+// statement -- and runs it again when MySQL rolled it back as a deadlock
+// victim (Error 1213), up to mysqlDeadlockAttempts runs in all (DFLT-00329).
+// A retry is safe because a deadlock victim has been rolled back entirely,
+// and a retried transaction takes its locks and makes its decisions again
+// from the start. Any other error, and success, is returned at once. When
+// every run deadlocked, the result is CONCURRENT_WRITE_CONFLICT: nothing
+// was written, and the caller can simply make the same call again -- the
+// bare driver error never reaches it.
+//
+// SQLite has no counterpart: its transactions begin IMMEDIATE, taking the
+// write lock up front, so they wait rather than deadlock.
+func retryMySQLDeadlock(what string, run func() error) error {
+	var err error
+	for attempt := 1; attempt <= mysqlDeadlockAttempts; attempt++ {
+		err = run()
+		if !isMySQLDeadlock(err) {
+			return err
+		}
+		if attempt < mysqlDeadlockAttempts {
+			time.Sleep(mysqlDeadlockBackoff())
+		}
+	}
+	return domain.NewAPIError(domain.ErrCodeConcurrentWriteConflict,
+		"%s kept colliding with other writes to the same ticket (MySQL deadlock, %d attempts); nothing was written, so the same call can simply be made again: %v",
+		what, mysqlDeadlockAttempts, err)
 }
 
 // mysqlDialect is the shared label/ticket-update code's view of MySQL:
@@ -582,6 +636,14 @@ func (r *MySQLRepository) Init() error {
 	}, mysqlNodeClaimColumnTypes); err != nil {
 		return err
 	}
+	if err := addNodeDecisionColumns("mysql", func() (map[string]bool, error) {
+		return r.mysqlColumnsIn("nodes", nodeDecisionColumns)
+	}, func(column, sqlType string) error {
+		_, err := r.db.Exec("ALTER TABLE nodes ADD COLUMN " + column + " " + sqlType)
+		return err
+	}, mysqlNodeDecisionColumnTypes); err != nil {
+		return err
+	}
 	// DFLT-00083 migration: tickets whose priority is NULL become MEDIUM.
 	return backfillNullTicketPriority(r.db)
 }
@@ -594,6 +656,15 @@ var mysqlNodeClaimColumnTypes = map[string]string{
 	"claim_token":                 "VARCHAR(64) NULL",
 	"claim_session_id":            "VARCHAR(64) NULL",
 	"claimed_at":                  "VARCHAR(64) NULL",
+}
+
+// mysqlNodeDecisionColumnTypes are the decision columns' types for
+// addNodeDecisionColumns (see mysqlSchemaStatements' nodes).
+var mysqlNodeDecisionColumnTypes = map[string]string{
+	"decided_by_name":             "VARCHAR(255) NULL",
+	"decided_by_name_is_fallback": "TINYINT(1) NULL",
+	"decided_at":                  "VARCHAR(64) NULL",
+	"decided_by_autopilot":        "TINYINT(1) NULL",
 }
 
 // addTicketParentColumn is the DFLT-00142 migration for a DB created before
@@ -971,14 +1042,29 @@ func (r *MySQLRepository) ClearEdgesByTicket(ticketID string) error {
 
 // --- Artifacts ---
 
+// CreateArtifact inserts the artifact. The INSERT checks its foreign keys
+// by taking shared locks on the parent ticket and node rows, which a node
+// transition may be holding exclusively while it waits for one of them in
+// turn: InnoDB then picks one of the two as a deadlock victim (Error 1213).
+// When that is this INSERT it is simply run again (retryMySQLDeadlock) --
+// the ID was minted before the call and the failed INSERT was rolled back,
+// so the artifact is never written twice (DFLT-00329).
 func (r *MySQLRepository) CreateArtifact(a domain.Artifact) (domain.Artifact, error) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := r.db.Exec(
-		`INSERT INTO artifacts (id, ticket_id, node_id, name, type, content, file_path, metadata, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.TicketID, a.NodeID, a.Name, a.Type,
-		nullableString(a.Content), nullableString(a.FilePath), nullableString(a.Metadata), now,
-	)
+	var now string
+	err := retryMySQLDeadlock("adding artifact "+a.ID, func() error {
+		now = time.Now().UTC().Format(time.RFC3339Nano)
+		_, err := r.db.Exec(
+			`INSERT INTO artifacts (id, ticket_id, node_id, name, type, content, file_path, metadata, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			a.ID, a.TicketID, a.NodeID, a.Name, a.Type,
+			nullableString(a.Content), nullableString(a.FilePath), nullableString(a.Metadata), now,
+		)
+		return err
+	})
+	var apiErr *domain.APIError
+	if errors.As(err, &apiErr) {
+		return domain.Artifact{}, err
+	}
 	if err != nil {
 		return domain.Artifact{}, fmt.Errorf("inserting artifact: %w", err)
 	}

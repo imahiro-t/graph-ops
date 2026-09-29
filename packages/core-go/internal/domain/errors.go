@@ -195,6 +195,21 @@ const (
 	// (the seed carries on with the existing graph, an expansion ends with
 	// "already been expanded"), so it never reaches the CLI or the Web UI.
 	ErrCodeGraphChanged ErrorCode = "GRAPH_CHANGED"
+	// ErrCodeTicketStatusChanged: a ticket status write carried the status
+	// it was derived from (store.TicketPatch.IfStatus, DFLT-00329) and the
+	// stored status no longer matched -- somebody else changed it first,
+	// e.g. closed the ticket. Nothing was written. Returned with a 409 by an
+	// HTTP data source (protocol 1.2); the engine absorbs it (it re-reads
+	// and derives again), so it does not normally reach the CLI or the Web
+	// UI.
+	ErrCodeTicketStatusChanged ErrorCode = "TICKET_STATUS_CHANGED"
+	// ErrCodeConcurrentWriteConflict: a write kept colliding with another
+	// write to the same ticket (on MySQL, a deadlock that was still there
+	// after the retries, DFLT-00329). Nothing was written, so the same call
+	// can simply be made again -- unlike INVALID_NODE_STATE, which says the
+	// state has changed and the same call will be refused again. Returned
+	// with a 409.
+	ErrCodeConcurrentWriteConflict ErrorCode = "CONCURRENT_WRITE_CONFLICT"
 )
 
 // APIError pairs a machine-readable Code with a developer-facing English

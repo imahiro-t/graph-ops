@@ -75,6 +75,10 @@ CREATE TABLE IF NOT EXISTS nodes (
 	claim_token TEXT,
 	claim_session_id TEXT,
 	claimed_at TEXT,
+	decided_by_name TEXT,
+	decided_by_name_is_fallback INTEGER,
+	decided_at TEXT,
+	decided_by_autopilot INTEGER,
 	FOREIGN KEY(ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
 );
 
@@ -294,6 +298,14 @@ func (r *SQLiteRepository) Init() error {
 	}, sqliteNodeClaimColumnTypes); err != nil {
 		return err
 	}
+	if err := addNodeDecisionColumns("sqlite", func() (map[string]bool, error) {
+		return r.sqliteColumns("nodes")
+	}, func(column, sqlType string) error {
+		_, err := r.db.Exec(`ALTER TABLE nodes ADD COLUMN ` + column + ` ` + sqlType)
+		return err
+	}, sqliteNodeDecisionColumnTypes); err != nil {
+		return err
+	}
 	// DFLT-00083 migration: tickets whose priority is NULL become MEDIUM.
 	return backfillNullTicketPriority(r.db)
 }
@@ -306,6 +318,15 @@ var sqliteNodeClaimColumnTypes = map[string]string{
 	"claim_token":                 "TEXT",
 	"claim_session_id":            "TEXT",
 	"claimed_at":                  "TEXT",
+}
+
+// sqliteNodeDecisionColumnTypes are the decision columns' types for
+// addNodeDecisionColumns (see schemaDDL's nodes).
+var sqliteNodeDecisionColumnTypes = map[string]string{
+	"decided_by_name":             "TEXT",
+	"decided_by_name_is_fallback": "INTEGER",
+	"decided_at":                  "TEXT",
+	"decided_by_autopilot":        "INTEGER",
 }
 
 // dropLegacyProjectsWorkDir is the DFLT-00080 migration: a DB created before
@@ -631,12 +652,20 @@ func scanNode(row interface {
 	var assignee, gateID, criteria, configID sql.NullString
 	var claimedBy, claimToken, claimSession, claimedAt sql.NullString
 	var claimedByFallback sql.NullInt64
+	var decidedBy, decidedAt sql.NullString
+	var decidedByFallback, decidedByAutopilot sql.NullInt64
 	var isManual int
 	if err := row.Scan(&n.ID, &n.TicketID, &n.Name, &n.Type, &n.Status, &n.IterationCount,
 		&n.MaxIterations, &assignee, &isManual, &gateID, &criteria, &configID, &n.CreatedAt, &n.UpdatedAt,
-		&claimedBy, &claimedByFallback, &claimToken, &claimSession, &claimedAt); err != nil {
+		&claimedBy, &claimedByFallback, &claimToken, &claimSession, &claimedAt,
+		&decidedBy, &decidedByFallback, &decidedAt, &decidedByAutopilot); err != nil {
 		return nil, err
 	}
+	n.DecidedByName = stringOrNil(decidedBy)
+	n.DecidedAt = stringOrNil(decidedAt)
+	n.DecidedByNameIsFallback = boolOrNil(decidedByFallback)
+	n.DecidedByAutopilot = boolOrNil(decidedByAutopilot)
+	n.SanitizeDecisionName()
 	n.ClaimedByName = stringOrNil(claimedBy)
 	n.ClaimToken = stringOrNil(claimToken)
 	n.ClaimSessionID = stringOrNil(claimSession)
@@ -663,7 +692,17 @@ func scanNode(row interface {
 }
 
 const nodeSelectCols = `id, ticket_id, name, type, status, iteration_count, max_iterations, assignee, is_manual, gate_id, criteria, config_id, created_at, updated_at, ` +
-	`claimed_by_name, claimed_by_name_is_fallback, claim_token, claim_session_id, claimed_at`
+	`claimed_by_name, claimed_by_name_is_fallback, claim_token, claim_session_id, claimed_at, ` +
+	`decided_by_name, decided_by_name_is_fallback, decided_at, decided_by_autopilot`
+
+// boolOrNil is a NULL-able 0/1 column as a *bool.
+func boolOrNil(v sql.NullInt64) *bool {
+	if !v.Valid {
+		return nil
+	}
+	b := v.Int64 != 0
+	return &b
+}
 
 // stringOrNil is a NULL-able column as a *string.
 func stringOrNil(s sql.NullString) *string {

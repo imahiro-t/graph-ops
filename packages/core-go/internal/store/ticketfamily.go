@@ -112,11 +112,30 @@ var nodeClaimColumns = []string{"claimed_by_name", "claimed_by_name_is_fallback"
 // is read on a migrated DB. Like ensureTicketParentColumn, a failed ALTER is
 // forgiven when the column exists afterwards (a concurrent Init added it).
 func addNodeClaimColumns(backend string, existingColumns func() (map[string]bool, error), addColumn func(column, sqlType string) error, types map[string]string) error {
+	return addNodeColumns(backend, nodeClaimColumns, existingColumns, addColumn, types)
+}
+
+// nodeDecisionColumns are the decision columns DFLT-00329 added to nodes, in
+// the order addNodeDecisionColumns adds them.
+var nodeDecisionColumns = []string{"decided_by_name", "decided_by_name_is_fallback", "decided_at", "decided_by_autopilot"}
+
+// addNodeDecisionColumns is the DFLT-00329 migration that adds the decision
+// columns to the nodes of a DB created before them, exactly as
+// addNodeClaimColumns adds the claim columns: NULL-able, so existing rows
+// read back as undecided.
+func addNodeDecisionColumns(backend string, existingColumns func() (map[string]bool, error), addColumn func(column, sqlType string) error, types map[string]string) error {
+	return addNodeColumns(backend, nodeDecisionColumns, existingColumns, addColumn, types)
+}
+
+// addNodeColumns is the shared body of addNodeClaimColumns and
+// addNodeDecisionColumns: each of columns that existingColumns does not
+// report is added with its type from types.
+func addNodeColumns(backend string, columns []string, existingColumns func() (map[string]bool, error), addColumn func(column, sqlType string) error, types map[string]string) error {
 	have, err := existingColumns()
 	if err != nil {
 		return fmt.Errorf("inspecting nodes columns: %w", err)
 	}
-	for _, column := range nodeClaimColumns {
+	for _, column := range columns {
 		if have[column] {
 			continue
 		}

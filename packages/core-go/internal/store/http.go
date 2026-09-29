@@ -308,6 +308,12 @@ var knownHTTPDataSourceErrorCodes = map[domain.ErrorCode]bool{
 	domain.ErrCodeValidation:        true,
 	domain.ErrCodeInternal:          true,
 	domain.ErrCodeGraphChanged:      true,
+	// DFLT-00329: a node transition that lost (409), a ticket status write
+	// whose if_status no longer matched (409), and a write the plugin could
+	// not complete because of concurrent writes and that can be retried.
+	domain.ErrCodeInvalidNodeState:        true,
+	domain.ErrCodeTicketStatusChanged:     true,
+	domain.ErrCodeConcurrentWriteConflict: true,
 }
 
 type httpErrorBody struct {
@@ -626,9 +632,31 @@ func (r *HTTPRepository) ListTicketsByProject(projectID string) ([]domain.Ticket
 	return r.listTickets("/projects/" + esc(projectID) + "/tickets")
 }
 
+// UpdateTicket sends patch as a PATCH. patch.IfStatus travels as if_status
+// to a data source speaking 1.2, which must refuse the PATCH with 409
+// TICKET_STATUS_CHANGED when the stored status differs. An older data
+// source has no if_status, so the status is fetched and compared first and
+// the PATCH sent only when it matches -- two calls, not atomic.
 func (r *HTTPRepository) UpdateTicket(id string, patch TicketPatch) (domain.Ticket, error) {
+	body := ticketPatchBody(patch)
+	if patch.IfStatus != nil {
+		if r.supportsNodeTransitions() {
+			body["if_status"] = *patch.IfStatus
+		} else {
+			cur, err := r.GetTicket(id)
+			if err != nil {
+				return domain.Ticket{}, err
+			}
+			if cur == nil {
+				return domain.Ticket{}, domain.NewAPIError(domain.ErrCodeTicketNotFound, "ticket %s not found", id)
+			}
+			if cur.Status != *patch.IfStatus {
+				return domain.Ticket{}, ticketStatusChanged(id, *patch.IfStatus, cur.Status)
+			}
+		}
+	}
 	var out domain.Ticket
-	if err := r.do(http.MethodPatch, "/tickets/"+esc(id), ticketPatchBody(patch), &out); err != nil {
+	if err := r.do(http.MethodPatch, "/tickets/"+esc(id), body, &out); err != nil {
 		return domain.Ticket{}, err
 	}
 	normalizeTicket(&out)
@@ -669,7 +697,12 @@ func (r *HTTPRepository) nodeFromWire(w httpNodeWire) domain.GraphNode {
 	if !r.supportsClaims() {
 		n.ClaimedByName, n.ClaimedByNameIsFallback, n.ClaimToken, n.ClaimSessionID, n.ClaimedAt = nil, nil, nil, nil, nil
 	}
+	// The decision fields likewise (DFLT-00329).
+	if !r.supportsNodeTransitions() {
+		n.DecidedByName, n.DecidedByNameIsFallback, n.DecidedAt, n.DecidedByAutopilot = nil, nil, nil, nil
+	}
 	n.SanitizeClaimName()
+	n.SanitizeDecisionName()
 	return n
 }
 
@@ -717,6 +750,7 @@ func (r *HTTPRepository) UpdateNode(id string, patch NodePatch) (domain.GraphNod
 	body := nodePatchBody(patch)
 	if patch.Status != nil {
 		r.addClaimPatchFields(body, *patch.Status, nil)
+		r.addDecisionPatchFields(body, nil)
 	}
 	return r.patchNode(id, body)
 }
@@ -765,6 +799,7 @@ func (r *HTTPRepository) ClaimNode(id string, newStatus domain.NodeStatus, exclu
 	}
 	body := nodePatchBody(NodePatch{Status: &newStatus})
 	r.addClaimPatchFields(body, newStatus, claim)
+	r.addDecisionPatchFields(body, nil)
 	updated, err := r.patchNode(id, body)
 	if err != nil {
 		return nil, err

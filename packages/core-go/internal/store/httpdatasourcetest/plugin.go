@@ -158,6 +158,7 @@ func (p *Plugin) routes() {
 	h("DELETE /nodes/{nodeId}", p.deleteNode)
 
 	h("POST /tickets/{ticketId}/graph", p.createGraphBatch)
+	h("POST /tickets/{ticketId}/node-transition", p.applyNodeTransition)
 
 	h("POST /tickets/{ticketId}/edges", p.createEdge)
 	h("GET /tickets/{ticketId}/edges", p.listEdges)
@@ -231,7 +232,8 @@ func writeAPIErr(w http.ResponseWriter, err error) {
 	case domain.ErrCodeTicketNotFound, domain.ErrCodeNodeNotFound, domain.ErrCodeArtifactNotFound,
 		domain.ErrCodeProjectNotFound, domain.ErrCodeLabelNotFound:
 		status = http.StatusNotFound
-	case domain.ErrCodeLabelNameTaken, domain.ErrCodePrefixTaken, domain.ErrCodeGraphChanged:
+	case domain.ErrCodeLabelNameTaken, domain.ErrCodePrefixTaken, domain.ErrCodeGraphChanged,
+		domain.ErrCodeInvalidNodeState, domain.ErrCodeTicketStatusChanged:
 		status = http.StatusConflict
 	}
 	writeErr(w, status, string(apiErr.Code), apiErr.Message)
@@ -913,6 +915,9 @@ func (p *Plugin) updateTicket(w http.ResponseWriter, r *http.Request) {
 		GraphExpandedAt *string                `json:"graph_expanded_at"`
 		Priority        *domain.TicketPriority `json:"priority"`
 		LabelIDs        *[]string              `json:"label_ids"`
+		// IfStatus (1.2) is a condition: the PATCH is refused with 409
+		// TICKET_STATUS_CHANGED unless the stored status is exactly this.
+		IfStatus *domain.TicketStatus `json:"if_status"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -920,6 +925,10 @@ func (p *Plugin) updateTicket(w http.ResponseWriter, r *http.Request) {
 	t := p.findTicket(id)
 	if t == nil {
 		writeAPIErr(w, notFound(domain.ErrCodeTicketNotFound, "ticket", id))
+		return
+	}
+	if body.IfStatus != nil && p.speaksAutopilotRuns() && t.Status != *body.IfStatus {
+		writeAPIErr(w, domain.NewAPIError(domain.ErrCodeTicketStatusChanged, "ticket %s is %s, not %s", id, t.Status, *body.IfStatus))
 		return
 	}
 	var newLabels []string
@@ -1054,6 +1063,7 @@ func (p *Plugin) wire(n *domain.GraphNode) WireNode {
 	c := *n
 	if !p.speaksAutopilotRuns() {
 		c.ClaimedByName, c.ClaimedByNameIsFallback, c.ClaimToken, c.ClaimSessionID, c.ClaimedAt = nil, nil, nil, nil, nil
+		c.DecidedByName, c.DecidedByNameIsFallback, c.DecidedAt, c.DecidedByAutopilot = nil, nil, nil, nil
 	}
 	return WireNode{GraphNode: c, ClaimToken: c.ClaimToken}
 }
@@ -1081,6 +1091,7 @@ func (p *Plugin) createNode(w http.ResponseWriter, r *http.Request) {
 	in.ClaimToken = wireIn.ClaimToken
 	if !p.speaksAutopilotRuns() {
 		in.ClaimedByName, in.ClaimedByNameIsFallback, in.ClaimToken, in.ClaimSessionID, in.ClaimedAt = nil, nil, nil, nil, nil
+		in.DecidedByName, in.DecidedByNameIsFallback, in.DecidedAt, in.DecidedByAutopilot = nil, nil, nil, nil
 	}
 	if p.findTicket(ticketID) == nil {
 		writeAPIErr(w, notFound(domain.ErrCodeTicketNotFound, "ticket", ticketID))
@@ -1138,6 +1149,11 @@ func (p *Plugin) updateNode(w http.ResponseWriter, r *http.Request) {
 		ClaimToken              optionalString `json:"claim_token"`
 		ClaimSessionID          optionalString `json:"claim_session_id"`
 		ClaimedAt               optionalString `json:"claimed_at"`
+		// Decision fields (1.2): absent leaves them, null clears them.
+		DecidedByName           optionalString `json:"decided_by_name"`
+		DecidedByNameIsFallback optionalBool   `json:"decided_by_name_is_fallback"`
+		DecidedAt               optionalString `json:"decided_at"`
+		DecidedByAutopilot      optionalBool   `json:"decided_by_autopilot"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -1189,6 +1205,18 @@ func (p *Plugin) updateNode(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.ClaimedAt.set {
 			n.ClaimedAt = body.ClaimedAt.value
+		}
+		if body.DecidedByName.set {
+			n.DecidedByName = body.DecidedByName.value
+		}
+		if body.DecidedByNameIsFallback.set {
+			n.DecidedByNameIsFallback = body.DecidedByNameIsFallback.value
+		}
+		if body.DecidedAt.set {
+			n.DecidedAt = body.DecidedAt.value
+		}
+		if body.DecidedByAutopilot.set {
+			n.DecidedByAutopilot = body.DecidedByAutopilot.value
 		}
 	}
 	n.UpdatedAt = now()
@@ -1336,6 +1364,7 @@ func (p *Plugin) createGraphBatch(w http.ResponseWriter, r *http.Request) {
 		n.ID = fmt.Sprintf("%s-%02d", ticketID, seq)
 		n.TicketID = ticketID
 		n.ClaimedByName, n.ClaimedByNameIsFallback, n.ClaimToken, n.ClaimSessionID, n.ClaimedAt = nil, nil, nil, nil, nil
+		n.DecidedByName, n.DecidedByNameIsFallback, n.DecidedAt, n.DecidedByAutopilot = nil, nil, nil, nil
 		if n.MaxIterations == 0 {
 			n.MaxIterations = 3
 		}
@@ -1390,6 +1419,188 @@ func (p *Plugin) createGraphBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	t.UpdatedAt = now()
 	writeJSON(w, http.StatusCreated, map[string]any{"nodes": outNodes, "edges": outEdges})
+}
+
+// nodeTransitionStep and nodeTransitionRequest are POST
+// /tickets/{ticketId}/node-transition's body (store.NodeStep /
+// store.NodeTransition, restated because this package must not import
+// internal/store).
+type nodeTransitionStep struct {
+	NodeID             string               `json:"node_id"`
+	Required           bool                 `json:"required"`
+	IfStatusIn         []domain.NodeStatus  `json:"if_status_in"`
+	IfStatusNotIn      []domain.NodeStatus  `json:"if_status_not_in"`
+	CheckClaimToken    bool                 `json:"check_claim_token"`
+	IfClaimToken       *string              `json:"if_claim_token"`
+	IfIterationCount   *int                 `json:"if_iteration_count"`
+	IfUpdatedAt        *string              `json:"if_updated_at"`
+	SetStatus          *domain.NodeStatus   `json:"set_status"`
+	IncrementIteration bool                 `json:"increment_iteration"`
+	AddMaxIterations   int                  `json:"add_max_iterations"`
+	Decision           *domain.NodeDecision `json:"decision"`
+	Touch              bool                 `json:"touch"`
+}
+
+type nodeTransitionRequest struct {
+	RequireTicketOpen bool                 `json:"require_ticket_open"`
+	IfBlocked         *bool                `json:"if_blocked"`
+	SetBlocked        *bool                `json:"set_blocked"`
+	Steps             []nodeTransitionStep `json:"steps"`
+	Artifacts         []domain.Artifact    `json:"artifacts"`
+}
+
+func statusIn(list []domain.NodeStatus, s domain.NodeStatus) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+// stepHolds is whether st's conditions hold for n (nil: no such node).
+func stepHolds(st nodeTransitionStep, n *domain.GraphNode) bool {
+	if n == nil {
+		return false
+	}
+	if len(st.IfStatusIn) > 0 && !statusIn(st.IfStatusIn, n.Status) {
+		return false
+	}
+	if statusIn(st.IfStatusNotIn, n.Status) {
+		return false
+	}
+	if st.CheckClaimToken {
+		if st.IfClaimToken == nil && n.ClaimToken != nil {
+			return false
+		}
+		if st.IfClaimToken != nil && (n.ClaimToken == nil || *n.ClaimToken != *st.IfClaimToken) {
+			return false
+		}
+	}
+	if st.IfIterationCount != nil && *st.IfIterationCount != n.IterationCount {
+		return false
+	}
+	if st.IfUpdatedAt != nil && *st.IfUpdatedAt != n.UpdatedAt {
+		return false
+	}
+	return true
+}
+
+// applyStep is st's writes applied to n.
+func applyStep(st nodeTransitionStep, n *domain.GraphNode, ts string) {
+	if st.SetStatus != nil {
+		n.Status = *st.SetStatus
+		n.ClaimedByName, n.ClaimedByNameIsFallback, n.ClaimToken, n.ClaimSessionID, n.ClaimedAt = nil, nil, nil, nil, nil
+		n.DecidedByName, n.DecidedByNameIsFallback, n.DecidedAt, n.DecidedByAutopilot = nil, nil, nil, nil
+		if d := st.Decision; d != nil {
+			name, fallback, at, autopilot := d.Name, d.NameIsFallback, d.DecidedAt, d.Autopilot
+			n.DecidedByName, n.DecidedByNameIsFallback, n.DecidedAt, n.DecidedByAutopilot = &name, &fallback, &at, &autopilot
+		}
+	}
+	if st.IncrementIteration {
+		n.IterationCount++
+	}
+	n.MaxIterations += st.AddMaxIterations
+	if st.SetStatus != nil || st.IncrementIteration || st.AddMaxIterations != 0 || st.Touch {
+		n.UpdatedAt = ts
+	}
+}
+
+// applyNodeTransition is POST /tickets/{ticketId}/node-transition (1.2):
+// every condition is checked and every write made, or nothing. Every
+// handler runs under p.mu, so the check and the writes are one step; the
+// writes are applied to copies first and stored only once everything has
+// been checked, which is how this plugin keeps the request atomic (a real
+// plugin would typically use a transaction).
+func (p *Plugin) applyNodeTransition(w http.ResponseWriter, r *http.Request) {
+	if !p.speaksAutopilotRuns() {
+		http.NotFound(w, r)
+		return
+	}
+	ticketID := r.PathValue("ticketId")
+	var in nodeTransitionRequest
+	if !decode(w, r, &in) {
+		return
+	}
+	t := p.findTicket(ticketID)
+	if t == nil {
+		writeAPIErr(w, notFound(domain.ErrCodeTicketNotFound, "ticket", ticketID))
+		return
+	}
+	if in.RequireTicketOpen && t.Status == domain.TicketClosed {
+		writeAPIErr(w, domain.NewAPIError(domain.ErrCodeInvalidNodeState, "ticket %s is CLOSED", ticketID))
+		return
+	}
+	if in.IfBlocked != nil && *in.IfBlocked != t.Blocked {
+		writeAPIErr(w, domain.NewAPIError(domain.ErrCodeInvalidNodeState, "ticket %s's blocked flag is %v", ticketID, t.Blocked))
+		return
+	}
+	copies := map[string]*domain.GraphNode{}
+	for _, st := range in.Steps {
+		if st.Decision != nil && st.SetStatus == nil {
+			writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "step %s records a decision without a status", st.NodeID))
+			return
+		}
+		if _, ok := copies[st.NodeID]; ok {
+			continue
+		}
+		if n := p.findNode(st.NodeID); n != nil {
+			if n.TicketID != ticketID {
+				writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "node %s is not a node of ticket %s", st.NodeID, ticketID))
+				return
+			}
+			c := *n
+			copies[st.NodeID] = &c
+		} else {
+			copies[st.NodeID] = nil
+		}
+	}
+	ts := now()
+	applied := make([]bool, len(in.Steps))
+	for i, st := range in.Steps {
+		n := copies[st.NodeID]
+		if !stepHolds(st, n) {
+			if st.Required {
+				writeAPIErr(w, domain.NewAPIError(domain.ErrCodeInvalidNodeState, "node %s no longer matches the transition's conditions", st.NodeID))
+				return
+			}
+			continue
+		}
+		applied[i] = true
+		applyStep(st, n, ts)
+	}
+	for _, a := range in.Artifacts {
+		if a.TicketID != ticketID || p.findNode(a.NodeID) == nil {
+			writeAPIErr(w, domain.NewAPIError(domain.ErrCodeValidation, "artifact %s does not belong to a node of ticket %s", a.ID, ticketID))
+			return
+		}
+	}
+
+	// Everything checked: store.
+	for _, a := range in.Artifacts {
+		c := a
+		c.CreatedAt = now()
+		c.HasContent = hasContent(&c)
+		p.artifacts = append(p.artifacts, &c)
+	}
+	ids := make([]string, 0, len(copies))
+	for id, c := range copies {
+		if c == nil {
+			continue
+		}
+		*p.findNode(id) = *c
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	if in.SetBlocked != nil {
+		t.Blocked = *in.SetBlocked
+		t.UpdatedAt = ts
+	}
+	out := []WireNode{}
+	for _, id := range ids {
+		out = append(out, p.wire(p.findNode(id)))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"applied": applied, "nodes": out})
 }
 
 func (p *Plugin) listEdges(w http.ResponseWriter, r *http.Request) {
