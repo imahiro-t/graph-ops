@@ -165,12 +165,12 @@ export const App: React.FC = () => {
   //   3. Writes. A request already in flight when the header moves still
   //      comes back. fetchAllTickets drops it (a newer run, or a different
   //      current project, supersedes it), as refreshProjectLabels does for
-  //      labels (DFLT-00296). (1) already stops such a response from being *shown*; (3)
-  //      stops it from knocking the current project's loaded list back to
-  //      "loading" until the next poll. An expanded ticket's detail
-  //      response (DFLT-00112) only ever replaces a ticket with the same id
-  //      inside the loaded list, so one for a project the user has left
-  //      matches nothing (see fetchTicketDetail).
+  //      labels (DFLT-00296). (1) already stops such a response from being
+  //      *shown*; (3) stops it from knocking the current project's loaded
+  //      list back to "loading" until the next poll. An expanded ticket's
+  //      detail response (DFLT-00112) only ever replaces a ticket with the
+  //      same id inside the loaded list, so one for a project the user has
+  //      left matches nothing (see fetchTicketDetail).
   //
   // What is NOT promised: that the header follows a switch made in another
   // tab of the same environment. It shows this window's own choice until a

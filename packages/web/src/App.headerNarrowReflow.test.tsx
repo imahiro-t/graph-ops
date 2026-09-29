@@ -53,6 +53,7 @@ import i18n from './i18n';
 import App from './App';
 import { Project } from './types';
 import { createFakeBackend, installFakeBackend } from './test/fakeBackend';
+import { findPreviousPage } from './test/waitForAnswers';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 
@@ -182,11 +183,6 @@ describe.each(['ja', 'en'] as const)('top header in a 160px window at 200%% (%s)
     expect(time).toHaveClass('min-w-0', BREAKS_ANYWHERE);
   });
 });
-
-// The pager is drawn only once the page size of five has arrived, which is
-// its own request (GET /api/settings/app): seeing a ticket does not imply
-// it has been answered (DFLT-00296).
-const findPreviousPage = () => screen.findByRole('button', { name: i18n.t('pagination.previous') });
 
 describe.each(['ja', 'en'] as const)('pagination in a 160px window at 200%% (%s)', lng => {
   beforeEach(async () => {

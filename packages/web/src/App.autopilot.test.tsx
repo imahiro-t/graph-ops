@@ -3,13 +3,14 @@
 // errors and the "automatic decisions" section. fetch is served by
 // test/fakeBackend.ts. DFLT-00147: the start is confirmed in the in-app
 // dialog, never with window.confirm.
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
 import App from './App';
 import { AutopilotRun, Project } from './types';
 import { FakeAutopilotStart, FakeBackend, FakeTicket, createFakeBackend, installFakeBackend } from './test/fakeBackend';
+import { trackBodyReads } from './test/waitForAnswers';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 
@@ -119,41 +120,13 @@ function holdStarts() {
 // The runs (GET /api/autopilot/runs) are fetched twice at startup (for the
 // current project, then after the first ticket fetch), independently of the
 // ticket list, and nothing on screen always shows that their answers are in.
-// This counts the requests made and the answers the app has read; call it
-// after seed() and before rendering. runsSettled() waits until every runs
-// request made so far has been answered and applied. refreshAutopilotRuns
+// This tracks them with trackBodyReads; call it after seed() and before
+// rendering. The runsSettled() it returns waits until every runs request
+// made so far has been answered and applied. refreshAutopilotRuns
 // applies whichever answer arrives last, so a test that refreshes the runs
 // lets the startup ones settle first (DFLT-00296).
 function trackRunReads() {
-  let made = 0;
-  let read = 0;
-  const inner = backend.fetch.bind(backend);
-  backend.fetch = async (input, init) => {
-    const isRuns = String(input).startsWith('/api/autopilot/runs');
-    if (isRuns) made++;
-    const res = await inner(input, init);
-    if (isRuns) {
-      const json = res.json.bind(res);
-      res.json = async () => {
-        try {
-          return await json();
-        } finally {
-          read++;
-        }
-      };
-    }
-    return res;
-  };
-  return async function runsSettled() {
-    await waitFor(() => {
-      expect(made).toBeGreaterThan(0);
-      expect(read).toBe(made);
-    });
-    // Let the last answer reach the state and the render.
-    await act(async () => {
-      await new Promise(r => setTimeout(r, 0));
-    });
-  };
+  return trackBodyReads(backend, url => url.startsWith('/api/autopilot/runs'));
 }
 
 const startRequests = () =>
@@ -429,14 +402,29 @@ describe('autopilot in the Web UI', () => {
     expect(screen.getByRole('dialog', { name: modeTitle('tree', true) })).toHaveAccessibleDescription(resumeText);
     expect(screen.getByTestId('autopilot-mode-ticket')).toBeDisabled();
 
-    // The poll shows the ticket reopened and the stopped run gone: a start
-    // would now be a fresh one (still allowed), so only the text could change.
+    // The polls show the ticket reopened and then the stopped run gone: a
+    // start would now be a fresh one (still allowed), so only the text could
+    // change. The two changes go in one poll each, because a poll's tickets
+    // and runs are separate requests: had the runs (none) landed before the
+    // ticket's new status, the view would briefly say a DONE ticket with
+    // nothing to resume, and the dialog would rightly close (DFLT-00296).
     backend.tickets = backend.tickets.map(tk => (tk.id === X ? { ...tk, status: 'IN PROGRESS' } : tk));
-    backend.autopilotRuns = [];
     await poll();
     // The single choice, disabled on the finished ticket, is enabled again
-    // once the new view has arrived; the choice itself does not move.
+    // once the reopened ticket has arrived; the choice itself does not move.
     await waitFor(() => expect(screen.getByTestId('autopilot-mode-ticket')).toBeEnabled());
+    expect(screen.getByTestId('autopilot-mode-tree')).toBeChecked();
+
+    // The refresh button stays disabled until the first poll's fetch is
+    // done; a click before that would not poll again.
+    await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('toolbar.refreshTitle') })).toBeEnabled());
+    await runsSettled();
+    backend.autopilotRuns = [];
+    await poll();
+    // Nothing on screen shows the empty runs have arrived: wait for the app
+    // to read and apply them.
+    await runsSettled();
+    expect(screen.getByTestId('autopilot-mode-ticket')).toBeEnabled();
     expect(screen.getByTestId('autopilot-mode-tree')).toBeChecked();
 
     expect(screen.getByRole('dialog', { name: modeTitle('tree', true) })).toHaveAccessibleDescription(resumeText);
@@ -464,7 +452,10 @@ describe('autopilot in the Web UI', () => {
     expect(tree).toBeDisabled();
     expect(within(controls).getByTestId('autopilot-disabled-reason')).toHaveTextContent(i18n.t('autopilot.blocked', { root: X }));
     expect(focusFallback(controls)).toContainElement(within(controls).getByTestId('autopilot-disabled-reason'));
-    expect(focusFallback(controls)).toHaveFocus();
+    // The dialog hands focus back in an effect cleanup, which can run just
+    // after the DOM change that took the dialog out: wait for it
+    // (DFLT-00296).
+    await waitFor(() => expect(focusFallback(controls)).toHaveFocus());
     expect(document.body).not.toHaveFocus();
   });
 
@@ -488,7 +479,10 @@ describe('autopilot in the Web UI', () => {
     await waitFor(() => expect(dialog()).not.toBeInTheDocument());
     expect(startRequests()).toEqual([]);
     expect(button).toBeEnabled();
-    expect(button).toHaveFocus();
+    // The dialog hands focus back in an effect cleanup, which can run just
+    // after the DOM change that took the dialog out: wait for it
+    // (DFLT-00296).
+    await waitFor(() => expect(button).toHaveFocus());
     expect(focusFallback(controls)).not.toHaveFocus();
     expect(within(controls).queryByTestId('autopilot-disabled-reason')).not.toBeInTheDocument();
   });
