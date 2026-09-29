@@ -101,6 +101,13 @@ func New(repo store.GraphRepository, eng *engine.GraphEngine, cfg Config) *Serve
 			logger.Warn(fmt.Sprintf(format, args...), slog.String("event", "node_claims"))
 		})
 	}
+	// The repository's own warnings (an HTTP data source older than 1.2
+	// checking if_updated_at non-atomically -- DFLT-00330) likewise.
+	if sink, ok := repo.(store.WarningSink); ok {
+		sink.SetLogf(func(format string, args ...any) {
+			logger.Warn(fmt.Sprintf(format, args...), slog.String("event", "data_source"))
+		})
+	}
 	return &Server{repo: repo, engine: eng, cfg: cfg, rejectLog: newRejectLogger(logger), logger: logger}
 }
 
@@ -644,7 +651,7 @@ func statusForError(err error, fallback int) int {
 		// state the row is in right now, which is what 409 means
 		// (DFLT-00102).
 		case domain.ErrCodeInvalidNodeState, domain.ErrCodeNodeClaimedByOther,
-			domain.ErrCodeTicketStatusChanged, domain.ErrCodeConcurrentWriteConflict:
+			domain.ErrCodeTicketStatusChanged, domain.ErrCodeTicketChanged, domain.ErrCodeConcurrentWriteConflict:
 			return http.StatusConflict
 		// The autopilot (DFLT-00142): a start that collides with another
 		// run or with the root's state is a conflict with the current

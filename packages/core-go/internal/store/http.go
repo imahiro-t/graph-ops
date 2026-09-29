@@ -9,8 +9,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/graph-ops/core-go/internal/domain"
@@ -150,9 +152,38 @@ type HTTPRepository struct {
 	// against a plugin that speaks it (e.g. parent_ticket_id needs 1.1, the
 	// autopilot-runs endpoints 1.2).
 	serverMinor int
+	// logf is where this repository's warnings go (nil: stderr as
+	// "graph-engine: warning: ..."); the Web UI server points it at its
+	// structured logger through SetLogf.
+	logf func(format string, args ...any)
+	// ifUpdatedAtFallbackWarned says the non-atomic if_updated_at fallback
+	// of a data source older than 1.2 once per repository -- the CLI and
+	// the Web UI server each open exactly one, so once per process
+	// (DFLT-00330).
+	ifUpdatedAtFallbackWarned sync.Once
 }
 
 var _ GraphRepository = (*HTTPRepository)(nil)
+
+// WarningSink is implemented by a repository that has warnings of its own
+// to say; the Web UI server points it at its structured logger.
+type WarningSink interface {
+	SetLogf(logf func(format string, args ...any))
+}
+
+var _ WarningSink = (*HTTPRepository)(nil)
+
+// SetLogf sets where the repository's warnings go; nil restores the default
+// (stderr).
+func (r *HTTPRepository) SetLogf(logf func(format string, args ...any)) { r.logf = logf }
+
+func (r *HTTPRepository) warnf(format string, args ...any) {
+	if r.logf != nil {
+		r.logf(format, args...)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "graph-engine: warning: "+format+"\n", args...)
+}
 
 // newHTTPDataSourceClient builds the client used for every request: TLS
 // certificates are always verified (no InsecureSkipVerify, TLS 1.2 or newer),
@@ -313,6 +344,7 @@ var knownHTTPDataSourceErrorCodes = map[domain.ErrorCode]bool{
 	// not complete because of concurrent writes and that can be retried.
 	domain.ErrCodeInvalidNodeState:        true,
 	domain.ErrCodeTicketStatusChanged:     true,
+	domain.ErrCodeTicketChanged:           true,
 	domain.ErrCodeConcurrentWriteConflict: true,
 }
 
@@ -633,16 +665,28 @@ func (r *HTTPRepository) ListTicketsByProject(projectID string) ([]domain.Ticket
 }
 
 // UpdateTicket sends patch as a PATCH. patch.IfStatus travels as if_status
-// to a data source speaking 1.2, which must refuse the PATCH with 409
-// TICKET_STATUS_CHANGED when the stored status differs. An older data
-// source has no if_status, so the status is fetched and compared first and
-// the PATCH sent only when it matches -- two calls, not atomic.
+// and patch.IfUpdatedAt as if_updated_at (DFLT-00330) to a data source
+// speaking 1.2, which must refuse the PATCH with 409 TICKET_STATUS_CHANGED /
+// TICKET_CHANGED when the stored value differs. An older data source has
+// neither, so the ticket is fetched (once for both conditions) and compared
+// first and the PATCH sent only when it matches -- two calls, not atomic,
+// which is said once per repository for if_updated_at.
 func (r *HTTPRepository) UpdateTicket(id string, patch TicketPatch) (domain.Ticket, error) {
 	body := ticketPatchBody(patch)
-	if patch.IfStatus != nil {
+	if patch.IfStatus != nil || patch.IfUpdatedAt != nil {
 		if r.supportsNodeTransitions() {
-			body["if_status"] = *patch.IfStatus
+			if patch.IfStatus != nil {
+				body["if_status"] = *patch.IfStatus
+			}
+			if patch.IfUpdatedAt != nil {
+				body["if_updated_at"] = *patch.IfUpdatedAt
+			}
 		} else {
+			if patch.IfUpdatedAt != nil {
+				r.ifUpdatedAtFallbackWarned.Do(func() {
+					r.warnf("the data source speaks HTTP data source protocol 1.%d, older than 1.2, so a ticket write conditioned on updated_at (--if-updated-at, if_updated_at) is checked by reading the ticket first and is not atomic: a change made between the read and the write is not detected", r.serverMinor)
+				})
+			}
 			cur, err := r.GetTicket(id)
 			if err != nil {
 				return domain.Ticket{}, err
@@ -650,8 +694,11 @@ func (r *HTTPRepository) UpdateTicket(id string, patch TicketPatch) (domain.Tick
 			if cur == nil {
 				return domain.Ticket{}, domain.NewAPIError(domain.ErrCodeTicketNotFound, "ticket %s not found", id)
 			}
-			if cur.Status != *patch.IfStatus {
+			if patch.IfStatus != nil && cur.Status != *patch.IfStatus {
 				return domain.Ticket{}, ticketStatusChanged(id, *patch.IfStatus, cur.Status)
+			}
+			if patch.IfUpdatedAt != nil && cur.UpdatedAt != *patch.IfUpdatedAt {
+				return domain.Ticket{}, ticketChanged(id, *patch.IfUpdatedAt, cur.UpdatedAt)
 			}
 		}
 	}

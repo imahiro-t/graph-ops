@@ -233,7 +233,7 @@ func writeAPIErr(w http.ResponseWriter, err error) {
 		domain.ErrCodeProjectNotFound, domain.ErrCodeLabelNotFound:
 		status = http.StatusNotFound
 	case domain.ErrCodeLabelNameTaken, domain.ErrCodePrefixTaken, domain.ErrCodeGraphChanged,
-		domain.ErrCodeInvalidNodeState, domain.ErrCodeTicketStatusChanged:
+		domain.ErrCodeInvalidNodeState, domain.ErrCodeTicketStatusChanged, domain.ErrCodeTicketChanged:
 		status = http.StatusConflict
 	}
 	writeErr(w, status, string(apiErr.Code), apiErr.Message)
@@ -248,6 +248,19 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
+
+// nextTicketUpdatedAt is the updated_at a ticket write stores: now, or the
+// ticket's current updated_at plus a nanosecond when the clock has not moved
+// past it (compared as times, not strings), so that every write leaves a
+// value the ticket has never held -- what protocol 1.2 requires for
+// if_updated_at (DFLT-00330).
+func nextTicketUpdatedAt(prev string) string {
+	n := time.Now().UTC()
+	if p, err := time.Parse(time.RFC3339Nano, prev); err == nil && !n.After(p) {
+		n = p.UTC().Add(time.Nanosecond)
+	}
+	return n.Format(time.RFC3339Nano)
+}
 
 func (p *Plugin) nextID(prefix string) string {
 	p.idSeq++
@@ -918,6 +931,9 @@ func (p *Plugin) updateTicket(w http.ResponseWriter, r *http.Request) {
 		// IfStatus (1.2) is a condition: the PATCH is refused with 409
 		// TICKET_STATUS_CHANGED unless the stored status is exactly this.
 		IfStatus *domain.TicketStatus `json:"if_status"`
+		// IfUpdatedAt (1.2) likewise: 409 TICKET_CHANGED unless the stored
+		// updated_at is exactly this string.
+		IfUpdatedAt *string `json:"if_updated_at"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -929,6 +945,10 @@ func (p *Plugin) updateTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.IfStatus != nil && p.speaksAutopilotRuns() && t.Status != *body.IfStatus {
 		writeAPIErr(w, domain.NewAPIError(domain.ErrCodeTicketStatusChanged, "ticket %s is %s, not %s", id, t.Status, *body.IfStatus))
+		return
+	}
+	if body.IfUpdatedAt != nil && p.speaksAutopilotRuns() && t.UpdatedAt != *body.IfUpdatedAt {
+		writeAPIErr(w, domain.NewAPIError(domain.ErrCodeTicketChanged, "ticket %s is at updated_at %s, not %s", id, t.UpdatedAt, *body.IfUpdatedAt))
 		return
 	}
 	var newLabels []string
@@ -976,7 +996,7 @@ func (p *Plugin) updateTicket(w http.ResponseWriter, r *http.Request) {
 	if body.LabelIDs != nil {
 		p.ticketLabelIDs[t.ID] = newLabels
 	}
-	t.UpdatedAt = now()
+	t.UpdatedAt = nextTicketUpdatedAt(t.UpdatedAt)
 	writeJSON(w, http.StatusOK, p.withLabels(t))
 }
 
@@ -1112,7 +1132,7 @@ func (p *Plugin) createNode(w http.ResponseWriter, r *http.Request) {
 	n.CreatedAt, n.UpdatedAt = ts, ts
 	p.nodes = append(p.nodes, &n)
 	if t := p.findTicket(ticketID); t != nil {
-		t.UpdatedAt = ts
+		t.UpdatedAt = nextTicketUpdatedAt(t.UpdatedAt)
 	}
 	writeJSON(w, http.StatusCreated, p.wire(&n))
 }
@@ -1417,7 +1437,7 @@ func (p *Plugin) createGraphBatch(w http.ResponseWriter, r *http.Request) {
 		v := *in.GraphExpandedAt
 		t.GraphExpandedAt = &v
 	}
-	t.UpdatedAt = now()
+	t.UpdatedAt = nextTicketUpdatedAt(t.UpdatedAt)
 	writeJSON(w, http.StatusCreated, map[string]any{"nodes": outNodes, "edges": outEdges})
 }
 
@@ -1594,7 +1614,7 @@ func (p *Plugin) applyNodeTransition(w http.ResponseWriter, r *http.Request) {
 	sort.Strings(ids)
 	if in.SetBlocked != nil {
 		t.Blocked = *in.SetBlocked
-		t.UpdatedAt = ts
+		t.UpdatedAt = nextTicketUpdatedAt(t.UpdatedAt)
 	}
 	out := []WireNode{}
 	for _, id := range ids {

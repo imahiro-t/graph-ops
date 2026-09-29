@@ -95,6 +95,19 @@ info:
       a node that was rewound and handed out again since it was read, and
       no decision is recorded. It reads the ticket before a conditional
       status write instead of sending `if_status`.
+    - 1.2 also adds `if_updated_at` on `TicketPatch`, which makes any
+      ticket write conditional on the `updated_at` of the version it was
+      based on (409 `TICKET_CHANGED`): graph-engine sends it for
+      `update-ticket` / `refine-ticket --if-updated-at` and for the Web UI's
+      label changes, so that two members editing the same ticket cannot
+      silently overwrite each other. With it, a ticket's `updated_at` must
+      change to a different string on every write, like a node's. It was
+      added to 1.2 before any release shipped it, so the version stayed
+      1.2; a plugin reporting 1.2 must implement both. Against 1.1 or 1.0
+      graph-engine never sends it: it reads the ticket, compares
+      `updated_at` itself and sends the PATCH only on a match -- which is
+      not atomic (a write in between is not detected), and graph-engine
+      says so once per process.
 
     ## Transport and authentication
 
@@ -178,6 +191,12 @@ info:
       present, write nothing unless the ticket's current status is exactly
       that value, and answer 409 `TICKET_STATUS_CHANGED` otherwise. Check
       and write atomically.
+    - `if_updated_at` (tickets, since 1.2) is a condition too: when
+      present, write nothing -- `label_ids` included -- unless the ticket's
+      stored `updated_at` is exactly that string (compare the strings, not
+      the times), and answer 409 `TICKET_CHANGED` otherwise. Check and write
+      atomically. With both `if_status` and `if_updated_at`, write only when
+      both hold.
 
     ## Errors
 
@@ -191,7 +210,7 @@ info:
        regardless of the HTTP status (so `500` with `INTERNAL_ERROR` is still
        read as `INTERNAL_ERROR`). Use the status the code suggests anyway
        (404 for `*_NOT_FOUND`, 409 for `*_TAKEN`, `GRAPH_CHANGED`,
-       `INVALID_NODE_STATE`, `TICKET_STATUS_CHANGED` and
+       `INVALID_NODE_STATE`, `TICKET_STATUS_CHANGED`, `TICKET_CHANGED` and
        `CONCURRENT_WRITE_CONFLICT`, 400 for validation codes, 500 for
        `INTERNAL_ERROR`).
     3. Anything else (an unknown code, a body that is not this JSON, an empty
@@ -1250,6 +1269,7 @@ components:
         - GRAPH_CHANGED
         - INVALID_NODE_STATE
         - TICKET_STATUS_CHANGED
+        - TICKET_CHANGED
         - CONCURRENT_WRITE_CONFLICT
 
     ErrorResponse:
@@ -1338,7 +1358,9 @@ components:
         auto_executable: { type: boolean }
         blocked: { type: boolean }
         created_at: { $ref: "#/components/schemas/Timestamp" }
-        updated_at: { $ref: "#/components/schemas/Timestamp" }
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+          description: Since 1.2, must change (to a different string) on every write to the ticket -- updateTicket, and the ticket writes of createNode, createGraphBatch and applyNodeTransition; `updateTicket` compares it exactly with `if_updated_at`, so store it with sub-second precision, move it past the stored value when the clock has not (e.g. by a nanosecond), and return it unchanged.
         refined_at: { $ref: "#/components/schemas/Timestamp" }
         closed_reason: { type: string }
         assignee: { type: string }
@@ -1379,6 +1401,17 @@ components:
             graph-engine sends it when it brings a ticket's status in line
             with its nodes, so that a status derived from a stale read never
             overwrites another member's `CLOSED`.
+        if_updated_at:
+          type: string
+          x-since: "1.2"
+          description: |
+            Since 1.2. A condition, not a field: write nothing -- `label_ids`
+            included -- unless the ticket's stored `updated_at` is exactly
+            this string (a string comparison, not a comparison of times),
+            and answer 409 `TICKET_CHANGED` otherwise (check and write
+            atomically). graph-engine sends it for `update-ticket` /
+            `refine-ticket --if-updated-at` and for the Web UI's label
+            changes. With `if_status` as well, write only when both hold.
 
     GraphNode:
       type: object

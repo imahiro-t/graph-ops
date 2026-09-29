@@ -203,6 +203,15 @@ const (
 	// and derives again), so it does not normally reach the CLI or the Web
 	// UI.
 	ErrCodeTicketStatusChanged ErrorCode = "TICKET_STATUS_CHANGED"
+	// ErrCodeTicketChanged: a ticket write carried the updated_at of the
+	// version it was based on (store.TicketPatch.IfUpdatedAt, the
+	// if_updated_at of PATCH /api/tickets/{id} and --if-updated-at of
+	// update-ticket / refine-ticket, DFLT-00330) and the stored updated_at
+	// no longer matched -- somebody else wrote the ticket after it was
+	// read. Nothing was written; read the ticket again and redo the change.
+	// Not to be confused with TICKET_STATUS_CHANGED, which answers a
+	// mismatched if_status. Returned with a 409.
+	ErrCodeTicketChanged ErrorCode = "TICKET_CHANGED"
 	// ErrCodeConcurrentWriteConflict: a write kept colliding with another
 	// write to the same ticket (on MySQL, a deadlock that was still there
 	// after the retries, DFLT-00329). Nothing was written, so the same call

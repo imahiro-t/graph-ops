@@ -160,8 +160,9 @@ func createGraphBatchSQL(db *sql.DB, d sqlDialect, ticketID string, b GraphBatch
 
 	var seq int
 	var expandedAt sql.NullString
-	row := tx.QueryRow(`SELECT node_seq, graph_expanded_at FROM tickets WHERE id = ?`+d.forUpdate, ticketID)
-	if err := row.Scan(&seq, &expandedAt); err != nil {
+	var prevUpdatedAt string
+	row := tx.QueryRow(`SELECT node_seq, graph_expanded_at, updated_at FROM tickets WHERE id = ?`+d.forUpdate, ticketID)
+	if err := row.Scan(&seq, &expandedAt, &prevUpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return domain.NewAPIError(domain.ErrCodeTicketNotFound, "ticket %s not found", ticketID)
 		}
@@ -265,7 +266,8 @@ func createGraphBatchSQL(db *sql.DB, d sqlDialect, ticketID string, b GraphBatch
 		}
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// The ticket's updated_at must never repeat a value (DFLT-00330).
+	now := nextUpdatedAt(prevUpdatedAt, time.Now())
 	if b.GraphExpandedAt != nil {
 		_, err = tx.Exec(`UPDATE tickets SET node_seq = ?, updated_at = ?, graph_expanded_at = ? WHERE id = ?`, seq, now, *b.GraphExpandedAt, ticketID)
 	} else {

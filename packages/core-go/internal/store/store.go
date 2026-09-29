@@ -44,6 +44,22 @@ type TicketPatch struct {
 	// PATCH -- not atomic. syncTicketStatus uses it so that a status
 	// derived from a stale read can never overwrite somebody else's CLOSED.
 	IfStatus *domain.TicketStatus
+	// IfUpdatedAt (DFLT-00330) is a condition, not a field to write, like
+	// IfStatus: when non-nil, UpdateTicket writes nothing -- labels
+	// included -- unless the ticket's stored updated_at is exactly
+	// *IfUpdatedAt (an exact string comparison, never a comparison of
+	// times) at the moment of the write, and answers TICKET_CHANGED (a
+	// *domain.APIError, 409) otherwise. The SQL backends check it in the
+	// same transaction as the write, and every ticket write stores an
+	// updated_at the row has never held before (nextUpdatedAt), so a match
+	// means nobody wrote the ticket since it was read. An HTTP data source
+	// speaking protocol 1.2 receives it as if_updated_at and must do the
+	// same; one older than 1.2 gets a GET, a comparison and then the PATCH
+	// -- not atomic. With both IfStatus and IfUpdatedAt set, the write
+	// happens only when both hold. update-ticket and refine-ticket pass it
+	// for --if-updated-at; the engine's own ticket writes (status, blocked,
+	// graph_expanded_at, refined_at, ...) never set it.
+	IfUpdatedAt *string
 }
 
 // LabelPatch carries optional field updates for UpdateLabel; nil fields are

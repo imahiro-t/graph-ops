@@ -607,8 +607,9 @@ func (r *SQLiteRepository) CreateNode(n domain.GraphNode) (domain.GraphNode, err
 	defer tx.Rollback() //nolint:errcheck
 
 	var seq int
-	row := tx.QueryRow(`SELECT node_seq FROM tickets WHERE id = ?`, n.TicketID)
-	if err := row.Scan(&seq); err != nil {
+	var prevUpdatedAt string
+	row := tx.QueryRow(`SELECT node_seq, updated_at FROM tickets WHERE id = ?`, n.TicketID)
+	if err := row.Scan(&seq, &prevUpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return domain.GraphNode{}, fmt.Errorf("ticket %s not found", n.TicketID)
 		}
@@ -616,7 +617,9 @@ func (r *SQLiteRepository) CreateNode(n domain.GraphNode) (domain.GraphNode, err
 	}
 	seq++
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := tx.Exec(`UPDATE tickets SET node_seq = ?, updated_at = ? WHERE id = ?`, seq, now, n.TicketID); err != nil {
+	// The ticket's updated_at must never repeat a value (DFLT-00330).
+	ticketUpdatedAt := nextUpdatedAt(prevUpdatedAt, time.Now())
+	if _, err := tx.Exec(`UPDATE tickets SET node_seq = ?, updated_at = ? WHERE id = ?`, seq, ticketUpdatedAt, n.TicketID); err != nil {
 		return domain.GraphNode{}, fmt.Errorf("incrementing ticket node_seq: %w", err)
 	}
 	id := fmt.Sprintf("%s-%02d", n.TicketID, seq)

@@ -514,6 +514,12 @@ func updateTicket(db *sql.DB, d sqlDialect, id string, patch TicketPatch) (domai
 	if patch.IfStatus != nil && cur.Status != *patch.IfStatus {
 		return domain.Ticket{}, ticketStatusChanged(id, *patch.IfStatus, cur.Status)
 	}
+	// Same for IfUpdatedAt (DFLT-00330): an exact string comparison, and a
+	// mismatch writes nothing -- not the labels either, which are replaced
+	// further down in this same transaction.
+	if patch.IfUpdatedAt != nil && cur.UpdatedAt != *patch.IfUpdatedAt {
+		return domain.Ticket{}, ticketChanged(id, *patch.IfUpdatedAt, cur.UpdatedAt)
+	}
 	if patch.Title != nil {
 		cur.Title = *patch.Title
 	}
@@ -549,7 +555,9 @@ func updateTicket(db *sql.DB, d sqlDialect, id string, patch TicketPatch) (domai
 	// the default on write, as CreateTicket does, so any update -- even one
 	// that doesn't touch priority -- leaves the row with a valid level.
 	cur.Priority = domain.TicketPriority(ticketPriorityOrDefault(cur.Priority))
-	cur.UpdatedAt = nowRFC3339()
+	// Never a value the row has held before, so IfUpdatedAt can tell any
+	// two versions apart (DFLT-00330).
+	cur.UpdatedAt = nextUpdatedAt(cur.UpdatedAt, time.Now())
 
 	if patch.LabelIDs != nil {
 		if err := replaceTicketLabels(tx, cur.ID, cur.ProjectID, *patch.LabelIDs); err != nil {
@@ -587,6 +595,14 @@ func ticketStatusChanged(id string, want, got domain.TicketStatus) error {
 	return domain.NewAPIError(domain.ErrCodeTicketStatusChanged,
 		"ticket %s is %s, not %s as this write expected; somebody else changed its status first, so nothing was written", id, got, want).
 		WithDetails(map[string]any{"expected_status": string(want), "current_status": string(got)})
+}
+
+// ticketChanged is the TICKET_CHANGED error a TicketPatch with IfUpdatedAt
+// answers when the stored updated_at is not the expected one (DFLT-00330).
+func ticketChanged(id, want, got string) error {
+	return domain.NewAPIError(domain.ErrCodeTicketChanged,
+		"ticket %s was changed by somebody else since it was read (updated_at is %s, not %s), so nothing was written; read it again and redo the change", id, got, want).
+		WithDetails(map[string]any{"expected_updated_at": want, "current_updated_at": got})
 }
 
 // labelIDsOf extracts the IDs CreateTicket attaches from its input ticket.

@@ -368,7 +368,8 @@ func applyNodeTransitionSQL(db *sql.DB, d sqlDialect, ticketID string, t NodeTra
 
 	var status string
 	var blocked int
-	if err := tx.QueryRow(`SELECT status, blocked FROM tickets WHERE id = ?`+d.forUpdate, ticketID).Scan(&status, &blocked); err != nil {
+	var ticketUpdatedAt string
+	if err := tx.QueryRow(`SELECT status, blocked, updated_at FROM tickets WHERE id = ?`+d.forUpdate, ticketID).Scan(&status, &blocked, &ticketUpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return NodeTransitionResult{}, domain.NewAPIError(domain.ErrCodeTicketNotFound, "ticket %s not found", ticketID)
 		}
@@ -438,7 +439,8 @@ func applyNodeTransitionSQL(db *sql.DB, d sqlDialect, ticketID string, t NodeTra
 	}
 
 	if t.SetBlocked != nil {
-		if _, err := tx.Exec(`UPDATE tickets SET blocked=?, updated_at=? WHERE id=?`, boolToInt(*t.SetBlocked), now, ticketID); err != nil {
+		// The ticket's updated_at must never repeat a value (DFLT-00330).
+		if _, err := tx.Exec(`UPDATE tickets SET blocked=?, updated_at=? WHERE id=?`, boolToInt(*t.SetBlocked), nextUpdatedAt(ticketUpdatedAt, time.Now()), ticketID); err != nil {
 			return NodeTransitionResult{}, fmt.Errorf("updating ticket %s: %w", ticketID, err)
 		}
 	}
