@@ -58,8 +58,8 @@ function makeResponse(overrides: Partial<AppSettingsResponse> = {}): AppSettings
 // re-render that swaps the loading spinner for the page is still to come --
 // and under the load of a full run it sometimes had not happened before the
 // next synchronous getByText. So wait for the spinner to go instead. It is
-// always there when render() returns (load() sets loading before it awaits the
-// fetch), which waitForElementToBeRemoved insists on: if that ever stops being
+// always there when render() returns (loading starts true, DFLT-00323),
+// which waitForElementToBeRemoved insists on: if that ever stops being
 // true, this fails loudly rather than waiting for nothing.
 async function renderLoadedEditor() {
   renderEditor();
