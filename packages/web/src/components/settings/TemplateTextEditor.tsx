@@ -72,7 +72,6 @@ export const TemplateTextEditor: React.FC<Props> = ({
   // templates remounts this editor (TemplatesEditor's key={selected}).
   const [loadError, setLoadError] = useState('');
   const [loadFailures, setLoadFailures] = useState(0);
-  const [retrying, setRetrying] = useState(false);
   const { savedFlash, showSavedFlash } = useSavedFlash();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveButtonRef = useRef<HTMLButtonElement>(null);
@@ -103,11 +102,11 @@ export const TemplateTextEditor: React.FC<Props> = ({
   useEffect(() => { load(); }, [load]);
 
   const focusTextareaAfterRetry = useFocusAfterRetry(() => textareaRef.current);
+  // While the load has failed, `loading` is true only during a retry (load()
+  // runs on mount and from here), so it is what LoadFailure shows as
+  // `retrying`; LoadFailure itself ignores clicks while it is.
   const retryLoad = async () => {
-    setRetrying(true);
-    const ok = await load();
-    setRetrying(false);
-    if (ok) focusTextareaAfterRetry();
+    if (await load()) focusTextareaAfterRetry();
   };
 
   const handleSave = async () => {
@@ -153,7 +152,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
       {loadError ? (
         <LoadFailure
           message={t('settings.common.loadFailed', { message: loadError })}
-          retrying={retrying}
+          retrying={loading}
           onRetry={() => void retryLoad()}
           failureKey={loadFailures}
         />

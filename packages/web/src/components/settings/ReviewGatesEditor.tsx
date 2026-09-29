@@ -206,7 +206,6 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // was just saved, so its failure stays in `error`.
   const [loadError, setLoadError] = useState('');
   const [loadFailures, setLoadFailures] = useState(0);
-  const [retrying, setRetrying] = useState(false);
   // True while `error` is the empty-ID validation error, so the rows whose ID
   // is (still) empty can be marked invalid and point at the message.
   const [emptyIdErrorShown, setEmptyIdErrorShown] = useState(false);
@@ -316,11 +315,11 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // After a successful retry focus moves to the form's container (see
   // useFocusAfterRetry): the focused retry button is gone.
   const focusFormAfterRetry = useFocusAfterRetry(() => containerRef.current);
+  // While the load has failed, `loading` is true only during a retry (load()
+  // runs on mount and from here), so it is what LoadFailure shows as
+  // `retrying`; LoadFailure itself ignores clicks while it is.
   const retryLoad = async () => {
-    setRetrying(true);
-    const ok = await load();
-    setRetrying(false);
-    if (ok) focusFormAfterRetry();
+    if (await load()) focusFormAfterRetry();
   };
 
   // Editing any field on a not-yet-overridden default row is what actually
@@ -442,7 +441,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.intro')}</p>
         <LoadFailure
           message={t('settings.common.loadFailed', { message: loadError })}
-          retrying={retrying}
+          retrying={loading}
           onRetry={() => void retryLoad()}
           failureKey={loadFailures}
         />
