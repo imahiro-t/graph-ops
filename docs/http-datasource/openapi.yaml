@@ -750,7 +750,9 @@ paths:
         graph-engine deletes the records of its own cancelled or pruned
         runs, and, after starting a run, the settled records (not active:
         finished, stopped, or with a heartbeat more than 10 minutes old)
-        of any member beyond the 20 most recently updated in the project.
+        of any member beyond the 20 most recently updated in the project
+        -- at most 2 per start, the least recently updated first; the
+        rest are deleted by later starts.
         A record deleted this way may be saved again later by its run's
         machine (a PUT of a record that does not exist creates it).
       responses:
