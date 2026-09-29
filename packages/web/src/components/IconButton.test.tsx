@@ -683,6 +683,40 @@ describe('IconButton text-named options', () => {
     expect(tooltip).toHaveAttribute('aria-hidden', 'true');
   });
 
+  // A long unbroken name ('A' x 80) or path in a narrow window: the tooltip
+  // is at most 20rem and never wider than the viewport less the 4px margin
+  // on each side (a fixed element's % resolves against the viewport, which
+  // excludes a classic scrollbar, unlike 100vw), and it breaks anywhere so
+  // its min-content width cannot push it past that cap. overflow-wrap:
+  // break-word would not lower min-content, so the unbroken word would widen
+  // the tooltip to 20rem and clip it off-screen. For text that already fits
+  // the look is unchanged. jsdom computes no layout, so the classes are
+  // pinned; the real-browser measurements are in the implementation notes.
+  it('caps the tooltip width by the viewport and lets it break anywhere', async () => {
+    const user = userEvent.setup();
+    const longName = 'A'.repeat(80);
+    render(
+      <IconButton nameFromContent tooltip={<span className="block">{longName}</span>}>
+        <span>{longName}</span>
+      </IconButton>
+    );
+    await user.hover(screen.getByRole('button', { name: longName }));
+    const tooltip = openIconButtonTooltip();
+    expect(tooltip).toHaveClass('max-w-[min(20rem,calc(100%-8px))]', 'wrap-anywhere', 'whitespace-normal', 'fixed');
+    expect(tooltip).not.toHaveClass('max-w-xs', 'wrap-break-word');
+  });
+
+  it('gives an existing one-line tooltip the same width cap and wrapping', async () => {
+    const user = userEvent.setup();
+    render(
+      <IconButton label="Settings">
+        <Icon />
+      </IconButton>
+    );
+    await user.hover(screen.getByRole('button', { name: 'Settings' }));
+    expect(openIconButtonTooltip()).toHaveClass('max-w-[min(20rem,calc(100%-8px))]', 'wrap-anywhere');
+  });
+
   it('opens no tooltip with tooltipDisabled, even on keyboard focus, and leaves Escape alone', async () => {
     const user = userEvent.setup();
     const seen: boolean[] = [];

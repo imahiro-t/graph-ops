@@ -195,6 +195,26 @@ describe('project switcher accessibility', () => {
       expect(switcher()).toHaveAccessibleDescription('/work/alpha');
     });
 
+    // The tooltip content is memoized in App: a fresh element on every App
+    // render would make IconButton re-run its positioning effect
+    // (re-measure, drop and re-add its scroll / resize listeners) each time.
+    it('keeps the open tooltip\'s positioning effect in place across App re-renders', async () => {
+      const user = await renderApp();
+      await user.hover(switcher());
+      const tooltip = openIconButtonTooltip();
+      const removeSpy = vi.spyOn(window, 'removeEventListener');
+      const addSpy = vi.spyOn(window, 'addEventListener');
+
+      const search = screen.getByPlaceholderText(i18n.t('toolbar.searchPlaceholder'));
+      fireEvent.change(search, { target: { value: 'A' } });
+      fireEvent.change(search, { target: { value: 'AA' } });
+      expect(search).toHaveValue('AA');
+
+      expect(openIconButtonTooltip()).toBe(tooltip);
+      expect(removeSpy.mock.calls.filter(([type]) => type === 'scroll' || type === 'resize')).toEqual([]);
+      expect(addSpy.mock.calls.filter(([type]) => type === 'scroll' || type === 'resize')).toEqual([]);
+    });
+
     it('closes the popup on one Escape right after Enter opened it from the keyboard, with no tooltip while it is open', async () => {
       const user = await renderApp();
       await tabToSwitcher(user);

@@ -79,7 +79,17 @@
 //   button's content, like any text button. `label` is then optional and
 //   only serves as the default tooltip text.
 // - `tooltip` may be any node, so a tooltip can have more than one line
-//   (block-level spans inside it).
+//   (block-level spans inside it). Pass a stable reference (useMemo) when
+//   it is an element: the positioning effect re-runs whenever the content
+//   changes, so a fresh element on every render of the caller would
+//   re-measure and re-subscribe each time.
+// - Every tooltip is at most 20rem wide and never wider than the viewport
+//   less the 4px margin on each side, and breaks anywhere (overflow-wrap:
+//   anywhere, which, unlike break-word, also lowers its min-content width),
+//   so a long unbroken name or path in a narrow window wraps inside the
+//   viewport instead of widening the tooltip past it. The cap is a % of the
+//   fixed element's containing block, the viewport without a classic
+//   scrollbar, rather than 100vw, which includes one.
 // - `tooltipDisabled`: the tooltip does not open, and `open` itself stays
 //   false, so no positioning, no portal and no Escape handling happen either
 //   -- a tooltip hidden only by looks would still preventDefault an Escape
@@ -308,7 +318,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
             aria-hidden="true"
             hidden={!open}
             data-icon-button-tooltip=""
-            className="fixed z-60 max-w-xs rounded-sm px-2 py-1 text-[11px] font-medium leading-snug shadow-xs bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 whitespace-normal wrap-break-word text-left"
+            className="fixed z-60 max-w-[min(20rem,calc(100%-8px))] rounded-sm px-2 py-1 text-[11px] font-medium leading-snug shadow-xs bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 whitespace-normal wrap-anywhere text-left"
             style={{
               left: position?.left ?? 0,
               top: position?.top ?? 0,

@@ -218,6 +218,25 @@ export const App: React.FC = () => {
   const [projectMenuPlacement, setProjectMenuPlacement] = useState<PopupPlacement | null>(null);
   // The switcher button's description: the local path alone (DFLT-00285).
   const projectSwitcherDescriptionId = useId();
+  // The switcher's second tooltip line and its description are the same
+  // text, computed once so the two cannot drift apart (DFLT-00285).
+  const currentProjectPathLabel = currentProject
+    ? currentProject.local_path || t('settings.appSettings.projects.notSet')
+    : undefined;
+  // Memoized: IconButton re-runs its positioning effect whenever the
+  // tooltip content changes, and a fresh element on every App render (the
+  // ticket list polls) would re-measure and re-subscribe each time.
+  const currentProjectName = currentProject?.name;
+  const projectSwitcherTooltip = useMemo(
+    () =>
+      currentProjectName === undefined ? undefined : (
+        <>
+          <span className="block">{currentProjectName}</span>
+          <span className="block">{currentProjectPathLabel}</span>
+        </>
+      ),
+    [currentProjectName, currentProjectPathLabel]
+  );
   // Per-project count of tickets awaiting approval, badged on the switcher's
   // menu items (DFLT-00144). Refetched every time the menu opens; empty
   // while that fetch is in flight and after it fails, so the menu never
@@ -1261,14 +1280,7 @@ export const App: React.FC = () => {
               <IconButton
                 ref={projectMenuButtonRef}
                 nameFromContent
-                tooltip={
-                  currentProject ? (
-                    <>
-                      <span className="block">{currentProject.name}</span>
-                      <span className="block">{currentProject.local_path || t('settings.appSettings.projects.notSet')}</span>
-                    </>
-                  ) : undefined
-                }
+                tooltip={projectSwitcherTooltip}
                 tooltipDisabled={isProjectMenuOpen || !currentProject}
                 aria-describedby={currentProject ? projectSwitcherDescriptionId : undefined}
                 wrapperClassName="min-w-0 max-w-full"
@@ -1289,7 +1301,7 @@ export const App: React.FC = () => {
               </IconButton>
               {currentProject && (
                 <span id={projectSwitcherDescriptionId} hidden>
-                  {currentProject.local_path || t('settings.appSettings.projects.notSet')}
+                  {currentProjectPathLabel}
                 </span>
               )}
 
