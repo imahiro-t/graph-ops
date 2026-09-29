@@ -23,6 +23,8 @@ import { StatusLiveRegion } from '../StatusLiveRegion';
 import { IconButton } from '../IconButton';
 import { SubmittingText, submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
+import { LoadFailure, useFocusAfterRetry } from './LoadFailure';
+import { focusKeySelector } from '../../lib/focusAfterRemoval';
 import { Spinner } from '../Spinner';
 
 interface Props {
@@ -153,17 +155,26 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [labels, setLabels] = useState<LabelUsage[]>([]);
-  // Starts as canEdit, i.e. true whenever there is a project whose labels
-  // load() is about to fetch -- the resolved projectId above, which falls
-  // back to the first project, not initialProjectId. The first render then
-  // already shows the loading line instead of the "no labels" empty state for
-  // a frame (DFLT-00323, DFLT-00343). With no project nothing is loaded and
-  // the loading line is not shown anyway (it is gated on canEdit).
-  const [loading, setLoading] = useState(canEdit);
+  // The project whose labels are in `labels`, '' while none is. Set only by
+  // a successful fetch for the latest request, and cleared when a switch
+  // starts, so `projectId !== loadedProjectId` means "this project's labels
+  // are not in yet": the first render -- for the resolved projectId above,
+  // which falls back to the first project, not initialProjectId -- and the
+  // one right after a switch, before the effect has started the next fetch,
+  // show the loading line rather than the "no labels" empty state or the
+  // previous project's labels (DFLT-00323, DFLT-00343, DFLT-00350). With no
+  // project nothing is loaded and neither the loading line nor a load
+  // failure is shown (both are gated on canEdit).
+  const [loadedProjectId, setLoadedProjectId] = useState('');
   // Errors are kept apart by what raised them (DFLT-00214), so that starting
   // one action never silently removes the report of another one's failure:
-  // - loadError: the list could not be fetched. Cleared only by the next
-  //   load (a project switch).
+  // - loadError: the list could not be fetched, with the project it was
+  //   for; shown (with a retry button, in place of the list) only while that
+  //   project is selected (DFLT-00350). Cleared by the next load (a project
+  //   switch) or a successful retry; a retry leaves it on screen, with its
+  //   focused retry button, until its own result is in. While it is shown
+  //   the create form is disabled: the list is not known, so nothing is
+  //   created against it.
   // - createError: the create form's last attempt failed. Cleared only by
   //   the next create (or a load), never by a row's action.
   // - rowErrors: per label id, the last failed rename/recolor/delete of that
@@ -171,7 +182,9 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   //   recolor or delete (or by a load) -- not by another row's action and not
   //   by a create. The same idea as busyIds (DFLT-00211): a row's state lives
   //   and dies with that row's own requests.
-  const [loadError, setLoadError] = useState('');
+  const [loadError, setLoadError] = useState<{ projectId: string; message: string } | null>(null);
+  const [loadFailures, setLoadFailures] = useState(0);
+  const [retrying, setRetrying] = useState(false);
   const [createError, setCreateError] = useState('');
   const [rowErrors, setRowErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
   // Always a new Map (React would not see an in-place change), and the
@@ -274,28 +287,26 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
     // into a selection where the form it describes is disabled
     // (accessibility review condition A-2). Every kind of error goes: the
     // rows they belong to are being replaced (DFLT-00214).
-    setLoadError('');
+    setLoadError(null);
+    setRetrying(false);
     setCreateError('');
     setCreateFailed(false);
     setRowErrors(prev => (prev.size === 0 ? prev : new Map()));
     setRenameFailedId(null);
-    if (!projectId) {
-      setLabels([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    // The previous project's labels go at once, so a failed fetch cannot
+    // leave them on screen under this project.
+    setLabels([]);
+    setLoadedProjectId('');
+    if (!projectId) return;
     try {
       const fetched = sortLabels(await fetchLabels(t, projectId));
       if (requestedProjectIdRef.current !== projectId) return;
       setLabels(fetched);
+      setLoadedProjectId(projectId);
     } catch (e) {
       if (requestedProjectIdRef.current !== projectId) return;
-      setLoadError(errorMessage(e, t('errors.UNKNOWN')));
-    } finally {
-      // loading too: a late response must not clear the spinner belonging to
-      // the request that is still in flight.
-      if (requestedProjectIdRef.current === projectId) setLoading(false);
+      setLoadError({ projectId, message: errorMessage(e, t('errors.UNKNOWN')) });
+      setLoadFailures(n => n + 1);
     }
     // t is deliberately left out: a language switch must not re-fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -306,13 +317,55 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
     load();
   }, [load, setRenaming]);
 
+  // After a successful retry the focused retry button is gone; focus moves
+  // to the create form's name input, which is there (and enabled) whatever
+  // the list holds, even when it is empty.
+  const focusNameAfterRetry = useFocusAfterRetry(() =>
+    containerRef.current?.querySelector<HTMLElement>(focusKeySelector(CREATE_NAME_FOCUS_KEY))
+  );
+  // A retry of the selected project's list after a failure. Unlike load() it
+  // clears nothing when it starts: the failure and its retry button (with
+  // focus on it) stay until the result is in. Its answer is dropped if the
+  // selection has moved on meanwhile -- load() for the new project then owns
+  // the list, the failure and `retrying`.
+  const retryLoad = async () => {
+    const requestedFor = projectId;
+    requestedProjectIdRef.current = requestedFor;
+    setRetrying(true);
+    try {
+      const fetched = sortLabels(await fetchLabels(t, requestedFor));
+      if (requestedProjectIdRef.current !== requestedFor) return;
+      // All in one render: the loading line never shows in between.
+      setLabels(fetched);
+      setLoadedProjectId(requestedFor);
+      setLoadError(null);
+      setRetrying(false);
+      focusNameAfterRetry();
+    } catch (e) {
+      if (requestedProjectIdRef.current !== requestedFor) return;
+      setLoadError({ projectId: requestedFor, message: errorMessage(e, t('errors.UNKNOWN')) });
+      setLoadFailures(n => n + 1);
+      setRetrying(false);
+    }
+  };
+
+  // In this order (see LoadFailure), and only with a project selected: the
+  // selected project's load failure, then loading, then the list. A failed
+  // fetch never sets loadedProjectId, so the loading test would otherwise
+  // hide the failure for good.
+  const loadFailed = canEdit && loadError !== null && loadError.projectId === projectId;
+  const listLoading = canEdit && !loadFailed && projectId !== loadedProjectId;
+  // The create form is disabled with no project, and while the list could
+  // not be loaded (completion criterion: nothing is saved from the failed
+  // state).
+  const createDisabled = !canEdit || loadFailed;
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canEdit || creating || newName.trim() === '') return;
+    if (createDisabled || creating || newName.trim() === '') return;
     setCreating(true);
-    // Only the create form's own error: a row's failure stays on its row, and
-    // a load failure stays until the next load (DFLT-00214) -- creating a
-    // label does not re-fetch the list, so the list is no less incomplete.
+    // Only the create form's own error: a row's failure stays on its row
+    // (DFLT-00214). (A load failure disables this form, see createDisabled.)
     setCreateError('');
     setCreateFailed(false);
     try {
@@ -550,7 +603,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
             }}
             placeholder={t('settings.labels.namePlaceholder')}
             maxLength={LABEL_NAME_MAX_LENGTH}
-            disabled={!canEdit}
+            disabled={createDisabled}
             readOnly={creating}
             aria-invalid={errorDescribesName || undefined}
             aria-describedby={errorDescribesName ? errorId : undefined}
@@ -559,7 +612,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
           />
           <button
             type="submit"
-            disabled={!canEdit || creating || newName.trim() === ''}
+            disabled={createDisabled || creating || newName.trim() === ''}
             {...submittingProps(creating)}
             className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white font-semibold flex items-center gap-1"
           >
@@ -574,20 +627,16 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
           <LabelColorPalette
             value={newColor}
             onChange={setNewColor}
-            disabled={!canEdit}
+            disabled={createDisabled}
             busy={creating}
             groupLabel={t('settings.labels.newColorGroup')}
           />
         </div>
       </form>
 
-      {/* Two separate alerts, so clearing one never takes the other with it
-          (DFLT-00214). Only the create error describes the name input. */}
-      {loadError && (
-        <ErrorBox role="alert" className="p-2.5">
-          {loadError}
-        </ErrorBox>
-      )}
+      {/* The load failure (in the list's place, below) and this are separate
+          alerts, so clearing one never takes the other with it (DFLT-00214).
+          Only the create error describes the name input. */}
       {createError && (
         <ErrorBox id={errorId} role="alert" className="p-2.5">
           {createError}
@@ -595,15 +644,23 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
       )}
 
       {/* List */}
-      {canEdit && loading && (
+      {loadFailed && (
+        <LoadFailure
+          message={t('settings.common.loadFailed', { message: loadError.message })}
+          retrying={retrying}
+          onRetry={() => void retryLoad()}
+          failureKey={loadFailures}
+        />
+      )}
+      {listLoading && (
         <div role="status" className="text-slate-500 dark:text-slate-400">
           {t('settings.labels.loading')}
         </div>
       )}
-      {canEdit && !loading && labels.length === 0 && (
+      {canEdit && !loadFailed && !listLoading && labels.length === 0 && (
         <div className="text-slate-500 dark:text-slate-400">{t('settings.labels.empty')}</div>
       )}
-      {labels.length > 0 && (
+      {!loadFailed && !listLoading && labels.length > 0 && (
         <ul className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg">
           {labels.map(label => {
             const busy = busyIds.has(label.id);

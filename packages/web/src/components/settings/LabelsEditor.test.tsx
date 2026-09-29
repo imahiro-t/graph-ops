@@ -1674,19 +1674,29 @@ describe("LabelsEditor keeping each row's error", () => {
     expect(screen.queryAllByRole('alert')).toHaveLength(0);
   });
 
-  it("keeps the load error when a label is created, since creating does not re-fetch the list", async () => {
+  // DFLT-00350: this used to check that a label could still be created, and
+  // the load error kept, while the list could not be loaded. Nothing is saved
+  // from the failed state any more: the create form is disabled until a retry
+  // has loaded the list.
+  it('disables the create form while the list cannot be loaded, and enables it once a retry has loaded it', async () => {
     mockedFetch.mockReset();
-    mockedFetch.mockRejectedValue(new Error('network down'));
+    mockedFetch.mockRejectedValueOnce(new Error('network down')).mockResolvedValueOnce([label('label-bug', 'バグ', 'red', 2)]);
     mockedCreate.mockResolvedValue(label('label-doc', 'ドキュメント', 'gray', 0));
     const user = userEvent.setup();
     render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
     expect(await screen.findByRole('alert')).toHaveTextContent('network down');
+    expect(createForm().getByRole('textbox')).toBeDisabled();
+    expect(createForm().getByRole('button', { name: i18n.t('settings.labels.create') })).toBeDisabled();
+    // The load error does not describe the name input: it is not about it.
+    expect(createForm().getByRole('textbox')).not.toHaveAttribute('aria-describedby');
+
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.common.retry') }));
+    await screen.findByTestId('label-row-label-bug');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 
     await user.type(createForm().getByRole('textbox'), 'ドキュメント{Enter}');
     await screen.findByTestId('label-row-label-doc');
-    expect(screen.getByRole('alert')).toHaveTextContent('network down');
-    // The load error does not describe the name input: it is not about it.
-    expect(createForm().getByRole('textbox')).not.toHaveAttribute('aria-describedby');
+    expect(mockedCreate).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1902,5 +1912,164 @@ describe('LabelsEditor narrow reflow (DFLT-00261)', () => {
 
     await user.click(renameButton('label-bug', 'バグ'));
     expect(within(row('label-bug')).getByRole('textbox')).toHaveClass('w-44', 'narrow:w-full', 'narrow:min-w-0');
+  });
+});
+
+// DFLT-00350: a failed list load shows the error and a retry button in place
+// of the list, and a project switch never shows the previous project's labels
+// or error.
+describe('LabelsEditor load failure, retry and project switch', () => {
+  const selector = () => screen.getByLabelText(i18n.t('settings.labels.projectLabel'));
+  const retryButton = () => screen.getByRole('button', { name: i18n.t('settings.common.retry') });
+  const nameInput = () => createForm().getByRole('textbox');
+  type Pending = { projectId: string; resolve: (l: LabelUsage[]) => void; reject: (e: unknown) => void };
+  let pending: Pending[];
+  const take = (projectId: string) => {
+    const i = pending.findIndex(p => p.projectId === projectId);
+    expect(i).toBeGreaterThanOrEqual(0);
+    return pending.splice(i, 1)[0];
+  };
+
+  beforeEach(() => {
+    mockedFetch.mockReset();
+    mockedCreate.mockReset();
+    pending = [];
+    mockedFetch.mockImplementation(
+      (_t: unknown, projectId: string) =>
+        new Promise<LabelUsage[]>((resolve, reject) => { pending.push({ projectId, resolve, reject }); })
+    );
+  });
+
+  it('shows the error and a retry button, not the list or the empty state, and disables the create form', async () => {
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await act(async () => { take('proj-A').reject(new Error('network down')); });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('network down');
+    expect(retryButton()).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('settings.labels.empty'))).not.toBeInTheDocument();
+    expect(statusTexts()).not.toContain(i18n.t('settings.labels.loading'));
+    expect(nameInput()).toBeDisabled();
+    // The project selector stays usable.
+    expect(selector()).toBeEnabled();
+  });
+
+  it('keeps the retry button busy and focused during the retry, then shows the list and moves focus to the name input', async () => {
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await act(async () => { take('proj-A').reject(new Error('network down')); });
+    await screen.findByRole('alert');
+
+    const button = retryButton();
+    button.focus();
+    await user.keyboard('{Enter}');
+    expect(button).toHaveFocus();
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(statusTexts()).not.toContain(i18n.t('settings.labels.loading'));
+    await user.keyboard('{Enter}');
+    expect(pending).toHaveLength(1);
+
+    await act(async () => { take('proj-A').resolve([label('label-bug', 'バグ', 'red', 2)]); });
+
+    expect(await screen.findByTestId('label-row-label-bug')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(statusTexts()).not.toContain(i18n.t('settings.labels.loading'));
+    await waitFor(() => expect(nameInput()).toHaveFocus());
+  });
+
+  it('moves focus to the name input after a retry that returns no labels', async () => {
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await act(async () => { take('proj-A').reject(new Error('network down')); });
+    await screen.findByRole('alert');
+
+    await user.click(retryButton());
+    await act(async () => { take('proj-A').resolve([]); });
+
+    expect(await screen.findByText(i18n.t('settings.labels.empty'))).toBeInTheDocument();
+    await waitFor(() => expect(nameInput()).toHaveFocus());
+  });
+
+  it('keeps the error and the retry button when the retry fails again', async () => {
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await act(async () => { take('proj-A').reject(new Error('network down')); });
+    const first = await screen.findByRole('alert');
+
+    retryButton().focus();
+    await user.keyboard('{Enter}');
+    await act(async () => { take('proj-A').reject(new Error('still down')); });
+
+    await waitFor(() => expect(screen.getByRole('alert')).not.toBe(first));
+    expect(screen.getByRole('alert')).toHaveTextContent('still down');
+    expect(retryButton()).toHaveFocus();
+    expect(retryButton()).not.toHaveAttribute('aria-busy');
+    expect(nameInput()).toBeDisabled();
+  });
+
+  it.each([
+    ['succeeds', (p: Pending) => p.resolve([label('label-bug', 'バグ', 'red', 2)])],
+    ['fails', (p: Pending) => p.reject(new Error('late A failure'))]
+  ])('drops the answer of a retry that was overtaken by a project switch (it %s)', async (_how, finish) => {
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await act(async () => { take('proj-A').reject(new Error('network down')); });
+    await screen.findByRole('alert');
+
+    await user.click(retryButton());
+    await user.selectOptions(selector(), 'proj-B');
+    await act(async () => { take('proj-B').resolve([{ ...label('label-b-only', 'B専用', 'green', 0), project_id: 'proj-B' }]); });
+    expect(await screen.findByTestId('label-row-label-b-only')).toBeInTheDocument();
+
+    await act(async () => { finish(take('proj-A')); });
+
+    expect(screen.getByTestId('label-row-label-b-only')).toBeInTheDocument();
+    expect(screen.queryByTestId('label-row-label-bug')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.retry') })).not.toBeInTheDocument();
+    expect(nameInput()).toBeEnabled();
+  });
+
+  it("shows the loading line, not the previous project's labels, right after a switch", async () => {
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await act(async () => { take('proj-A').resolve([label('label-bug', 'バグ', 'red', 2)]); });
+    await screen.findByTestId('label-row-label-bug');
+
+    await user.selectOptions(selector(), 'proj-B');
+
+    expect(screen.queryByTestId('label-row-label-bug')).not.toBeInTheDocument();
+    expect(statusTexts()).toContain(i18n.t('settings.labels.loading'));
+    expect(screen.queryByText(i18n.t('settings.labels.empty'))).not.toBeInTheDocument();
+  });
+
+  it("does not show the previous project's load error after a switch, nor its labels once B fails", async () => {
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await act(async () => { take('proj-A').resolve([label('label-bug', 'バグ', 'red', 2)]); });
+    await screen.findByTestId('label-row-label-bug');
+
+    await user.selectOptions(selector(), 'proj-B');
+    await act(async () => { take('proj-B').reject(new Error('B failed')); });
+    expect(await screen.findByRole('alert')).toHaveTextContent('B failed');
+    expect(screen.queryByTestId('label-row-label-bug')).not.toBeInTheDocument();
+
+    await user.selectOptions(selector(), 'proj-A');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(statusTexts()).toContain(i18n.t('settings.labels.loading'));
+  });
+
+  it('shows neither the loading line nor a load failure with no project selected', async () => {
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await act(async () => { take('proj-A').reject(new Error('network down')); });
+    await screen.findByRole('alert');
+
+    await user.selectOptions(selector(), '');
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.retry') })).not.toBeInTheDocument();
+    expect(statusTexts()).not.toContain(i18n.t('settings.labels.loading'));
+    expect(screen.getByText(i18n.t('settings.labels.selectProject'))).toBeInTheDocument();
   });
 });
