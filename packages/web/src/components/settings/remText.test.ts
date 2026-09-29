@@ -8,11 +8,14 @@ import path from 'node:path';
 // in px, so they follow the browser's default font size (WCAG 1.4.4). This
 // reads every non-test source file in this directory and fails if a px text
 // size comes back. (DFLT-00294 also moved the node types list's 9px "default"
-// badge to 0.5625rem and widened the check from 10px / 11px to every px size.)
+// badge to 0.5625rem and widened the check from 10px / 11px to every px size;
+// DFLT-00320 made that badge 0.6875rem.)
 //
 // Class names are matched by regular expressions or assembled at run time on
-// purpose: Tailwind scans src/ for candidates, so writing a px text class
-// literally here would add an otherwise unused rule to the app's CSS.
+// purpose: Tailwind used to scan the test files too, so writing a px text
+// class literally here added an otherwise unused rule to the app's CSS.
+// index.css now leaves the test files out (DFLT-00323); this stays as a
+// second guard.
 const DIR = __dirname;
 const SOURCES = fs
   .readdirSync(DIR)
@@ -43,7 +46,8 @@ describe('settings/ text sizes (DFLT-00287)', () => {
     const all = SOURCES.map(read).join('\n');
     expect(count(all, remText('0.625'))).toBeGreaterThanOrEqual(48);
     expect(count(all, remText('0.6875'))).toBeGreaterThanOrEqual(32);
-    // DFLT-00294: the node types list's "default" badge.
-    expect(count(all, remText('0.5625'))).toBeGreaterThanOrEqual(1);
+    // DFLT-00294 made the node types list's "default" badge 0.5625rem;
+    // DFLT-00320 made it 0.6875rem (11px), one more on top of the 32 above.
+    expect(count(all, remText('0.6875'))).toBeGreaterThanOrEqual(33);
   });
 });

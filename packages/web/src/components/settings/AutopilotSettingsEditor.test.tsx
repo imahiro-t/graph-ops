@@ -3,6 +3,7 @@
 // real error translation path.
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import i18n from '../../i18n';
 import { AutopilotSettingsEditor } from './AutopilotSettingsEditor';
@@ -84,6 +85,32 @@ describe('AutopilotSettingsEditor', () => {
   afterEach(async () => {
     fetchSpy.mockRestore();
     await i18n.changeLanguage('ja');
+  });
+
+  // DFLT-00343: the first render must already be the loading line, not the
+  // editor with its empty defaults. render() runs effects straight away, so
+  // the DOM is already past the first frame; renderToStaticMarkup renders
+  // once and runs no effect, which is exactly that first frame.
+  it('shows the loading line, not the default settings, before they have loaded', () => {
+    fetchSpy.mockReturnValue(new Promise(() => {}));
+    const html = renderToStaticMarkup(
+      <AutopilotSettingsEditor projectId="proj-A" projectName="Project A" onDirtyChange={vi.fn()} />
+    );
+    expect(html).toContain(i18n.t('settings.common.loading'));
+    expect(html).not.toContain(label('maxTickets'));
+    expect(html).not.toContain('<input');
+    expect(html).not.toContain('<select');
+    // The button's own text, not the word inside the intro paragraph.
+    expect(html).not.toContain(`${i18n.t('settings.common.save')}</button>`);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps showing the no-project message, not the loading line, on the first frame with no project', () => {
+    fetchSpy.mockReturnValue(new Promise(() => {}));
+    const html = renderToStaticMarkup(<AutopilotSettingsEditor projectId="" onDirtyChange={vi.fn()} />);
+    expect(html).toContain(i18n.t('settings.autopilot.noProject'));
+    expect(html).not.toContain(i18n.t('settings.common.loading'));
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('edits a value and saves only that key, then shows the saved value', async () => {

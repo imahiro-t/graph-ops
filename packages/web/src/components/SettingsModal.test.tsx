@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { getFocusableElements } from '../hooks/useModalDialog';
 import { SettingsModal } from './SettingsModal';
-import { openIconButtonTooltip, openIconButtonTooltips } from '../test/iconButtonTooltip';
+import { openIconButtonTooltip, openIconButtonTooltips, setupHoverUser, startHoverFakeTimers, waitForHoverOpenDelay } from '../test/iconButtonTooltip';
 import { Project } from '../types';
 
 vi.mock('../lib/settingsApi', async () => {
@@ -329,8 +329,9 @@ describe('SettingsModal', () => {
     // control -- and, since focus is not on the button, the press is not marked as handled: it goes on to the modal,
     // which closes on it as it would with no tooltip open.
     it('lets Escape dismiss a hover-opened icon button tooltip while focus is elsewhere, and close the modal', async () => {
+      startHoverFakeTimers();
       (fetchSettingsNodeTypes as unknown as Mock).mockResolvedValue([{ type: 'plan', has_default: true, has_user_override: false }]);
-      const user = userEvent.setup();
+      const user = setupHoverUser();
       const onClose = vi.fn();
       renderModal(onClose);
 
@@ -339,6 +340,7 @@ describe('SettingsModal', () => {
       const add = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') });
       act(() => add.focus());
       await user.hover(del.parentElement as HTMLElement);
+      await waitForHoverOpenDelay();
       expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
 
       await user.keyboard('{Escape}');

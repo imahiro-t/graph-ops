@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Tag } from 'lucide-react';
+import { Tag } from 'lucide-react';
 import { Label } from '../types';
 import { setTicketLabels } from '../lib/labelsApi';
 import { plainCopyProps } from '../lib/plainCopy';
@@ -9,6 +9,8 @@ import { errorMessage, hasApiErrorCode } from '../lib/apiError';
 import { isLaterTimestamp } from '../lib/timestamp';
 import { submittingProps, useSubmittingLabel } from './Submitting';
 import { fitPopupHorizontally, rootFontSizePx } from '../lib/popupPlacement';
+import { CHECKBOX_FOCUS_CLASS } from './checkboxFocus';
+import { Spinner } from './Spinner';
 
 // The panel's own width: its w-56 (14rem). Keep the two in step --
 // LabelSelect.narrowPopup.test.tsx checks that the panel still has w-56.
@@ -260,7 +262,7 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
           // same as rounded-full.
           className="px-2 py-0.5 rounded-full upto-15rem:rounded-xl border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 text-[0.6875rem] font-semibold flex flex-wrap items-center gap-1 transition min-w-0 max-w-full wrap-break-word text-left"
         >
-          {saving ? <Loader2 className="w-3 h-3 shrink-0 animate-spin" aria-hidden="true" /> : <Tag className="w-3 h-3 shrink-0" aria-hidden="true" />}
+          {saving ? <Spinner className="w-3 h-3 shrink-0" /> : <Tag className="w-3 h-3 shrink-0" aria-hidden="true" />}
           {/* ticket.labels.editVisible is ticket.labels.edit with its break
               opportunities marked: "ラベルを<wbr/>編集" in Japanese, where
               break-keep (word-break: keep-all) otherwise allows no break
@@ -308,7 +310,7 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
                       checked={selectedIds.includes(l.id)}
                       aria-disabled={saving}
                       onChange={() => toggle(l.id)}
-                      className="shrink-0 rounded-sm border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0 aria-disabled:opacity-50"
+                      className={`shrink-0 rounded-sm border-slate-300 dark:border-slate-600 text-blue-600 ${CHECKBOX_FOCUS_CLASS} aria-disabled:opacity-50`}
                     />
                     <span className="truncate group-data-narrow:min-w-0 group-data-narrow:overflow-visible group-data-narrow:whitespace-normal group-data-narrow:text-clip group-data-narrow:wrap-anywhere">{l.name}</span>
                   </label>

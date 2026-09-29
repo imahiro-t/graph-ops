@@ -47,6 +47,7 @@ import { focusIfLost, focusKeySelector, neighborAfterRemoval } from './lib/focus
 import { installPlainCopy } from './lib/plainCopy';
 import { useLatest } from './hooks/useLatest';
 import { useTransientAnnouncement } from './hooks/useTransientAnnouncement';
+import { SPIN_CLASS } from './components/Spinner';
 
 // Cycles through the three-way theme preference in a fixed order, used by
 // the header toggle button (light -> dark -> system -> light -> ...).
@@ -171,7 +172,8 @@ export const App: React.FC = () => {
   //   3. Writes. A request already in flight when the header moves still
   //      comes back. fetchAllTickets drops it (a newer run, or a different
   //      current project, supersedes it), as refreshProjectLabels does for
-  //      labels (DFLT-00296). (1) already stops such a response from being
+  //      labels (DFLT-00296) and refreshAutopilotRuns for the autopilot
+  //      runs (DFLT-00323). (1) already stops such a response from being
   //      *shown*; (3) stops it from knocking the current project's loaded
   //      list back to "loading" until the next poll. An expanded ticket's
   //      detail response (DFLT-00112) only ever replaces a ticket with the
@@ -226,8 +228,10 @@ export const App: React.FC = () => {
   const projectSwitcherDescriptionId = useId();
   // The switcher's second tooltip line and its description are the same
   // text, computed once so the two cannot drift apart (DFLT-00285).
+  // DFLT-00321: a missing path reads "Local path: Not set" rather than a bare
+  // "Not set", which did not say what was not set.
   const currentProjectPathLabel = currentProject
-    ? currentProject.local_path || t('settings.appSettings.projects.notSet')
+    ? currentProject.local_path || t('projectSwitcher.localPathNotSet')
     : undefined;
   // Memoized: IconButton re-runs its positioning effect whenever the
   // tooltip content changes, and a fresh element on every App render (the
@@ -504,24 +508,58 @@ export const App: React.FC = () => {
   // Refreshed like the labels -- on a project switch, with every ticket
   // (re)fetch (so the regular poll moves the badges along), and right after
   // a start from a ticket -- and tagged with the project for the same
-  // reason.
+  // reason. Like the labels, an answer a later call has superseded is
+  // dropped, so an older answer arriving last cannot put older runs back
+  // (DFLT-00323); a superseded call still waits for the latest one to be
+  // applied before it returns (see refreshAutopilotRuns).
   const [runList, setRunList] = useState<ProjectScoped<AutopilotRun[]> | null>(null);
   const autopilotRuns = useMemo(
     () => (currentProjectId && runList?.projectId === currentProjectId ? runList.value : NO_RUNS),
     [currentProjectId, runList]
   );
+  const autopilotRunsFetchSeqRef = useRef(0);
+  // The latest call's fetch-and-apply. Never rejects.
+  const latestRunsFetchRef = useRef<Promise<void>>(Promise.resolve());
+  // Resolves once the runs of the latest call made so far -- this one, or
+  // one that superseded it, however many times over -- have been applied (or
+  // that call has failed and kept the previous runs). A start's buttons wait
+  // on this before leaving their "starting" state (AutopilotControls,
+  // DFLT-00147/00149): had a superseded call returned as soon as its own
+  // answer was dropped, they would come back with the runs from before the
+  // start, and be disabled right after by the new ones. How long this can
+  // take is bounded by AutopilotControls' SETTLE_TIMEOUT_MS.
   const refreshAutopilotRuns = useCallback(
     async (projectId: string = currentProjectIdRef.current) => {
+      // Taken before the no-project case too: clearing the runs supersedes
+      // any request still in flight, which must not fill them back in.
+      const seq = ++autopilotRunsFetchSeqRef.current;
+      let own: Promise<void>;
       if (!projectId) {
         setRunList(null);
-        return;
+        own = Promise.resolve();
+      } else {
+        own = (async () => {
+          try {
+            const runs = await fetchAutopilotRuns(tRef.current, projectId);
+            // Ignore an answer a later call has superseded, or one for a
+            // project that is no longer current.
+            if (seq === autopilotRunsFetchSeqRef.current && projectId === currentProjectIdRef.current) {
+              setRunList({ projectId, value: runs });
+            }
+          } catch (e) {
+            // Keep the previous runs: the server still refuses a duplicate.
+            console.error('Failed to load autopilot runs', e);
+          }
+        })();
       }
-      try {
-        const runs = await fetchAutopilotRuns(tRef.current, projectId);
-        if (projectId === currentProjectIdRef.current) setRunList({ projectId, value: runs });
-      } catch (e) {
-        // Keep the previous runs: the server still refuses a duplicate.
-        console.error('Failed to load autopilot runs', e);
+      // Set in the same synchronous step as the sequence number, so the
+      // latest promise is always the latest call's.
+      latestRunsFetchRef.current = own;
+      let awaited = own;
+      await awaited;
+      while (latestRunsFetchRef.current !== awaited) {
+        awaited = latestRunsFetchRef.current;
+        await awaited;
       }
     },
     [currentProjectIdRef, tRef]
@@ -530,7 +568,9 @@ export const App: React.FC = () => {
     refreshAutopilotRuns(currentProject?.id ?? '');
   }, [currentProject?.id, refreshAutopilotRuns]);
   // Returns the refresh so a start's buttons wait for the new runs before
-  // they leave their "starting" state (AutopilotControls, DFLT-00147).
+  // they leave their "starting" state (AutopilotControls, DFLT-00147). The
+  // promise resolves once the latest runs are applied, even when a poll's
+  // refresh overtook this one (DFLT-00323).
   const handleAutopilotChanged = useCallback(() => refreshAutopilotRuns(), [refreshAutopilotRuns]);
   // Every ticket's descendants, from the whole list's parent_ticket_id: a
   // tree start is refused when an active run roots below the ticket.
@@ -1605,7 +1645,7 @@ export const App: React.FC = () => {
               className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition"
               label={t('toolbar.refreshTitle')}
             >
-              <RotateCw aria-hidden="true" className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <RotateCw aria-hidden="true" className={`w-3.5 h-3.5 ${loading ? SPIN_CLASS : ''}`} />
             </IconButton>
             <span className="min-w-0 wrap-anywhere">
               {t('toolbar.updatedAt', {

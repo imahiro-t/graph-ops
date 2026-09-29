@@ -11,7 +11,7 @@
 // just the one the app currently has open.
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Pencil, Plus, Tag, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Tag, Trash2 } from 'lucide-react';
 import { LabelColor, LabelUsage, LABEL_COLORS, LABEL_NAME_MAX_LENGTH, Project } from '../../types';
 import { getLabelColorMeta } from '../../labelMeta';
 import { createLabel, deleteLabel, fetchLabels, updateLabel } from '../../lib/labelsApi';
@@ -23,6 +23,7 @@ import { StatusLiveRegion } from '../StatusLiveRegion';
 import { IconButton } from '../IconButton';
 import { SubmittingText, submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
+import { Spinner } from '../Spinner';
 
 interface Props {
   // Every project that can be picked. An empty list disables the tab: there
@@ -152,7 +153,13 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [labels, setLabels] = useState<LabelUsage[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Starts as canEdit, i.e. true whenever there is a project whose labels
+  // load() is about to fetch -- the resolved projectId above, which falls
+  // back to the first project, not initialProjectId. The first render then
+  // already shows the loading line instead of the "no labels" empty state for
+  // a frame (DFLT-00323, DFLT-00343). With no project nothing is loaded and
+  // the loading line is not shown anyway (it is gated on canEdit).
+  const [loading, setLoading] = useState(canEdit);
   // Errors are kept apart by what raised them (DFLT-00214), so that starting
   // one action never silently removes the report of another one's failure:
   // - loadError: the list could not be fetched. Cleared only by the next
@@ -556,7 +563,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
             {...submittingProps(creating)}
             className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white font-semibold flex items-center gap-1"
           >
-            {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" /> : <Plus className="w-3.5 h-3.5" aria-hidden="true" />}
+            {creating ? <Spinner className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" aria-hidden="true" />}
             {t('settings.labels.create')}
             <SubmittingText busy={creating} />
           </button>
@@ -665,7 +672,7 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
                   {/* DFLT-00168: the spinner is the only direct sign that this
                       row's save is in progress, so it needs 3:1 (WCAG 1.4.11)
                       against white / slate-900: 4.76:1 / 6.96:1. */}
-                  {busy && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-500 dark:text-slate-400" aria-hidden="true" />}
+                  {busy && <Spinner className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />}
                   {renaming ? (
                     <>
                       <button

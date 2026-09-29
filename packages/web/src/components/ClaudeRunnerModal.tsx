@@ -1,11 +1,12 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Terminal, X, ExternalLink, Loader2 } from 'lucide-react';
+import { Terminal, X, ExternalLink } from 'lucide-react';
 import { useClaudeLaunch } from '../hooks/useClaudeLaunch';
 import { useModalDialog } from '../hooks/useModalDialog';
 import { isSubmitShortcut } from '../lib/keyboardShortcuts';
 import { StatusLiveRegion } from './StatusLiveRegion';
 import { SubmittingText, submittingProps } from './Submitting';
+import { Spinner } from './Spinner';
 
 interface Props {
   isOpen: boolean;
@@ -146,7 +147,7 @@ export const ClaudeRunnerModal: React.FC<Props> = ({ isOpen, onClose, ticketId, 
               {...submittingProps(isLaunching)}
               className="self-end px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg flex items-center gap-2 shadow-xs transition max-w-full wrap-break-word"
             >
-              {isLaunching ? <Loader2 aria-hidden="true" className="w-4 h-4 shrink-0 animate-spin" /> : <ExternalLink aria-hidden="true" className="w-4 h-4 shrink-0" />}
+              {isLaunching ? <Spinner className="w-4 h-4 shrink-0" /> : <ExternalLink aria-hidden="true" className="w-4 h-4 shrink-0" />}
               {t('claudeRunnerModal.launch')}
               <SubmittingText busy={isLaunching} />
             </button>

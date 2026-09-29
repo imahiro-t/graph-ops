@@ -43,7 +43,8 @@ type Mock = ReturnType<typeof vi.fn>;
 
 const classesOf = (value: string) => value.split(/\s+/).filter(Boolean);
 // Assembled at run time so this file adds no px text rule to the app's CSS
-// (Tailwind scans src/ for class candidates).
+// (a second guard: index.css leaves the test files out of Tailwind's scan
+// since DFLT-00323).
 const pxText = (n: number) => ['text-[', String(n), 'px]'].join('');
 
 interface Case {

@@ -77,7 +77,8 @@
     "noProjectYet": "まだプロジェクトが作成されていません。作成するとチケットの管理を始められます。",
     "loadFailed": "現在のプロジェクトの設定を読み込めませんでした。ホームの設定ファイル（~/.graph-ops/config.json）を確認してから再試行してください。",
     "retry": "再試行",
-    "pendingApprovals": "承認待ち {{count}} 件"
+    "pendingApprovals": "承認待ち {{count}} 件",
+    "localPathNotSet": "ローカルパス: 未設定"
   },
   "createProjectModal": {
     "title": "新規プロジェクト作成",
@@ -390,6 +391,7 @@
       "saveSuccess": "保存しました。",
       "noChangesToSave": "保存する変更はありません。",
       "loading": "読み込み中...",
+      "retry": "再試行",
       "inheritedFromDefault": "プラグイン既定を継承",
       "yes": "はい",
       "no": "いいえ",
@@ -502,6 +504,7 @@
       "emptyOverrideHint": "空にして保存すると上書きが解除され、プラグイン既定に戻ります。"
     },
     "appSettings": {
+      "loadFailed": "アプリ設定を読み込めませんでした（{{message}}）。保存済みの設定を既定値で上書きしないよう、読み込めるまで設定のフォームは表示しません。再試行してください。",
       "restartNote": "この項目の変更は、次回サーバー起動時に反映されます（保存先: {{path}}）。",
       "restartNoteNoPath": "設定はホームの設定ファイル（$HOME/.graph-ops/config.json）に保存されます。ホームディレクトリを解決できないため保存先がなく、サーバーは環境変数と組み込みの既定値で動作しています。反映には再起動が必要です。",
       "homeConfigUnreadable": "{{path}} を読み込めないため、この画面のどの項目も有効になっておらず（表示されている値は環境変数と組み込みの既定値です）、直すまで保存もできません。このファイルを直すか削除してください。",

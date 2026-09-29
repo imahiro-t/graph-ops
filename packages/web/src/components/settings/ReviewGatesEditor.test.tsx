@@ -9,12 +9,13 @@
 // and shows its reason there too.
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { ReviewGatesEditor } from './ReviewGatesEditor';
 import { REANNOUNCE_GAP_MS, TRANSIENT_ANNOUNCEMENT_DURATION_MS } from '../../hooks/useTransientAnnouncement';
 import { SETTINGS_CATALOG_WARNINGS, SettingsCatalogResponse, SettingsCatalogWarning } from '../../types';
-import { openIconButtonTooltip } from '../../test/iconButtonTooltip';
+import { openIconButtonTooltip, setupHoverUser, startHoverFakeTimers, waitForHoverOpenDelay } from '../../test/iconButtonTooltip';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -118,6 +119,22 @@ describe('ReviewGatesEditor', () => {
     mockedSaveCatalog.mockReset();
     mockedSaveCatalog.mockResolvedValue(undefined);
     await i18n.changeLanguage('ja');
+  });
+
+  // DFLT-00343: the first render must already be the loading line, not the
+  // editor with its empty defaults. render() runs effects straight away, so
+  // the DOM is already past the first frame; renderToStaticMarkup renders
+  // once and runs no effect, which is exactly that first frame.
+  it('shows the loading line, not an empty gate list, before the catalog has loaded', () => {
+    mockedFetchCatalog.mockReturnValue(new Promise(() => {}));
+    const html = renderToStaticMarkup(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    expect(html).toContain(i18n.t('settings.common.loading'));
+    expect(html).not.toContain(i18n.t('settings.reviewGates.intro'));
+    expect(html).not.toContain(i18n.t('settings.reviewGates.workflowMaxIterationsLabel'));
+    // The button's own text, not the word inside the intro paragraph.
+    expect(html).not.toContain(`${i18n.t('settings.common.save')}</button>`);
+    expect(html).not.toContain('<input');
+    expect(mockedFetchCatalog).not.toHaveBeenCalled();
   });
 
   it('disables the name field for a not-yet-overridden default gate and shows the rename-blocked hint', async () => {
@@ -719,7 +736,8 @@ describe('ReviewGatesEditor delete button accessible name', () => {
   });
 
   it('shows the delete tooltip on keyboard focus, and why a default gate cannot be deleted on hover', async () => {
-    const user = userEvent.setup();
+    startHoverFakeTimers();
+    const user = setupHoverUser();
     render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
     await screen.findByDisplayValue('Code Review');
 
@@ -730,6 +748,7 @@ describe('ReviewGatesEditor delete button accessible name', () => {
 
     const defaultGate = screen.getByRole('button', { name: deleteName('code_review') });
     await user.hover(defaultGate.parentElement as HTMLElement);
+    await waitForHoverOpenDelay();
     expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.reviewGates.cannotDeleteDefaultHint'));
   });
 
@@ -1617,6 +1636,20 @@ describe('ReviewGatesEditor removal announcement', () => {
 // height and inner scroll (the tab panel scrolls instead), and the bottom
 // add / save row wraps. The wide classes stay. jsdom does no layout, so the
 // classes are pinned.
+// DFLT-00321: the same keyboard focus line as the other controls (a 2px
+// blue-500 / dark:blue-400 outline on focus-visible), and no ring-0 override.
+// The ring-0 class is assembled at run time so Tailwind does not pick it up
+// from this file.
+const NO_RING = ['focus', 'ring-0'].join(':');
+const CHECKBOX_FOCUS = [
+  'focus:outline-hidden',
+  'focus-visible:outline-solid',
+  'focus-visible:outline-2',
+  'focus-visible:outline-offset-0',
+  'focus-visible:outline-blue-500',
+  'dark:focus-visible:outline-blue-400'
+];
+
 describe('ReviewGatesEditor narrow reflow (DFLT-00261)', () => {
   beforeEach(async () => {
     mockedFetchCatalog.mockReset();
@@ -1649,5 +1682,16 @@ describe('ReviewGatesEditor narrow reflow (DFLT-00261)', () => {
     expect(addButton.parentElement).toHaveClass('flex', 'justify-between', 'items-center', 'narrow:flex-wrap', 'narrow:gap-2');
     const saveButton = screen.getByRole('button', { name: i18n.t('settings.common.save') });
     expect(saveButton.parentElement).toHaveClass('flex', 'items-center', 'gap-2', 'narrow:flex-wrap');
+  });
+
+  it('gives each enabled checkbox the same keyboard focus line as the other controls (DFLT-00321)', async () => {
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+    const boxes = screen.getAllByRole('checkbox', { name: i18n.t('settings.reviewGates.enabledLabel') });
+    expect(boxes).toHaveLength(2);
+    for (const box of boxes) {
+      expect(box).toHaveClass(...CHECKBOX_FOCUS);
+      expect(box).not.toHaveClass(NO_RING);
+    }
   });
 });

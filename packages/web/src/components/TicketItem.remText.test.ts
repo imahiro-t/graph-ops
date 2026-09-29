@@ -9,8 +9,10 @@ import path from 'node:path';
 // reads the component's source and fails if a px text size comes back.
 //
 // Class names are matched by regular expressions or assembled at run time on
-// purpose: Tailwind scans src/ for candidates, so writing a px text class
-// literally here would add an otherwise unused rule to the app's CSS.
+// purpose: Tailwind used to scan the test files too, so writing a px text
+// class literally here added an otherwise unused rule to the app's CSS.
+// index.css now leaves the test files out (DFLT-00323); this stays as a
+// second guard.
 const SOURCE = path.resolve(__dirname, 'TicketItem.tsx');
 
 // Removes /* ... */ (including JSX {/* ... */}) and // line comments. A line
@@ -29,6 +31,10 @@ describe('TicketItem text sizes (DFLT-00281)', () => {
   it('uses no px text size (a text-[Npx] class) outside comments', () => {
     expect(code.match(/text-\[\d+(?:\.\d+)?px\]/g) ?? []).toEqual([]);
   });
+
+  // DFLT-00320: font sizes set outside a text size class (such as the
+  // graph's former fontSize="9" attribute) are checked for every source file,
+  // this one included, by src/remText.test.ts.
 
   it('uses the rem equivalents instead (guards against the check above passing on stripped-out code)', () => {
     // Outside comments, at the time of DFLT-00281: 3 existing + 5 replaced

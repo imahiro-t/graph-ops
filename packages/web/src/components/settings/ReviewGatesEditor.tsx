@@ -10,7 +10,7 @@
 // additional_criteria field. There is no per-gate iteration limit any more.
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Save, Plus, Trash2, CheckCircle2, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
+import { Save, Plus, Trash2, CheckCircle2, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
 import { ReviewGateDef, SETTINGS_CATALOG_WARNINGS, SettingsCatalog, SettingsCatalogWarning, SettingsDocument } from '../../types';
 import { fetchSettingsCatalog, saveSettingsCatalog } from '../../lib/settingsApi';
 import { errorMessage } from '../../lib/apiError';
@@ -22,6 +22,8 @@ import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/f
 import { IconButton } from '../IconButton';
 import { submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
+import { CHECKBOX_FOCUS_CLASS } from '../checkboxFocus';
+import { Spinner } from '../Spinner';
 
 interface Props {
   onDirtyChange: (dirty: boolean) => void;
@@ -185,7 +187,11 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const [savedMaxIterations, setSavedMaxIterations] = useState<number | null>(null);
   const [inheritedMaxIterations, setInheritedMaxIterations] = useState<number>(DEFAULT_MAX_ITERATIONS);
   const [warnings, setWarnings] = useState<SettingsCatalogWarning[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Starts true: the first render already shows the loading line, so the
+  // gate list is never drawn with its defaults for a frame before load() runs
+  // (DFLT-00323, DFLT-00343) -- a flicker, and a form someone could start
+  // editing or save with values that are not the stored ones.
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   // True while `error` is the empty-ID validation error, so the rows whose ID
@@ -402,7 +408,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
-        <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> {t('settings.common.loading')}
+        <Spinner className="w-4 h-4" /> {t('settings.common.loading')}
       </div>
     );
   }
@@ -528,7 +534,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   type="checkbox"
                   checked={g.enabled !== false}
                   onChange={e => updateGate(g.rowKey, { enabled: e.target.checked })}
-                  className="rounded-sm border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-0"
+                  className={`rounded-sm border-slate-300 dark:border-slate-600 text-blue-600 ${CHECKBOX_FOCUS_CLASS}`}
                 />
                 {t('settings.reviewGates.enabledLabel')}
               </label>
@@ -670,7 +676,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
             {...submittingProps(saving)}
             className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
           >
-            {saving ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Save aria-hidden="true" className="w-3.5 h-3.5" />}
+            {saving ? <Spinner className="w-3.5 h-3.5" /> : <Save aria-hidden="true" className="w-3.5 h-3.5" />}
             {saving ? t('settings.common.saving') : t('settings.common.save')}
           </button>
         </div>

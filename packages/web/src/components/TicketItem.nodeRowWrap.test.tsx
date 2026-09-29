@@ -151,13 +151,15 @@ const artifact = (id: string, nodeId: string): Artifact => ({
 // A node with every optional badge (retry, manual, artifacts), a node with a
 // long name, and an approval gate whose only predecessor is DONE, so its
 // approve/reject buttons show in the row.
+// Taken by id or type below, never by position in this list (DFLT-00323).
+const ALL_BADGES_ID = `${T}-01`;
 const NODES = [
-  node(`${T}-01`, 'release', 'DONE', { iteration_count: 2, is_manual: true }),
+  node(ALL_BADGES_ID, 'release', 'DONE', { iteration_count: 2, is_manual: true }),
   node(`${T}-02`, 'implementation', 'IN PROGRESS', { name: LONG_NAME }),
   node(`${T}-03`, 'approval_gate', 'TODO')
 ];
-const EDGES = [edge(`${T}-01`, `${T}-03`)];
-const ARTIFACTS = [artifact('a1', `${T}-01`), artifact('a2', `${T}-01`)];
+const EDGES = [edge(ALL_BADGES_ID, `${T}-03`)];
+const ARTIFACTS = [artifact('a1', ALL_BADGES_ID), artifact('a2', ALL_BADGES_ID)];
 
 const makeTicket = (): TicketDetail => ({
   id: T,
@@ -188,9 +190,12 @@ const renderTicket = () =>
     />
   );
 
-// The row's parts, found from the node's named toggle button.
+// The row's parts, found from the node's named toggle button. `order` is
+// the sequence number drawn right after the toggle, found by its place
+// rather than by its text, which depends on the order the rows are drawn in.
 const rowParts = (n: GraphNode) => {
   const toggle = screen.getByTestId(`node-toggle-expand-${n.id}`);
+  const order = toggle.nextElementSibling as HTMLElement;
   const left = toggle.parentElement!;
   const row = left.parentElement!;
   const right = row.children[1] as HTMLElement;
@@ -199,7 +204,7 @@ const rowParts = (n: GraphNode) => {
   const time = right.lastElementChild as HTMLElement;
   // The status badge is the right group's rounded-full span (see getNodeBadge).
   const status = Array.from(right.children).find(el => el.tagName === 'SPAN' && el.classList.contains('rounded-full')) as HTMLElement;
-  return { toggle, left, row, right, id, name, time, status };
+  return { toggle, order, left, row, right, id, name, time, status };
 };
 
 // Each class is checked on its own: `not.toHaveClass(a, b)` passes as soon as
@@ -381,9 +386,13 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
     for (const key of ['row', 'left', 'right', 'id', 'name', 'time'] as const) {
       expect(parts[key]).toHaveClass(...BEFORE[key].split(' '));
     }
+    // What is left out below is the sequence number (see rowParts).
+    expect(parts.order.tagName).toBe('SPAN');
+    expect(parts.order).toHaveClass('font-mono');
+    expect(parts.order.textContent).toMatch(/^\d+$/);
     // The badges that must not wrap from lg up are still shrink-0 whitespace-nowrap.
     for (const badge of parts.left.querySelectorAll('span')) {
-      if (badge === parts.id || badge === parts.name || badge.textContent === String(NODES.indexOf(n) + 1)) continue;
+      if (badge === parts.id || badge === parts.name || badge === parts.order) continue;
       if (!badge.classList.contains('whitespace-nowrap')) continue;
       expect(badge).toHaveClass('shrink-0');
     }
@@ -450,7 +459,7 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
 
   // DFLT-00260: the retry, manual and artifact badges of the node that has all three.
   const sideBadges = () => {
-    const n = NODES[0];
+    const n = NODES.find(x => x.id === ALL_BADGES_ID)!;
     const { left } = rowParts(n);
     const byText = (text: string) => within(left).getByText(text, { exact: false }).closest('span') as HTMLElement;
     const retry = byText(i18n.t('ticketItem.retryCount', { count: n.iteration_count }));
@@ -575,7 +584,7 @@ describe.each(['ja', 'en'] as const)('TicketItem node rows on a narrow screen (%
 
   it('the approve/reject buttons wrap and may shrink under 80rem, and still do not toggle the row', () => {
     renderTicket();
-    const gate = NODES[2];
+    const gate = NODES.find(x => x.type === 'approval_gate')!;
     const approve = screen.getByTestId(`node-approve-${gate.id}`);
     const buttons = approve.parentElement!;
     expect(buttons).toHaveClass(...BEFORE.approvalButtons.split(' '), ...ADDED.approvalButtons);

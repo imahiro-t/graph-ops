@@ -4,7 +4,7 @@
 // for the append-by-default merge semantics this editor exposes.
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Save, CheckCircle2, Plus, Trash2, Check, X } from 'lucide-react';
+import { Save, CheckCircle2, Plus, Trash2, Check, X } from 'lucide-react';
 import { SettingsNodeTypeInfo } from '../../types';
 import { fetchSettingsNodeType, fetchSettingsNodeTypes, saveSettingsNodeType } from '../../lib/settingsApi';
 import { getNodeTypeMeta } from '../../nodeTypeMeta';
@@ -20,6 +20,7 @@ import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/f
 import { submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
 import { LIST_HEADING_CLASS, LIST_ITEM_FOCUS_CLASS, LIST_LAYOUT_CLASS, LIST_PANE_CLASS } from './listPane';
+import { Spinner } from '../Spinner';
 
 // Mirrors config.isSafeExtensionName (packages/core-go/internal/config/
 // extensions.go) so an obviously-invalid name is rejected here with a clear
@@ -47,7 +48,18 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const [tierText, setTierText] = useState('');
   const [savedTierText, setSavedTierText] = useState('');
   const [mergedText, setMergedText] = useState('');
-  const [loading, setLoading] = useState(false);
+  // Starts true: the first render already shows the loading line, so the
+  // right-hand editor is never drawn empty (an empty textarea and a save
+  // button) while the type list and then the selected type's text are on
+  // their way (DFLT-00343). loadSelected clears it once the text is in;
+  // when the first list load picks nothing to load -- it failed, or the
+  // list is empty -- loadTypes clears it instead (see initialListPendingRef).
+  const [loading, setLoading] = useState(true);
+  // True until the first loadTypes call has settled. Only that call may
+  // clear the initial `loading` (when it leaves nothing selected to load);
+  // the re-fetch after a save or delete must not, since it can overlap a
+  // loadSelected whose loading line has to stay up.
+  const initialListPendingRef = useRef(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const { savedFlash, showSavedFlash } = useSavedFlash();
@@ -117,10 +129,14 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       // change loadTypes's identity and re-fetch the whole list for no
       // reason (#3).
       setSelected(prev => (list.length > 0 && !list.some(info => info.type === prev) ? list[0].type : prev));
+      if (initialListPendingRef.current && list.length === 0) setLoading(false);
       return list;
     } catch (e) {
       setError(errorMessage(e, tRef.current('errors.UNKNOWN')));
+      if (initialListPendingRef.current) setLoading(false);
       return null;
+    } finally {
+      initialListPendingRef.current = false;
     }
   }, [tRef]);
 
@@ -320,16 +336,36 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   gap-y-0.5 keeps that second line close to the name. */}
               <button
                 onClick={() => void select(info.type)}
+                // DFLT-00321: aria-current marks the one type whose editor
+                // is shown on the right, with the same value TemplatesEditor
+                // uses. undefined (not false) keeps the attribute off the
+                // other items -- React would render false as "false".
+                aria-current={selected === info.type ? 'true' : undefined}
                 className={`flex-1 min-w-0 text-left pl-3 pr-1 py-2 text-xs flex items-center gap-2 upto-15rem:flex-wrap upto-15rem:gap-y-0.5 ${LIST_ITEM_FOCUS_CLASS} ${
                   selected === info.type ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'
                 }`}
               >
                 <Icon aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-slate-400" />
                 <span title={displayName} className="truncate flex-1 upto-15rem:basis-[calc(100%-1.375rem)]">{displayName}</span>
+                {/* DFLT-00320: the badge text is 0.6875rem (11px at the
+                    default 16px, the size of IconButton's tooltip and
+                    LabelChip) -- 0.5625rem (9px) was too small to read.
+                    leading-none sets its line-height to 1. Without it the
+                    badge inherits the button's text-xs line-height as a
+                    computed length (16px, 32px at 200%), not as a ratio, so
+                    it was 16 + 4 = 20px tall before this change (40px on its
+                    own second line at 320px / 200%) and made the item taller
+                    than the name line: 36px vs 32px, 108px at 320px / 200%.
+                    With it the badge is 11 + 4 = 15px (30px on the second
+                    line at 320px / 200%), and the item is 32px / 98px.
+                    The text colour is slate-600 / dark:slate-300 (6.15:1 on
+                    slate-200, 6.97:1 on slate-700): the earlier slate-500 /
+                    dark:slate-400 were 3.86:1 / 4.04:1, below the 4.5:1 that
+                    WCAG 1.4.3 needs for 11px semibold text. */}
                 {!hasOverride && info.has_default && (
                   <span
                     title={t('settings.nodeTypes.defaultBadgeHint')}
-                    className="shrink-0 text-[0.5625rem] font-semibold px-1 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 upto-15rem:ml-[1.375rem]"
+                    className="shrink-0 text-[0.6875rem] leading-none font-semibold px-1 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 upto-15rem:ml-[1.375rem]"
                   >
                     {t('settings.nodeTypes.defaultBadge')}
                   </span>
@@ -461,7 +497,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         {error && <ErrorBox className="p-2.5 text-[0.6875rem]">{error}</ErrorBox>}
         {loading ? (
           <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
-            <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> {t('settings.common.loading')}
+            <Spinner className="w-4 h-4" /> {t('settings.common.loading')}
           </div>
         ) : (
           <>
@@ -503,7 +539,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 {...submittingProps(saving)}
                 className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition"
               >
-                {saving ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Save aria-hidden="true" className="w-3.5 h-3.5" />}
+                {saving ? <Spinner className="w-3.5 h-3.5" /> : <Save aria-hidden="true" className="w-3.5 h-3.5" />}
                 {saving ? t('settings.common.saving') : t('settings.common.save')}
               </button>
             </div>

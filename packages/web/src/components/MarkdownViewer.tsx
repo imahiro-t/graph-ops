@@ -275,8 +275,24 @@ export const MarkdownViewer: React.FC<Props> = ({ content, scrollable = false, l
       // blue-500 focus ring rather than indigo-400 -- see GherkinViewer for
       // the contrast numbers; outline-hidden leaves the ring as the only focus
       // indicator, so it has to clear 3:1 on the light theme too.
-      className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3 text-xs overflow-x-auto inset-shadow-sm ${
-        scrollable ? 'max-h-64 overflow-y-auto focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500' : ''
+      // DFLT-00321: only the scrollable viewer is a scroll container. The
+      // other one (the ticket description, the artifact preview page) used
+      // to be overflow-x-auto as well, which makes overflow-y auto too:
+      // whenever something in it ran past its width -- a long word, path or
+      // URL on the artifact preview page, which did not break words --
+      // Chromium and Firefox made the whole viewer a tab stop of its own
+      // (keyboard-focusable scrollers), with no name and no focus ring. It
+      // needs no scrolling of its own: tables and code blocks scroll in their
+      // own overflow-x-auto boxes, images are max-w-full, and
+      // wrap-break-word breaks a word wider than the viewer (as the ticket
+      // description's box already did). The scrollable viewer keeps
+      // overflow-x-auto: it is a named, focusable region anyway, and it sits
+      // in padded boxes (the artifact card's p-3 and p-2.5), so its ring is
+      // not cut off.
+      className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3 text-xs inset-shadow-sm ${
+        scrollable
+          ? 'overflow-x-auto max-h-64 overflow-y-auto focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500'
+          : 'wrap-break-word'
       }`}
       tabIndex={scrollable ? 0 : undefined}
       role={scrollable && label ? 'region' : undefined}

@@ -11,7 +11,6 @@ import {
   ExternalLink,
   Download,
   Send,
-  Loader2,
   Layers,
   ClipboardEdit,
   Check,
@@ -50,6 +49,9 @@ import { isSubmitShortcut } from '../lib/keyboardShortcuts';
 import { focusIfLost } from '../lib/focusAfterRemoval';
 import { plainCopyProps } from '../lib/plainCopy';
 import { withBreaks, WORD_JOINER } from '../lib/wbr';
+import { graphNodeLabel } from '../lib/graphNodeLabel';
+import { rootFontSizePx } from '../lib/popupPlacement';
+import { Spinner } from './Spinner';
 
 interface Props {
   ticket: TicketDetail;
@@ -117,6 +119,25 @@ const artifactTabClass = (active: boolean) =>
 // the selection along this list.
 const ARTIFACT_TABS = ['nodes', 'gherkin', 'html', 'artifacts'] as const;
 type ArtifactTab = (typeof ARTIFACT_TABS)[number];
+
+// DFLT-00334: the below-80rem classes shared by the two artifact header rows
+// (a node's artifacts and the Artifacts tab). Under 80rem the header row wraps
+// instead of forcing name, Download and the type badge onto one line: at 320px
+// with a 200% font the row is ~80px in an expanded node (~122px in the
+// Artifacts tab), and the node card (overflow-hidden) clipped the right group
+// while the name was squeezed to one character a line. The name group wraps
+// too, so a long name moves under its icon and gets the full row; the name
+// keeps an auto basis and wrap-break-word (never wrap-anywhere or basis-0,
+// which would let it shrink to one character again). The right group moves to
+// the next line, stays right-aligned (safe, so it never runs out on the left)
+// and wraps within itself; the badge may break a word only when it is wider
+// than the row. From 80rem up the row is unchanged: only shrink-0 on the icons
+// is added without the variant.
+const ARTIFACT_HEADER_ROW_WRAP = 'below-80rem:flex-wrap below-80rem:gap-x-2 below-80rem:gap-y-1';
+const ARTIFACT_HEADER_NAME_GROUP_WRAP = 'below-80rem:flex-wrap below-80rem:min-w-0 below-80rem:max-w-full';
+const ARTIFACT_HEADER_TEXT_WRAP = 'below-80rem:min-w-0 below-80rem:wrap-break-word';
+const ARTIFACT_HEADER_RIGHT_GROUP_WRAP =
+  'below-80rem:flex-wrap below-80rem:ml-auto below-80rem:min-w-0 below-80rem:max-w-full below-80rem:justify-end-safe';
 
 // How long the ID copy button shows its "copied"/"failed" state before going
 // back to idle (DFLT-00143).
@@ -348,7 +369,7 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
         className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded-sm text-[0.6875rem] font-bold flex items-center gap-1 transition shrink-0 max-w-full wrap-anywhere"
       >
         {isSubmitting ? (
-          <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
+          <Spinner className="w-3 h-3" />
         ) : (
           <X aria-hidden="true" className="w-3 h-3" />
         )}
@@ -1185,13 +1206,20 @@ export const TicketItem: React.FC<Props> = ({
     has_content?: boolean;
   }) => {
     if (!(artifact.content || artifact.file_path || artifact.has_content)) return null;
+    // DFLT-00334: under 80rem the link itself may shrink to its row
+    // (min-w-0). overflow-wrap: break-word on the label does not lower the
+    // link's min-content, so without min-w-0 on the <a> an English
+    // "Download" that is longer than an 80px header row (320px, 200% font)
+    // still sticks out past the row's left edge. The label wraps between
+    // words while it fits and mid-word only when one word is wider than the
+    // row; the icon keeps its size.
     return (
       <a
         href={`/api/artifacts/${artifact.id}/content?download=1`}
-        className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1 text-[0.6875rem]"
+        className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1 text-[0.6875rem] below-80rem:min-w-0 below-80rem:max-w-full"
       >
-        <Download aria-hidden="true" className="w-3 h-3" />
-        {t('ticketItem.download')}
+        <Download aria-hidden="true" className="w-3 h-3 shrink-0" />
+        <span className={ARTIFACT_HEADER_TEXT_WRAP}>{t('ticketItem.download')}</span>
       </a>
     );
   };
@@ -1256,10 +1284,35 @@ export const TicketItem: React.FC<Props> = ({
   // React 19 callback-ref cleanup. The ref must be stable (useCallback with
   // no deps): an inline function would run the cleanup on every render and
   // clear the state while the button still has focus.
+  //
+  // DFLT-00321: when the button leaves the DOM while it has focus (the only
+  // way that happens with the focus rule above is the description being
+  // emptied by an external update), the focus would drop to <body>. The
+  // cleanup runs before React removes the node, so it can still see that the
+  // button has focus; it only raises a flag, and the layout effect below --
+  // which runs after the commit has removed the button -- moves the focus to
+  // the description card's heading. When the card itself is gone as well
+  // (ticket closed, unmount) there is no heading and nothing is moved.
+  const descriptionHeadingRef = useRef<HTMLSpanElement>(null);
+  const descriptionToggleHadFocusRef = useRef(false);
   const descriptionToggleRef = useCallback((el: HTMLButtonElement | null) => {
     if (!el) return;
-    return () => setIsDescriptionToggleFocused(false);
+    return () => {
+      if (el.ownerDocument.activeElement === el) descriptionToggleHadFocusRef.current = true;
+      setIsDescriptionToggleFocused(false);
+    };
   }, []);
+  useLayoutEffect(() => {
+    if (!descriptionToggleHadFocusRef.current) return;
+    descriptionToggleHadFocusRef.current = false;
+    const heading = descriptionHeadingRef.current;
+    if (!heading) return;
+    // Only take over a focus that was actually lost -- never pull it away
+    // from an element that already has it.
+    const active = heading.ownerDocument.activeElement;
+    if (active && active !== heading.ownerDocument.body) return;
+    heading.focus();
+  });
   const showDescriptionToggle =
     description.length > 0 &&
     (isDescriptionExpanded || isCollapsedDescriptionOverflowing || isDescriptionToggleFocused);
@@ -1390,6 +1443,14 @@ export const TicketItem: React.FC<Props> = ({
   const rowSpacing = 52;
   const svgWidth = Math.max(300, maxPerLevel * colSpacing + 60);
   const svgHeight = Math.max(180, (maxLevel + 1) * rowSpacing + 46);
+
+  // DFLT-00320: how much larger than the default 16px the root font is. The
+  // node name labels are sized in rem, so they grow with it; on a parallel
+  // row graphNodeLabel shortens them by estimated width (at the default size
+  // too, since DFLT-00335) so neighbours 78 units apart don't overlap, with
+  // a smaller budget the larger the font. Read on each render (a later
+  // change of the browser's text size is picked up on the next re-render).
+  const graphFontScale = Math.max(1, rootFontSizePx() / 16);
 
   const nodePos = new Map<string, { x: number; y: number }>();
   levelGroups.forEach((ids, lvl) => {
@@ -1709,7 +1770,7 @@ export const TicketItem: React.FC<Props> = ({
                     label={t('ticketItem.selfAssign.unassign')}
                     className="p-0.5 text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-200 disabled:opacity-50 rounded-full"
                   >
-                    {assignToMeSaving ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <X aria-hidden="true" className="w-3 h-3" />}
+                    {assignToMeSaving ? <Spinner className="w-3 h-3" /> : <X aria-hidden="true" className="w-3 h-3" />}
                   </IconButton>
                 </span>
               ) : ticket.assignee ? (
@@ -1734,7 +1795,7 @@ export const TicketItem: React.FC<Props> = ({
                   {...submittingProps(assignToMeSaving)}
                   className="px-2 py-0.5 rounded-full border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 disabled:opacity-50 text-[0.6875rem] font-semibold flex items-center gap-1 min-w-0 max-w-full wrap-anywhere transition"
                 >
-                  {assignToMeSaving ? <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" /> : <UserPlus aria-hidden="true" className="w-3 h-3" />}
+                  {assignToMeSaving ? <Spinner className="w-3 h-3" /> : <UserPlus aria-hidden="true" className="w-3 h-3" />}
                   {t('ticketItem.selfAssign.assign')}
                   <SubmittingText busy={assignToMeSaving} />
                 </button>
@@ -1802,7 +1863,7 @@ export const TicketItem: React.FC<Props> = ({
               wrapperClassName="-m-1"
               className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 rounded-sm"
             >
-              {isReopeningTicket ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <RotateCcw aria-hidden="true" className="w-4 h-4" />}
+              {isReopeningTicket ? <Spinner className="w-4 h-4" /> : <RotateCcw aria-hidden="true" className="w-4 h-4" />}
             </IconButton>
           ) : (
             <IconButton
@@ -1835,7 +1896,7 @@ export const TicketItem: React.FC<Props> = ({
             wrapperClassName="-m-1"
             className="text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition p-1 rounded-sm"
           >
-            {isDeletingTicket ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : <Trash2 aria-hidden="true" className="w-4 h-4" />}
+            {isDeletingTicket ? <Spinner className="w-4 h-4" /> : <Trash2 aria-hidden="true" className="w-4 h-4" />}
           </IconButton>
         </div>
       </div>
@@ -1869,7 +1930,7 @@ export const TicketItem: React.FC<Props> = ({
             {...submittingProps(isClosingTicket)}
             className="px-2 py-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-sm text-xs font-bold flex items-center gap-1 transition shrink-0"
           >
-            {isClosingTicket ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 animate-spin" /> : <Archive aria-hidden="true" className="w-3.5 h-3.5" />}
+            {isClosingTicket ? <Spinner className="w-3.5 h-3.5" /> : <Archive aria-hidden="true" className="w-3.5 h-3.5" />}
             {t('ticketItem.close.confirm')}
             <SubmittingText busy={isClosingTicket} />
           </button>
@@ -2041,7 +2102,14 @@ export const TicketItem: React.FC<Props> = ({
                 time wrap instead of the FileText and History icons being
                 squeezed (to 0px for History at 200% on 320px). */}
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mb-2">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 min-w-0 wrap-anywhere">
+              {/* DFLT-00321: tabIndex=-1 makes the heading a target for the
+                  focus when the "Full text" button disappears under it (see
+                  descriptionToggleRef) without adding a tab stop. */}
+              <span
+                ref={descriptionHeadingRef}
+                tabIndex={-1}
+                className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 min-w-0 wrap-anywhere rounded-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+              >
                 <FileText aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
                 <span className="min-w-0 wrap-anywhere">{t('ticketItem.description.title')}</span>
               </span>
@@ -2258,6 +2326,10 @@ export const TicketItem: React.FC<Props> = ({
                     isReviewType(n.type) ? '#a855f7' :
                     null;
                   const outerR = isInProgress ? 8 : 6;
+                  const label = graphNodeLabel(n.name, {
+                    parallel: (levelGroups.get(level.get(n.id) || 0)?.length ?? 1) > 1,
+                    fontScale: graphFontScale
+                  });
 
                   return (
                     <g key={n.id}>
@@ -2287,15 +2359,29 @@ export const TicketItem: React.FC<Props> = ({
                         stroke="#ffffff"
                         strokeWidth="2"
                       />
+                      {/* DFLT-00320: the size is text-[0.5625rem], not a
+                          fontSize attribute -- an SVG fontSize attribute is
+                          in user units (px) and ignores the browser's default
+                          font size. CSS px inside the SVG are user units
+                          scaled by the viewBox like before, so at the default
+                          16px this is still 9 units. The baseline is split
+                          into a fixed y + 6 and dy 1.3333em: 6 + 9 * 1.3333 =
+                          y + 18 at the default size (unchanged), and y + 30 at
+                          200%, where the text's top (~y + 14) clears a gate's
+                          ring (radius up to 11) and its bottom (~y + 34)
+                          stays above the next row's ring (y + 41). A
+                          shortened label carries the full name as a <title>
+                          (graphNodeLabel explains the shortening). */}
                       <text
                         x={pos.x}
-                        y={pos.y + 18}
-                        fontSize="9"
+                        y={pos.y + 6}
+                        dy="1.3333em"
                         fontWeight="600"
                         textAnchor="middle"
-                        className="select-none fill-slate-700 dark:fill-slate-300"
+                        className="select-none text-[0.5625rem] fill-slate-700 dark:fill-slate-300"
                       >
-                        {n.name.length > 12 ? n.name.slice(0, 12) + '…' : n.name}
+                        {label.truncated && <title>{n.name}</title>}
+                        {label.text}
                       </text>
                     </g>
                   );
@@ -2665,7 +2751,7 @@ export const TicketItem: React.FC<Props> = ({
                                     className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded-sm text-[0.6875rem] font-bold flex items-center gap-1 transition below-80rem:min-w-0 below-80rem:max-w-full below-80rem:flex-wrap below-80rem:wrap-anywhere upto-15rem:px-1"
                                   >
                                     {isApprovalSubmitting ? (
-                                      <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
+                                      <Spinner className="w-3 h-3" />
                                     ) : (
                                       <Check aria-hidden="true" className="w-3 h-3" />
                                     )}
@@ -2769,16 +2855,16 @@ export const TicketItem: React.FC<Props> = ({
                               ) : (
                                 nodeArtifacts.map(art => (
                                   <div key={art.id} className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 space-y-2">
-                                    <div className="flex items-center justify-between font-bold text-slate-700 dark:text-slate-300 text-xs">
-                                      <span className="flex items-center gap-1.5">
-                                        {art.type === 'gherkin' && <FileCode aria-hidden="true" className="w-3.5 h-3.5 text-amber-500" />}
-                                        {art.type === 'html' && <Globe aria-hidden="true" className="w-3.5 h-3.5 text-cyan-500" />}
-                                        {art.type === 'text' && <FileText aria-hidden="true" className="w-3.5 h-3.5 text-indigo-500" />}
-                                        {art.name}
+                                    <div className={`flex items-center justify-between font-bold text-slate-700 dark:text-slate-300 text-xs ${ARTIFACT_HEADER_ROW_WRAP}`}>
+                                      <span className={`flex items-center gap-1.5 ${ARTIFACT_HEADER_NAME_GROUP_WRAP}`}>
+                                        {art.type === 'gherkin' && <FileCode aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-amber-500" />}
+                                        {art.type === 'html' && <Globe aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-cyan-500" />}
+                                        {art.type === 'text' && <FileText aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-500" />}
+                                        <span className={ARTIFACT_HEADER_TEXT_WRAP}>{art.name}</span>
                                       </span>
-                                      <span className="flex items-center gap-2">
+                                      <span className={`flex items-center gap-2 ${ARTIFACT_HEADER_RIGHT_GROUP_WRAP}`}>
                                         {downloadLink(art)}
-                                        <span className="text-[0.625rem] uppercase font-mono px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-sm">
+                                        <span className={`text-[0.625rem] uppercase font-mono px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-sm ${ARTIFACT_HEADER_TEXT_WRAP}`}>
                                           {art.type}
                                         </span>
                                       </span>
@@ -2899,14 +2985,16 @@ export const TicketItem: React.FC<Props> = ({
                           key={a.id}
                           className="p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs"
                         >
-                          <div className="flex items-center justify-between font-semibold text-slate-800 dark:text-slate-200 mb-1">
-                            <span className="flex items-center gap-2">
-                              <FileText aria-hidden="true" className="w-4 h-4 text-indigo-500" />
-                              {a.name}
+                          {/* DFLT-00334: same wrapping header as the
+                              node artifacts above (ARTIFACT_HEADER_*). */}
+                          <div className={`flex items-center justify-between font-semibold text-slate-800 dark:text-slate-200 mb-1 ${ARTIFACT_HEADER_ROW_WRAP}`}>
+                            <span className={`flex items-center gap-2 ${ARTIFACT_HEADER_NAME_GROUP_WRAP}`}>
+                              <FileText aria-hidden="true" className="w-4 h-4 shrink-0 text-indigo-500" />
+                              <span className={ARTIFACT_HEADER_TEXT_WRAP}>{a.name}</span>
                             </span>
-                            <span className="flex items-center gap-2">
+                            <span className={`flex items-center gap-2 ${ARTIFACT_HEADER_RIGHT_GROUP_WRAP}`}>
                               {downloadLink(a)}
-                              <span className="text-[0.625rem] px-2 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 uppercase font-mono">
+                              <span className={`text-[0.625rem] px-2 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 uppercase font-mono ${ARTIFACT_HEADER_TEXT_WRAP}`}>
                                 {a.type}
                               </span>
                             </span>
@@ -2992,7 +3080,7 @@ export const TicketItem: React.FC<Props> = ({
                       {...submittingProps(isRunning)}
                       className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
                     >
-                      {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-600" />}
+                      {isRunning ? <Spinner className="w-3.5 h-3.5 shrink-0" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-600" />}
                       {t('ticketItem.actions.refine')}
                       <SubmittingText busy={isRunning} />
                     </button>
@@ -3002,7 +3090,7 @@ export const TicketItem: React.FC<Props> = ({
                       {...submittingProps(isRunning)}
                       className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition"
                     >
-                      {isRunning ? <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" /> : <Play aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />}
+                      {isRunning ? <Spinner className="w-3.5 h-3.5 shrink-0" /> : <Play aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />}
                       {t('ticketItem.actions.run')}
                       <SubmittingText busy={isRunning} />
                     </button>
@@ -3048,7 +3136,7 @@ export const TicketItem: React.FC<Props> = ({
                 {...submittingProps(isRunning)}
                 className="px-4 max-sm:px-3 max-sm:py-2 max-sm:ml-auto max-w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center justify-center gap-1.5 transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
               >
-                {isRunning ? <Loader2 aria-hidden="true" className="w-4 h-4 shrink-0 animate-spin" /> : <Send aria-hidden="true" className="w-4 h-4 shrink-0" />}
+                {isRunning ? <Spinner className="w-4 h-4 shrink-0" /> : <Send aria-hidden="true" className="w-4 h-4 shrink-0" />}
                 {t('ticketItem.send')}
                 <SubmittingText busy={isRunning} />
               </button>

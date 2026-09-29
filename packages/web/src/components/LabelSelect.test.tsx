@@ -40,6 +40,20 @@ async function openPanel(user: ReturnType<typeof userEvent.setup>) {
   return screen.getByRole('group', { name: i18n.t('ticket.labels.groupLabel', { id: 'TEST-00001' }) });
 }
 
+// DFLT-00321: the same keyboard focus line as the other controls (a 2px
+// blue-500 / dark:blue-400 outline on focus-visible), and no ring-0 override.
+// The ring-0 class is assembled at run time so Tailwind does not pick it up
+// from this file.
+const NO_RING = ['focus', 'ring-0'].join(':');
+const CHECKBOX_FOCUS = [
+  'focus:outline-hidden',
+  'focus-visible:outline-solid',
+  'focus-visible:outline-2',
+  'focus-visible:outline-offset-0',
+  'focus-visible:outline-blue-500',
+  'dark:focus-visible:outline-blue-400'
+];
+
 describe('LabelSelect', () => {
   beforeEach(() => {
     mockedSet.mockReset();
@@ -638,5 +652,17 @@ describe('LabelSelect panel position (DFLT-00295)', () => {
     const name = box.nextElementSibling as HTMLElement;
     expect(name).toHaveClass('truncate', 'group-data-narrow:min-w-0', 'group-data-narrow:whitespace-normal', 'group-data-narrow:wrap-anywhere');
     expect(box.parentElement).toHaveClass('flex', 'whitespace-nowrap', 'px-3', 'group-data-narrow:px-2', 'group-data-narrow:whitespace-normal');
+  });
+
+  it('gives each checkbox the same keyboard focus line as the other controls (DFLT-00321)', async () => {
+    const user = userEvent.setup();
+    render(<LabelSelect ticketId="TEST-00001" labels={[BUG]} projectLabels={PROJECT_LABELS} updatedAt={U0} onSaved={vi.fn()} />);
+    await openPanel(user);
+    const boxes = screen.getAllByRole('checkbox');
+    expect(boxes).toHaveLength(4);
+    for (const box of boxes) {
+      expect(box).toHaveClass(...CHECKBOX_FOCUS);
+      expect(box).not.toHaveClass(NO_RING);
+    }
   });
 });

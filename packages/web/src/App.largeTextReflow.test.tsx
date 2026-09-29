@@ -40,7 +40,7 @@ import App from './App';
 import { Project } from './types';
 import { createFakeBackend, installFakeBackend } from './test/fakeBackend';
 import { findPreviousPage } from './test/waitForAnswers';
-import { allIconButtonTooltips, openIconButtonTooltip } from './test/iconButtonTooltip';
+import { allIconButtonTooltips, openIconButtonTooltip, setupHoverUser, startHoverFakeTimers, waitForHoverOpenDelay } from './test/iconButtonTooltip';
 import { PROJECT_MENU_WIDTH_REM } from './lib/popupPlacement';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
@@ -450,9 +450,12 @@ describe.each(['ja', 'en'] as const)('full project name in the switcher\'s toolt
     return current;
   }
 
-  async function renderWith(currentProjectId: string) {
+  // A test that hovers passes { hover: true }: it then runs under fake timers
+  // with a user that advances them, as waitForHoverOpenDelay needs.
+  async function renderWith(currentProjectId: string, { hover = false }: { hover?: boolean } = {}) {
+    if (hover) startHoverFakeTimers();
     const current = seedProjects(currentProjectId);
-    const user = userEvent.setup();
+    const user = hover ? setupHoverUser() : userEvent.setup();
     render(<App />);
     await screen.findByText(`${current.prefix}-00001`);
     return user;
@@ -479,13 +482,14 @@ describe.each(['ja', 'en'] as const)('full project name in the switcher\'s toolt
 
   async function hoverTooltipLines(user: ReturnType<typeof userEvent.setup>): Promise<string[]> {
     await user.hover(switcherButton());
+    await waitForHoverOpenDelay();
     const tooltip = openIconButtonTooltip();
     expect(tooltip).toHaveAttribute('aria-hidden', 'true');
     return Array.from(tooltip.children).map(line => line.textContent ?? '');
   }
 
   it('puts the name on the tooltip\'s first line and the local path on the second, describing the button by the path alone', async () => {
-    const user = await renderWith(alpha.id);
+    const user = await renderWith(alpha.id, { hover: true });
     const button = switcherButton();
     expect(button).not.toHaveAttribute('title');
     expect(button).toHaveAccessibleName('Alpha');
@@ -493,9 +497,11 @@ describe.each(['ja', 'en'] as const)('full project name in the switcher\'s toolt
     expect(await hoverTooltipLines(user)).toEqual(['Alpha', '/work/alpha']);
   });
 
-  it('writes "not set" on the second line and in the description when the project has no local path', async () => {
-    const user = await renderWith(beta.id);
-    const notSet = i18n.t('settings.appSettings.projects.notSet');
+  // DFLT-00321: "Local path: Not set", not a bare "Not set".
+  it('writes "local path: not set" on the second line and in the description when the project has no local path', async () => {
+    const user = await renderWith(beta.id, { hover: true });
+    const notSet = i18n.t('projectSwitcher.localPathNotSet');
+    expect(notSet).toBe(i18n.language === 'en' ? 'Local path: Not set' : 'ローカルパス: 未設定');
     const button = switcherButton();
     expect(button).not.toHaveAttribute('title');
     expect(button).toHaveAccessibleName('Beta');
@@ -504,7 +510,7 @@ describe.each(['ja', 'en'] as const)('full project name in the switcher\'s toolt
   });
 
   it('puts a long name in the tooltip in full, keeping it out of the description', async () => {
-    const user = await renderWith(long.id);
+    const user = await renderWith(long.id, { hover: true });
     expect(switcherButton()).toHaveAccessibleDescription('/work/long');
     expect(await hoverTooltipLines(user)).toEqual([LONG, '/work/long']);
   });
@@ -518,8 +524,9 @@ describe.each(['ja', 'en'] as const)('full project name in the switcher\'s toolt
   });
 
   it('gives the button no tooltip and no description when there is no project', async () => {
+    startHoverFakeTimers();
     installFakeBackend(createFakeBackend({ projects: [], currentProjectId: '', labels: [], tickets: [] }));
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     render(<App />);
     await screen.findByText(i18n.t('projectSwitcher.noProjectYet'));
     const button = switcherButton();
@@ -528,6 +535,7 @@ describe.each(['ja', 'en'] as const)('full project name in the switcher\'s toolt
     expect(button).not.toHaveAttribute('aria-describedby');
     expect(button).toHaveAccessibleDescription('');
     await user.hover(button);
+    await waitForHoverOpenDelay();
     await user.tab();
     expect(allIconButtonTooltips().filter(t => !t.hidden && t.textContent?.includes(i18n.t('projectSwitcher.noProject')))).toHaveLength(0);
   });

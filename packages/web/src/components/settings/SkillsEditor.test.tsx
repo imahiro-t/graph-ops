@@ -3,6 +3,7 @@
 // ticket's plan sections 3-2 (#7/#8) and 4-2.
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { SkillsEditor } from './SkillsEditor';
@@ -46,6 +47,42 @@ describe('SkillsEditor', () => {
 
   afterEach(async () => {
     await i18n.changeLanguage('ja');
+  });
+
+  // DFLT-00343: the first frame (renderToStaticMarkup renders once and runs
+  // no effect) must show the loading line, not an empty editor, and the line
+  // must go away when the first list load leaves nothing to load.
+  describe('initial loading line', () => {
+    it('shows the loading line, not an empty editor, before anything has loaded', () => {
+      mockedFetchSkills.mockReturnValue(new Promise(() => {}));
+      const html = renderToStaticMarkup(<SkillsEditor onDirtyChange={vi.fn()} />);
+      expect(html).toContain(i18n.t('settings.common.loading'));
+      expect(html).not.toContain('<textarea');
+      expect(html).not.toContain(`${i18n.t('settings.common.save')}</button>`);
+      expect(mockedFetchSkills).not.toHaveBeenCalled();
+    });
+
+    it('drops the loading line and shows the error when the list cannot be fetched', async () => {
+      mockedFetchSkills.mockReset();
+      mockedFetchSkills.mockRejectedValue(new Error('list failed'));
+      render(<SkillsEditor onDirtyChange={vi.fn()} />);
+
+      expect(screen.getByText(i18n.t('settings.common.loading'))).toBeInTheDocument();
+      expect(await screen.findByText('list failed')).toBeInTheDocument();
+      expect(screen.queryByText(i18n.t('settings.common.loading'))).not.toBeInTheDocument();
+      expect(mockedFetchSkill).not.toHaveBeenCalled();
+    });
+
+    it('drops the loading line when the list is empty', async () => {
+      mockedFetchSkills.mockReset();
+      mockedFetchSkills.mockResolvedValue([]);
+      render(<SkillsEditor onDirtyChange={vi.fn()} />);
+
+      expect(screen.getByText(i18n.t('settings.common.loading'))).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByText(i18n.t('settings.common.loading'))).not.toBeInTheDocument());
+      expect(mockedFetchSkills).toHaveBeenCalledTimes(1);
+      expect(mockedFetchSkill).not.toHaveBeenCalled();
+    });
   });
 
   it('selects the first skill on initial mount and fetches its detail', async () => {
@@ -318,5 +355,26 @@ describe('SkillsEditor narrow reflow (DFLT-00261)', () => {
     expect(list).toHaveClass('overflow-y-auto', 'scroll-pt-12');
     expect(list.firstElementChild).toHaveTextContent(i18n.t('settings.skills.listTitle'));
     expect(list.firstElementChild).toHaveClass('sticky', 'top-0', 'z-10');
+  });
+
+  // DFLT-00321: the selected skill's list button carries aria-current="true"
+  // (the value TemplatesEditor uses), no other item carries it, and it
+  // follows the selection.
+  it('marks only the selected skill with aria-current, and moves it with the selection', async () => {
+    const user = userEvent.setup();
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('create-ticket-tier-text');
+
+    const createButton = screen.getByRole('button', { name: new RegExp(i18n.t('settings.skills.names.createTicket')) });
+    const refineButton = screen.getByRole('button', { name: new RegExp(i18n.t('settings.skills.names.refineTicket')) });
+    expect(createButton).toHaveAttribute('aria-current', 'true');
+    expect(refineButton).not.toHaveAttribute('aria-current');
+    expect(document.querySelectorAll('[aria-current]')).toHaveLength(1);
+
+    await user.click(refineButton);
+    await screen.findByDisplayValue('refine-ticket-tier-text');
+    expect(refineButton).toHaveAttribute('aria-current', 'true');
+    expect(createButton).not.toHaveAttribute('aria-current');
+    expect(document.querySelectorAll('[aria-current]')).toHaveLength(1);
   });
 });

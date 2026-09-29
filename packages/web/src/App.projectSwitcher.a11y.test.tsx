@@ -39,7 +39,7 @@ import App from './App';
 import { Project } from './types';
 import { FakeBackend, createFakeBackend, installFakeBackend } from './test/fakeBackend';
 import { trackBodyReads } from './test/waitForAnswers';
-import { openIconButtonTooltip, openIconButtonTooltips } from './test/iconButtonTooltip';
+import { openIconButtonTooltip, openIconButtonTooltips, setupHoverUser, startHoverFakeTimers, waitForHoverOpenDelay } from './test/iconButtonTooltip';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'AAA', local_path: '/work/alpha', created_at: '', updated_at: '' };
 const beta: Project = { id: 'p-beta', name: 'Beta', prefix: 'BBB', local_path: '/work/beta', created_at: '', updated_at: '' };
@@ -85,8 +85,12 @@ function menuItem(p: Project) {
 // it is, the open menu has no project items at all. So besides the first
 // ticket, wait for the app to read that list and let it reach the state and
 // the render, before any test opens the menu (DFLT-00296).
-async function renderApp() {
-  const user = userEvent.setup();
+//
+// A test that hovers passes { hover: true }: it then runs under fake timers
+// with a user that advances them, as waitForHoverOpenDelay needs.
+async function renderApp({ hover = false }: { hover?: boolean } = {}) {
+  if (hover) startHoverFakeTimers();
+  const user = hover ? setupHoverUser() : userEvent.setup();
   const projectListRead = trackBodyReads(backend, (url, method) => url === '/api/projects' && method === 'GET');
   render(<App />);
   await screen.findByText('AAA-00001');
@@ -173,8 +177,9 @@ describe('project switcher accessibility', () => {
     it.each([
       ['ja', alpha, '/work/alpha'],
       ['en', alpha, '/work/alpha'],
-      ['ja', { ...beta, local_path: '' }, '未設定'],
-      ['en', { ...beta, local_path: '' }, 'Not set']
+      // DFLT-00321: a missing path says what is not set.
+      ['ja', { ...beta, local_path: '' }, 'ローカルパス: 未設定'],
+      ['en', { ...beta, local_path: '' }, 'Local path: Not set']
     ] as const)('(%s) names %s by its text and describes it by the local path alone', async (lng, project, description) => {
       backend = createFakeBackend({
         projects: [alpha, project.id === beta.id ? project : beta],
@@ -194,6 +199,27 @@ describe('project switcher accessibility', () => {
       expect(button).not.toHaveAccessibleDescription(expect.stringContaining(project.name));
     });
 
+    // DFLT-00321: the tooltip's second line and the description are the
+    // same text, so a missing path reads "Local path: Not set" in both.
+    it.each([
+      ['ja', 'ローカルパス: 未設定'],
+      ['en', 'Local path: Not set']
+    ] as const)('(%s) shows the same "local path not set" text in the tooltip as in the description', async (lng, text) => {
+      backend = createFakeBackend({
+        projects: [{ ...alpha, local_path: '' }, beta],
+        currentProjectId: alpha.id,
+        labels: [],
+        tickets: [{ id: 'AAA-00001', project_id: alpha.id, title: 'チケット', status: 'TODO', priority: 'HIGH', labelIds: [] }]
+      });
+      fetchMock = installFakeBackend(backend);
+      await i18n.changeLanguage(lng);
+      const user = await renderApp();
+      await tabToSwitcher(user);
+      const tooltip = openIconButtonTooltip();
+      expect(Array.from(tooltip.children).map(l => l.textContent)).toEqual(['Alpha', text]);
+      expect(switcher()).toHaveAccessibleDescription(text);
+    });
+
     it('opens the tooltip of the name and the path on keyboard focus', async () => {
       const user = await renderApp();
       await tabToSwitcher(user);
@@ -207,8 +233,9 @@ describe('project switcher accessibility', () => {
     // render would make IconButton re-run its positioning effect
     // (re-measure, drop and re-add its scroll / resize listeners) each time.
     it('keeps the open tooltip\'s positioning effect in place across App re-renders', async () => {
-      const user = await renderApp();
+      const user = await renderApp({ hover: true });
       await user.hover(switcher());
+      await waitForHoverOpenDelay();
       const tooltip = openIconButtonTooltip();
       const removeSpy = vi.spyOn(window, 'removeEventListener');
       const addSpy = vi.spyOn(window, 'addEventListener');
@@ -239,8 +266,9 @@ describe('project switcher accessibility', () => {
     });
 
     it('shows no tooltip while a popup opened by a mouse click is open, and one Escape closes it', async () => {
-      const user = await renderApp();
+      const user = await renderApp({ hover: true });
       await user.hover(switcher());
+      await waitForHoverOpenDelay();
       expect(openIconButtonTooltip()).toHaveTextContent('Alpha');
 
       await user.click(switcher());

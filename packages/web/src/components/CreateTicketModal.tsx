@@ -1,10 +1,10 @@
 import React, { useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2 } from 'lucide-react';
 import { isSubmitShortcut } from '../lib/keyboardShortcuts';
 import { useModalDialog } from '../hooks/useModalDialog';
 import { StatusLiveRegion } from './StatusLiveRegion';
 import { SubmittingText, submittingProps } from './Submitting';
+import { Spinner } from './Spinner';
 
 interface Props {
   // Called with the free-form request text once the user submits. The
@@ -131,7 +131,7 @@ export const CreateTicketModal: React.FC<Props> = ({ onSubmit, onClose, isCreati
               {...submittingProps(isCreating)}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-xs font-semibold text-white transition flex items-center gap-1.5 max-w-full wrap-break-word"
             >
-              {isCreating && <Loader2 aria-hidden="true" className="w-3.5 h-3.5 shrink-0 animate-spin" />}
+              {isCreating && <Spinner className="w-3.5 h-3.5 shrink-0" />}
               {t('createModal.submit')}
               <SubmittingText busy={isCreating} />
             </button>

@@ -3,11 +3,13 @@
 // this tab's load). See this ticket's plan section 4-2.
 import { act, render, screen, waitFor, waitForElementToBeRemoved, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { AppSettingsEditor } from './AppSettingsEditor';
 import { REDACTED_SECRET_PLACEHOLDER, AppSettingsResponse, Project } from '../../types';
 import { openIconButtonTooltip } from '../../test/iconButtonTooltip';
+import { submittingName } from '../../test/submittingName';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -71,8 +73,8 @@ function renderEditor() {
 // mount effect inside render()'s act, so waiting for that call waits for
 // nothing -- under load the assertions then run against the loading spinner.
 // Wait for the spinner to go away instead. It is always showing when render()
-// returns (load() sets loading before awaiting the fetch), so if that ever
-// stops being true this fails loudly rather than passing without waiting.
+// returns (loading starts true, DFLT-00323), so if that ever stops being
+// true this fails loudly rather than passing without waiting.
 // Call it right after render(), with no await in between.
 async function waitForAppSettingsLoaded() {
   await waitForElementToBeRemoved(() => screen.queryByText(i18n.t('settings.common.loading')));
@@ -89,6 +91,141 @@ describe('AppSettingsEditor', () => {
     // Some tests deliberately switch language -- restore the fixture default
     // (setup.ts's beforeAll) so it never leaks into the next test.
     await i18n.changeLanguage('ja');
+  });
+
+  // DFLT-00323: the first render, before the mount effect has run load(),
+  // shows the loading line and not the form with its default values.
+  // render() runs the mount effect inside its act, so what it leaves in the
+  // DOM is already past the first frame; renderToStaticMarkup renders once
+  // and runs no effect, which is exactly that first frame.
+  it('shows the loading line, not the default form, before the settings have loaded', () => {
+    mockedFetchAppSettings.mockReturnValue(new Promise(() => {}));
+    const html = renderToStaticMarkup(
+      <AppSettingsEditor
+        projects={[]}
+        onDirtyChange={vi.fn()}
+        onProjectsChanged={vi.fn()}
+        onPaginationPageSizeChanged={vi.fn()}
+        onMyNameChanged={vi.fn()}
+      />
+    );
+    expect(html).toContain(i18n.t('settings.common.loading'));
+    expect(html).not.toContain(i18n.t('settings.appSettings.pagination.pageSizeLabel'));
+    expect(html).not.toContain(i18n.t('settings.appSettings.storage.title'));
+    expect(html).not.toContain(i18n.t('settings.common.save'));
+    expect(html).not.toContain('<input');
+    expect(mockedFetchAppSettings).not.toHaveBeenCalled();
+  });
+
+  // DFLT-00343: the loading line is a status message (SC 4.1.3), the same
+  // pattern as LabelsEditor's loading line.
+  describe('the loading line', () => {
+    it('is a role="status" element on the first frame', () => {
+      mockedFetchAppSettings.mockReturnValue(new Promise(() => {}));
+      const html = renderToStaticMarkup(
+        <AppSettingsEditor
+          projects={[]}
+          onDirtyChange={vi.fn()}
+          onProjectsChanged={vi.fn()}
+          onPaginationPageSizeChanged={vi.fn()}
+          onMyNameChanged={vi.fn()}
+        />
+      );
+      const container = document.createElement('div');
+      container.innerHTML = html;
+      const status = container.querySelector('[role="status"]');
+      expect(status).not.toBeNull();
+      expect(status).toHaveTextContent(i18n.t('settings.common.loading'));
+    });
+
+    it('is found by role right after render and goes away once the settings are in', async () => {
+      mockedFetchAppSettings.mockResolvedValue(makeResponse());
+      renderEditor();
+      // Filtered by its text: the form mounts empty status live regions of
+      // its own (StatusLiveRegion) once it is shown.
+      const loadingStatus = screen.getAllByRole('status').filter(el => el.textContent?.includes(i18n.t('settings.common.loading')));
+      expect(loadingStatus).toHaveLength(1);
+      await waitForAppSettingsLoaded();
+      expect(
+        screen.queryAllByRole('status').filter(el => el.textContent?.includes(i18n.t('settings.common.loading')))
+      ).toHaveLength(0);
+    });
+  });
+
+  // DFLT-00343: a failed load must not leave the form on screen with its
+  // defaults, where saving would overwrite the stored settings with them.
+  describe('when the settings cannot be loaded', () => {
+    const retryButton = () => screen.getByRole('button', { name: i18n.t('settings.common.retry') });
+    const expectNoForm = () => {
+      expect(screen.queryByText(i18n.t('settings.appSettings.pagination.pageSizeLabel'))).not.toBeInTheDocument();
+      expect(screen.queryByText(i18n.t('settings.appSettings.storage.title'))).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
+      expect(screen.queryAllByRole('textbox')).toHaveLength(0);
+      expect(screen.queryAllByRole('spinbutton')).toHaveLength(0);
+      expect(document.querySelector('input, select, textarea')).toBeNull();
+    };
+
+    it('shows the error and a retry button instead of the default form', async () => {
+      mockedFetchAppSettings.mockRejectedValueOnce(new Error('config unreadable'));
+      renderEditor();
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(i18n.t('settings.appSettings.loadFailed', { message: 'config unreadable' }));
+      expect(retryButton()).toBeInTheDocument();
+      expect(screen.queryByText(i18n.t('settings.common.loading'))).not.toBeInTheDocument();
+      expectNoForm();
+    });
+
+    it('shows the form once a retry has loaded the settings, and moves focus to it', async () => {
+      const user = userEvent.setup();
+      mockedFetchAppSettings.mockRejectedValueOnce(new Error('config unreadable'));
+      let resolveRetry: (value: AppSettingsResponse) => void = () => {};
+      mockedFetchAppSettings.mockReturnValueOnce(new Promise<AppSettingsResponse>(r => { resolveRetry = r; }));
+      renderEditor();
+
+      await screen.findByRole('alert');
+      await user.click(retryButton());
+      // While the retry runs the button stays, focused, and says it is busy.
+      const busyButton = screen.getByRole('button', { name: submittingName(i18n.t('settings.common.retry')) });
+      expect(busyButton).toHaveAttribute('aria-busy', 'true');
+      expect(busyButton).toHaveAttribute('aria-disabled', 'true');
+      expect(busyButton).toHaveFocus();
+      // A second press while busy sends nothing.
+      await user.click(busyButton);
+      expect(mockedFetchAppSettings).toHaveBeenCalledTimes(2);
+
+      await act(async () => resolveRetry(makeResponse({ paginationPageSize: 25 })));
+
+      expect(await screen.findByText(i18n.t('settings.appSettings.pagination.pageSizeLabel'))).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: i18n.t('settings.common.save') })).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: i18n.t('settings.common.retry') })).not.toBeInTheDocument();
+      expect(mockedFetchAppSettings).toHaveBeenCalledTimes(2);
+      // Focus went to the form's container, not <body>.
+      await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+      expect(document.activeElement).toHaveAttribute('tabindex', '-1');
+      expect(document.activeElement).toContainElement(screen.getByText(i18n.t('settings.appSettings.storage.title')));
+    });
+
+    it('keeps the error, the retry button and the focus on it when the retry fails again', async () => {
+      const user = userEvent.setup();
+      mockedFetchAppSettings.mockRejectedValueOnce(new Error('config unreadable'));
+      mockedFetchAppSettings.mockRejectedValueOnce(new Error('still unreadable'));
+      renderEditor();
+
+      await screen.findByRole('alert');
+      await user.click(retryButton());
+
+      await waitFor(() =>
+        expect(screen.getByRole('alert')).toHaveTextContent(i18n.t('settings.appSettings.loadFailed', { message: 'still unreadable' }))
+      );
+      const button = retryButton();
+      expect(button).toHaveFocus();
+      expect(button).not.toHaveAttribute('aria-busy');
+      expect(button).toHaveAttribute('aria-disabled', 'false');
+      expect(mockedFetchAppSettings).toHaveBeenCalledTimes(2);
+      expectNoForm();
+    });
   });
 
   it('M-5: retyping the MySQL password in plaintext and saving returns the field to the redacted state', async () => {

@@ -78,7 +78,8 @@
     "loadFailed": "Could not load the current project setting. Check your home config file (~/.graph-ops/config.json) and try again.",
     "retry": "Retry",
     "pendingApprovals_one": "{{count}} ticket awaiting approval",
-    "pendingApprovals_other": "{{count}} tickets awaiting approval"
+    "pendingApprovals_other": "{{count}} tickets awaiting approval",
+    "localPathNotSet": "Local path: Not set"
   },
   "createProjectModal": {
     "title": "Create New Project",
@@ -391,6 +392,7 @@
       "saveSuccess": "Saved successfully.",
       "noChangesToSave": "No changes to save.",
       "loading": "Loading...",
+      "retry": "Retry",
       "inheritedFromDefault": "Inherited from the plugin default",
       "yes": "Yes",
       "no": "No",
@@ -503,6 +505,7 @@
       "emptyOverrideHint": "Saving with this field empty clears the override and falls back to the plugin default."
     },
     "appSettings": {
+      "loadFailed": "The app settings could not be loaded ({{message}}). The settings form stays hidden until they load, so the saved settings cannot be overwritten with defaults. Please retry.",
       "restartNote": "Changes here take effect the next time the server starts (saved to: {{path}}).",
       "restartNoteNoPath": "Settings are saved to your home config file ($HOME/.graph-ops/config.json). Your home directory could not be resolved, so there is nowhere to save them and the server is running on environment variables and built-in defaults. They take effect after a restart.",
       "homeConfigUnreadable": "{{path}} could not be read, so none of the settings on this page are in effect -- the values shown come from environment variables and built-in defaults -- and saving here fails until it is fixed. Repair or delete that file.",

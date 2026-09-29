@@ -4,11 +4,12 @@
 // this ticket's plan sections 3-2 (#3/#4) and 4-2.
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { NodeTypesEditor } from './NodeTypesEditor';
 import { SettingsNodeTypeInfo } from '../../types';
-import { openIconButtonTooltip } from '../../test/iconButtonTooltip';
+import { openIconButtonTooltip, setupHoverUser, startHoverFakeTimers, waitForHoverOpenDelay } from '../../test/iconButtonTooltip';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -49,6 +50,42 @@ describe('NodeTypesEditor', () => {
 
   afterEach(async () => {
     await i18n.changeLanguage('ja');
+  });
+
+  // DFLT-00343: the first frame (renderToStaticMarkup renders once and runs
+  // no effect) must show the loading line, not an empty editor, and the line
+  // must go away when the first list load leaves nothing to load.
+  describe('initial loading line', () => {
+    it('shows the loading line, not an empty editor, before anything has loaded', () => {
+      mockedFetchTypes.mockReturnValue(new Promise(() => {}));
+      const html = renderToStaticMarkup(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+      expect(html).toContain(i18n.t('settings.common.loading'));
+      expect(html).not.toContain('<textarea');
+      expect(html).not.toContain(`${i18n.t('settings.common.save')}</button>`);
+      expect(mockedFetchTypes).not.toHaveBeenCalled();
+    });
+
+    it('drops the loading line and shows the error when the list cannot be fetched', async () => {
+      mockedFetchTypes.mockReset();
+      mockedFetchTypes.mockRejectedValue(new Error('list failed'));
+      render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+
+      expect(screen.getByText(i18n.t('settings.common.loading'))).toBeInTheDocument();
+      expect(await screen.findByText('list failed')).toBeInTheDocument();
+      expect(screen.queryByText(i18n.t('settings.common.loading'))).not.toBeInTheDocument();
+      expect(mockedFetchType).not.toHaveBeenCalled();
+    });
+
+    it('drops the loading line when the list is empty', async () => {
+      mockedFetchTypes.mockReset();
+      mockedFetchTypes.mockResolvedValue([]);
+      render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+
+      expect(screen.getByText(i18n.t('settings.common.loading'))).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByText(i18n.t('settings.common.loading'))).not.toBeInTheDocument());
+      expect(mockedFetchTypes).toHaveBeenCalledTimes(1);
+      expect(mockedFetchType).not.toHaveBeenCalled();
+    });
   });
 
   it('selects the first type on initial mount and fetches its detail', async () => {
@@ -632,13 +669,15 @@ describe('NodeTypesEditor delete button names', () => {
   // The reason is shown on hover and stays available to assistive
   // technology as the description.
   it('shows why a default type cannot be deleted on hover', async () => {
-    const user = userEvent.setup();
+    startHoverFakeTimers();
+    const user = setupHoverUser();
     render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
     await screen.findByDisplayValue('implementation-tier-text');
     const byDefault = screen.getByRole('button', {
       name: i18n.t('settings.nodeTypes.deleteTypeAriaLabel', { name: i18n.t('nodeType.implementation') })
     });
     await user.hover(byDefault.parentElement as HTMLElement);
+    await waitForHoverOpenDelay();
     expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
   });
 
@@ -913,9 +952,18 @@ describe('NodeTypesEditor names cut off with an ellipsis, full name in the edito
     const badge = screen.getByText(i18n.t('settings.nodeTypes.defaultBadge'));
     expect(itemButton('Implementation')).toContainElement(badge);
     expect(badge).toHaveClass('upto-15rem:ml-[1.375rem]');
-    // DFLT-00294: the badge text is 0.5625rem (9px at the default 16px), so it
-    // follows the browser's default font size like the rest of the editor.
-    expect(badge).toHaveClass('text-[0.5625rem]');
+    // DFLT-00294 / DFLT-00320: the badge text is in rem, so it follows the
+    // browser's default font size like the rest of the editor, and is
+    // 0.6875rem (11px at the default 16px) so it is readable; leading-none
+    // keeps the larger text from making the item taller.
+    expect(badge).toHaveClass('text-[0.6875rem]', 'leading-none');
+    expect(badge).not.toHaveClass('text-[0.5625rem]');
+    // DFLT-00320: the text colour meets WCAG 1.4.3 (4.5:1) on the badge's
+    // background: slate-600 on slate-200 is 6.15:1, slate-300 on slate-700
+    // (dark) is 6.97:1. The earlier slate-500 / slate-400 were 3.86:1 / 4.04:1.
+    expect(badge).toHaveClass('bg-slate-200', 'text-slate-600', 'dark:bg-slate-700', 'dark:text-slate-300');
+    expect(badge).not.toHaveClass('text-slate-500');
+    expect(badge).not.toHaveClass('dark:text-slate-400');
     const dot = itemButton('Gherkin Spec').querySelector(`[title="${i18n.t('settings.nodeTypes.overrideBadge')}"]`);
     expect(dot).toHaveClass('upto-15rem:ml-[1.375rem]');
   });
@@ -1033,5 +1081,32 @@ describe('NodeTypesEditor names cut off with an ellipsis, full name in the edito
     const heading = editorHeading();
     expect(heading.querySelector('span')).toHaveTextContent(i18n.t('nodeType.implementation'));
     expect(heading.querySelector('code')).toHaveTextContent('implementation');
+  });
+
+  // DFLT-00321: the selected type's list button carries aria-current="true"
+  // (the value TemplatesEditor uses); no other item -- and not the row's
+  // delete button -- carries it, and it follows the selection.
+  it('marks only the selected type with aria-current, and moves it with the selection', async () => {
+    mockedFetchTypes.mockResolvedValue([...TYPES, { type: 'custom_lint', has_default: false, has_user_override: true }]);
+    const user = userEvent.setup();
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('implementation-tier-text');
+
+    const listButton = (type: string) =>
+      screen.getByRole('button', { name: new RegExp(`^${type === 'custom_lint' ? 'custom_lint' : i18n.t(`nodeType.${type}`)}`) });
+    const deleteButton = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.deleteTypeAriaLabel', { name: 'custom_lint' }) });
+
+    expect(listButton('implementation')).toHaveAttribute('aria-current', 'true');
+    expect(listButton('review')).not.toHaveAttribute('aria-current');
+    expect(listButton('custom_lint')).not.toHaveAttribute('aria-current');
+    expect(deleteButton).not.toHaveAttribute('aria-current');
+    expect(document.querySelectorAll('[aria-current]')).toHaveLength(1);
+
+    await user.click(listButton('custom_lint'));
+    await screen.findByDisplayValue('custom_lint-tier-text');
+    expect(listButton('custom_lint')).toHaveAttribute('aria-current', 'true');
+    expect(listButton('implementation')).not.toHaveAttribute('aria-current');
+    expect(deleteButton).not.toHaveAttribute('aria-current');
+    expect(document.querySelectorAll('[aria-current]')).toHaveLength(1);
   });
 });

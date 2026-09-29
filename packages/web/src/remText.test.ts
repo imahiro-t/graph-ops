@@ -11,11 +11,15 @@ import path from 'node:path';
 // pending-approval badge, labels, the Gherkin / Markdown viewers, the modals,
 // tooltips, the autopilot decisions, the ticket family and the node types
 // list's "default" badge). This reads every non-test source file under src/
-// and fails if a px text size comes back outside comments.
+// and fails if a px text size comes back outside comments. (DFLT-00320 also
+// moved the execution graph's SVG fontSize attribute to rem and added a check
+// for font sizes set outside a text size class.)
 //
 // Class names are matched by regular expressions or assembled at run time on
-// purpose: Tailwind scans src/ for candidates, so writing a px text class
-// literally here would add an otherwise unused rule to the app's CSS.
+// purpose: Tailwind used to scan the test files too, so writing a px text
+// class literally here added an otherwise unused rule to the app's CSS.
+// index.css now leaves the test files out (DFLT-00323); this stays as a
+// second guard.
 const SRC = __dirname;
 
 function listSources(dir: string): string[] {
@@ -62,8 +66,26 @@ const REPLACED: Record<string, Partial<Record<'0.5625' | '0.625' | '0.6875', num
   'components/CreateTicketModal.tsx': { '0.6875': 1 },
   'components/MarkdownViewer.tsx': { '0.6875': 3 },
   'components/ProjectSetupModal.tsx': { '0.6875': 4 },
-  'components/settings/NodeTypesEditor.tsx': { '0.5625': 1 }
+  // DFLT-00320 moved the "default" badge from 0.5625rem to 0.6875rem (the
+  // other 3 are the editor's existing 11px sizes).
+  'components/settings/NodeTypesEditor.tsx': { '0.6875': 4 },
+  // DFLT-00320: the execution graph's node name labels (a fontSize="9"
+  // attribute before).
+  'components/TicketItem.tsx': { '0.5625': 1 }
 };
+
+// DFLT-00320: a font size set outside a text size class is not seen by the
+// text-[Npx] check, and in px / SVG user units it ignores the browser's
+// default font size (the execution graph's fontSize="9" attribute was one).
+// Sizes are set with rem text size classes, so any such font size is rejected,
+// whatever its unit: an SVG fontSize attribute or a fontSize style whose value
+// is a number or starts with one (fontSize="9", fontSize={9},
+// { fontSize: '9px' }, but also '0.5rem'), and any CSS font-size declaration.
+const FONT_SIZE_OUTSIDE_CLASSES = [
+  /fontSize\s*=\s*(?:"\s*[\d.]|'\s*[\d.]|\{\s*[\d.'"])/g,
+  /fontSize\s*:\s*['"]?\s*\d/g,
+  /font-size\s*[:=]/g
+];
 
 describe('src/ text sizes (DFLT-00294)', () => {
   it('finds the source files to check', () => {
@@ -77,6 +99,11 @@ describe('src/ text sizes (DFLT-00294)', () => {
 
   it.each(SOURCES)('%s uses no px text size (a text-[Npx] class) outside comments', name => {
     expect(code(name).match(PX_TEXT) ?? []).toEqual([]);
+  });
+
+  it.each(SOURCES)('%s sets no font size outside a text size class (fontSize attribute or style, CSS font-size) outside comments', name => {
+    const src = code(name);
+    for (const re of FONT_SIZE_OUTSIDE_CLASSES) expect(src.match(re) ?? []).toEqual([]);
   });
 
   it.each(Object.entries(REPLACED))('%s uses the rem sizes instead', (name, sizes) => {

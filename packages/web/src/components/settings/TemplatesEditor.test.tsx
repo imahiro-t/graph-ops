@@ -5,6 +5,7 @@
 // item, labelled preview and textarea, text contrast, focus after saving).
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { TemplatesEditor } from './TemplatesEditor';
@@ -61,6 +62,21 @@ describe('TemplatesEditor', () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await i18n.changeLanguage('ja');
+  });
+
+  // DFLT-00343: the first render must already be the loading line, not the
+  // editor with its empty defaults. render() runs effects straight away, so
+  // the DOM is already past the first frame; renderToStaticMarkup renders
+  // once and runs no effect, which is exactly that first frame.
+  it('shows the loading line, not an empty editor, before the template has loaded', () => {
+    fetchPlan.mockReturnValue(new Promise(() => {}));
+    const html = renderToStaticMarkup(<TemplatesEditor onDirtyChange={vi.fn()} />);
+    expect(html).toContain(i18n.t('settings.common.loading'));
+    expect(html).not.toContain('<textarea');
+    expect(html).not.toContain(i18n.t('settings.planTemplate.mergedPreviewLabel'));
+    // The button's own text, not the word inside the intro paragraph.
+    expect(html).not.toContain(`${i18n.t('settings.common.save')}</button>`);
+    expect(fetchPlan).not.toHaveBeenCalled();
   });
 
   it('lists plan, review and report in order and opens the plan template first', async () => {

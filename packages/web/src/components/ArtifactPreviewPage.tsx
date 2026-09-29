@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileCode, FileText, Code2, Loader2, AlertTriangle } from 'lucide-react';
+import { FileCode, FileText, Code2, AlertTriangle } from 'lucide-react';
 import { GherkinViewer } from './GherkinViewer';
 import { MarkdownViewer } from './MarkdownViewer';
 import { errorMessage } from '../lib/apiError';
+import { Spinner } from './Spinner';
 
 // Standalone page for "open in new tab" on a gherkin/text/html artifact (see
 // TicketItem.tsx's openInNewTabLink): a plain GET /api/artifacts/{id}/content
@@ -106,7 +107,7 @@ export const ArtifactPreviewPage: React.FC = () => {
             </div>
           ) : content === null ? (
             <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-sm p-4">
-              <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" />
+              <Spinner className="w-4 h-4" />
               {t('artifactPreview.loading')}
             </div>
           ) : type === 'gherkin' ? (
