@@ -209,8 +209,8 @@ describe('named variants for the last arbitrary at-rule prefixes (DFLT-00294)', 
   it('nests sm:cq-from-16rem: the same way as sm:[@container(min-width:16rem)]: (@container inside the sm @media)', async () => {
     const flat = (css: string) => css.replace(/\s+/g, '');
     const nested = '@media(width>=640px){@container(min-width:16rem){';
-    const named = flat(await buildCss([v('sm', v(CQ_FROM16, 'border-l'))]));
-    const arbitrary = flat(await buildCss([v('sm', v(ARB_CQ_FROM16, 'border-l'))]));
+    const named = flat(await buildCss([v('sm', v(CQ_FROM16, 'pl-3'))]));
+    const arbitrary = flat(await buildCss([v('sm', v(ARB_CQ_FROM16, 'pl-3'))]));
     expect(named).toContain(nested);
     expect(arbitrary).toContain(nested);
     expect(named.match(/@container/g)).toHaveLength(1);
