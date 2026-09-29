@@ -73,20 +73,20 @@
 //   320-336px screen, so under 80rem it may shrink and wrap too; from 80rem
 //   up it stays one line.
 //
-// DFLT-00280: in English with a 200% default font at 320-375px the status badge wrapped inside its words ("IN / PROGR
-// / ESS", "AWAITIN / G FIX") and, still rounded-full, looked like a tall
-// oval. `anywhere` makes a single character the badge's min-content width,
-// so the shrinking right group squeezed it that narrow. Under 80rem it is
-// now wrap-break-word (overflow-wrap: break-word), which keeps the longest word
-// as the min-content width, so it wraps at the spaces and breaks inside a
-// word only when that word cannot fit on a line of its own; and it is
-// rounded-xl there, a rounded rectangle when wrapped and still a pill on one
-// line (0.75rem is at least half the one-line height).
+// DFLT-00280: in English with a 200% default font at 320-375px the status
+// badge wrapped inside its words ("IN / PROGR / ESS", "AWAITIN / G FIX")
+// and, still rounded-full, looked like a tall oval. `anywhere` makes a
+// single character the badge's min-content width, so the shrinking right
+// group squeezed it that narrow. Under 80rem it is now wrap-break-word
+// (overflow-wrap: break-word), which keeps the longest word as the
+// min-content width, so it wraps at the spaces and breaks inside a word only
+// when that word cannot fit on a line of its own; and it is rounded-xl
+// there, a rounded rectangle when wrapped and still a pill on one line
+// (0.75rem is at least half the one-line height).
 // That alone did not fit: at 200% x 320-336px the badge already took the
 // row's whole width and still had no room for "PROGRESS" (next to the dot)
 // or "AWAITING" on a line of their own (measured: 138px available for 116px
-// + 32px padding + the dot). So
-// under 80rem the IN PROGRESS badge is a block with the dot inline in front
+// + 32px padding + the dot). So under 80rem the IN PROGRESS badge is a block with the dot inline in front
 // of the label ("• IN" / "PROGRESS"), and under 15rem the badge and the
 // row pad 0.25rem at the sides instead of 0.5rem. The label stays in a span
 // of its own, with min-w-0; that has no effect today (under 80rem the span

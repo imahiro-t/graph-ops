@@ -28,28 +28,31 @@
 // implementation notes.
 //
 // fetch is served by test/fakeBackend.ts, like App.largeTextReflow.test.tsx.
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from './i18n';
 import App from './App';
 import { Project } from './types';
 import { createFakeBackend, installFakeBackend } from './test/fakeBackend';
 import { findPreviousPage } from './test/waitForAnswers';
+import { openIconButtonTooltips } from './test/iconButtonTooltip';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 
 const BREAKS_ANYWHERE = 'wrap-anywhere';
 const NARROW = 'upto-15rem:';
 
-// Six tickets on pages of five, so the pagination row is drawn.
-function seed() {
+// Six tickets on pages of five, so the pagination row is drawn. Without a
+// project there are no tickets.
+function seed({ withProject = true }: { withProject?: boolean } = {}) {
   installFakeBackend(
     createFakeBackend({
       projects: [alpha],
-      currentProjectId: alpha.id,
+      currentProjectId: withProject ? alpha.id : '',
       paginationPageSize: 5,
       labels: [],
-      tickets: Array.from({ length: 6 }, (_, i) => ({
+      tickets: (withProject ? Array.from({ length: 6 }) : []).map((_, i) => ({
         id: `ALP-0000${i + 1}`,
         project_id: alpha.id,
         title: `チケット ${i + 1}`,
@@ -64,6 +67,19 @@ function seed() {
 async function renderApp() {
   render(<App />);
   await screen.findByText('ALP-00001');
+}
+
+// Without a project there is no ticket to wait for: wait for the switcher's
+// "Select a project" label instead.
+async function renderAppWithoutProject() {
+  render(<App />);
+  const header = screen.getByRole('banner');
+  await within(header).findByRole('button', { name: i18n.t('projectSwitcher.noProject') });
+  return header;
+}
+
+function languageName(lng: 'ja' | 'en') {
+  return i18n.t('header.language.toggleTitle', { lang: i18n.t(`header.language.${lng}`) });
 }
 
 afterEach(async () => {
@@ -238,6 +254,76 @@ describe.each(['ja', 'en'] as const)('summary card figures (%s)', lng => {
       const label = item.children[1] as HTMLElement;
       expect(label).toHaveClass('text-[0.6875rem]');
       expect(Array.from(label.classList).filter(c => c.includes(BREAKS_ANYWHERE))).toEqual([]);
+    }
+  });
+});
+
+// DFLT-00319: moved from App.headerIconOnly.test.tsx (removed with the
+// icon-only header of a window of 200px or less), keeping the cases that
+// hold at every width. Without a project New Ticket is natively disabled and
+// described by the reason alone (a hidden span referenced by
+// aria-describedby), with the reason as its title and no visible tooltip;
+// with a project it has neither. The header's Tab order is unchanged.
+describe.each(['ja', 'en'] as const)('New Ticket and the Tab order in a 320px window at 200%% (%s)', lng => {
+  beforeEach(async () => {
+    await i18n.changeLanguage(lng);
+  });
+
+  it('is disabled without a project and described by the reason alone, through a hidden element', async () => {
+    seed({ withProject: false });
+    const header = await renderAppWithoutProject();
+    const button = within(header).getByRole('button', { name: i18n.t('header.newTicket') });
+    expect(button).toBeDisabled();
+    const reason = i18n.t('projectSwitcher.selectFirst');
+    expect(button).toHaveAccessibleDescription(reason);
+    expect(button).not.toHaveAccessibleDescription(new RegExp(i18n.t('header.newTicket')));
+    const describedBy = button.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    const description = document.getElementById(describedBy as string) as HTMLElement;
+    expect(description).toHaveAttribute('hidden');
+    expect(description.textContent).toBe(reason);
+  });
+
+  it('keeps the title with the reason without a project and opens no visible tooltip on hover', async () => {
+    seed({ withProject: false });
+    const user = userEvent.setup();
+    const header = await renderAppWithoutProject();
+    const button = within(header).getByRole('button', { name: i18n.t('header.newTicket') });
+    expect(button).toHaveAttribute('title', i18n.t('projectSwitcher.selectFirst'));
+    // A disabled button gets no pointer events: hover its row instead.
+    await user.hover(button.parentElement as HTMLElement);
+    expect(openIconButtonTooltips()).toHaveLength(0);
+  });
+
+  it('has no description and no title with a project', async () => {
+    seed();
+    await renderApp();
+    const header = screen.getByRole('banner');
+    const button = within(header).getByRole('button', { name: i18n.t('header.newTicket') });
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(button).not.toHaveAttribute('aria-describedby');
+    expect(button).not.toHaveAttribute('title');
+    expect(button).toHaveAccessibleDescription('');
+  });
+
+  it('keeps the Tab order of the header controls', async () => {
+    seed();
+    const user = userEvent.setup();
+    await renderApp();
+    const header = screen.getByRole('banner');
+    const expected = [
+      'Alpha',
+      i18n.t('header.launchClaude'),
+      languageName(lng),
+      new RegExp(`^${i18n.t('header.theme.toggleTitle', { mode: '' }).split(':')[0]}`),
+      i18n.t('header.settings'),
+      i18n.t('header.newTicket')
+    ];
+    const buttons = expected.map(name => within(header).getByRole('button', { name }));
+    await user.tab();
+    for (const button of buttons) {
+      expect(button).toHaveFocus();
+      await user.tab();
     }
   });
 });

@@ -409,13 +409,13 @@ describe.each(['ja', 'en'] as const)('project switcher in a narrow header (%s)',
   });
 });
 
-// DFLT-00277: with the name truncated in the button, sighted users read the full name in
-// the button's tooltip -- the name on the first line, the local path (or
-// "not set") on the second -- and in the popup, whose items now wrap the
-// name instead of truncating it. The prefix and the pending-approval badge
-// stay in the group on the item's right. The accessible name is unchanged
-// (checked with the button's layout in "project switcher in a narrow header"
-// above).
+// DFLT-00277: with the name truncated in the button, sighted users read the
+// full name in the button's tooltip -- the name on the first line, the local
+// path (or "not set") on the second -- and in the popup, whose items now
+// wrap the name instead of truncating it. The prefix and the
+// pending-approval badge stay in the group on the item's right. The
+// accessible name is unchanged (checked with the button's layout in
+// "project switcher in a narrow header" above).
 // DFLT-00285: the tooltip is IconButton's visible one (hover and keyboard
 // focus, aria-hidden) instead of a title attribute, so a screen reader no
 // longer reads the name a second time as the description: the description

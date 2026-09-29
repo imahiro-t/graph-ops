@@ -1981,15 +1981,16 @@ export const TicketItem: React.FC<Props> = ({
             </div>
             {/* DFLT-00276: a closed reason with one long word (e.g.
                 "superseded-by-DFLT-00002") reached R304.9 at 320px / 200% in
-                English, past the card's clip. min-w-0 lets this item shrink, and only the
-                reason span gets wrap-anywhere: put on the whole item it was
-                inherited by the "Closed reason:" text too, whose share of
-                the one-line flex row then broke it mid-word ("Close / d /
-                reaso / n:" at 320px). flex-wrap moves the reason onto its
-                own line when it does not fit beside the label, the label
-                text keeps min-width: auto so it breaks between words only,
-                and the icon is shrink-0 so it is not squeezed to a dot. When
-                everything fits on one line nothing changes.
+                English, past the card's clip. min-w-0 lets this item
+                shrink, and only the reason span gets wrap-anywhere: put on
+                the whole item it was inherited by the "Closed reason:" text
+                too, whose share of the one-line flex row then broke it
+                mid-word ("Close / d / reaso / n:" at 320px). flex-wrap moves
+                the reason onto its own line when it does not fit beside the
+                label, the label text keeps min-width: auto so it breaks
+                between words only, and the icon is shrink-0 so it is not
+                squeezed to a dot. When everything fits on one line nothing
+                changes.
                 DFLT-00292: the label is a flex item of its own (MetaLabel), so
                 when the icon and the label do not fit on one line the label
                 moves to the next line whole instead of breaking ("クローズ理 /

@@ -167,9 +167,9 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
     // and the save error are flex items of the metadata bar's labels item
     // (flex-wrap) on their own. When the wrapper was one inline-flex item,
     // an error widened it, and the whole wrapper -- button included --
-    // wrapped to the next line, taking the open panel with it. An item added after the button never
-    // moves it. The wrapper only keeps its event handlers (they work
-    // through contents).
+    // wrapped to the next line, taking the open panel with it. An item
+    // added after the button never moves it. The wrapper only keeps its
+    // event handlers (they work through contents).
     <div
       ref={wrapperRef}
       className="contents"
