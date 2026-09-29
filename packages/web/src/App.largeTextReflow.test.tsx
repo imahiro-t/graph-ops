@@ -40,7 +40,7 @@ import App from './App';
 import { Project } from './types';
 import { createFakeBackend, installFakeBackend } from './test/fakeBackend';
 import { findPreviousPage } from './test/waitForAnswers';
-import { allIconButtonTooltips, openIconButtonTooltip } from './test/iconButtonTooltip';
+import { allIconButtonTooltips, openIconButtonTooltip, waitForHoverOpenDelay } from './test/iconButtonTooltip';
 import { PROJECT_MENU_WIDTH_REM } from './lib/popupPlacement';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
@@ -479,6 +479,7 @@ describe.each(['ja', 'en'] as const)('full project name in the switcher\'s toolt
 
   async function hoverTooltipLines(user: ReturnType<typeof userEvent.setup>): Promise<string[]> {
     await user.hover(switcherButton());
+    await waitForHoverOpenDelay();
     const tooltip = openIconButtonTooltip();
     expect(tooltip).toHaveAttribute('aria-hidden', 'true');
     return Array.from(tooltip.children).map(line => line.textContent ?? '');
@@ -530,6 +531,7 @@ describe.each(['ja', 'en'] as const)('full project name in the switcher\'s toolt
     expect(button).not.toHaveAttribute('aria-describedby');
     expect(button).toHaveAccessibleDescription('');
     await user.hover(button);
+    await waitForHoverOpenDelay();
     await user.tab();
     expect(allIconButtonTooltips().filter(t => !t.hidden && t.textContent?.includes(i18n.t('projectSwitcher.noProject')))).toHaveLength(0);
   });

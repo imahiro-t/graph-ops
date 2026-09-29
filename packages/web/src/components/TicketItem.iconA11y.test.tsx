@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { Artifact, GraphNode, TicketDetail, TicketStatus } from '../types';
 import { TicketItem } from './TicketItem';
-import { openIconButtonTooltip, openIconButtonTooltips } from '../test/iconButtonTooltip';
+import { openIconButtonTooltip, openIconButtonTooltips, waitForHoverOpenDelay } from '../test/iconButtonTooltip';
 
 const TICKET_ID = 'TEST-00166';
 
@@ -205,10 +205,33 @@ describe('TicketItem icon buttons (IconButton)', () => {
     const user = userEvent.setup();
     const { onToggleExpand } = renderRow();
     const del = screen.getByRole('button', { name: i18n.t('ticketItem.delete.ariaLabel', { id: TICKET_ID, title: 'アイコンのテスト' }) });
+    // Opened by keyboard focus, the tooltip stays through a press on it
+    // (only a hover-opened one closes on the pointerdown, DFLT-00322), so the
+    // whole press lands on it and has to stop there. The events are fired
+    // one by one: user.click's mousedown would move focus off the button and
+    // close the tooltip before the click.
+    for (let i = 0; i < 20 && document.activeElement !== del; i++) await user.tab();
+    expect(del).toHaveFocus();
+    const tooltip = openIconButtonTooltip();
+    fireEvent.pointerDown(tooltip);
+    fireEvent.mouseDown(tooltip);
+    fireEvent.mouseUp(tooltip);
+    fireEvent.click(tooltip);
+    expect(openIconButtonTooltip()).toBe(tooltip);
+    expect(onToggleExpand).not.toHaveBeenCalled();
+  });
+
+  it('does not toggle the row when a hover-opened tooltip is clicked', async () => {
+    const user = userEvent.setup();
+    const { onToggleExpand } = renderRow();
+    const del = screen.getByRole('button', { name: i18n.t('ticketItem.delete.ariaLabel', { id: TICKET_ID, title: 'アイコンのテスト' }) });
     await user.hover(del);
+    await waitForHoverOpenDelay();
     await user.click(openIconButtonTooltip());
     expect(onToggleExpand).not.toHaveBeenCalled();
-    // The tooltip is still up, and nothing else opened.
-    expect(openIconButtonTooltips()).toHaveLength(1);
+    // The press ends the hover-opened tooltip (DFLT-00322: one press pushes
+    // a tooltip that covers something out of the way), and nothing else
+    // opened.
+    expect(openIconButtonTooltips()).toHaveLength(0);
   });
 });

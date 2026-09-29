@@ -39,7 +39,7 @@ import App from './App';
 import { Project } from './types';
 import { FakeBackend, createFakeBackend, installFakeBackend } from './test/fakeBackend';
 import { trackBodyReads } from './test/waitForAnswers';
-import { openIconButtonTooltip, openIconButtonTooltips } from './test/iconButtonTooltip';
+import { openIconButtonTooltip, openIconButtonTooltips, waitForHoverOpenDelay } from './test/iconButtonTooltip';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'AAA', local_path: '/work/alpha', created_at: '', updated_at: '' };
 const beta: Project = { id: 'p-beta', name: 'Beta', prefix: 'BBB', local_path: '/work/beta', created_at: '', updated_at: '' };
@@ -231,6 +231,7 @@ describe('project switcher accessibility', () => {
     it('keeps the open tooltip\'s positioning effect in place across App re-renders', async () => {
       const user = await renderApp();
       await user.hover(switcher());
+      await waitForHoverOpenDelay();
       const tooltip = openIconButtonTooltip();
       const removeSpy = vi.spyOn(window, 'removeEventListener');
       const addSpy = vi.spyOn(window, 'addEventListener');
@@ -263,6 +264,7 @@ describe('project switcher accessibility', () => {
     it('shows no tooltip while a popup opened by a mouse click is open, and one Escape closes it', async () => {
       const user = await renderApp();
       await user.hover(switcher());
+      await waitForHoverOpenDelay();
       expect(openIconButtonTooltip()).toHaveTextContent('Alpha');
 
       await user.click(switcher());

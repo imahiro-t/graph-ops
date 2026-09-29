@@ -3,11 +3,11 @@
 import { createRef, type FormEvent } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { IconButton } from './IconButton';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { IconButton, OPEN_DELAY_MS } from './IconButton';
 import i18n from '../i18n';
 import { submittingName } from '../test/submittingName';
-import { allIconButtonTooltips, openIconButtonTooltip, openIconButtonTooltips } from '../test/iconButtonTooltip';
+import { allIconButtonTooltips, openIconButtonTooltip, openIconButtonTooltips, waitForHoverOpenDelay } from '../test/iconButtonTooltip';
 
 const Icon = () => <svg aria-hidden="true" data-testid="icon" />;
 
@@ -79,6 +79,7 @@ describe('IconButton', () => {
     );
     const button = screen.getByRole('button', { name: 'Refresh' });
     await user.hover(button);
+    await waitForHoverOpenDelay();
     expect(openIconButtonTooltip()).toBeVisible();
     await user.unhover(button);
     // The close is delayed so the pointer can move onto the tooltip.
@@ -95,6 +96,7 @@ describe('IconButton', () => {
     );
     const button = screen.getByRole('button', { name: 'Refresh' });
     await user.hover(button);
+    await waitForHoverOpenDelay();
     const tooltip = openIconButtonTooltip();
     await user.hover(tooltip);
     await new Promise(r => setTimeout(r, 150));
@@ -115,6 +117,7 @@ describe('IconButton', () => {
     const wrapper = button.parentElement as HTMLElement;
     expect(wrapper).toHaveClass('inline-flex', 'shrink-0');
     await user.hover(wrapper);
+    await waitForHoverOpenDelay();
     expect(openIconButtonTooltip()).toHaveTextContent('Defaults cannot be deleted');
   });
 
@@ -231,8 +234,21 @@ describe('IconButton', () => {
         </IconButton>
       </div>
     );
-    await user.hover(screen.getByRole('button', { name: 'Delete' }));
-    await user.click(openIconButtonTooltip());
+    // Opened by keyboard focus: a press on the tooltip ends only a
+    // hover-opened state (DFLT-00322), so this tooltip stays in place and the
+    // whole press lands on it. (A hover-opened one closes on the pointerdown,
+    // and the rest of the press no longer reaches it -- see "closes a
+    // hover-opened tooltip on a pointerdown on it" below.) The events are
+    // fired one by one because user.click's mousedown would also move focus
+    // off the button, which closes the tooltip before the mouseup and the
+    // click; each of the four has its own stopPropagation to guard.
+    await user.tab();
+    const tooltip = openIconButtonTooltip();
+    fireEvent.pointerDown(tooltip);
+    fireEvent.mouseDown(tooltip);
+    fireEvent.mouseUp(tooltip);
+    fireEvent.click(tooltip);
+    expect(openIconButtonTooltip()).toBe(tooltip);
     expect(onClick).not.toHaveBeenCalled();
     expect(onMouseDown).not.toHaveBeenCalled();
     expect(onMouseUp).not.toHaveBeenCalled();
@@ -241,6 +257,34 @@ describe('IconButton', () => {
     // The button's own click still bubbles as before.
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a whole click on a describeWithTooltip tooltip from the ancestors, though the press closes it', async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    const onMouseDown = vi.fn();
+    const onMouseUp = vi.fn();
+    const onPointerDown = vi.fn();
+    render(
+      <div onClick={onClick} onMouseDown={onMouseDown} onMouseUp={onMouseUp} onPointerDown={onPointerDown}>
+        <IconButton label="Delete type: plan" tooltip="Defaults cannot be deleted" describeWithTooltip>
+          <Icon />
+        </IconButton>
+      </div>
+    );
+    await user.hover(screen.getByRole('button', { name: 'Delete type: plan' }));
+    await waitForHoverOpenDelay();
+    const tooltip = openIconButtonTooltip();
+    // The pointerdown ends the hover-opened state, but the element stays
+    // (hidden) for aria-describedby, so the rest of the press still lands on
+    // it and has to be stopped there as well.
+    await user.click(tooltip);
+    expect(openIconButtonTooltips()).toHaveLength(0);
+    expect(allIconButtonTooltips()).toEqual([tooltip]);
+    expect(onClick).not.toHaveBeenCalled();
+    expect(onMouseDown).not.toHaveBeenCalled();
+    expect(onMouseUp).not.toHaveBeenCalled();
+    expect(onPointerDown).not.toHaveBeenCalled();
   });
 
   it('exposes the tooltip as the description only with describeWithTooltip, even while it is closed', async () => {
@@ -368,6 +412,7 @@ describe('IconButton', () => {
       expect(openIconButtonTooltip()).toBeVisible();
 
       await user.hover(button);
+      await waitForHoverOpenDelay();
       await user.unhover(button);
       await new Promise(r => setTimeout(r, 150));
       expect(button).toHaveFocus();
@@ -387,6 +432,7 @@ describe('IconButton', () => {
       const button = screen.getByRole('button', { name: 'Settings' });
       await user.tab();
       await user.hover(button);
+      await waitForHoverOpenDelay();
       await user.tab();
       expect(screen.getByRole('button', { name: 'next' })).toHaveFocus();
       expect(openIconButtonTooltip()).toHaveTextContent('Settings');
@@ -406,6 +452,7 @@ describe('IconButton', () => {
       const button = screen.getByRole('button', { name: 'Settings' });
       await user.tab();
       await user.hover(button);
+      await waitForHoverOpenDelay();
       await user.keyboard('{Escape}');
       expect(openIconButtonTooltips()).toHaveLength(0);
       await new Promise(r => setTimeout(r, 150));
@@ -435,6 +482,7 @@ describe('IconButton', () => {
         const input = screen.getByRole('textbox', { name: 'field' });
         await user.click(input);
         await user.hover(screen.getByRole('button', { name: 'Refresh' }));
+        await waitForHoverOpenDelay();
         expect(openIconButtonTooltip()).toBeVisible();
 
         await user.keyboard('{Escape}');
@@ -459,6 +507,7 @@ describe('IconButton', () => {
       );
       await user.click(screen.getByRole('textbox', { name: 'field' }));
       await user.hover(screen.getByRole('button', { name: 'Delete' }).parentElement as HTMLElement);
+      await waitForHoverOpenDelay();
       expect(openIconButtonTooltip()).toHaveTextContent('Defaults cannot be deleted');
 
       await user.keyboard('{Escape}');
@@ -477,6 +526,7 @@ describe('IconButton', () => {
       );
       await user.click(screen.getByRole('textbox', { name: 'field' }));
       await user.hover(screen.getByRole('button', { name: 'Refresh' }));
+      await waitForHoverOpenDelay();
       await user.keyboard('{Escape}');
       expect(openIconButtonTooltips()).toHaveLength(0);
     });
@@ -493,6 +543,7 @@ describe('IconButton', () => {
         );
         const button = screen.getByRole('button', { name: 'Refresh' });
         await user.hover(button);
+        await waitForHoverOpenDelay();
         const registered = add.mock.calls.filter(([type, , capture]) => type === 'keydown' && capture === true);
         expect(registered).toHaveLength(1);
         await user.unhover(button);
@@ -522,6 +573,7 @@ describe('IconButton', () => {
       const input = screen.getByRole('textbox', { name: 'field' });
       await user.click(input);
       await user.hover(screen.getByRole('button', { name: 'Refresh' }));
+      await waitForHoverOpenDelay();
       fireEvent.keyDown(input, init);
       expect(openIconButtonTooltip()).toBeVisible();
     });
@@ -577,6 +629,7 @@ describe('IconButton', () => {
         </IconButton>
       );
       await user.hover(screen.getByRole('button', { name: 'Delete' }));
+      await waitForHoverOpenDelay();
       const tooltip = openIconButtonTooltip();
       expect(tooltip).toHaveStyle({ visibility: 'visible' });
       return tooltip;
@@ -615,6 +668,126 @@ describe('IconButton', () => {
       // 18 (button bottom) + 6.
       expect(tooltip).toHaveStyle({ top: '24px' });
     });
+
+    // DFLT-00322: a resize re-measures at once and again in the next frame.
+    describe('after a resize', () => {
+      // Collects requestAnimationFrame callbacks so a test runs them itself.
+      function controlFrames() {
+        const frames = new Map<number, FrameRequestCallback>();
+        let next = 1;
+        vi.spyOn(window, 'requestAnimationFrame').mockImplementation(cb => {
+          const id = next++;
+          frames.set(id, cb);
+          return id;
+        });
+        vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => {
+          frames.delete(id);
+        });
+        return frames;
+      }
+
+      it('follows the button to where the resize moved it', async () => {
+        const button = { left: 400, top: 100 };
+        const tooltip = await openAt(button);
+        expect(tooltip).toHaveStyle({ left: '373px', top: '122px' });
+        button.left = 200;
+        button.top = 300;
+        act(() => {
+          window.dispatchEvent(new Event('resize'));
+        });
+        // 208 - 35; 316 + 6.
+        expect(tooltip).toHaveStyle({ left: '173px', top: '322px' });
+      });
+
+      it('measures again in the next frame, for a layout that settles only after the resize event', async () => {
+        const button = { left: 400, top: 100 };
+        const tooltip = await openAt(button);
+        const frames = controlFrames();
+        act(() => {
+          window.dispatchEvent(new Event('resize'));
+        });
+        // The layout had not changed yet when the resize event came.
+        expect(tooltip).toHaveStyle({ left: '373px', top: '122px' });
+        button.left = 200;
+        button.top = 300;
+        act(() => {
+          for (const cb of [...frames.values()]) cb(performance.now());
+        });
+        expect(tooltip).toHaveStyle({ left: '173px', top: '322px' });
+      });
+
+      // Found in the browser: a fixed tooltip that a narrowing window has
+      // left near its right edge shrinks to the room left there, so it was
+      // measured as a narrow column and placed off the button.
+      it('measures the tooltip at full width even where the old position left it little room', async () => {
+        const button = { left: 700, top: 100 };
+        const tooltip = await openAt(button);
+        // 708 - 35.
+        expect(tooltip).toHaveStyle({ left: '673px', top: '122px' });
+        // From here on the tooltip shrinks to the room right of its left edge
+        // in a 400px-wide viewport, as a fixed element in a browser does.
+        const viewportWidth = 400;
+        Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: viewportWidth });
+        vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+          if (this.hasAttribute('data-icon-button-tooltip')) {
+            const left = parseFloat(this.style.left) || 0;
+            const width = Math.max(10, Math.min(TOOLTIP.width, viewportWidth - left));
+            return rect(left, 0, width, TOOLTIP.height * Math.ceil(TOOLTIP.width / width));
+          }
+          if (this.tagName === 'BUTTON') return rect(button.left, button.top, 16, 16);
+          return rect(0, 0, 0, 0);
+        });
+        button.left = 100;
+        act(() => {
+          window.dispatchEvent(new Event('resize'));
+        });
+        // 108 - 35: centred with the full 70px width, not the 10px left at 673.
+        expect(tooltip).toHaveStyle({ left: '73px', top: '122px' });
+      });
+
+      it('keeps one pending frame for consecutive resizes', async () => {
+        await openAt({ left: 400, top: 100 });
+        const frames = controlFrames();
+        act(() => {
+          window.dispatchEvent(new Event('resize'));
+          window.dispatchEvent(new Event('resize'));
+          window.dispatchEvent(new Event('resize'));
+        });
+        expect(frames.size).toBe(1);
+      });
+
+      it.each(['close', 'unmount'] as const)('runs a frame left pending by a resize without error after the tooltip is gone (%s)', async how => {
+        const errors = vi.spyOn(console, 'error');
+        const user = userEvent.setup();
+        stubLayout({ left: 400, top: 100 });
+        const { unmount } = render(
+          <IconButton label="Delete">
+            <Icon />
+          </IconButton>
+        );
+        const button = screen.getByRole('button', { name: 'Delete' });
+        await user.hover(button);
+        await waitForHoverOpenDelay();
+        openIconButtonTooltip();
+        const frames = controlFrames();
+        const pending: FrameRequestCallback[] = [];
+        act(() => {
+          window.dispatchEvent(new Event('resize'));
+        });
+        pending.push(...frames.values());
+        expect(pending).toHaveLength(1);
+        if (how === 'close') {
+          await user.keyboard('{Escape}');
+          expect(openIconButtonTooltips()).toHaveLength(0);
+        } else {
+          unmount();
+        }
+        // Closing cancelled it; run it anyway, as a frame already underway would.
+        expect(frames.size).toBe(0);
+        expect(() => act(() => pending.forEach(cb => cb(performance.now())))).not.toThrow();
+        expect(errors).not.toHaveBeenCalled();
+      });
+    });
   });
 });
 
@@ -631,6 +804,7 @@ describe('IconButton text-named options', () => {
     const button = screen.getByRole('button', { name: 'Settings' });
     expect(button).toHaveAttribute('aria-label', 'Settings');
     await user.hover(button);
+    await waitForHoverOpenDelay();
     const tooltip = openIconButtonTooltip();
     expect(tooltip).toHaveTextContent(/^Settings$/);
     expect(tooltip.children).toHaveLength(0);
@@ -660,6 +834,7 @@ describe('IconButton text-named options', () => {
     expect(button).not.toHaveAttribute('aria-label');
     expect(button).toHaveAccessibleName('Alpha');
     await user.hover(button);
+    await waitForHoverOpenDelay();
     expect(openIconButtonTooltip()).toHaveTextContent(/^Switch project$/);
   });
 
@@ -671,6 +846,7 @@ describe('IconButton text-named options', () => {
       </IconButton>
     );
     await user.hover(screen.getByRole('button', { name: 'Alpha' }));
+    await waitForHoverOpenDelay();
     await user.tab();
     expect(allIconButtonTooltips()).toHaveLength(0);
   });
@@ -691,6 +867,7 @@ describe('IconButton text-named options', () => {
       </IconButton>
     );
     await user.hover(screen.getByRole('button', { name: 'Alpha' }));
+    await waitForHoverOpenDelay();
     const tooltip = openIconButtonTooltip();
     const lines = Array.from(tooltip.children);
     expect(lines.map(l => l.textContent)).toEqual(['Alpha', '/work/alpha']);
@@ -716,6 +893,7 @@ describe('IconButton text-named options', () => {
       </IconButton>
     );
     await user.hover(screen.getByRole('button', { name: longName }));
+    await waitForHoverOpenDelay();
     const tooltip = openIconButtonTooltip();
     expect(tooltip).toHaveClass('max-w-[min(20rem,calc(100%-8px))]', 'wrap-anywhere', 'whitespace-normal', 'fixed');
     expect(tooltip).not.toHaveClass('max-w-xs', 'wrap-break-word');
@@ -733,6 +911,7 @@ describe('IconButton text-named options', () => {
       </IconButton>
     );
     await user.hover(screen.getByRole('button', { name: 'Settings' }));
+    await waitForHoverOpenDelay();
     const tooltip = openIconButtonTooltip();
     expect(tooltip).toHaveClass('text-[0.6875rem]');
     expect(Array.from(tooltip.classList).filter(c => /^text-\[[\d.]+px\]$/.test(c))).toEqual([]);
@@ -746,6 +925,7 @@ describe('IconButton text-named options', () => {
       </IconButton>
     );
     await user.hover(screen.getByRole('button', { name: 'Settings' }));
+    await waitForHoverOpenDelay();
     expect(openIconButtonTooltip()).toHaveClass('max-w-[min(20rem,calc(100%-8px))]', 'wrap-anywhere');
   });
 
@@ -768,6 +948,7 @@ describe('IconButton text-named options', () => {
       expect(button.matches(':focus-visible')).toBe(true);
       expect(allIconButtonTooltips()).toHaveLength(0);
       await user.hover(button);
+      await waitForHoverOpenDelay();
       expect(allIconButtonTooltips()).toHaveLength(0);
       await user.keyboard('{Escape}');
       expect(seen).toEqual([false]);
@@ -807,6 +988,7 @@ describe('IconButton busy', () => {
     expect(button).toHaveAttribute('aria-label', `Delete ticket${i18n.t('common.submitting')}`);
     expect(button).toHaveAccessibleName(submittingName('Delete ticket'));
     await userEvent.setup().hover(button.parentElement!);
+    await waitForHoverOpenDelay();
     expect(openIconButtonTooltip()).toHaveTextContent(/^Delete$/);
 
     rerender(
@@ -827,6 +1009,7 @@ describe('IconButton busy', () => {
     const button = screen.getByRole('button');
     expect(button).toHaveAccessibleName(submittingName('Reopen'));
     await userEvent.setup().hover(button.parentElement!);
+    await waitForHoverOpenDelay();
     expect(openIconButtonTooltip()).toHaveTextContent(/^Reopen$/);
   });
 
@@ -837,5 +1020,266 @@ describe('IconButton busy', () => {
       </IconButton>
     );
     expect(screen.getByRole('button', { name: 'Settings' })).not.toHaveAttribute('aria-busy');
+  });
+});
+
+// DFLT-00322: a hover tooltip must not stay open after a tap, nor open on a
+// pointer that merely crosses the button, and one press on the tooltip
+// pushes it away.
+describe('IconButton hover tooltip after touch and crossing pointers', () => {
+  type PointerKind = 'mouse' | 'pen' | 'touch';
+
+  // fireEvent's init sets pointerType when jsdom's PointerEvent supports it;
+  // otherwise it is defined on the event here, so React reads it either way.
+  function firePointer(
+    el: Element,
+    type: 'pointerover' | 'pointerenter' | 'pointerdown' | 'pointerup' | 'pointerleave' | 'pointerout' | 'pointermove',
+    pointerType: PointerKind
+  ) {
+    const bubbles = type !== 'pointerenter' && type !== 'pointerleave';
+    const Ctor = typeof PointerEvent === 'function' ? PointerEvent : MouseEvent;
+    const event = new Ctor(type, { bubbles, cancelable: true, pointerType } as PointerEventInit);
+    if ((event as PointerEvent).pointerType !== pointerType) {
+      Object.defineProperty(event, 'pointerType', { value: pointerType });
+    }
+    act(() => {
+      el.dispatchEvent(event);
+    });
+  }
+
+  function fireMouse(el: Element, type: 'mouseover' | 'mouseenter' | 'mouseout' | 'mouseleave' | 'mousedown' | 'mouseup' | 'mousemove' | 'click') {
+    const bubbles = type !== 'mouseenter' && type !== 'mouseleave';
+    act(() => {
+      el.dispatchEvent(new MouseEvent(type, { bubbles, cancelable: true }));
+    });
+  }
+
+  // React derives enter / leave from over / out, so these send those.
+  const mouseIn = (el: Element) => fireMouse(el, 'mouseover');
+  const mouseOut = (el: Element, to: Element = document.body) =>
+    act(() => {
+      el.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, cancelable: true, relatedTarget: to }));
+    });
+  const pointerIn = (el: Element, kind: PointerKind) => firePointer(el, 'pointerover', kind);
+
+  function tap(el: Element) {
+    for (const type of ['pointerover', 'pointerenter', 'pointerdown', 'pointerup', 'pointerout', 'pointerleave'] as const) {
+      firePointer(el, type, 'touch');
+    }
+    // The compatibility mouse events a browser sends after a tap.
+    for (const type of ['mouseover', 'mouseenter', 'mousemove', 'mousedown', 'mouseup', 'click'] as const) {
+      fireMouse(el, type);
+    }
+  }
+
+  const advance = (ms: number) =>
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
+
+  function renderButton(props: Partial<React.ComponentProps<typeof IconButton>> = {}) {
+    render(
+      <>
+        <IconButton label="Language" {...props}>
+          <Icon />
+        </IconButton>
+        <button type="button">outside</button>
+      </>
+    );
+    return {
+      button: screen.getByRole('button', { name: 'Language' }),
+      outside: screen.getByRole('button', { name: 'outside' })
+    };
+  }
+
+  describe('with fake timers', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('reads pointerType from the dispatched pointer events', () => {
+      const seen: string[] = [];
+      render(<div data-testid="probe" onPointerDown={e => seen.push(e.pointerType)} />);
+      firePointer(screen.getByTestId('probe'), 'pointerdown', 'touch');
+      expect(seen).toEqual(['touch']);
+    });
+
+    it('opens no tooltip on the compatibility mouse events after a tap', () => {
+      const { button } = renderButton();
+      tap(button);
+      expect(openIconButtonTooltips()).toHaveLength(0);
+      advance(OPEN_DELAY_MS + 200);
+      expect(allIconButtonTooltips()).toHaveLength(0);
+    });
+
+    it('opens no tooltip after a long press either', () => {
+      const { button } = renderButton();
+      firePointer(button, 'pointerover', 'touch');
+      firePointer(button, 'pointerenter', 'touch');
+      firePointer(button, 'pointerdown', 'touch');
+      advance(1500);
+      firePointer(button, 'pointerup', 'touch');
+      fireMouse(button, 'mouseover');
+      fireMouse(button, 'mouseenter');
+      expect(openIconButtonTooltips()).toHaveLength(0);
+      advance(OPEN_DELAY_MS + 200);
+      expect(allIconButtonTooltips()).toHaveLength(0);
+    });
+
+    it('still opens on a mouse hover after a tap', () => {
+      const { button } = renderButton();
+      tap(button);
+      mouseOut(button);
+      pointerIn(button, 'mouse');
+      mouseIn(button);
+      advance(OPEN_DELAY_MS);
+      expect(openIconButtonTooltip()).toHaveTextContent('Language');
+    });
+
+    it('lets a mouse pointermove inside the wrapper overwrite the touch record', () => {
+      const { button } = renderButton();
+      tap(button);
+      mouseOut(button);
+      // No pointerover / pointerenter: only a move, then the mouse event.
+      firePointer(button, 'pointermove', 'mouse');
+      mouseIn(button);
+      advance(OPEN_DELAY_MS);
+      expect(openIconButtonTooltip()).toHaveTextContent('Language');
+    });
+
+    it('does not open on a bare mouseenter after a tap (control for the pointermove case)', () => {
+      const { button } = renderButton();
+      tap(button);
+      mouseOut(button);
+      mouseIn(button);
+      advance(OPEN_DELAY_MS + 200);
+      expect(allIconButtonTooltips()).toHaveLength(0);
+    });
+
+    it('closes a mouse-opened tooltip on a touch pointerdown, and no pending timer opens it again', () => {
+      const { button } = renderButton();
+      pointerIn(button, 'mouse');
+      mouseIn(button);
+      advance(OPEN_DELAY_MS);
+      expect(openIconButtonTooltips()).toHaveLength(1);
+      firePointer(button, 'pointerdown', 'touch');
+      expect(openIconButtonTooltips()).toHaveLength(0);
+      advance(OPEN_DELAY_MS + 200);
+      expect(openIconButtonTooltips()).toHaveLength(0);
+    });
+
+    it.each(['mouse', 'pen'] as const)('opens on a %s hover after the delay and closes shortly after it leaves', kind => {
+      const { button } = renderButton();
+      pointerIn(button, kind);
+      mouseIn(button);
+      expect(openIconButtonTooltips()).toHaveLength(0);
+      advance(OPEN_DELAY_MS);
+      expect(openIconButtonTooltips()).toHaveLength(1);
+      mouseOut(button);
+      advance(150);
+      expect(openIconButtonTooltips()).toHaveLength(0);
+    });
+
+    it('never opens for a pointer that crosses the button faster than the delay', () => {
+      const { button, outside } = renderButton();
+      pointerIn(button, 'mouse');
+      mouseIn(button);
+      advance(OPEN_DELAY_MS - 100);
+      mouseOut(button, outside);
+      advance(OPEN_DELAY_MS + 200);
+      // Never rendered at all, so it never opened in between either.
+      expect(allIconButtonTooltips()).toHaveLength(0);
+    });
+
+    it('stays open without a new delay when the pointer moves from the button onto the tooltip', () => {
+      const { button } = renderButton();
+      pointerIn(button, 'mouse');
+      mouseIn(button);
+      advance(OPEN_DELAY_MS);
+      const tooltip = openIconButtonTooltip();
+      mouseOut(button, tooltip);
+      pointerIn(tooltip, 'mouse');
+      mouseIn(tooltip);
+      advance(150);
+      expect(openIconButtonTooltip()).toBe(tooltip);
+      mouseOut(tooltip);
+      advance(150);
+      expect(openIconButtonTooltips()).toHaveLength(0);
+    });
+
+    it('closes a hover-opened tooltip on a pointerdown on it, keeping the press from the ancestors', () => {
+      const onPointerDown = vi.fn();
+      const onClick = vi.fn();
+      render(
+        <div onPointerDown={onPointerDown} onClick={onClick}>
+          <IconButton label="Language">
+            <Icon />
+          </IconButton>
+        </div>
+      );
+      const button = screen.getByRole('button', { name: 'Language' });
+      pointerIn(button, 'mouse');
+      mouseIn(button);
+      advance(OPEN_DELAY_MS);
+      const tooltip = openIconButtonTooltip();
+      mouseOut(button, tooltip);
+      pointerIn(tooltip, 'mouse');
+      mouseIn(tooltip);
+      firePointer(tooltip, 'pointerdown', 'mouse');
+      expect(openIconButtonTooltips()).toHaveLength(0);
+      expect(onPointerDown).not.toHaveBeenCalled();
+      advance(OPEN_DELAY_MS + 200);
+      expect(openIconButtonTooltips()).toHaveLength(0);
+    });
+  });
+
+  describe('keyboard focus', () => {
+    it('opens on :focus-visible focus after a tap, without delay', async () => {
+      const user = userEvent.setup();
+      const { button } = renderButton();
+      tap(button);
+      act(() => button.blur());
+      expect(openIconButtonTooltips()).toHaveLength(0);
+      await user.tab();
+      expect(button).toHaveFocus();
+      expect(openIconButtonTooltip()).toHaveTextContent('Language');
+    });
+
+    it('opens on :focus-visible focus without the hover delay', async () => {
+      const user = userEvent.setup();
+      const { button } = renderButton();
+      await user.tab();
+      expect(button).toHaveFocus();
+      expect(openIconButtonTooltip()).toHaveTextContent('Language');
+    });
+
+    it('keeps a focus-opened tooltip open on a pointerdown on it', async () => {
+      const user = userEvent.setup();
+      renderButton();
+      await user.tab();
+      const tooltip = openIconButtonTooltip();
+      firePointer(tooltip, 'pointerdown', 'mouse');
+      await new Promise(r => setTimeout(r, 150));
+      expect(openIconButtonTooltip()).toBe(tooltip);
+    });
+  });
+
+  it('opens no tooltip after a mouse click that leaves the button, once the delays have run out', async () => {
+    const user = userEvent.setup();
+    const { button, outside } = renderButton();
+    // A browser does not match :focus-visible on a mouse click's focus;
+    // jsdom does, so it is stubbed as in the test above.
+    const matches = vi.spyOn(button, 'matches').mockImplementation(sel => sel !== ':focus-visible');
+    try {
+      await user.click(button);
+      await user.hover(outside);
+      await waitForHoverOpenDelay();
+      expect(openIconButtonTooltips()).toHaveLength(0);
+    } finally {
+      matches.mockRestore();
+    }
   });
 });
