@@ -80,15 +80,17 @@ export function LoadFailure({ message, retrying, onRetry, failureKey }: Props) {
 // for a later render, the same rule as LabelsEditor's pendingFocus.
 export function useFocusAfterRetry(getTarget: () => HTMLElement | null | undefined): () => void {
   const [pending, setPending] = useState(false);
-  // No dependency list on purpose: the target may only appear (or be
-  // enabled) a few renders after the retry, so every render checks again
-  // until the move is done. getTarget is read fresh each time.
+  // The target may only appear (or be enabled) a few renders after the
+  // retry, so while the move is pending every render checks again. Callers
+  // pass getTarget as an inline arrow, a new function on each render, so
+  // listing it re-runs the effect on every render, which is what is wanted
+  // here; the effect does nothing while no move is pending.
   useEffect(() => {
     if (!pending) return;
     const el = getTarget();
     if (!el || (el as HTMLButtonElement | HTMLInputElement).disabled) return;
     focusIfLost(el);
     setPending(false);
-  });
+  }, [pending, getTarget]);
   return useCallback(() => setPending(true), []);
 }
