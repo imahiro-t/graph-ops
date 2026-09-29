@@ -19,6 +19,7 @@ import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
 import { submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
+import { LIST_HEADING_CLASS, LIST_ITEM_FOCUS_CLASS, LIST_LAYOUT_CLASS, LIST_PANE_CLASS } from './listPane';
 
 // Mirrors config.isSafeExtensionName (packages/core-go/internal/config/
 // extensions.go) so an obviously-invalid name is rejected here with a clear
@@ -83,6 +84,13 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     // types/isAddingType are what mount and unmount the targets; they are
     // listed so the effect re-runs on them.
   }, [pendingFocus, types, isAddingType]);
+
+  // A type's name as the user sees it: the translated label for a known
+  // type, the type id itself for a custom one.
+  const typeDisplayName = (type: string): string => {
+    const labelKey = getNodeTypeMeta(type).labelKey;
+    return labelKey ? t(labelKey) : type;
+  };
 
   const isDirty = tierText !== savedTierText;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
@@ -263,20 +271,16 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     }
   };
 
+  const selectedDisplayName = typeDisplayName(selected);
+
   return (
-    <div className="flex h-full min-h-0 gap-4 narrow:flex-col narrow:h-auto">
+    <div className={LIST_LAYOUT_CLASS}>
       {confirmDialog}
       <StatusLiveRegion message={deleteNotice} />
-      {/* Left: type list. Its heading is sticky, so the list's scroll
-          padding (3rem, taller than the heading's 1rem padding + one 11px
-          line at any default font size) keeps an item that keyboard focus
-          scrolls into view -- e.g. by Shift+Tab -- below the heading instead
-          of under it, and z-10 keeps scrolled rows (and their delete
-          buttons) painted beneath the heading. It matters most below 48rem,
-          where the list is capped at max-h-40 and scrolls (DFLT-00261 A-1);
-          the padding only affects scroll-into-view, not the layout. */}
-      <div ref={listRef} className="w-56 shrink-0 border border-slate-200 dark:border-slate-800 rounded-lg overflow-y-auto scroll-pt-12 bg-slate-50 dark:bg-slate-800 flex flex-col narrow:w-full narrow:max-h-40">
-        <div className="px-3 py-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10 bg-slate-50 dark:bg-slate-800">
+      {/* Left: type list. See listPane.ts for why the heading is sticky
+          and the list has scroll padding. */}
+      <div ref={listRef} className={`${LIST_PANE_CLASS} flex flex-col`}>
+        <div className={LIST_HEADING_CLASS}>
           {t('settings.nodeTypes.listTitle')}
         </div>
         {types.map(info => {
@@ -292,9 +296,10 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           // -- only overridden or not -- exactly like レビューゲート's
           // default rows; deleting only ever makes sense for a custom type.
           const canDelete = !info.has_default;
-          // One name for both the visible select button and the delete
-          // button's accessible name, so the two always read the same.
-          const displayName = meta.labelKey ? t(meta.labelKey) : info.type;
+          // One name for the visible select button, the delete button's
+          // accessible name and the editor heading, so they always read the
+          // same.
+          const displayName = typeDisplayName(info.type);
           return (
             <div
               key={info.type}
@@ -302,24 +307,35 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 selected === info.type ? 'bg-white dark:bg-slate-900' : 'hover:bg-white dark:hover:bg-slate-900'
               }`}
             >
+              {/* DFLT-00287: the name is always one line, cut off with an
+                  ellipsis when it does not fit -- never broken mid-word. Its
+                  full text stays in the button's accessible name and the
+                  title tooltip, and the editor heading on the right shows it
+                  in full once the type is selected. At the narrowest size
+                  (upto-15rem: -- 480px and below at 200% text) the button
+                  wraps and the name takes the whole first line, less the
+                  icon (0.875rem) and the gap after it (0.5rem), so the
+                  "default" badge / override dot move to a second line,
+                  indented by the same 1.375rem to line up under the name;
+                  gap-y-0.5 keeps that second line close to the name. */}
               <button
                 onClick={() => void select(info.type)}
-                className={`flex-1 min-w-0 text-left pl-3 pr-1 py-2 text-xs flex items-center gap-2 ${
+                className={`flex-1 min-w-0 text-left pl-3 pr-1 py-2 text-xs flex items-center gap-2 upto-15rem:flex-wrap upto-15rem:gap-y-0.5 ${LIST_ITEM_FOCUS_CLASS} ${
                   selected === info.type ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'
                 }`}
               >
                 <Icon aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-                <span className="truncate flex-1 narrow:whitespace-normal narrow:wrap-anywhere">{displayName}</span>
+                <span title={displayName} className="truncate flex-1 upto-15rem:basis-[calc(100%-1.375rem)]">{displayName}</span>
                 {!hasOverride && info.has_default && (
                   <span
                     title={t('settings.nodeTypes.defaultBadgeHint')}
-                    className="shrink-0 text-[9px] font-semibold px-1 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400"
+                    className="shrink-0 text-[9px] font-semibold px-1 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 upto-15rem:ml-[1.375rem]"
                   >
                     {t('settings.nodeTypes.defaultBadge')}
                   </span>
                 )}
                 {hasOverride && (
-                  <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-blue-500" title={t('settings.nodeTypes.overrideBadge')} />
+                  <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-blue-500 upto-15rem:ml-[1.375rem]" title={t('settings.nodeTypes.overrideBadge')} />
                 )}
               </button>
               <IconButton
@@ -354,7 +370,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         <div className="mt-auto border-t border-slate-200 dark:border-slate-700 p-2">
           {isAddingType ? (
             <>
-              <label htmlFor={newTypeInputId} className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
+              <label htmlFor={newTypeInputId} className="block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5">
                 {t('settings.nodeTypes.newTypeLabel')}
               </label>
               <div className="flex items-center gap-1">
@@ -414,7 +430,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               ref={addTypeButtonRef}
               data-focus-key={ADD_TYPE_FOCUS_KEY}
               onClick={() => setIsAddingType(true)}
-              className="w-full px-2 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 rounded-sm text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition border border-slate-200 dark:border-slate-700"
+              className="w-full px-2 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 rounded-sm text-[0.6875rem] font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition border border-slate-200 dark:border-slate-700"
             >
               <Plus aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.nodeTypes.addType')}
             </button>
@@ -424,7 +440,25 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
       {/* Right: editor */}
       <div className="flex-1 min-w-0 flex flex-col gap-3">
-        {error && <ErrorBox className="p-2.5 text-[11px]">{error}</ErrorBox>}
+        {/* DFLT-00287: the selected type's full name, which the list may cut
+            off with an ellipsis. It wraps (between words where it can, else
+            anywhere) instead of overflowing, and stays up while the type's
+            text loads. When the name differs from the type id -- a
+            translated label, even one differing only in case, like "Plan"
+            for plan -- the id follows in monospace so both can be matched
+            to the files on disk. */}
+        {selected && (
+          <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 wrap-break-word">
+            <span>{selectedDisplayName}</span>
+            {selectedDisplayName !== selected && (
+              <>
+                {' '}
+                <code className="font-mono font-normal text-slate-500 dark:text-slate-400">{selected}</code>
+              </>
+            )}
+          </h3>
+        )}
+        {error && <ErrorBox className="p-2.5 text-[0.6875rem]">{error}</ErrorBox>}
         {loading ? (
           <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
             <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> {t('settings.common.loading')}
@@ -441,7 +475,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 role="region"
                 aria-labelledby={mergedPreviewLabelId}
                 tabIndex={0}
-                className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 max-h-40 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
+                className="whitespace-pre-wrap text-[0.6875rem] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 max-h-40 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
               >
                 {mergedText || t('settings.common.inheritedFromDefault')}
               </pre>
@@ -455,7 +489,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 placeholder={t('settings.nodeTypes.tierTextPlaceholder')}
                 className="flex-1 min-h-40 w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-hidden focus:border-blue-600 dark:focus:border-blue-400 disabled:opacity-60 disabled:bg-slate-50 dark:disabled:bg-slate-800"
               />
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">{t('settings.nodeTypes.emptyOverrideHint')}</p>
+              <p className="text-[0.625rem] text-slate-500 dark:text-slate-400 mt-1">{t('settings.nodeTypes.emptyOverrideHint')}</p>
             </div>
             <div className="flex justify-end items-center gap-2 narrow:flex-wrap">
               {savedFlash && (

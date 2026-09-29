@@ -10,7 +10,7 @@
 //   Ordinary words still break at word boundaries. It is the same for every
 //   box, so it lives here; callers must not add `wrap-break-word`, which
 //   Tailwind v4 emits later and so would win. Padding (p-2 /
-//   p-2.5), font size (text-[11px] or inherited) and layout (flex gap-2,
+//   p-2.5), font size (text-[0.6875rem] or inherited) and layout (flex gap-2,
 //   basis-full, whitespace-pre-wrap) differ from box to box, and the app does
 //   not use tailwind-merge, so two utilities of the same kind in one class
 //   string would be settled by CSS order rather than by the caller. Those are

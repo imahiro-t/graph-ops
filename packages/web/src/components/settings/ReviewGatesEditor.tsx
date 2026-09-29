@@ -158,7 +158,7 @@ const ADD_GATE_FOCUS_KEY = 'add-gate';
 // (deleteUnnamedGateAriaLabel / previewToggleUnnamedAriaLabel).
 const gateDisplayName = (g: Pick<GateRow, 'id' | 'name'>) => (g.id ?? '').trim() || (g.name ?? '').trim();
 
-const SMALL_LABEL_CLASS = 'block text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-0.5';
+const SMALL_LABEL_CLASS = 'block text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 mb-0.5';
 
 export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const { t } = useTranslation();
@@ -409,14 +409,14 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
   return (
     <div ref={containerRef} className="flex flex-col gap-3 h-full min-h-0 narrow:h-auto">
-      <p className="text-[11px] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.intro')}</p>
-      {error && <ErrorBox id={errorId} role="alert" className="p-2.5 text-[11px] whitespace-pre-wrap">{error}</ErrorBox>}
+      <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.intro')}</p>
+      {error && <ErrorBox id={errorId} role="alert" className="p-2.5 text-[0.6875rem] whitespace-pre-wrap">{error}</ErrorBox>}
 
       {warnings.length > 0 && (
         <div
           role="note"
           aria-labelledby={`${idPrefix}-warnings-title`}
-          className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-200 text-[11px] rounded-lg border border-amber-200 dark:border-amber-900"
+          className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-200 text-[0.6875rem] rounded-lg border border-amber-200 dark:border-amber-900"
         >
           <p id={`${idPrefix}-warnings-title`} className="flex items-center gap-1 font-semibold">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
@@ -429,7 +429,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       )}
 
       <div className="border border-slate-200 dark:border-slate-800 rounded-lg p-3 bg-white dark:bg-slate-900">
-        <label htmlFor={`${idPrefix}-workflow-max`} className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+        <label htmlFor={`${idPrefix}-workflow-max`} className="block text-[0.6875rem] font-semibold text-slate-700 dark:text-slate-300 mb-1">
           {t('settings.reviewGates.workflowMaxIterationsLabel')}
         </label>
         <select
@@ -449,7 +449,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
             <option value={String(maxIterations)}>{t('settings.reviewGates.workflowMaxIterationsInvalid', { value: maxIterations })}</option>
           )}
         </select>
-        <p id={`${idPrefix}-workflow-max-help`} className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+        <p id={`${idPrefix}-workflow-max-help`} className="mt-1 text-[0.625rem] text-slate-500 dark:text-slate-400">
           {t('settings.reviewGates.workflowMaxIterationsHelp')}
         </p>
       </div>
@@ -506,7 +506,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               {!g.isOverridden && (
                 <span
                   title={t('settings.reviewGates.defaultBadgeHint')}
-                  className="shrink-0 mb-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-sm bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700"
+                  className="shrink-0 mb-1 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-sm bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700"
                 >
                   {t('settings.reviewGates.defaultBadge')}
                 </span>
@@ -523,7 +523,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-sm px-2 py-1 text-xs text-slate-900 dark:text-slate-100 disabled:opacity-60"
                 />
               </div>
-              <label className="flex items-center gap-1 mb-1 text-[11px] text-slate-600 dark:text-slate-400 shrink-0">
+              <label className="flex items-center gap-1 mb-1 text-[0.6875rem] text-slate-600 dark:text-slate-400 shrink-0">
                 <input
                   type="checkbox"
                   checked={g.enabled !== false}
@@ -602,7 +602,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                 aria-label={rowName
                   ? t('settings.reviewGates.previewToggleAriaLabel', { label: previewLabel, name: rowName })
                   : t('settings.reviewGates.previewToggleUnnamedAriaLabel', { label: previewLabel, row: idx + 1 })}
-                className="flex items-center gap-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+                className="flex items-center gap-1 text-[0.625rem] font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
               >
                 {previewOpen ? <ChevronDown aria-hidden="true" className="w-3 h-3" /> : <ChevronRight aria-hidden="true" className="w-3 h-3" />}
                 {previewLabel}
@@ -630,17 +630,17 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
                           role="region"
                           aria-labelledby={`${mergedCriteriaLabelId} ${mergedCriteriaGateId}`}
                           tabIndex={0}
-                          className="whitespace-pre-wrap text-[11px] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 max-h-32 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
+                          className="whitespace-pre-wrap text-[0.6875rem] leading-relaxed bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2 max-h-32 overflow-y-auto text-slate-600 dark:text-slate-400 font-mono focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
                         >
                           {mergedGates[g.id].criteria || t('settings.common.inheritedFromDefault')}
                         </pre>
                       </div>
-                      <div className="flex items-center gap-4 text-[11px] text-slate-600 dark:text-slate-400">
+                      <div className="flex items-center gap-4 text-[0.6875rem] text-slate-600 dark:text-slate-400">
                         <span>{t('settings.reviewGates.mergedEnabledLabel')}: {mergedGates[g.id].enabled === false ? t('settings.common.no') : t('settings.common.yes')}</span>
                       </div>
                     </div>
                   ) : (
-                    <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.previewUnavailableHint')}</p>
+                    <p className="mt-1 text-[0.625rem] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.previewUnavailableHint')}</p>
                   )}
                 </div>
               )}

@@ -1,0 +1,47 @@
+// @vitest-environment node
+import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+
+// DFLT-00287: the settings editors set their small text sizes in rem
+// (text-[0.625rem] / text-[0.6875rem], 10px / 11px at the default 16px), not
+// in px, so they follow the browser's default font size (WCAG 1.4.4). This
+// reads every non-test source file in this directory and fails if a 10px or
+// 11px text size comes back. (The node types list's 9px "default" badge is
+// out of this ticket's scope and not checked.)
+//
+// Class names are matched by regular expressions or assembled at run time on
+// purpose: Tailwind scans src/ for candidates, so writing a px text class
+// literally here would add an otherwise unused rule to the app's CSS.
+const DIR = __dirname;
+const SOURCES = fs
+  .readdirSync(DIR)
+  .filter(name => /\.(tsx?|jsx?)$/.test(name) && !/\.test\.(tsx?|jsx?)$/.test(name))
+  .sort();
+
+const read = (name: string) => fs.readFileSync(path.join(DIR, name), 'utf8');
+const PX_10_11 = /text-\[1[01]px\]/g;
+const remText = (size: string) => ['text-[', size, 'rem]'].join('');
+const count = (src: string, cls: string) => src.split(cls).length - 1;
+
+describe('settings/ text sizes (DFLT-00287)', () => {
+  it('finds the settings editors to check', () => {
+    // Guards against the checks below passing on an empty directory listing.
+    for (const name of ['AppSettingsEditor.tsx', 'AutopilotSettingsEditor.tsx', 'NodeTypesEditor.tsx', 'SkillsEditor.tsx', 'TemplatesEditor.tsx', 'ReviewGatesEditor.tsx', 'TemplateTextEditor.tsx', 'ErrorBox.tsx', 'listPane.ts']) {
+      expect(SOURCES).toContain(name);
+    }
+  });
+
+  it.each(SOURCES)('%s uses no 10px / 11px text size, even in comments', name => {
+    expect(read(name).match(PX_10_11) ?? []).toEqual([]);
+  });
+
+  it('uses the rem equivalents instead', () => {
+    // At the time of DFLT-00287: 48 replaced 10px sizes and 34 replaced 11px
+    // sizes across the editors (the list heading's now lives in listPane.ts).
+    // Lower bounds, so adding more rem sizes later is fine.
+    const all = SOURCES.map(read).join('\n');
+    expect(count(all, remText('0.625'))).toBeGreaterThanOrEqual(48);
+    expect(count(all, remText('0.6875'))).toBeGreaterThanOrEqual(32);
+  });
+});
