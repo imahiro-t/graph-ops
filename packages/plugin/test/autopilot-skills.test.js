@@ -115,6 +115,49 @@ test('autopilot-worker/SKILL.md states the handoff and report rules', () => {
   ]);
 });
 
+test('autopilot-worker/SKILL.md sorts handoff items into a Drop kind before the other two', () => {
+  const body = read('skills/autopilot-worker/SKILL.md');
+  const handoff = body.slice(body.indexOf('## 5. Decide the handoff'), body.indexOf('## 6. Report the result'));
+  assert.ok(handoff.length > 0, 'the handoff section must exist');
+  assertAll(handoff, 'autopilot-worker handoff', [
+    'Sort every other item into one of three kinds',
+    'Check **Drop** first',
+    '**Drop**',
+    'even if this ticket\'s own changes are involved',
+    // The five Drop criteria.
+    '**Outside the supported range**',
+    'the `content` of `get-skill-context "autopilot-worker"` in step 0, the project\'s settings, or the repository\'s own description',
+    'When no supported range is stated, this criterion does not apply; never guess one.',
+    '**No real harm**',
+    '**Needs a real device or environment**',
+    'and no defect has been found',
+    '**Not reproduced**',
+    'A defect that was actually observed or reproduced does not match.',
+    '**Accepted in the plan or a review**',
+    'Without such a statement it does not match.',
+    'When unsure whether an item matches, do not drop it',
+    // Backlog items must say why they are worth working on.
+    'why it is worth working on (one line)',
+    'An item goes into the backlog only if you can say in one line why it is worth working on; if you cannot, drop it.',
+    // Dropped items get no ticket and are only recorded.
+    'A dropped item creates no ticket',
+    'its decision (child ticket, backlog, dropped or not created)',
+    'For a dropped item, always record the kind and the reason, naming the Drop criterion it matches',
+    // With autoCreateTickets off, dropped items are still shown to the person.
+    '`<n>` counts every sorted item, dropped ones included',
+    'dropped items included, each with its kind and the reason (which Drop criterion it matches)',
+    'picked by the person at handoff'
+  ]);
+  // The old two-kind wording, whose "drop the rest" clashed with the new kind, is gone.
+  assert.ok(!handoff.includes('one of two kinds'), 'the handoff must no longer sort into two kinds');
+  assert.ok(!handoff.includes('drop the rest'), '"drop the rest" must not be confused with the Drop kind');
+  // Drop is listed before In scope and Out of scope.
+  assert.ok(handoff.indexOf('- **Drop**') < handoff.indexOf('- **In scope**'), 'Drop must be checked before In scope');
+
+  const report = body.slice(body.indexOf('## 6. Report the result'), body.indexOf('## 7. Role `merge-up`'));
+  assertAll(report, 'autopilot-worker report', ['the number of dropped items (count only)']);
+});
+
 test('autopilot-worker/SKILL.md keeps merge-up and finalize away from the nodes', () => {
   const body = read('skills/autopilot-worker/SKILL.md');
   const mergeUp = body.slice(body.indexOf('## 7. Role `merge-up`'), body.indexOf('## 8. Role `finalize`'));
