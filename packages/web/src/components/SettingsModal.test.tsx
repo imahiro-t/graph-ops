@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { getFocusableElements } from '../hooks/useModalDialog';
 import { SettingsModal } from './SettingsModal';
-import { openIconButtonTooltip, openIconButtonTooltips } from '../test/iconButtonTooltip';
+import { openIconButtonTooltip, openIconButtonTooltips, waitForHoverOpenDelay } from '../test/iconButtonTooltip';
 import { Project } from '../types';
 
 vi.mock('../lib/settingsApi', async () => {
@@ -339,6 +339,7 @@ describe('SettingsModal', () => {
       const add = screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') });
       act(() => add.focus());
       await user.hover(del.parentElement as HTMLElement);
+      await waitForHoverOpenDelay();
       expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.nodeTypes.cannotDeleteDefaultHint'));
 
       await user.keyboard('{Escape}');

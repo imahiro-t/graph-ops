@@ -36,7 +36,7 @@ import App from './App';
 import { Project } from './types';
 import { createFakeBackend, installFakeBackend } from './test/fakeBackend';
 import { findPreviousPage } from './test/waitForAnswers';
-import { openIconButtonTooltips } from './test/iconButtonTooltip';
+import { openIconButtonTooltips, waitForHoverOpenDelay } from './test/iconButtonTooltip';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 
@@ -292,6 +292,7 @@ describe.each(['ja', 'en'] as const)('New Ticket and the Tab order in a 320px wi
     expect(button).toHaveAttribute('title', i18n.t('projectSwitcher.selectFirst'));
     // A disabled button gets no pointer events: hover its row instead.
     await user.hover(button.parentElement as HTMLElement);
+    await waitForHoverOpenDelay();
     expect(openIconButtonTooltips()).toHaveLength(0);
   });
 

@@ -1,7 +1,20 @@
 // Test helpers for IconButton's tooltip (DFLT-00171). The tooltip is
 // rendered into document.body through a portal and is aria-hidden, so it
 // cannot be found by role; these look it up by its data attribute instead.
+import { act } from '@testing-library/react';
+import { OPEN_DELAY_MS } from '../components/IconButton';
+
 const TOOLTIP_SELECTOR = '[data-icon-button-tooltip]';
+
+// Hover opens a tooltip only after the pointer has rested on the button for
+// OPEN_DELAY_MS (DFLT-00322). Call this after user.hover() before looking
+// for the tooltip -- and before asserting that none opened, so such a check
+// is not passed merely because the delay has not run out yet.
+export async function waitForHoverOpenDelay(): Promise<void> {
+  await act(async () => {
+    await new Promise(resolve => setTimeout(resolve, OPEN_DELAY_MS + 20));
+  });
+}
 
 // Every tooltip element currently in the DOM, open or not.
 export function allIconButtonTooltips(): HTMLElement[] {

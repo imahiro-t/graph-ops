@@ -52,6 +52,37 @@
 //   for instance, toggles on click).
 // - The tooltip itself can be hovered (WCAG 1.4.13): leaving the button or
 //   the tooltip only schedules the close, and entering either cancels it.
+// - Hover opens the tooltip only after the pointer has rested on the button
+//   for OPEN_DELAY_MS (DFLT-00322). A pointer that merely crosses the button
+//   on its way elsewhere -- from the language button to "New ticket", say --
+//   never opens it, so it never gets to cover the neighbour it was heading
+//   for (at some header widths the tooltip lands right on top of it, and a
+//   pointer stopping on the tooltip would keep it open by the rule above).
+//   Moving from the button onto an open tooltip, and keyboard focus, open
+//   (or keep open) without delay.
+// - A pointerdown on the tooltip ends its hover-opened state (DFLT-00322),
+//   so a tooltip that does end up covering something can be pushed away
+//   with one press. It does not close a focus-opened tooltip, and the press
+//   still stops at the tooltip (see above), so it never reaches what the
+//   tooltip covered.
+// - Touch never opens the hover tooltip (DFLT-00322). After a tap the
+//   browser sends compatibility mouseover / mouseenter events, and a finger
+//   never "leaves", so a tooltip opened by them would stay. The pointerType
+//   of the latest pointer event on the wrapper or the tooltip is kept, and a
+//   mouseenter while it is "touch" is ignored. No time window is involved:
+//   the compatibility events come after pointerup, which a long press can
+//   put well after pointerdown. A mouse or pen overwrites the record with
+//   its own pointerover / pointermove, which arrive before the mouse events
+//   of the same movement. A touch pointerdown also ends a hover-opened
+//   state. Focus is not affected: a :focus-visible focus still opens it.
+// - The tooltip is measured at the viewport's top-left corner (DFLT-00322).
+//   Measured where it sits, a tooltip that a narrowing window has left near
+//   the right edge shrinks to a narrow, tall column, and the position
+//   worked out from that size put it off the button after a resize.
+// - While open, a resize re-measures at once and once more in the next
+//   animation frame (DFLT-00322), in case the layout the resize causes
+//   (a header that wraps differently, say) is not settled when the resize
+//   event is dispatched. Consecutive resizes share one pending frame.
 // - Escape dismisses an open tooltip wherever focus is (WCAG 1.4.13,
 //   dismissible), until the pointer leaves and focus leaves the button;
 //   an Escape pressed while an input method is composing text is ignored.
@@ -103,6 +134,9 @@ import { createPortal } from 'react-dom';
 import { submittingProps, useSubmittingLabel } from './Submitting';
 
 const CLOSE_DELAY_MS = 100;
+// How long the pointer has to rest on the button before hover opens the
+// tooltip (DFLT-00322, see the header comment).
+export const OPEN_DELAY_MS = 300;
 const VIEWPORT_MARGIN = 4;
 const GAP = 6;
 
@@ -180,6 +214,13 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
   const tooltipRef = useRef<HTMLSpanElement | null>(null);
   const wrapperRef = useRef<HTMLSpanElement | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirrors `hovered` for the event handlers, which must not wait for a
+  // re-render to see it.
+  const hoveredRef = useRef(false);
+  // The pointerType of the latest pointer event on the wrapper or the
+  // tooltip (see the header comment on touch).
+  const lastPointerTypeRef = useRef<string | null>(null);
 
   const setButtonRef = useCallback(
     (node: HTMLButtonElement | null) => {
@@ -197,34 +238,105 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     }
   }, []);
 
-  const startHover = useCallback(() => {
-    cancelClose();
-    setHovered(true);
-  }, [cancelClose]);
+  const cancelOpen = useCallback(() => {
+    if (openTimerRef.current !== null) {
+      clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+  }, []);
+
+  const setHover = useCallback((value: boolean) => {
+    hoveredRef.current = value;
+    setHovered(value);
+  }, []);
+
+  // A mouseenter on the button (after OPEN_DELAY_MS) or on the tooltip
+  // (`immediate`: it is already on screen). Ignored right after touch.
+  const startHover = useCallback(
+    (immediate: boolean) => {
+      if (lastPointerTypeRef.current === 'touch') return;
+      cancelClose();
+      if (hoveredRef.current) return;
+      if (immediate) {
+        cancelOpen();
+        setHover(true);
+        return;
+      }
+      if (openTimerRef.current !== null) return;
+      openTimerRef.current = setTimeout(() => {
+        openTimerRef.current = null;
+        setHover(true);
+      }, OPEN_DELAY_MS);
+    },
+    [cancelClose, cancelOpen, setHover]
+  );
 
   const scheduleHoverEnd = useCallback(() => {
+    cancelOpen();
     cancelClose();
+    if (!hoveredRef.current) return;
     closeTimerRef.current = setTimeout(() => {
       closeTimerRef.current = null;
-      setHovered(false);
+      setHover(false);
     }, CLOSE_DELAY_MS);
-  }, [cancelClose]);
+  }, [cancelClose, cancelOpen, setHover]);
+
+  // Ends the hover-opened state at once (a touch, or a press on the tooltip).
+  const endHover = useCallback(() => {
+    cancelOpen();
+    cancelClose();
+    setHover(false);
+  }, [cancelClose, cancelOpen, setHover]);
 
   // Escape: close for both hover and focus, until each of them starts again.
   const dismiss = useCallback(() => {
-    cancelClose();
-    setHovered(false);
+    endHover();
     setFocused(false);
-  }, [cancelClose]);
+  }, [endHover]);
 
-  useEffect(() => cancelClose, [cancelClose]);
+  useEffect(
+    () => () => {
+      cancelClose();
+      cancelOpen();
+    },
+    [cancelClose, cancelOpen]
+  );
+
+  const recordPointer = (e: React.PointerEvent) => {
+    lastPointerTypeRef.current = e.pointerType || null;
+  };
+
+  const handleWrapperPointerDown = (e: React.PointerEvent) => {
+    recordPointer(e);
+    if (e.pointerType === 'touch') endHover();
+  };
+
+  const handleTooltipPointerDown = (e: React.PointerEvent) => {
+    // Keep the press from reaching the button's ancestors (see the header
+    // comment), then end the hover-opened state.
+    e.stopPropagation();
+    recordPointer(e);
+    endHover();
+  };
 
   const updatePosition = useCallback(() => {
     const button = buttonRef.current;
     const tip = tooltipRef.current;
     if (!button || !tip) return;
     const anchor = button.getBoundingClientRect();
+    // Measure at the viewport's top-left corner, then put the tooltip back.
+    // A fixed element's shrink-to-fit width is limited by the room between
+    // its left edge and the viewport's right edge, so measured where it
+    // was placed for a wider window, it comes out a narrow, tall column,
+    // and a position worked out from that size is off once the tooltip
+    // widens again (DFLT-00322).
+    const placedLeft = tip.style.left;
+    const placedTop = tip.style.top;
+    tip.style.left = '0px';
+    tip.style.top = '0px';
     const { width, height } = tip.getBoundingClientRect();
+    tip.style.left = placedLeft;
+    tip.style.top = placedTop;
     const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
     const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
 
@@ -249,11 +361,21 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       return;
     }
     updatePosition();
+    let frame: number | null = null;
+    const onResize = () => {
+      updatePosition();
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        updatePosition();
+      });
+    };
     window.addEventListener('scroll', updatePosition, true);
-    window.addEventListener('resize', updatePosition);
+    window.addEventListener('resize', onResize);
     return () => {
       window.removeEventListener('scroll', updatePosition, true);
-      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('resize', onResize);
+      if (frame !== null) cancelAnimationFrame(frame);
     };
   }, [open, tooltipContent, updatePosition]);
 
@@ -292,8 +414,15 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     <span
       ref={wrapperRef}
       className={`inline-flex ${wrapperClassName ?? ''}`}
-      onMouseEnter={startHover}
+      onMouseEnter={() => startHover(false)}
       onMouseLeave={scheduleHoverEnd}
+      onPointerOver={recordPointer}
+      onPointerEnter={recordPointer}
+      onPointerMove={recordPointer}
+      onPointerDown={handleWrapperPointerDown}
+      onPointerUp={recordPointer}
+      onPointerCancel={recordPointer}
+      onPointerLeave={recordPointer}
       onFocus={e => {
         if (isFocusVisible(e.target)) setFocused(true);
       }}
@@ -329,12 +458,18 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
               top: position?.top ?? 0,
               visibility: position ? 'visible' : 'hidden'
             }}
-            onMouseEnter={startHover}
+            onMouseEnter={() => startHover(true)}
             onMouseLeave={scheduleHoverEnd}
+            onPointerOver={recordPointer}
+            onPointerEnter={recordPointer}
+            onPointerMove={recordPointer}
+            onPointerUp={recordPointer}
+            onPointerCancel={recordPointer}
+            onPointerLeave={recordPointer}
             onClick={stopPropagation}
             onMouseDown={stopPropagation}
             onMouseUp={stopPropagation}
-            onPointerDown={stopPropagation}
+            onPointerDown={handleTooltipPointerDown}
           >
             {tooltipContent}
           </span>,

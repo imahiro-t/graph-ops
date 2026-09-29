@@ -14,7 +14,7 @@ import i18n from '../../i18n';
 import { ReviewGatesEditor } from './ReviewGatesEditor';
 import { REANNOUNCE_GAP_MS, TRANSIENT_ANNOUNCEMENT_DURATION_MS } from '../../hooks/useTransientAnnouncement';
 import { SETTINGS_CATALOG_WARNINGS, SettingsCatalogResponse, SettingsCatalogWarning } from '../../types';
-import { openIconButtonTooltip } from '../../test/iconButtonTooltip';
+import { openIconButtonTooltip, waitForHoverOpenDelay } from '../../test/iconButtonTooltip';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -730,6 +730,7 @@ describe('ReviewGatesEditor delete button accessible name', () => {
 
     const defaultGate = screen.getByRole('button', { name: deleteName('code_review') });
     await user.hover(defaultGate.parentElement as HTMLElement);
+    await waitForHoverOpenDelay();
     expect(openIconButtonTooltip()).toHaveTextContent(i18n.t('settings.reviewGates.cannotDeleteDefaultHint'));
   });
 

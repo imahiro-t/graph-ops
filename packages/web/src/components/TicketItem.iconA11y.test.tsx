@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { Artifact, GraphNode, TicketDetail, TicketStatus } from '../types';
 import { TicketItem } from './TicketItem';
-import { openIconButtonTooltip, openIconButtonTooltips } from '../test/iconButtonTooltip';
+import { openIconButtonTooltip, openIconButtonTooltips, waitForHoverOpenDelay } from '../test/iconButtonTooltip';
 
 const TICKET_ID = 'TEST-00166';
 
@@ -206,9 +206,12 @@ describe('TicketItem icon buttons (IconButton)', () => {
     const { onToggleExpand } = renderRow();
     const del = screen.getByRole('button', { name: i18n.t('ticketItem.delete.ariaLabel', { id: TICKET_ID, title: 'アイコンのテスト' }) });
     await user.hover(del);
+    await waitForHoverOpenDelay();
     await user.click(openIconButtonTooltip());
     expect(onToggleExpand).not.toHaveBeenCalled();
-    // The tooltip is still up, and nothing else opened.
-    expect(openIconButtonTooltips()).toHaveLength(1);
+    // The press ends the hover-opened tooltip (DFLT-00322: one press pushes
+    // a tooltip that covers something out of the way), and nothing else
+    // opened.
+    expect(openIconButtonTooltips()).toHaveLength(0);
   });
 });
