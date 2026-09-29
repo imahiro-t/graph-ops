@@ -393,9 +393,11 @@ moving it to `IN PROGRESS`/`IN REVIEW`. Against SQLite and MySQL that is a
 single conditional statement (`UPDATE nodes SET status=... WHERE id=... AND
 status NOT IN ('DONE','IN PROGRESS','IN REVIEW')`), so of two callers racing
 for the same node exactly one wins and the other is simply not offered it.
-The protocol has no conditional update, so against an HTTP data source
-graph-engine claims with `GET /nodes/{id}` followed by `PATCH /nodes/{id}`
-instead, and a claim that lands between those two requests is invisible to it:
+The protocol has no conditional way to claim: `applyNodeTransition` (1.2)
+carries completions and decisions but is not used for claiming, and the node
+`PATCH` carries no condition. So against an HTTP data source -- 1.2 included
+-- graph-engine claims with `GET /nodes/{id}` followed by `PATCH /nodes/{id}`,
+and a claim that lands between those two requests is invisible to it:
 **the same node can be handed out twice**. A plugin cannot close this gap on
 its own -- the PATCH it receives carries no expected-current-status to check
 against -- so treat it as a property of this backend. In practice one
