@@ -36,7 +36,7 @@ import App from './App';
 import { Project } from './types';
 import { createFakeBackend, installFakeBackend } from './test/fakeBackend';
 import { findPreviousPage } from './test/waitForAnswers';
-import { allIconButtonTooltips, openIconButtonTooltips, waitForHoverOpenDelay } from './test/iconButtonTooltip';
+import { allIconButtonTooltips, openIconButtonTooltips, setupHoverUser, startHoverFakeTimers, waitForHoverOpenDelay } from './test/iconButtonTooltip';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 
@@ -293,8 +293,9 @@ describe.each(['ja', 'en'] as const)('New Ticket and the Tab order in a 320px wi
   });
 
   it('keeps the title with the reason without a project and gives the button itself no tooltip', async () => {
+    startHoverFakeTimers();
     seed({ withProject: false });
-    const user = userEvent.setup();
+    const user = setupHoverUser();
     const header = await renderAppWithoutProject();
     const button = within(header).getByRole('button', { name: i18n.t('header.newTicket') });
     const reason = i18n.t('projectSwitcher.selectFirst');

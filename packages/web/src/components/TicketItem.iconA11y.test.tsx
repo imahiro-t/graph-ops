@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { Artifact, GraphNode, TicketDetail, TicketStatus } from '../types';
 import { TicketItem } from './TicketItem';
-import { openIconButtonTooltip, openIconButtonTooltips, waitForHoverOpenDelay } from '../test/iconButtonTooltip';
+import { openIconButtonTooltip, openIconButtonTooltips, setupHoverUser, startHoverFakeTimers, waitForHoverOpenDelay } from '../test/iconButtonTooltip';
 
 const TICKET_ID = 'TEST-00166';
 
@@ -222,7 +222,8 @@ describe('TicketItem icon buttons (IconButton)', () => {
   });
 
   it('does not toggle the row when a hover-opened tooltip is clicked', async () => {
-    const user = userEvent.setup();
+    startHoverFakeTimers();
+    const user = setupHoverUser();
     const { onToggleExpand } = renderRow();
     const del = screen.getByRole('button', { name: i18n.t('ticketItem.delete.ariaLabel', { id: TICKET_ID, title: 'アイコンのテスト' }) });
     await user.hover(del);

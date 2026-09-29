@@ -2,6 +2,8 @@
 // rendered into document.body through a portal and is aria-hidden, so it
 // cannot be found by role; these look it up by its data attribute instead.
 import { act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, beforeEach, onTestFinished, vi } from 'vitest';
 import { OPEN_DELAY_MS } from '../components/IconButton';
 
 const TOOLTIP_SELECTOR = '[data-icon-button-tooltip]';
@@ -10,10 +12,52 @@ const TOOLTIP_SELECTOR = '[data-icon-button-tooltip]';
 // OPEN_DELAY_MS (DFLT-00322). Call this after user.hover() before looking
 // for the tooltip -- and before asserting that none opened, so such a check
 // is not passed merely because the delay has not run out yet.
+//
+// It moves the fake clock past the delay instead of waiting for it in real
+// time (DFLT-00341), so a test that hovers must run under fake timers: call
+// useHoverFakeTimers() in its describe (or startHoverFakeTimers() at the top
+// of the test) and create its user with setupHoverUser(). Without fake timers it throws rather than falling back to
+// a real wait, so a missing setup fails loudly instead of slowing tests down.
 export async function waitForHoverOpenDelay(): Promise<void> {
+  if (!vi.isFakeTimers()) {
+    throw new Error(
+      'waitForHoverOpenDelay() needs fake timers: call useHoverFakeTimers() in the describe and create the user with setupHoverUser()'
+    );
+  }
   await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, OPEN_DELAY_MS + 20));
+    // The clock only moves forward after the hover, so advancing it by the
+    // whole delay always fires an open scheduled by that hover.
+    await vi.advanceTimersByTimeAsync(OPEN_DELAY_MS);
   });
+}
+
+// Runs each test of the enclosing describe under fake timers, for use with
+// waitForHoverOpenDelay() and setupHoverUser(). shouldAdvanceTime keeps the
+// fake clock moving with real time too, so findBy*/waitFor, the fake
+// backend's delayed replies and other real-time waits still make progress.
+export function useHoverFakeTimers(): void {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+}
+
+// The same fake timers for the current test only, for a test that hovers
+// among others in its describe that do not. Call it at the top of the test,
+// before rendering; real timers come back when the test finishes.
+export function startHoverFakeTimers(): void {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+}
+
+// A user-event instance whose internal waits advance the fake clock, for
+// tests run under useHoverFakeTimers().
+export function setupHoverUser(options: Parameters<typeof userEvent.setup>[0] = {}): ReturnType<typeof userEvent.setup> {
+  return userEvent.setup({ advanceTimers: vi.advanceTimersByTime, ...options });
 }
 
 // Every tooltip element currently in the DOM, open or not.

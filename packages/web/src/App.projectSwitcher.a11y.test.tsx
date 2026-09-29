@@ -39,7 +39,7 @@ import App from './App';
 import { Project } from './types';
 import { FakeBackend, createFakeBackend, installFakeBackend } from './test/fakeBackend';
 import { trackBodyReads } from './test/waitForAnswers';
-import { openIconButtonTooltip, openIconButtonTooltips, waitForHoverOpenDelay } from './test/iconButtonTooltip';
+import { openIconButtonTooltip, openIconButtonTooltips, setupHoverUser, startHoverFakeTimers, waitForHoverOpenDelay } from './test/iconButtonTooltip';
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'AAA', local_path: '/work/alpha', created_at: '', updated_at: '' };
 const beta: Project = { id: 'p-beta', name: 'Beta', prefix: 'BBB', local_path: '/work/beta', created_at: '', updated_at: '' };
@@ -85,8 +85,12 @@ function menuItem(p: Project) {
 // it is, the open menu has no project items at all. So besides the first
 // ticket, wait for the app to read that list and let it reach the state and
 // the render, before any test opens the menu (DFLT-00296).
-async function renderApp() {
-  const user = userEvent.setup();
+//
+// A test that hovers passes { hover: true }: it then runs under fake timers
+// with a user that advances them, as waitForHoverOpenDelay needs.
+async function renderApp({ hover = false }: { hover?: boolean } = {}) {
+  if (hover) startHoverFakeTimers();
+  const user = hover ? setupHoverUser() : userEvent.setup();
   const projectListRead = trackBodyReads(backend, (url, method) => url === '/api/projects' && method === 'GET');
   render(<App />);
   await screen.findByText('AAA-00001');
@@ -229,7 +233,7 @@ describe('project switcher accessibility', () => {
     // render would make IconButton re-run its positioning effect
     // (re-measure, drop and re-add its scroll / resize listeners) each time.
     it('keeps the open tooltip\'s positioning effect in place across App re-renders', async () => {
-      const user = await renderApp();
+      const user = await renderApp({ hover: true });
       await user.hover(switcher());
       await waitForHoverOpenDelay();
       const tooltip = openIconButtonTooltip();
@@ -262,7 +266,7 @@ describe('project switcher accessibility', () => {
     });
 
     it('shows no tooltip while a popup opened by a mouse click is open, and one Escape closes it', async () => {
-      const user = await renderApp();
+      const user = await renderApp({ hover: true });
       await user.hover(switcher());
       await waitForHoverOpenDelay();
       expect(openIconButtonTooltip()).toHaveTextContent('Alpha');
