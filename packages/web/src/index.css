@@ -1,5 +1,13 @@
 @import 'tailwindcss';
 
+/* DFLT-00323: Tailwind picks class candidates out of every file under src/,
+   and the tests' strings (class lists a test asserts are absent, old class
+   names kept for comparison, ...) are not classes the app uses. Leave the
+   test files out, so none of them adds an unused rule to the app's CSS. */
+@source not "./**/*.test.ts";
+@source not "./**/*.test.tsx";
+@source not "./test";
+
 /* DFLT-00270: Tailwind CSS v4 migration. The rules below keep the UI looking
    the way it did on Tailwind v3 (tailwind.config.js / postcss.config.js are
    gone; v4 is configured here and through @tailwindcss/vite). */

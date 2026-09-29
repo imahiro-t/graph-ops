@@ -30,9 +30,10 @@ import { compile } from 'tailwindcss';
 const INDEX_CSS = path.resolve(__dirname, 'index.css');
 const require = createRequire(import.meta.url);
 
-// Class names are assembled at run time on purpose: Tailwind scans src/ for
-// candidates, so writing e.g. the upto-15rem gap class literally here would
-// add an otherwise unused rule to the app's CSS.
+// Class names are assembled at run time on purpose: Tailwind used to scan the
+// test files too, so writing e.g. the upto-15rem gap class literally here
+// added an otherwise unused rule to the app's CSS. index.css now leaves the
+// test files out (DFLT-00323); this stays as a second guard.
 const v = (variant: string, utility: string) => [variant, utility].join(':');
 const BELOW = 'below-80rem';
 const UPTO = 'upto-15rem';
