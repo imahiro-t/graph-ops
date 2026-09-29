@@ -794,13 +794,14 @@ paths:
         with no sessions, or one that does not exist, simply contributes
         nothing; answer `[]` when nothing matches.
 
-        graph-engine reads this at every `begin-session` (one ticket), for
-        `unstick-node`, and when it lists tickets for `get-ticket` and the
-        Web UI -- then only for the tickets that have an `IN PROGRESS` /
+        graph-engine reads this at every `begin-session` (one ticket), and
+        when it shows claims for `get-ticket` and the Web UI's ticket
+        listings -- then only for the tickets that have an `IN PROGRESS` /
         `IN REVIEW` node claimed in a session, all of them in one request
         (at most 100 `ticket_id` parameters per request; more are split over
         several requests). The Web UI polls the ticket list, so keep it
-        cheap.
+        cheap. (`unstick-node` does not list: it reads the caller's and the
+        claimant's sessions one by one with `getProcessingSession`.)
       parameters:
         - name: ticket_id
           in: query
@@ -1310,7 +1311,12 @@ components:
         claims made in it (`GraphNode.claim_session_id`) are still being
         worked on: a session a person started is live while its heartbeat is
         at most 60 minutes old; an autopilot worker's session (`run_id` set)
-        follows its run's heartbeat instead (10 minutes, see `AutopilotRun`).
+        follows its run instead: live while the run is neither `finished`
+        nor `stopped` and its heartbeat is at most 10 minutes old (see
+        `AutopilotRun`), so a claim of a stopped or finished run expires at
+        once. When the run's record cannot be read or found (the data source
+        keeps no runs, or the record was deleted), the session's own
+        heartbeat and the 60 minutes decide.
         Heartbeats come from each member's clock, so this assumes the
         members' clocks are not minutes apart.
       required: [id, project_id, ticket_id, actor_name, actor_name_is_fallback, machine_id, started_at, heartbeat]
