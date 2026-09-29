@@ -96,8 +96,16 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
         // that one word is wider than the button can be (160px / 200%);
         // unlike wrap-anywhere it leaves the min-content width alone, so the
         // flex row cannot squeeze the name into "Edit / labe / ls". The icons
-        // are shrink-0 so they keep their size.
-        className="px-2 py-0.5 rounded-full border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 text-[11px] font-semibold flex items-center gap-1 transition min-w-0 max-w-full wrap-break-word text-left"
+        // are shrink-0 so they keep their size, and flex-wrap moves the name
+        // below the icon when the two do not fit on one line: at 160px / 200%
+        // the padding and the (rem-sized) icon leave the name about 12px
+        // beside the icon, which broke it into single letters. Whenever they
+        // fit on one line nothing changes. upto-15rem:rounded-xl (as the
+        // status chip does below 80rem) keeps a two- or three-line button a
+        // rounded rectangle rather than an ellipse; on one line its radius
+        // (0.75rem) is at least half the button's height, so it looks the
+        // same as rounded-full.
+        className="px-2 py-0.5 rounded-full upto-15rem:rounded-xl border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-300 dark:hover:border-indigo-700 text-[11px] font-semibold flex flex-wrap items-center gap-1 transition min-w-0 max-w-full wrap-break-word text-left"
       >
         {saving ? <Loader2 className="w-3 h-3 shrink-0 animate-spin" aria-hidden="true" /> : <Tag className="w-3 h-3 shrink-0" aria-hidden="true" />}
         {/* ticket.labels.editVisible is ticket.labels.edit with its break

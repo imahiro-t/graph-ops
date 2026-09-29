@@ -364,21 +364,37 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
 
 // A metadata bar item's label with its colon ("作成日時:", "Closed reason:")
 // (DFLT-00292). Labels break between words only: break-keep (word-break:
-// keep-all) keeps a CJK label such as "クローズ理由" together as one word,
-// and the last character and the colon sit in a whitespace-nowrap span, so
-// the line never breaks just before the colon ("クローズ理由 / :"). Only when
-// one word is wider than the line itself (e.g. "作成日時:" is about 104px
-// against the card's 78px at 160px / 200%) does wrap-break-word break it at
-// the line's end rather than letting it run past the card's clip. Unlike
-// wrap-anywhere, break-word leaves the min-content width alone, so a flex row
-// cannot squeeze the label into mid-word breaks (DFLT-00276's "Close / d /
-// reaso / n:"). Never put wrap-anywhere on a label or its ancestors.
+// keep-all) keeps a CJK label such as "クローズ理由" together, and the last
+// character and the colon sit in a whitespace-nowrap span, so the line never
+// breaks just before the colon ("クローズ理由 / :"). A Japanese label marks
+// where it may break between its words with "<wbr/>" in its *Visible
+// translation ("クローズ<wbr/>理由", "作成<wbr/>日時"): with a 200% text size
+// "クローズ理由:" is about 147px, wider than the card at 200-240px (118 /
+// 142px), and without the mark keep-all could only break it mid-word at the
+// line's end ("クローズ理 / 由:"). Only when one word is wider than the line
+// itself ("Created:" is 88px against 78px at 160px / 200%) does
+// wrap-break-word break it at the line's end rather than letting it run past
+// the card's clip. Unlike wrap-anywhere, break-word leaves the min-content
+// width alone, so a flex row cannot squeeze the label into mid-word breaks
+// (DFLT-00276's "Close / d / reaso / n:"). Never put wrap-anywhere on a label
+// or its ancestors.
+// `text` is plain text apart from those "<wbr/>" marks, which come from this
+// app's own translation files; it is split on them rather than parsed as
+// markup (escapeValue is off, so it must never be rendered as is).
+const WBR = '<wbr/>';
 const MetaLabel: React.FC<{ text: string }> = ({ text }) => {
-  const chars = Array.from(text);
-  const last = chars.pop() ?? '';
+  const words = text.split(WBR);
+  const lastWord = Array.from(words.pop() ?? '');
+  const last = lastWord.pop() ?? '';
+  words.push(lastWord.join(''));
   return (
     <span className="min-w-0 break-keep wrap-break-word">
-      {chars.join('')}
+      {words.map((w, i) => (
+        <React.Fragment key={i}>
+          {i > 0 && <wbr />}
+          {w}
+        </React.Fragment>
+      ))}
       <span className="whitespace-nowrap">{last}:</span>
     </span>
   );
@@ -1887,7 +1903,7 @@ export const TicketItem: React.FC<Props> = ({
                 breaks between words, and never before its colon. At any
                 usable width nothing changes. */}
             <div className="min-w-0">
-              <MetaLabel text={t('ticketItem.createdAt')} />{' '}
+              <MetaLabel text={t('ticketItem.createdAtVisible')} />{' '}
               <span className="font-mono text-slate-700 dark:text-slate-300 wrap-anywhere">{formatDateTime(ticket.created_at, i18n.language)}</span>
             </div>
             {/* Labels (DFLT-00084): every label, plus the picker.
@@ -1939,7 +1955,7 @@ export const TicketItem: React.FC<Props> = ({
             {ticket.closed_reason && (
               <div className="flex flex-wrap items-center gap-1 min-w-0 text-slate-700 dark:text-slate-300">
                 <Archive aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-slate-500 dark:text-slate-400" />
-                <MetaLabel text={t('ticketItem.close.reasonLabel')} />{' '}
+                <MetaLabel text={t('ticketItem.close.reasonLabelVisible')} />{' '}
                 <span className="font-medium min-w-0 wrap-anywhere">{ticket.closed_reason}</span>
               </div>
             )}

@@ -183,6 +183,7 @@
     "nodeCount": "Nodes",
     "loopEdges": "Loop-back edges: {{count}} (shown as dashed lines on the left)",
     "createdAt": "Created",
+    "createdAtVisible": "Created",
     "family": {
       "parent": "Parent ticket",
       "children": "Child tickets ({{count}})",
@@ -259,7 +260,8 @@
       "reasonInputLabel": "Reason for closing",
       "confirm": "Close",
       "cancel": "Cancel",
-      "reasonLabel": "Closed reason"
+      "reasonLabel": "Closed reason",
+      "reasonLabelVisible": "Closed reason"
     },
     "reopen": {
       "button": "Reopen"

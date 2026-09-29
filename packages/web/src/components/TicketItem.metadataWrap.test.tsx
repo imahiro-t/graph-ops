@@ -21,8 +21,9 @@
 // break before its colon ("クローズ理由 / :"). wrap-anywhere now sits on the
 // values only (the date, the closed reason, each chip, and the label save
 // error). Each label is a MetaLabel -- break-keep wrap-break-word, with its
-// last character and colon in a whitespace-nowrap span -- and the "Edit
-// labels" button is wrap-break-word with its name in a break-keep span
+// last character and colon in a whitespace-nowrap span, and a <wbr> between
+// the words of a Japanese label ("クローズ<wbr>理由") -- and the "Edit labels"
+// button is flex-wrap wrap-break-word with its name in a break-keep span
 // ("ラベルを<wbr>編集" in Japanese). LabelSelect's wrapper is flex-wrap so a
 // save error goes to its own line instead of squeezing the button.
 // jsdom does no layout, so this checks the classes; the widths themselves
@@ -72,9 +73,18 @@ const renderTicket = (overrides: Partial<TicketDetail> = {}, projectLabels: Labe
 const LONG_WORD = 'label-0123456789abcdef-not-found';
 
 // Checks a MetaLabel: the label and its colon in one span that breaks between
-// words only, with the last character and the colon joined by nowrap.
-const expectMetaLabel = (label: HTMLElement, text: string) => {
+// words only, with the last character and the colon joined by nowrap. `words`
+// are the parts a <wbr> separates (the Japanese "クローズ / 理由"); the text
+// must still read as the plain translation (`text`).
+const expectMetaLabel = (label: HTMLElement, text: string, words: string[] = [text]) => {
   expect(label.textContent).toBe(`${text}:`);
+  const wbrs = label.querySelectorAll('wbr');
+  expect(wbrs).toHaveLength(words.length - 1);
+  wbrs.forEach((wbr, i) => {
+    expect(wbr.parentElement).toBe(label);
+    expect(wbr.previousSibling?.textContent).toBe(words[i]);
+  });
+  expect(label.textContent).not.toContain('<wbr');
   expect(label).toHaveClass('min-w-0', 'break-keep', 'wrap-break-word');
   expect(label).not.toHaveClass('wrap-anywhere');
   const tails = label.querySelectorAll('.whitespace-nowrap');
@@ -126,7 +136,8 @@ describe.each(['ja', 'en'])('TicketItem metadata bar creation date (%s)', lng =>
     expect(dateSpan).toHaveClass('font-mono', 'wrap-anywhere');
     // The label breaks between words only, never before its colon.
     const label = labelSpanOf(item);
-    expectMetaLabel(label, i18n.t('ticketItem.createdAt'));
+    // Japanese may break only between "作成" and "日時" (DFLT-00292).
+    expectMetaLabel(label, i18n.t('ticketItem.createdAt'), lng === 'ja' ? ['作成', '日時'] : undefined);
     expectNoInheritedWrapAnywhere(label);
   });
 
@@ -154,7 +165,8 @@ describe.each(['ja', 'en'])('TicketItem metadata bar creation date (%s)', lng =>
     // The label is a flex item of its own that breaks between words only.
     const reasonLabel = labelSpanOf(reasonItem);
     expect(reasonLabel.parentElement).toBe(reasonItem);
-    expectMetaLabel(reasonLabel, i18n.t('ticketItem.close.reasonLabel'));
+    // Japanese may break only between "クローズ" and "理由", never "クローズ理 / 由:".
+    expectMetaLabel(reasonLabel, i18n.t('ticketItem.close.reasonLabel'), lng === 'ja' ? ['クローズ', '理由'] : undefined);
     expectNoInheritedWrapAnywhere(reasonLabel);
     // Only the reason itself breaks inside a word, and only when it cannot fit.
     expect(reason).toHaveClass('font-medium', 'min-w-0', 'wrap-anywhere');
@@ -172,7 +184,8 @@ describe.each(['ja', 'en'])('TicketItem metadata bar creation date (%s)', lng =>
     const editName = i18n.t('ticket.labels.edit');
     const button = within(labels).getByRole('button', { name: `${editName}: TEST-00276` });
     expectNoInheritedWrapAnywhere(button);
-    expect(button).toHaveClass('min-w-0', 'max-w-full', 'wrap-break-word');
+    // flex-wrap: the name moves below the icon instead of being squeezed beside it.
+    expect(button).toHaveClass('flex', 'flex-wrap', 'min-w-0', 'max-w-full', 'wrap-break-word', 'rounded-full', 'upto-15rem:rounded-xl');
     // The Tag icon keeps its size.
     expect(button.querySelector('svg')).toHaveClass('shrink-0');
 

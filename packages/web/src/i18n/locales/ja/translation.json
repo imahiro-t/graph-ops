@@ -182,6 +182,7 @@
     "nodeCount": "ノード数",
     "loopEdges": "差し戻し・戻りの辺: {{count}}本 (左側の破線で表示)",
     "createdAt": "作成日時",
+    "createdAtVisible": "作成<wbr/>日時",
     "family": {
       "parent": "親チケット",
       "children": "子チケット（{{count}}件）",
@@ -258,7 +259,8 @@
       "reasonInputLabel": "クローズする理由",
       "confirm": "クローズする",
       "cancel": "キャンセル",
-      "reasonLabel": "クローズ理由"
+      "reasonLabel": "クローズ理由",
+      "reasonLabelVisible": "クローズ<wbr/>理由"
     },
     "reopen": {
       "button": "再オープン"
