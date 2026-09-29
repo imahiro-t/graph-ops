@@ -25,6 +25,10 @@
 // 320-336px; there, and at 100% from 320px up, the padding measured the same
 // as before. In a real browser p-2 wins over max-sm:p-3 and the 15rem p-3
 // (computed padding 16px at a 32px root).
+//
+// DFLT-00295: the expanded details set the same four paddings through the
+// --details-pad variable (p-(--details-pad)), with the same variants in the
+// same order, because the metadata bar's labels may run into that padding.
 import { render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
@@ -100,9 +104,28 @@ describe.each(['ja', 'en'] as const)('TicketItem padding with large text on a na
   it('pads the expanded details less only below sm or with large text on a narrow screen', () => {
     renderTicket();
     const details = screen.getByTestId('ticket-details');
-    expect(details).toHaveClass('p-6', BELOW_SM_PADDING, NARROW_LARGE_TEXT_PADDING, TINY_WINDOW_PADDING);
-    // Unconditional or sm+ forms would change the look from sm up.
-    expectNoneOf(details, ['p-3', 'p-2', 'p-4', 'sm:p-6', 'sm:p-3', 'max-sm:p-2', 'upto-15rem:p-2']);
+    expect(details).toHaveClass(
+      'p-(--details-pad)',
+      '[--details-pad:1.5rem]',
+      'max-sm:[--details-pad:0.75rem]',
+      'upto-15rem:[--details-pad:0.75rem]',
+      '[@media(max-width:200px)]:[--details-pad:0.5rem]'
+    );
+    // Unconditional or sm+ forms would change the look from sm up, and the
+    // padding classes themselves would override the variable.
+    expectNoneOf(details, [
+      'p-6',
+      'p-3',
+      'p-2',
+      'p-4',
+      'sm:p-6',
+      'sm:p-3',
+      'max-sm:p-2',
+      'upto-15rem:p-2',
+      BELOW_SM_PADDING,
+      NARROW_LARGE_TEXT_PADDING,
+      TINY_WINDOW_PADDING
+    ]);
   });
 
   it('pads the Action Footer less only below sm or with large text on a narrow screen', () => {

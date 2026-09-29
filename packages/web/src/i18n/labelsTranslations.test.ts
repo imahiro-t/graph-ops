@@ -35,6 +35,8 @@ describe('label translations', () => {
       'settings.labels.confirmDelete',
       'settings.labels.confirmDeleteInUse',
       'ticket.labels.edit',
+      // The button's drawn name, with its break marks (DFLT-00292, DFLT-00295).
+      'ticket.labels.editVisible',
       'toolbar.labelAll',
       'toolbar.labelSelected',
       'toolbar.labelGroupLabel',

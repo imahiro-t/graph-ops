@@ -182,7 +182,6 @@
     },
     "nodeCount": "Nodes",
     "loopEdges": "Loop-back edges: {{count}} (shown as dashed lines on the left)",
-    "createdAt": "Created",
     "createdAtVisible": "Created",
     "family": {
       "parent": "Parent ticket",
@@ -260,7 +259,6 @@
       "reasonInputLabel": "Reason for closing",
       "confirm": "Close",
       "cancel": "Cancel",
-      "reasonLabel": "Closed reason",
       "reasonLabelVisible": "Closed reason"
     },
     "reopen": {
