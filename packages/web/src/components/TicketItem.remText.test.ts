@@ -9,8 +9,10 @@ import path from 'node:path';
 // reads the component's source and fails if a px text size comes back.
 //
 // Class names are matched by regular expressions or assembled at run time on
-// purpose: Tailwind scans src/ for candidates, so writing a px text class
-// literally here would add an otherwise unused rule to the app's CSS.
+// purpose: Tailwind used to scan the test files too, so writing a px text
+// class literally here added an otherwise unused rule to the app's CSS.
+// index.css now leaves the test files out (DFLT-00323); this stays as a
+// second guard.
 const SOURCE = path.resolve(__dirname, 'TicketItem.tsx');
 
 // Removes /* ... */ (including JSX {/* ... */}) and // line comments. A line

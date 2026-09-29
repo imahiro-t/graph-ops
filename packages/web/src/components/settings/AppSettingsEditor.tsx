@@ -184,7 +184,11 @@ export const AppSettingsEditor: React.FC<Props> = ({
   // last. A GET raises them too (an unreadable home config is visible before
   // anything is saved), so this is not cleared on load, it is replaced.
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Starts true: the first render already shows the loading line, so the
+  // form is never drawn with its defaults for a frame before load() runs
+  // (DFLT-00323) -- a flicker, and a form someone could start editing or
+  // save with values that are not the stored ones.
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const { savedFlash, showSavedFlash } = useSavedFlash();

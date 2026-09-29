@@ -3,6 +3,7 @@
 // this tab's load). See this ticket's plan section 4-2.
 import { act, render, screen, waitFor, waitForElementToBeRemoved, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { AppSettingsEditor } from './AppSettingsEditor';
@@ -71,8 +72,8 @@ function renderEditor() {
 // mount effect inside render()'s act, so waiting for that call waits for
 // nothing -- under load the assertions then run against the loading spinner.
 // Wait for the spinner to go away instead. It is always showing when render()
-// returns (load() sets loading before awaiting the fetch), so if that ever
-// stops being true this fails loudly rather than passing without waiting.
+// returns (loading starts true, DFLT-00323), so if that ever stops being
+// true this fails loudly rather than passing without waiting.
 // Call it right after render(), with no await in between.
 async function waitForAppSettingsLoaded() {
   await waitForElementToBeRemoved(() => screen.queryByText(i18n.t('settings.common.loading')));
@@ -89,6 +90,30 @@ describe('AppSettingsEditor', () => {
     // Some tests deliberately switch language -- restore the fixture default
     // (setup.ts's beforeAll) so it never leaks into the next test.
     await i18n.changeLanguage('ja');
+  });
+
+  // DFLT-00323: the first render, before the mount effect has run load(),
+  // shows the loading line and not the form with its default values.
+  // render() runs the mount effect inside its act, so what it leaves in the
+  // DOM is already past the first frame; renderToStaticMarkup renders once
+  // and runs no effect, which is exactly that first frame.
+  it('shows the loading line, not the default form, before the settings have loaded', () => {
+    mockedFetchAppSettings.mockReturnValue(new Promise(() => {}));
+    const html = renderToStaticMarkup(
+      <AppSettingsEditor
+        projects={[]}
+        onDirtyChange={vi.fn()}
+        onProjectsChanged={vi.fn()}
+        onPaginationPageSizeChanged={vi.fn()}
+        onMyNameChanged={vi.fn()}
+      />
+    );
+    expect(html).toContain(i18n.t('settings.common.loading'));
+    expect(html).not.toContain(i18n.t('settings.appSettings.pagination.pageSizeLabel'));
+    expect(html).not.toContain(i18n.t('settings.appSettings.storage.title'));
+    expect(html).not.toContain(i18n.t('settings.common.save'));
+    expect(html).not.toContain('<input');
+    expect(mockedFetchAppSettings).not.toHaveBeenCalled();
   });
 
   it('M-5: retyping the MySQL password in plaintext and saving returns the field to the redacted state', async () => {

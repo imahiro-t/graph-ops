@@ -8,8 +8,9 @@
 // - No control drops its keyboard focus indicator with a ring-0 focus
 //   override (the checkboxes in LabelSelect, MultiSelectFilter and
 //   ReviewGatesEditor had one).
-// Class names that must not reach the app's CSS are assembled at run time:
-// Tailwind scans src/ for candidates, test files included.
+// Class names that must not reach the app's CSS are assembled at run time.
+// Tailwind no longer scans the test files (index.css, DFLT-00323), so this
+// is a second guard, not the only one.
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';

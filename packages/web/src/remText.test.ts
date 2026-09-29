@@ -16,8 +16,10 @@ import path from 'node:path';
 // for font sizes set outside a text size class.)
 //
 // Class names are matched by regular expressions or assembled at run time on
-// purpose: Tailwind scans src/ for candidates, so writing a px text class
-// literally here would add an otherwise unused rule to the app's CSS.
+// purpose: Tailwind used to scan the test files too, so writing a px text
+// class literally here added an otherwise unused rule to the app's CSS.
+// index.css now leaves the test files out (DFLT-00323); this stays as a
+// second guard.
 const SRC = __dirname;
 
 function listSources(dir: string): string[] {

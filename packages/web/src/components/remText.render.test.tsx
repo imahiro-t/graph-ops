@@ -3,8 +3,9 @@
 // chip 0.6875rem -- 10px / 11px at the default 16px, so the default size looks
 // as before, and they follow the browser's default font size (WCAG 1.4.4).
 // jsdom does no layout, so this checks the classes. The px classes are
-// assembled at run time so that Tailwind (which scans src/) does not pick
-// them up as candidates.
+// assembled at run time so that Tailwind does not pick them up as
+// candidates (a second guard: index.css leaves the test files out since
+// DFLT-00323).
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import '../i18n';
