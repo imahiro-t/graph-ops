@@ -26,8 +26,8 @@
 // as before. In a real browser p-2 wins over max-sm:p-3 and the 15rem p-3
 // (computed padding 16px at a 32px root).
 //
-// DFLT-00290: that p-2 is now the named upto-200px:p-2 (index.css), the same
-// @media (max-width: 200px) condition, and from 7.5rem down (a 32px default
+// DFLT-00290: that p-2 is the named upto-200px:p-2 (index.css, DFLT-00294),
+// the same @media (max-width: 200px) condition, and from 7.5rem down (a 32px default
 // font in a 160px window) both pad with p-1 (upto-7_5rem:p-1). The arbitrary
 // [@media(max-width:200px)]: prefix came out after every named variant, so
 // it would have beaten upto-7_5rem:p-1 at 160px; upto-200px is declared

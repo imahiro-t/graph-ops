@@ -26,7 +26,7 @@ export function PendingApprovalBadge({ count }: { count: number }) {
       role="img"
       aria-label={label}
       title={label}
-      className={`inline-flex items-center justify-center min-w-5 px-1.5 rounded-full text-[10px] font-bold leading-4 ${PENDING_APPROVAL_BADGE_CLASSES}`}
+      className={`inline-flex items-center justify-center min-w-5 px-1.5 rounded-full text-[0.625rem] font-bold leading-4 ${PENDING_APPROVAL_BADGE_CLASSES}`}
     >
       {count}
     </span>

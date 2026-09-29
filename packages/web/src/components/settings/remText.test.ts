@@ -6,9 +6,9 @@ import path from 'node:path';
 // DFLT-00287: the settings editors set their small text sizes in rem
 // (text-[0.625rem] / text-[0.6875rem], 10px / 11px at the default 16px), not
 // in px, so they follow the browser's default font size (WCAG 1.4.4). This
-// reads every non-test source file in this directory and fails if a 10px or
-// 11px text size comes back. (The node types list's 9px "default" badge is
-// out of this ticket's scope and not checked.)
+// reads every non-test source file in this directory and fails if a px text
+// size comes back. (DFLT-00294 also moved the node types list's 9px "default"
+// badge to 0.5625rem and widened the check from 10px / 11px to every px size.)
 //
 // Class names are matched by regular expressions or assembled at run time on
 // purpose: Tailwind scans src/ for candidates, so writing a px text class
@@ -20,7 +20,7 @@ const SOURCES = fs
   .sort();
 
 const read = (name: string) => fs.readFileSync(path.join(DIR, name), 'utf8');
-const PX_10_11 = /text-\[1[01]px\]/g;
+const PX_TEXT = /text-\[\d+(?:\.\d+)?px\]/g;
 const remText = (size: string) => ['text-[', size, 'rem]'].join('');
 const count = (src: string, cls: string) => src.split(cls).length - 1;
 
@@ -32,8 +32,8 @@ describe('settings/ text sizes (DFLT-00287)', () => {
     }
   });
 
-  it.each(SOURCES)('%s uses no 10px / 11px text size, even in comments', name => {
-    expect(read(name).match(PX_10_11) ?? []).toEqual([]);
+  it.each(SOURCES)('%s uses no px text size, even in comments', name => {
+    expect(read(name).match(PX_TEXT) ?? []).toEqual([]);
   });
 
   it('uses the rem equivalents instead', () => {
@@ -43,5 +43,7 @@ describe('settings/ text sizes (DFLT-00287)', () => {
     const all = SOURCES.map(read).join('\n');
     expect(count(all, remText('0.625'))).toBeGreaterThanOrEqual(48);
     expect(count(all, remText('0.6875'))).toBeGreaterThanOrEqual(32);
+    // DFLT-00294: the node types list's "default" badge.
+    expect(count(all, remText('0.5625'))).toBeGreaterThanOrEqual(1);
   });
 });

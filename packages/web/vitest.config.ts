@@ -1,5 +1,5 @@
-import { mergeConfig, defineConfig } from 'vite';
-import viteConfig from './vite.config';
+import { mergeConfig, defineConfig } from 'vitest/config';
+import viteConfig from './vite.config.ts';
 
 // Merges onto vite.config.ts (left untouched) rather than duplicating its
 // plugins/server config -- this file only adds the `test` block Vitest
@@ -8,6 +8,13 @@ import viteConfig from './vite.config';
 // injected globals, so src/test/setup.ts has to import
 // '@testing-library/jest-dom/vitest' and call afterEach(cleanup) itself
 // (see that file).
+//
+// defineConfig/mergeConfig come from 'vitest/config' (not 'vite') so the
+// `test` block type-checks: that defineConfig's UserConfig carries
+// Vitest's `test` property, which tsconfig.node.json checks at build time.
+// The '.ts' extension on the vite.config import is explicit because Vite
+// warns that extensionless imports won't resolve under its future native
+// config loader.
 export default mergeConfig(
   viteConfig,
   defineConfig({

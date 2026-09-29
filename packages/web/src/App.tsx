@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState, useEffect, useRef } from 'react';
+import React, { useCallback, useMemo, useState, useEffect, useId, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Search,
@@ -42,6 +42,7 @@ import { localizedApiErrorMessage } from './lib/apiError';
 import { apiFetch } from './lib/apiFetch';
 import { fetchPendingApprovalCounts } from './lib/pendingApprovals';
 import { fetchAppSettings } from './lib/settingsApi';
+import { POPUP_VIEWPORT_MARGIN_REM, PROJECT_MENU_WIDTH_REM, PopupPlacement, fitPopupHorizontally, rootFontSizePx } from './lib/popupPlacement';
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from './lib/focusAfterRemoval';
 import { useLatest } from './hooks/useLatest';
 import { useTransientAnnouncement } from './hooks/useTransientAnnouncement';
@@ -211,6 +212,31 @@ export const App: React.FC = () => {
   // unmounts with the menu) or the dialog opened by itself (?newProject=1).
   const projectMenuButtonRef = useRef<HTMLButtonElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
+  // The wrapper the popup is positioned against (relative), and where the
+  // popup goes from it (DFLT-00285, see the effect below).
+  const projectMenuAnchorRef = useRef<HTMLDivElement>(null);
+  const [projectMenuPlacement, setProjectMenuPlacement] = useState<PopupPlacement | null>(null);
+  // The switcher button's description: the local path alone (DFLT-00285).
+  const projectSwitcherDescriptionId = useId();
+  // The switcher's second tooltip line and its description are the same
+  // text, computed once so the two cannot drift apart (DFLT-00285).
+  const currentProjectPathLabel = currentProject
+    ? currentProject.local_path || t('settings.appSettings.projects.notSet')
+    : undefined;
+  // Memoized: IconButton re-runs its positioning effect whenever the
+  // tooltip content changes, and a fresh element on every App render (the
+  // ticket list polls) would re-measure and re-subscribe each time.
+  const currentProjectName = currentProject?.name;
+  const projectSwitcherTooltip = useMemo(
+    () =>
+      currentProjectName === undefined ? undefined : (
+        <>
+          <span className="block">{currentProjectName}</span>
+          <span className="block">{currentProjectPathLabel}</span>
+        </>
+      ),
+    [currentProjectName, currentProjectPathLabel]
+  );
   // Per-project count of tickets awaiting approval, badged on the switcher's
   // menu items (DFLT-00144). Refetched every time the menu opens; empty
   // while that fetch is in flight and after it fails, so the menu never
@@ -277,6 +303,41 @@ export const App: React.FC = () => {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isProjectMenuOpen]);
+  // DFLT-00285: the popup lines up with the switcher's left edge, as it
+  // always did, but is never wider than the window less 0.5rem on each side,
+  // and moves left when it would otherwise end past the window's right edge
+  // (see lib/popupPlacement.ts). Worked out before paint when the popup
+  // opens, and again while it is open whenever the window is resized or
+  // zoomed (resize) or the wrapper or the page changes size
+  // (ResizeObserver: a change of the root font size fires no resize, but it
+  // resizes the button and so the wrapper). The popup's own width is 16rem
+  // (its w-64) at the current root font size, never a measurement of the
+  // popup, which would give back the capped width once maxWidth is set.
+  // Without ResizeObserver (jsdom) only resize is followed.
+  useLayoutEffect(() => {
+    if (!isProjectMenuOpen) return;
+    const anchor = projectMenuAnchorRef.current;
+    if (!anchor) return;
+    const update = () => {
+      const rem = rootFontSizePx();
+      const next = fitPopupHorizontally({
+        viewportWidth: document.documentElement.clientWidth || window.innerWidth,
+        anchorLeft: anchor.getBoundingClientRect().left,
+        preferredWidth: PROJECT_MENU_WIDTH_REM * rem,
+        margin: POPUP_VIEWPORT_MARGIN_REM * rem
+      });
+      setProjectMenuPlacement(prev => (prev && prev.left === next.left && prev.maxWidth === next.maxWidth ? prev : next));
+    };
+    update();
+    window.addEventListener('resize', update);
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    observer?.observe(anchor);
+    observer?.observe(document.documentElement);
+    return () => {
+      window.removeEventListener('resize', update);
+      observer?.disconnect();
+    };
   }, [isProjectMenuOpen]);
   // DFLT-00159: the menu closes when keyboard focus leaves the button and the
   // menu. Whether a focusout came from Tab is recorded on keydown (Tab, or
@@ -1161,7 +1222,7 @@ export const App: React.FC = () => {
           under the button there). */}
       <header
         ref={headerRef}
-        className={`bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 [@media(max-width:200px)]:px-2 lg:px-6 py-3.5 relative ${headerFitsSticky ? 'lg:sticky lg:top-0' : ''} z-30`}
+        className={`bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 upto-200px:px-2 lg:px-6 py-3.5 relative ${headerFitsSticky ? 'lg:sticky lg:top-0' : ''} z-30`}
       >
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
@@ -1182,9 +1243,15 @@ export const App: React.FC = () => {
                 narrower header and widened the page (a long project name at
                 200% text in a 320px window). The wrapper may shrink
                 (min-w-0), the button follows it (max-w-full) and the name
-                truncates; where the button fits, nothing moves. */}
+                truncates; where the button fits, nothing moves.
+                DFLT-00285: flex, so IconButton's inline-flex wrapper <span>
+                is a flex item (blockified) rather than inline content: in an
+                inline formatting context the line's strut and baseline
+                alignment could make this div taller than the button. The
+                wrapper shrinks with it (min-w-0 max-w-full). */}
             <div
-              className="relative min-w-0 max-w-56"
+              ref={projectMenuAnchorRef}
+              className="relative flex min-w-0 max-w-56"
               onKeyDown={handleProjectSwitcherKeyDown}
               onPointerDown={handleProjectSwitcherPointerDown}
               onBlur={handleProjectSwitcherBlur}
@@ -1197,26 +1264,31 @@ export const App: React.FC = () => {
                   closes when keyboard focus leaves the button and the popup
                   (DFLT-00159). aria-controls only while open: the popup is
                   not rendered while closed.
-                  DFLT-00277: the tooltip gives the full project name on its
-                  first line and the local path (or "not set") on the second.
-                  The name in the button truncates, and in a 160px window
-                  with a 32px root font it is not shown at all, so sighted
-                  users need somewhere to read it in full; the popup's items
-                  show it wrapped as well. The accessible name stays the
-                  button's text. */}
-              <button
+                  DFLT-00277 / DFLT-00285: the tooltip gives the full project
+                  name on its first line and the local path (or "not set") on
+                  the second. The name in the button truncates, and in a
+                  160px window with a 32px root font it is not shown at all,
+                  so sighted users need somewhere to read it in full; the
+                  popup's items show it wrapped as well. It is IconButton's
+                  visible tooltip (hover and keyboard focus, aria-hidden)
+                  rather than a title attribute, which screen readers could
+                  read as a description repeating the name. The accessible
+                  name stays the button's text (nameFromContent) and the
+                  description is the local path alone (the hidden span
+                  below). No tooltip while the popup is open -- it would
+                  cover the popup's first item -- or with no project. */}
+              <IconButton
                 ref={projectMenuButtonRef}
-                type="button"
+                nameFromContent
+                tooltip={projectSwitcherTooltip}
+                tooltipDisabled={isProjectMenuOpen || !currentProject}
+                aria-describedby={currentProject ? projectSwitcherDescriptionId : undefined}
+                wrapperClassName="min-w-0 max-w-full"
                 onClick={toggleProjectMenu}
                 aria-expanded={isProjectMenuOpen}
                 aria-haspopup="dialog"
                 aria-controls={isProjectMenuOpen ? PROJECT_MENU_ID : undefined}
-                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 [@media(max-width:200px)]:gap-1 [@media(max-width:200px)]:px-2 transition min-w-0 max-w-full"
-                title={
-                  currentProject
-                    ? `${currentProject.name}\n${currentProject.local_path || t('settings.appSettings.projects.notSet')}`
-                    : undefined
-                }
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 upto-200px:gap-1 upto-200px:px-2 transition min-w-0 max-w-full"
               >
                 <FolderOpen aria-hidden="true" className="w-4 h-4 text-slate-500 dark:text-slate-400 shrink-0" />
                 <span className="truncate">
@@ -1226,7 +1298,12 @@ export const App: React.FC = () => {
                     slate-500 is 4.76:1 on white and 4.55:1 on the slate-50 hover; slate-400 is
                     6.96:1 on slate-900 and 5.71:1 on the slate-800 hover. */}
                 <ChevronDown aria-hidden="true" className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 shrink-0" />
-              </button>
+              </IconButton>
+              {currentProject && (
+                <span id={projectSwitcherDescriptionId} hidden>
+                  {currentProjectPathLabel}
+                </span>
+              )}
 
               {isProjectMenuOpen && (
                 <>
@@ -1237,30 +1314,36 @@ export const App: React.FC = () => {
                     data-testid="project-switcher-overlay"
                     onClick={() => setIsProjectMenuOpen(false)}
                   />
-                  {/* DFLT-00277: w-64 is 512px with a 32px root font, so
-                      the open popup ran past a 320px window (scrollWidth
-                      544). It is now never wider than the window less 2rem
-                      (the header's padding on both sides); with the default
-                      font at 320px and up the cap is wider than w-64 and
-                      nothing changes. The cap never goes below 8rem, though:
-                      below that (160-200px windows at a 24-32px root) the
-                      name column shrank to 0px and the names ran under the
-                      badge and prefix, which spilled out of the popup. 8rem
-                      is what the cap gives at 320px with a 32px root, where
-                      every item fits, and it scales with the font, so the
-                      item keeps that layout at any text size. Only windows
-                      narrower than 320px (outside WCAG 1.4.10's reflow
-                      width) can then scroll sideways while the popup is
-                      open. */}
+                  {/* DFLT-00285: the popup is w-64 (16rem), lined up with
+                      the button's left edge, but its left and max-width are
+                      set from the window (projectMenuPlacement, see the
+                      effect that sets it): never wider than the window less
+                      0.5rem on each side, and moved left when it would end
+                      past the window's right edge. top-full puts it under
+                      the button: the wrapper is a flex container, where an
+                      absolute child with top: auto would sit at the top of
+                      the content box, over the button; top: 100% plus mt-1.5
+                      is where the static position put it while the wrapper
+                      was a block. The popup is a size container
+                      (@container): where it is narrower than 8rem
+                      (cq-below-8rem:, index.css; a 160-200px window with a
+                      24-32px root font, say), each item
+                      pads less and puts the badge and the prefix on a
+                      second line, so the name keeps the first line's width
+                      after the check mark and never shrinks to nothing. The
+                      condition is on the popup's width in rem, so it
+                      follows the root font size (a media query's rem would
+                      not). At 8rem and up nothing changes. */}
                   <div
                     ref={projectMenuRef}
                     id={PROJECT_MENU_ID}
                     role="dialog"
                     aria-label={t('projectSwitcher.menuLabel')}
-                    className="absolute left-0 mt-1.5 w-64 max-w-[max(calc(100vw-2rem),8rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-sm"
+                    style={projectMenuPlacement ? { left: projectMenuPlacement.left, maxWidth: projectMenuPlacement.maxWidth } : undefined}
+                    className="absolute left-0 top-full mt-1.5 w-64 @container bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 py-1 text-sm"
                   >
                     {projects.length === 0 && (
-                      <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">{t('projectSwitcher.empty')}</div>
+                      <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400 wrap-anywhere">{t('projectSwitcher.empty')}</div>
                     )}
                     {projects.map(p => {
                       // DFLT-00158: the check mark shows the current project
@@ -1277,7 +1360,7 @@ export const App: React.FC = () => {
                           key={p.id}
                           onClick={() => switchToProject(p)}
                           aria-current={isCurrent ? 'true' : undefined}
-                          className="w-full text-left px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 text-slate-700 dark:text-slate-300"
+                          className="w-full text-left px-3 cq-below-8rem:px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 flex cq-below-8rem:flex-wrap items-center gap-2 text-slate-700 dark:text-slate-300"
                         >
                           <Check
                             aria-hidden="true"
@@ -1286,9 +1369,13 @@ export const App: React.FC = () => {
                           {/* DFLT-00277: the name wraps (breaking anywhere, so a
                               name with no spaces cannot widen the item) instead
                               of truncating, so the popup always shows it in
-                              full. A one-line name looks as before. */}
-                          <span className="min-w-0 wrap-anywhere">{p.name}</span>
-                          <span className="ml-auto flex items-center gap-2 shrink-0">
+                              full. A one-line name looks as before.
+                              DFLT-00285: below 8rem the name takes the rest
+                              of the first line (flex-1 basis-0) and the group
+                              on the right fills a line of its own
+                              (basis-full), still right-aligned. */}
+                          <span className="min-w-0 wrap-anywhere cq-below-8rem:flex-1 cq-below-8rem:basis-0">{p.name}</span>
+                          <span className="ml-auto flex items-center gap-2 shrink-0 cq-below-8rem:basis-full cq-below-8rem:justify-end">
                             {pendingApprovalCounts[p.id] > 0 && (
                               <PendingApprovalBadge count={pendingApprovalCounts[p.id]} />
                             )}
@@ -1296,7 +1383,7 @@ export const App: React.FC = () => {
                                 4.76:1 on white and 4.55:1 on the slate-50 hover; slate-400 is 6.96:1
                                 on slate-900 and 5.71:1 on the slate-800 hover. The light hover margin
                                 is thin: recompute if the item backgrounds get darker. */}
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">{p.prefix}</span>
+                            <span className="text-[0.625rem] text-slate-500 dark:text-slate-400 font-mono">{p.prefix}</span>
                           </span>
                         </button>
                       );
@@ -1310,8 +1397,11 @@ export const App: React.FC = () => {
                         }}
                         className="w-full text-left px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 text-blue-700 dark:text-blue-400 font-medium"
                       >
-                        <Plus aria-hidden="true" className="w-3.5 h-3.5" />
-                        {t('projectSwitcher.createNew')}
+                        {/* DFLT-00285: the text may wrap and break inside a
+                            word, and the icon keeps its size, so a narrow
+                            popup keeps the entry inside it. */}
+                        <Plus aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />
+                        <span className="min-w-0 wrap-anywhere">{t('projectSwitcher.createNew')}</span>
                       </button>
                     </div>
                   </div>
@@ -1321,7 +1411,7 @@ export const App: React.FC = () => {
 
             <button
               onClick={() => setIsClaudeGlobalOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-700 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 [@media(max-width:200px)]:flex-wrap [@media(max-width:200px)]:justify-center [@media(max-width:200px)]:px-2 transition min-w-0 max-w-full"
+              className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-700 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 upto-200px:flex-wrap upto-200px:justify-center upto-200px:px-2 transition min-w-0 max-w-full"
             >
               <Terminal aria-hidden="true" className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
               <span className="min-w-0 wrap-anywhere">{t('header.launchClaude')}</span>
@@ -1336,7 +1426,7 @@ export const App: React.FC = () => {
               onClick={() => i18n.changeLanguage(currentLanguage === 'ja' ? 'en' : 'ja')}
               label={t('header.language.toggleTitle', { lang: t(`header.language.${currentLanguage}`) })}
               wrapperClassName="min-w-0 max-w-full"
-              className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 transition flex items-center gap-1.5 [@media(max-width:200px)]:flex-wrap [@media(max-width:200px)]:justify-center min-w-0 max-w-full"
+              className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 transition flex items-center gap-1.5 upto-200px:flex-wrap upto-200px:justify-center min-w-0 max-w-full"
             >
               <Languages aria-hidden="true" className="w-4 h-4 shrink-0" />
               <span className="text-xs font-semibold min-w-0 wrap-anywhere">{t(`header.language.${currentLanguage}`)}</span>
@@ -1371,7 +1461,7 @@ export const App: React.FC = () => {
               }}
               disabled={!currentProject}
               title={currentProject ? undefined : t('projectSwitcher.selectFirst')}
-              className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 [@media(max-width:200px)]:flex-wrap [@media(max-width:200px)]:justify-center [@media(max-width:200px)]:px-2 transition min-w-0 max-w-full"
+              className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 upto-200px:flex-wrap upto-200px:justify-center upto-200px:px-2 transition min-w-0 max-w-full"
             >
               <Plus aria-hidden="true" className="w-4 h-4 shrink-0" />
               <span className="min-w-0 wrap-anywhere">{t('header.newTicket')}</span>
@@ -1547,10 +1637,10 @@ export const App: React.FC = () => {
               container: its width comes from <main>, not from its content. */}
           <div
             data-testid="summary-heading"
-            className="flex upto-15rem:flex-wrap [@container(max-width:12rem)]:flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 max-w-full"
+            className="flex upto-15rem:flex-wrap cq-upto-12rem:flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 max-w-full"
           >
-            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm upto-15rem:min-w-0 upto-15rem:wrap-anywhere [@container(max-width:12rem)]:min-w-0 [@container(max-width:12rem)]:wrap-anywhere">{t('summary.title')}</span>
-            <span className="text-xs text-slate-500 dark:text-slate-400 upto-15rem:min-w-0 upto-15rem:wrap-anywhere [@container(max-width:12rem)]:min-w-0 [@container(max-width:12rem)]:wrap-anywhere">{t('summary.subtitle')}</span>
+            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm upto-15rem:min-w-0 upto-15rem:wrap-anywhere cq-upto-12rem:min-w-0 cq-upto-12rem:wrap-anywhere">{t('summary.title')}</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 upto-15rem:min-w-0 upto-15rem:wrap-anywhere cq-upto-12rem:min-w-0 cq-upto-12rem:wrap-anywhere">{t('summary.subtitle')}</span>
           </div>
 
           <div
@@ -1559,28 +1649,28 @@ export const App: React.FC = () => {
           >
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold wrap-anywhere text-slate-800 dark:text-slate-200">{totalCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:wrap-anywhere">{t('summary.total')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 upto-200px:wrap-anywhere">{t('summary.total')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold wrap-anywhere text-blue-600 dark:text-blue-400">{inProgressCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:wrap-anywhere">{t('summary.inProgress')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 upto-200px:wrap-anywhere">{t('summary.inProgress')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold wrap-anywhere text-purple-600 dark:text-purple-400">{inReviewCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:wrap-anywhere">{t('summary.inReview')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 upto-200px:wrap-anywhere">{t('summary.inReview')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div className="text-lg font-bold wrap-anywhere text-emerald-600 dark:text-emerald-400">{doneCount}</div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:wrap-anywhere">{t('summary.done')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 upto-200px:wrap-anywhere">{t('summary.done')}</div>
             </div>
             <div className="text-center px-3 min-w-0 max-w-full">
               <div
                 data-testid="summary-node-progress"
                 className="text-lg font-bold wrap-anywhere text-slate-800 dark:text-slate-200"
               >
-                <span className="whitespace-nowrap [@media(max-width:200px)]:whitespace-normal">{doneNodesCount}/</span><wbr /><span className="whitespace-nowrap [@media(max-width:200px)]:whitespace-normal">{totalNodesCount}</span>
+                <span className="whitespace-nowrap upto-200px:whitespace-normal">{doneNodesCount}/</span><wbr /><span className="whitespace-nowrap upto-200px:whitespace-normal">{totalNodesCount}</span>
               </div>
-              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 [@media(max-width:200px)]:wrap-anywhere">{t('summary.nodeProgress')}</div>
+              <div className="text-[0.6875rem] text-slate-500 dark:text-slate-400 upto-200px:wrap-anywhere">{t('summary.nodeProgress')}</div>
             </div>
           </div>
         </div>

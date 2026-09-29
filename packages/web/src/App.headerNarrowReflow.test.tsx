@@ -58,7 +58,7 @@ const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path
 
 const BREAKS_ANYWHERE = 'wrap-anywhere';
 const NARROW = 'upto-15rem:';
-const TINY = '[@media(max-width:200px)]:';
+const TINY = 'upto-200px:';
 
 // Six tickets on pages of five, so the pagination row is drawn.
 function seed() {
@@ -123,7 +123,13 @@ describe.each(['ja', 'en'] as const)('top header in a 160px window at 200%% (%s)
     expect(switcher).toHaveClass('min-w-0', 'max-w-full');
     expect(switcher).not.toHaveClass('max-w-[14rem]');
     expect(switcher).toHaveClass('gap-1.5', `${TINY}gap-1`, 'px-3', `${TINY}px-2`);
-    expect(switcher.parentElement).toHaveClass('relative', 'min-w-0', 'max-w-56');
+    // DFLT-00285: the button is an IconButton, so its wrapper span comes in
+    // between; it shrinks with the outer div, which is flex so the span is a
+    // flex item rather than inline content.
+    const span = switcher.parentElement as HTMLElement;
+    expect(span.tagName).toBe('SPAN');
+    expect(span).toHaveClass('min-w-0', 'max-w-full');
+    expect(span.parentElement).toHaveClass('relative', 'flex', 'min-w-0', 'max-w-56');
     expect(within(switcher).getByText('Alpha')).toHaveClass('truncate');
   });
 

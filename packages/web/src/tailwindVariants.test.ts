@@ -15,17 +15,22 @@ import { compile } from 'tailwindcss';
 // and [@media(min-width:80rem)]: prefixes. Their order against the core
 // screen variants and the other named variants is the same as before, which
 // is checked by building the same classes both ways. Their order against the
-// arbitrary variants that stay ([@container(...)]:,
-// [@media(max-width:200px)]:) is not: they now come out before those. That
+// arbitrary variants that stayed then ([@container(...)]:,
+// [@media(max-width:200px)]:) was not: they came out before those. That
 // intended change is pinned down separately.
-// DFLT-00290 added upto-200px, which replaces TicketItem.tsx's
-// [@media(max-width:200px)]: prefix on p-2 with the same (px) condition, and
-// upto-7_5rem, a 7.5rem max-width query for a large default font in a very
-// narrow window ("." is not allowed in a variant name). Both are declared
-// last, upto-7_5rem after upto-200px, so that on the same property
-// upto-7_5rem wins over upto-15rem and upto-200px -- which the arbitrary
-// [@media(max-width:200px)]: it replaced, emitted after every named variant,
-// would not have let it do.
+// DFLT-00294 named those last arbitrary at-rule prefixes too: upto-200px,
+// cq-upto-12rem, cq-from-16rem (as sm:cq-from-16rem:) and cq-below-8rem.
+// They are declared after the other named variants, in the order Tailwind
+// emitted the arbitrary prefixes, so their order against the core screen
+// variants, the other named variants and one another is the same as before;
+// that is checked by building the same classes both ways, as for DFLT-00281.
+// Any arbitrary variant still comes out after every named one.
+// DFLT-00290 added upto-7_5rem, a 7.5rem max-width query for a large default
+// font in a very narrow window ("." is not allowed in a variant name). It is
+// declared last, after upto-200px, so that on the same property it wins over
+// upto-15rem and upto-200px -- which the arbitrary [@media(max-width:200px)]:
+// that upto-200px replaced, emitted after every named variant, would not have
+// let it do.
 const INDEX_CSS = path.resolve(__dirname, 'index.css');
 const require = createRequire(import.meta.url);
 
@@ -46,9 +51,8 @@ const BELOW64_MEDIA = '@media not all and (min-width: 64rem)';
 const FROM64_MEDIA = '@media (min-width: 64rem)';
 const FROM80_MEDIA = '@media (min-width: 80rem)';
 
-const UPTO200PX = 'upto-200px';
 const UPTO7_5 = 'upto-7_5rem';
-const UPTO200PX_MEDIA = '@media (max-width: 200px)';
+const UPTO200_MEDIA = '@media (max-width: 200px)';
 const UPTO7_5_MEDIA = '@media (max-width: 7.5rem)';
 
 // The arbitrary variants DFLT-00281 replaced, and the ones that stay, also
@@ -57,8 +61,17 @@ const arb = (...parts: string[]) => ['[', ...parts, ']'].join('');
 const ARB_BELOW64 = arb('@media_not_all_and_(min-width:', '64rem)');
 const ARB_FROM64 = arb('@media(min-width:', '64rem)');
 const ARB_FROM80 = arb('@media(min-width:', '80rem)');
-const ARB_MAX200 = arb('@media(max-width:', '200px)');
 const ARB_CONTAINER = arb('@container(min-width:', '20rem)');
+
+// DFLT-00294: the named variants and the arbitrary prefixes they replaced.
+const UPTO200 = 'upto-200px';
+const CQ_UPTO12 = 'cq-upto-12rem';
+const CQ_FROM16 = 'cq-from-16rem';
+const CQ_BELOW8 = 'cq-below-8rem';
+const ARB_MAX200 = arb('@media(max-width:', '200px)');
+const ARB_CQ_UPTO12 = arb('@container(max-width:', '12rem)');
+const ARB_CQ_FROM16 = arb('@container(min-width:', '16rem)');
+const ARB_CQ_BELOW8 = arb('@container(width<', '8rem)');
 
 // The @media / @container conditions of the built CSS in the order they first
 // appear, with whitespace removed: the arbitrary forms print
@@ -143,32 +156,42 @@ describe('named rem media-query variants (index.css)', () => {
     expect(idx('@media(min-width:64rem)')).toBeLessThan(idx('@media(min-width:80rem)'));
   });
 
-  it('emits below-64rem / from-64rem / from-80rem before the arbitrary @container and max-width:200px variants (an intended change, see index.css)', async () => {
-    // As arbitrary prefixes they came out after [@container(...)]:, and the
-    // 64rem / 80rem min-width ones also after [@media(max-width:200px)]:.
-    // Named, they precede every arbitrary variant, so an arbitrary variant
-    // setting the same property on the same element now wins. The
-    // Ordering caveat in index.css describes this.
-    const classes = [v(ARB_CONTAINER, 'p-1'), v(ARB_MAX200, 'p-1'), v(BELOW64, 'p-1'), v(FROM64, 'p-1'), v(FROM80, 'p-1')];
+  it('emits below-64rem / from-64rem / from-80rem before the container-query and max-width:200px variants (DFLT-00281, kept by DFLT-00294)', async () => {
+    // As arbitrary prefixes below-64rem / from-64rem / from-80rem came out
+    // after [@container(...)]:, and the 64rem / 80rem min-width ones also
+    // after [@media(max-width:200px)]:. Named (DFLT-00281) they came out
+    // before those; DFLT-00294 named the latter too and declared them after
+    // the others, so that order stays.
+    const classes = [v(CQ_UPTO12, 'p-1'), v(CQ_BELOW8, 'p-1'), v(UPTO200, 'p-1'), v(BELOW64, 'p-1'), v(FROM64, 'p-1'), v(FROM80, 'p-1')];
     const conditions = atRuleConditions(await buildCss(classes));
     const idx = (c: string) => conditions.indexOf(c);
-    const container = idx('@container(min-width:20rem)');
-    const max200 = idx('@media(max-width:200px)');
-    expect(container).toBeGreaterThanOrEqual(0);
-    expect(max200).toBeGreaterThanOrEqual(0);
-    for (const c of ['@medianotalland(min-width:64rem)', '@media(min-width:64rem)', '@media(min-width:80rem)']) {
-      expect(idx(c)).toBeGreaterThanOrEqual(0);
-      expect(idx(c)).toBeLessThan(container);
-      expect(idx(c)).toBeLessThan(max200);
+    for (const later of ['@container(max-width:12rem)', '@container(width<8rem)', '@media(max-width:200px)']) {
+      expect(idx(later)).toBeGreaterThanOrEqual(0);
+      for (const c of ['@medianotalland(min-width:64rem)', '@media(min-width:64rem)', '@media(min-width:80rem)']) {
+        expect(idx(c)).toBeGreaterThanOrEqual(0);
+        expect(idx(c)).toBeLessThan(idx(later));
+      }
     }
   });
 
-  it('keeps the media condition of the arbitrary [@media(max-width:200px)]: that upto-200px replaced (DFLT-00290)', async () => {
-    const named = await buildCss([v(UPTO200PX, 'p-2')]);
-    expect(named).toContain(UPTO200PX_MEDIA);
-    const arbitrary = await buildCss([v(ARB_MAX200, 'p-2')]);
-    expect(atRuleConditions(named)).toEqual(atRuleConditions(arbitrary));
-    expect(atRuleConditions(named)).toContain('@media(max-width:200px)');
+  it('still emits an arbitrary at-rule variant after every named one', async () => {
+    // No arbitrary @media / @container prefix is left in src/ (DFLT-00294);
+    // one added later comes out after all the named variants and so wins
+    // over them on the same property. The Ordering caveat in index.css
+    // describes this.
+    const named = [BELOW, UPTO, BELOW64, FROM64, FROM80, CQ_UPTO12, CQ_BELOW8, UPTO200];
+    const conditions = atRuleConditions(await buildCss([v(ARB_CONTAINER, 'p-1'), ...named.map(n => v(n, 'p-1'))]));
+    const container = conditions.indexOf('@container(min-width:20rem)');
+    expect(container).toBeGreaterThanOrEqual(0);
+    const namedConditions = [
+      '@medianotalland(min-width:80rem)', '@media(max-width:15rem)', '@medianotalland(min-width:64rem)',
+      '@media(min-width:64rem)', '@media(min-width:80rem)', '@container(max-width:12rem)',
+      '@container(width<8rem)', '@media(max-width:200px)'
+    ];
+    for (const c of namedConditions) {
+      expect(conditions.indexOf(c)).toBeGreaterThanOrEqual(0);
+      expect(conditions.indexOf(c)).toBeLessThan(container);
+    }
   });
 
   it('gives upto-7_5rem a 7.5rem max-width condition (DFLT-00290)', async () => {
@@ -182,14 +205,14 @@ describe('named rem media-query variants (index.css)', () => {
   it('emits the named variants in declaration order, upto-200px and upto-7_5rem last (DFLT-00290)', async () => {
     const css = await buildCss([
       v(UPTO7_5, 'p-1'),
-      v(UPTO200PX, 'p-1'),
+      v(UPTO200, 'p-1'),
       v(FROM80, 'p-1'),
       v(FROM64, 'p-1'),
       v(BELOW64, 'p-1'),
       v(UPTO, 'p-1'),
       v(BELOW, 'p-1')
     ]);
-    const at = [BELOW_MEDIA, UPTO_MEDIA, BELOW64_MEDIA, FROM64_MEDIA, FROM80_MEDIA, UPTO200PX_MEDIA, UPTO7_5_MEDIA].map(m => css.indexOf(m));
+    const at = [BELOW_MEDIA, UPTO_MEDIA, BELOW64_MEDIA, FROM64_MEDIA, FROM80_MEDIA, UPTO200_MEDIA, UPTO7_5_MEDIA].map(m => css.indexOf(m));
     expect(at.every(i => i >= 0)).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
   });
@@ -197,7 +220,7 @@ describe('named rem media-query variants (index.css)', () => {
   it('lets upto-7_5rem win over upto-15rem and upto-200px on the same property, and upto-200px over upto-15rem (DFLT-00290)', async () => {
     // The classes TicketItem.tsx puts on the expanded details and the Action
     // Footer card: the one emitted last is the one that applies.
-    const css = await buildCss([v(UPTO, 'p-3'), v(UPTO200PX, 'p-2'), v(UPTO7_5, 'p-1'), v('max-sm', 'p-3')]);
+    const css = await buildCss([v(UPTO, 'p-3'), v(UPTO200, 'p-2'), v(UPTO7_5, 'p-1'), v('max-sm', 'p-3')]);
     const conditions = atRuleConditions(css);
     const idx = (c: string) => conditions.indexOf(c);
     expect(idx('@media(width<640px)')).toBeLessThan(idx('@media(max-width:15rem)'));
@@ -212,10 +235,106 @@ describe('named rem media-query variants (index.css)', () => {
   });
 
   it('emits upto-200px / upto-7_5rem before the arbitrary @container variants (DFLT-00290, see index.css)', async () => {
-    const conditions = atRuleConditions(await buildCss([v(ARB_CONTAINER, 'p-1'), v(UPTO200PX, 'p-1'), v(UPTO7_5, 'p-1')]));
+    const conditions = atRuleConditions(await buildCss([v(ARB_CONTAINER, 'p-1'), v(UPTO200, 'p-1'), v(UPTO7_5, 'p-1')]));
     const container = conditions.indexOf('@container(min-width:20rem)');
     expect(container).toBeGreaterThanOrEqual(0);
     expect(conditions.indexOf('@media(max-width:200px)')).toBeLessThan(container);
     expect(conditions.indexOf('@media(max-width:7.5rem)')).toBeLessThan(container);
+  });
+});
+
+describe('named variants for the last arbitrary at-rule prefixes (DFLT-00294)', () => {
+  // Each named variant and the arbitrary prefix it replaced. cq-from-16rem:
+  // is only used inside sm: in the app, so the nesting test below covers it.
+  const pairs: Array<[string, string]> = [
+    [UPTO200, ARB_MAX200],
+    [CQ_UPTO12, ARB_CQ_UPTO12],
+    [CQ_BELOW8, ARB_CQ_BELOW8]
+  ];
+
+  it('keeps the conditions of the arbitrary prefixes they replaced', async () => {
+    for (const [name, arbitrary] of pairs) {
+      const named = atRuleConditions(await buildCss([v(name, 'p-1')]));
+      expect(named).toEqual(atRuleConditions(await buildCss([v(arbitrary, 'p-1')])));
+    }
+    // The first condition is the variant's own (index.css's other rules add
+    // an @media of their own after the utilities).
+    expect(atRuleConditions(await buildCss([v(UPTO200, 'p-1')]))[0]).toBe('@media(max-width:200px)');
+    expect(atRuleConditions(await buildCss([v(CQ_UPTO12, 'p-1')]))[0]).toBe('@container(max-width:12rem)');
+    expect(atRuleConditions(await buildCss([v(CQ_BELOW8, 'p-1')]))[0]).toBe('@container(width<8rem)');
+  });
+
+  it('nests sm:cq-from-16rem: the same way as sm:[@container(min-width:16rem)]: (@container inside the sm @media)', async () => {
+    const flat = (css: string) => css.replace(/\s+/g, '');
+    const nested = '@media(width>=640px){@container(min-width:16rem){';
+    const named = flat(await buildCss([v('sm', v(CQ_FROM16, 'pl-3'))]));
+    const arbitrary = flat(await buildCss([v('sm', v(ARB_CQ_FROM16, 'pl-3'))]));
+    expect(named).toContain(nested);
+    expect(arbitrary).toContain(nested);
+    expect(named.match(/@container/g)).toHaveLength(1);
+  });
+
+  it('emits them after the other named variants, in declaration order: cq-upto-12rem, sm:cq-from-16rem, cq-below-8rem, upto-200px', async () => {
+    const css = await buildCss([
+      v(UPTO200, 'p-1'), v(CQ_BELOW8, 'p-1'), v('sm', v(CQ_FROM16, 'p-1')), v(CQ_UPTO12, 'p-1'),
+      v(FROM80, 'p-1'), v(FROM64, 'p-1'), v(BELOW64, 'p-1'), v(UPTO, 'p-1'), v(BELOW, 'p-1')
+    ]);
+    const conditions = atRuleConditions(css);
+    expect(conditions).toEqual([
+      '@medianotalland(min-width:80rem)',
+      '@media(max-width:15rem)',
+      '@medianotalland(min-width:64rem)',
+      '@media(min-width:64rem)',
+      '@media(min-width:80rem)',
+      '@container(max-width:12rem)',
+      '@media(width>=640px)',
+      '@container(min-width:16rem)',
+      '@container(width<8rem)',
+      '@media(max-width:200px)'
+    ]);
+  });
+
+  it('emits upto-200px after max-sm: and upto-15rem:, so TicketItem\'s upto-200px:p-2 wins over their p-3', async () => {
+    const conditions = atRuleConditions(await buildCss([v(UPTO200, 'p-2'), v(UPTO, 'p-3'), v('max-sm', 'p-3')]));
+    const idx = (c: string) => conditions.indexOf(c);
+    expect(idx('@media(width<640px)')).toBeGreaterThanOrEqual(0);
+    expect(idx('@media(max-width:15rem)')).toBeGreaterThan(idx('@media(width<640px)'));
+    expect(idx('@media(max-width:200px)')).toBeGreaterThan(idx('@media(max-width:15rem)'));
+  });
+
+  it('orders them against the core screen variants, narrow:, the other named variants and one another exactly as the arbitrary prefixes did', async () => {
+    // In the app:
+    // - upto-200px: shares elements with lg: (App.tsx), max-sm:
+    //   (TicketItem.tsx, AutopilotControls.tsx) and upto-15rem: (TicketItem.tsx).
+    // - cq-upto-12rem: shares elements with upto-15rem: (App.tsx).
+    // - cq-below-8rem: shares no element with lg:, max-sm:, upto-15rem:,
+    //   upto-200px: or cq-upto-12rem:.
+    // - cq-from-16rem: is only used as sm:cq-from-16rem: (AutopilotControls.tsx).
+    // The rest of the core screen variants, narrow: and the other named ones
+    // are here so the order is pinned against all of them.
+    const common = ['sm', 'max-sm', 'lg', 'max-lg', 'narrow', BELOW, UPTO, BELOW64, FROM64, FROM80].map(n => v(n, 'p-1'));
+    const before = await buildCss([...common, v(ARB_MAX200, 'p-1'), v(ARB_CQ_BELOW8, 'p-1'), v('sm', v(ARB_CQ_FROM16, 'p-1')), v(ARB_CQ_UPTO12, 'p-1')]);
+    const after = await buildCss([...common, v(UPTO200, 'p-1'), v(CQ_BELOW8, 'p-1'), v('sm', v(CQ_FROM16, 'p-1')), v(CQ_UPTO12, 'p-1')]);
+    const conditions = atRuleConditions(after);
+    expect(conditions).toEqual(atRuleConditions(before));
+    // The four come after the core, narrow: and the other named ones.
+    for (const c of ['@media(width>=640px)', '@media(width<640px)', '@media(width>=1024px)', '@media(width<1024px)', '@media(width<48rem)', '@media(min-width:80rem)']) {
+      expect(conditions.indexOf(c)).toBeGreaterThanOrEqual(0);
+      expect(conditions.indexOf(c)).toBeLessThan(conditions.indexOf('@container(max-width:12rem)'));
+    }
+    const own = conditions.filter(c => /max-width:12rem|min-width:16rem|width<8rem|max-width:200px/.test(c));
+    expect(own).toEqual([
+      '@container(max-width:12rem)',
+      '@container(min-width:16rem)',
+      '@container(width<8rem)',
+      '@media(max-width:200px)'
+    ]);
+    // Rule by rule too, not just the first appearance of each condition:
+    // with the class names and whitespace taken out (the arbitrary forms
+    // print `(max-width:200px)`, the named ones `(max-width: 200px)`) the
+    // two builds are the same CSS.
+    const rules = (css: string) =>
+      css.slice(css.indexOf('@layer utilities')).replace(/\.[^\s{]+\s*\{/g, '.x{').replace(/\s+/g, '');
+    expect(rules(after)).toEqual(rules(before));
   });
 });

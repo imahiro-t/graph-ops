@@ -913,8 +913,9 @@ describe('NodeTypesEditor names cut off with an ellipsis, full name in the edito
     const badge = screen.getByText(i18n.t('settings.nodeTypes.defaultBadge'));
     expect(itemButton('Implementation')).toContainElement(badge);
     expect(badge).toHaveClass('upto-15rem:ml-[1.375rem]');
-    // The 9px badge text is out of scope for DFLT-00287 (only 10px / 11px).
-    expect(badge).toHaveClass('text-[9px]');
+    // DFLT-00294: the badge text is 0.5625rem (9px at the default 16px), so it
+    // follows the browser's default font size like the rest of the editor.
+    expect(badge).toHaveClass('text-[0.5625rem]');
     const dot = itemButton('Gherkin Spec').querySelector(`[title="${i18n.t('settings.nodeTypes.overrideBadge')}"]`);
     expect(dot).toHaveClass('upto-15rem:ml-[1.375rem]');
   });

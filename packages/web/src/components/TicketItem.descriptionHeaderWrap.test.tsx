@@ -80,6 +80,11 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('[]', { status: 200 }))));
   // TicketItem measures its graph panel with a ResizeObserver, which jsdom lacks.
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  // DFLT-00288: the expand button is shown only while the collapsed body
+  // overflows, so make it overflow (jsdom reports 0 for both). TicketItem
+  // reads these only on the description body; restored in afterEach.
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(600);
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(224);
 });
 
 afterEach(async () => {
