@@ -1055,6 +1055,10 @@ func TestOpenAPI_OperationIDsMatchGraphRepository(t *testing.T) {
 	// Protocol 1.2's autopilot-runs endpoints (AutopilotRunStore, not
 	// GraphRepository; BeginAutopilotRun is a list followed by a save).
 	want = append(want, "listAutopilotRuns", "saveAutopilotRun", "deleteAutopilotRun")
+	// Protocol 1.2's processing-sessions endpoints (ProcessingSessionStore,
+	// DFLT-00327), also outside GraphRepository.
+	want = append(want, "saveProcessingSession", "touchProcessingSession", "getProcessingSession",
+		"listProcessingSessionsByTickets", "deleteProcessingSession")
 	sort.Strings(want)
 	if !reflect.DeepEqual(ops, want) {
 		t.Fatalf("operationIds %v\nwant %v", ops, want)

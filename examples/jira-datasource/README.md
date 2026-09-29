@@ -339,14 +339,18 @@ requests in flight finish.
 
 ## Limitations
 
-- **Protocol 1.1: autopilot runs are not shared.** The sample stays at
-  protocol 1.1 and does not implement 1.2's `autopilot-runs` endpoints.
+- **Protocol 1.1: autopilot runs are not shared, and node claims are not
+  recorded.** The sample stays at protocol 1.1 and does not implement 1.2's
+  `autopilot-runs` endpoints.
   graph-engine therefore keeps each member's autopilot runs on that member's
   machine only (and says so once per process): a member's `autopilot start`
   or Web UI launch is still refused when it overlaps one of their *own* runs,
   but a duplicate start by another member sharing this Jira site is **not**
-  detected. A plugin that wants that protection implements protocol 1.2 (see
-  the [developer manual](../../docs/http-datasource/README.md)).
+  detected. Nor does it implement 1.2's node claim fields and
+  `processing-sessions` endpoints, so who is running a node is not recorded
+  and `unstick-node` can release a node another member is still working on
+  (`begin-session` says so). A plugin that wants these protections implements
+  protocol 1.2 (see the [developer manual](../../docs/http-datasource/README.md)).
 - **One plugin process per Jira site.** Properties are updated with
   read-modify-write under an in-process per-issue lock; two plugin processes
   writing the same issue could lose each other's update.

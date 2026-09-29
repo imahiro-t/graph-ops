@@ -196,6 +196,20 @@ func TestNewSessionIDIsAUniqueUUIDv4(t *testing.T) {
 	}
 }
 
+// ValidSessionID accepts exactly what NewSessionID prints: the same UUID in
+// capitals would never match the stored value, so it is refused.
+func TestValidSessionIDIsLowercaseOnly(t *testing.T) {
+	id := NewSessionID()
+	if !ValidSessionID(id) {
+		t.Fatalf("%q was refused", id)
+	}
+	for _, bad := range []string{strings.ToUpper(id), "", "not-a-uuid", "{" + id + "}", id + "\n"} {
+		if ValidSessionID(bad) {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+}
+
 // DFLT-00336: the name is sanitized and capped when it is resolved, since
 // other members' machines print it.
 func TestResolveSanitizesAndCapsMyName(t *testing.T) {

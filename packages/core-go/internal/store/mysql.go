@@ -641,9 +641,6 @@ func (r *MySQLRepository) mysqlForeignKeyExists(table, constraint string) (bool,
 	return count > 0, nil
 }
 
-// mysqlColumnExists checks INFORMATION_SCHEMA.COLUMNS for the current
-// database (DATABASE()). Used by Init's legacy-column migration and by tests
-// to assert whether a schema has a given column.
 // mysqlColumnsIn reports which of columns table has, in one
 // INFORMATION_SCHEMA query.
 func (r *MySQLRepository) mysqlColumnsIn(table string, columns []string) (map[string]bool, error) {
@@ -667,6 +664,9 @@ func (r *MySQLRepository) mysqlColumnsIn(table string, columns []string) (map[st
 	return out, rows.Err()
 }
 
+// mysqlColumnExists checks INFORMATION_SCHEMA.COLUMNS for the current
+// database (DATABASE()). Used by Init's legacy-column migration and by tests
+// to assert whether a schema has a given column.
 func (r *MySQLRepository) mysqlColumnExists(table, column string) (bool, error) {
 	var count int
 	row := r.db.QueryRow(

@@ -29,11 +29,14 @@ operations becomes one HTTP request to a server you provide, the **plugin**.
 Nothing else changes: the engine, the CLI commands, the `process-ticket`
 skill and the Web UI behave exactly as they do with SQLite.
 
-Since protocol 1.2 there are also three endpoints outside those 32 operations,
-for the records of autopilot runs shared between members. They are optional:
+Since protocol 1.2 there are also eight endpoints outside those 32 operations:
+three for the records of autopilot runs shared between members, and five for
+the processing sessions that tell whether a claimed node is still being
+worked on (together with five claim fields on nodes). They are optional:
 a plugin that does not implement them reports protocol 1.1, and graph-engine
-then keeps run records on each machine only. See the `Autopilot runs (1.2)`
-row of [Endpoints](#endpoints) and the 1.2 row of
+then keeps run records on each machine only and records no node claims. See
+the `Autopilot runs (1.2)` and `Processing sessions (1.2)` rows of
+[Endpoints](#endpoints) and the 1.2 row of
 [Handshake and versioning](#handshake-and-versioning).
 
 ```
@@ -220,6 +223,7 @@ in lowerCamelCase.
 | Labels | `POST/GET /projects/{projectId}/labels`, `GET/PATCH/DELETE /labels/{labelId}` |
 | Current project | `GET/PUT /current-project` (**deprecated**) |
 | Autopilot runs (1.2) | `GET /projects/{projectId}/autopilot-runs`, `PUT/DELETE /autopilot-runs/{runId}` |
+| Processing sessions (1.2) | `GET /processing-sessions?ticket_id=...`, `PUT/GET/DELETE /processing-sessions/{sessionId}`, `POST /processing-sessions/{sessionId}/heartbeat` |
 
 `/current-project` is deprecated: the current project is a per-user choice, so
 graph-engine now keeps it in each user's home config file
@@ -266,7 +270,7 @@ What each minor version added:
 |---|---|
 | 1.0 | The initial protocol. |
 | 1.1 | `Ticket.parent_ticket_id` (optional, nullable): the ticket a ticket was derived from, set only by `createTicket`. graph-engine sends the key only when there is a parent, and when the plugin reports `1.0` it refuses a ticket with a parent with `PARENT_TICKET_UNSUPPORTED` before sending anything, so the parent is never silently dropped. Tickets without a parent work exactly as before on a 1.0 plugin. There is no children endpoint: graph-engine derives a ticket's children from `listTicketsByProject`, so on a large project `get-ticket` costs one project listing more. A plugin must keep the value as given (graph-engine has already checked that the parent exists and is in the same project) and may answer `VALIDATION_ERROR` for a parent it does not manage. |
-| 1.2 | **Autopilot runs shared between members** (`autopilot-runs` tag). `GET /projects/{projectId}/autopilot-runs` (`listAutopilotRuns`) lists a project's run records, `PUT /autopilot-runs/{runId}` (`saveAutopilotRun`) creates or replaces one, `DELETE /autopilot-runs/{runId}` (`deleteAutopilotRun`) removes one (a missing one is a no-op; graph-engine also uses it after a start to delete settled records beyond the 20 most recent of the project, whoever started them -- at most 2 per start, the oldest first, the rest on later starts -- and a later `PUT` may create such a record again). A record (`AutopilotRun`) has `id`, `project_id`, `root_ticket_id`, `mode`, `state`, `heartbeat`, `created_at`, `updated_at`, `started_by_name`, `machine_id`, `revision` and `snapshot`. Store `snapshot` as opaque JSON and return it unchanged. When the stored record's `revision` is equal to or greater than a `PUT`'s, keep the stored one and still answer 200 (a copy that arrived late). Never change `state` or `heartbeat` yourself: a run whose heartbeat is more than 10 minutes old simply stops counting as active. graph-engine judges a start by listing and then saving -- two requests, not atomic -- so two members starting overlapping runs at the same moment may both pass against an HTTP data source (SQLite and MySQL serialize it). Against a plugin that reports 1.1 or 1.0, graph-engine sends none of these requests: each machine judges from its own runs only (duplicate starts by other members are not detected) and says so once per process. |
+| 1.2 | **Autopilot runs shared between members** (`autopilot-runs` tag). `GET /projects/{projectId}/autopilot-runs` (`listAutopilotRuns`) lists a project's run records, `PUT /autopilot-runs/{runId}` (`saveAutopilotRun`) creates or replaces one, `DELETE /autopilot-runs/{runId}` (`deleteAutopilotRun`) removes one (a missing one is a no-op; graph-engine also uses it after a start to delete settled records beyond the 20 most recent of the project, whoever started them -- at most 2 per start, the oldest first, the rest on later starts -- and a later `PUT` may create such a record again). A record (`AutopilotRun`) has `id`, `project_id`, `root_ticket_id`, `mode`, `state`, `heartbeat`, `created_at`, `updated_at`, `started_by_name`, `machine_id`, `revision` and `snapshot`. Store `snapshot` as opaque JSON and return it unchanged. When the stored record's `revision` is equal to or greater than a `PUT`'s, keep the stored one and still answer 200 (a copy that arrived late). Never change `state` or `heartbeat` yourself: a run whose heartbeat is more than 10 minutes old simply stops counting as active. graph-engine judges a start by listing and then saving -- two requests, not atomic -- so two members starting overlapping runs at the same moment may both pass against an HTTP data source (SQLite and MySQL serialize it). Against a plugin that reports 1.1 or 1.0, graph-engine sends none of these requests: each machine judges from its own runs only (duplicate starts by other members are not detected) and says so once per process. **Node claims and processing sessions** (added to 1.2 before any release shipped it, so the version stayed 1.2). `GraphNode` and `NodePatch` gain five nullable fields -- `claimed_by_name`, `claimed_by_name_is_fallback`, `claim_token`, `claim_session_id`, `claimed_at` -- recording who took a node with `get-executable`, in which processing session, and when. graph-engine sends all five with every node `PATCH` that carries `status` (and never without it): the claimer's values when it claims the node, all `null` on every other status change (completion, loop-back, `unstick-node`, `reopen-nodes`, ...). `null` clears a field, as for `assignee`. Store them as given, include `claim_token` in what you return, and never change or clear them yourself. The `processing-sessions` endpoints keep the sessions: `PUT /processing-sessions/{sessionId}` (`saveProcessingSession`) creates or replaces one at `begin-session` (a missing ticket is `TICKET_NOT_FOUND`), `POST /processing-sessions/{sessionId}/heartbeat` (`touchProcessingSession`, body `{"heartbeat": "..."}`) moves only the heartbeat, and only forward -- an earlier or equal one is ignored with 200, a missing session is 404 -- and is sent on every command run with `--session`, so keep it cheap; `GET /processing-sessions/{sessionId}` (`getProcessingSession`, 404 when missing), `GET /processing-sessions?ticket_id=<id>&ticket_id=<id>...` (`listProcessingSessionsByTickets`, the sessions of any of the tickets, at most 100 `ticket_id`s per request; polled through the Web UI's ticket list, but only for tickets with a claimed node), and `DELETE /processing-sessions/{sessionId}` (`deleteProcessingSession`, a missing one is a no-op; `begin-session` deletes up to 5 of the same ticket's sessions that have been silent for more than 7 days and hold no claim). A session (`ProcessingSession`) has `id`, `project_id`, `ticket_id`, `actor_name`, `actor_name_is_fallback`, `machine_id`, `run_id` (autopilot only), `started_at` and `heartbeat`; never rewrite its heartbeat on graph-engine's behalf. Leases are judged from the members' own clocks, so this assumes those clocks are not minutes apart. A plugin that reports 1.2 but drops the claim fields leaves every claim unrecorded, so `unstick-node` releases other members' live claims without a check -- no worse than 1.1, but the protection is gone. Against a plugin that reports 1.1 or 1.0, graph-engine neither sends nor reads the claim fields and never calls these endpoints: nodes are handed out and released as before, without a record of who holds them; `begin-session` says so, and so does `unstick-node` when it releases such a node (commands run without a `begin-session` first, such as a bare `get-executable`, give no such warning). |
 
 ### Errors
 
@@ -295,12 +299,14 @@ failure. Deleting a missing ticket, node or project succeeds as a no-op;
 ### Partial updates: absent, `null`, value
 
 In every PATCH body an absent key means "leave unchanged". Two fields have a
-third state, so read the raw JSON, not just a decoded struct with defaults:
+third state (since 1.2, so do a node's claim fields), so read the raw JSON,
+not just a decoded struct with defaults:
 
 | Field | Absent key | `null` | Value |
 |---|---|---|---|
 | `assignee` (tickets, nodes) | unchanged | clear it | set it |
 | `label_ids` (tickets) | unchanged | - | replace the ticket's labels with exactly this set (`[]` removes all) |
+| The five claim fields (nodes, 1.2) | unchanged | clear it | set it (see the 1.2 row of [Handshake and versioning](#handshake-and-versioning)) |
 
 Every ID in `label_ids` must be a label of the ticket's own project; otherwise
 the **whole** patch fails with `LABEL_NOT_FOUND` and no other field of it is

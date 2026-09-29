@@ -45,6 +45,21 @@ info:
       or newer; against 1.1 or 1.0 it keeps runs on each machine only, says
       once that other members' runs cannot be seen, and never sends these
       requests.
+    - 1.2 also adds node claims and processing sessions: five nullable
+      claim fields on `GraphNode` and `NodePatch` (`claimed_by_name`,
+      `claimed_by_name_is_fallback`, `claim_token`, `claim_session_id`,
+      `claimed_at`), which record who took a node with `get-executable`,
+      and the `processing-sessions` endpoints (`saveProcessingSession`,
+      `touchProcessingSession`, `getProcessingSession`,
+      `listProcessingSessionsByTickets`, `deleteProcessingSession`, tag
+      `processing-sessions`), whose heartbeats tell whether a claim is still
+      being worked on, so `unstick-node` does not release another member's
+      live claim. These were added to 1.2 before any release shipped it, so
+      the version stayed 1.2. They are not part of `GraphRepository`'s 32
+      methods either. Against 1.1 or 1.0 graph-engine neither sends nor
+      reads the claim fields and never calls these endpoints: nodes are
+      handed out and released as before, without a record of who holds them
+      (`begin-session` and `unstick-node` say so).
 
     ## Transport and authentication
 
@@ -115,6 +130,11 @@ info:
       empty one) replaces the ticket's labels with exactly that set. Every ID
       must be a label of the ticket's own project, otherwise the whole patch
       fails with `LABEL_NOT_FOUND`.
+    - The five claim fields of a node (since 1.2) have the same three
+      states as `assignee`: absent key = unchanged, `null` = clear it, a
+      value = set it. graph-engine sends all five with every node PATCH that
+      carries `status` (and never without it): values when the PATCH claims
+      the node, all `null` otherwise.
 
     ## Errors
 
@@ -159,6 +179,7 @@ tags:
   - name: labels
   - name: current-project
   - name: autopilot-runs
+  - name: processing-sessions
 
 paths:
   /protocol:
@@ -760,6 +781,139 @@ paths:
         "200": { description: Deleted (any body is ignored). }
         default: { $ref: "#/components/responses/Error" }
 
+  /processing-sessions:
+    get:
+      operationId: listProcessingSessionsByTickets
+      tags: [processing-sessions]
+      summary: "Since 1.2. List the processing sessions of one or more tickets."
+      x-since: "1.2"
+      description: |
+        Every session `saveProcessingSession` stored whose `ticket_id` is one
+        of the `ticket_id` query parameters, in any order, including sessions
+        whose heartbeat is old (graph-engine judges them itself). A ticket
+        with no sessions, or one that does not exist, simply contributes
+        nothing; answer `[]` when nothing matches.
+
+        graph-engine reads this at every `begin-session` (one ticket), for
+        `unstick-node`, and when it lists tickets for `get-ticket` and the
+        Web UI -- then only for the tickets that have an `IN PROGRESS` /
+        `IN REVIEW` node claimed in a session, all of them in one request
+        (at most 100 `ticket_id` parameters per request; more are split over
+        several requests). The Web UI polls the ticket list, so keep it
+        cheap.
+      parameters:
+        - name: ticket_id
+          in: query
+          required: true
+          description: A ticket ID; repeated once per ticket (`?ticket_id=A-00001&ticket_id=A-00002`).
+          style: form
+          explode: true
+          schema: { type: array, minItems: 1, maxItems: 100, items: { type: string } }
+      responses:
+        "200":
+          description: The matching sessions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProcessingSession" }
+        default: { $ref: "#/components/responses/Error" }
+
+  /processing-sessions/{sessionId}:
+    parameters: [{ $ref: "#/components/parameters/sessionId" }]
+    put:
+      operationId: saveProcessingSession
+      tags: [processing-sessions]
+      summary: "Since 1.2. Create or replace one processing session."
+      x-since: "1.2"
+      description: |
+        Stores the body as the session `sessionId` (the body's `id` is the
+        same value). graph-engine sends it once per `begin-session`, the
+        command a person's (or an autopilot worker's) `process-ticket` runs
+        before it starts on a ticket. A missing ticket (`ticket_id`) is
+        `TICKET_NOT_FOUND`.
+
+        Store every field as given and never change one yourself: a session
+        whose heartbeat is old simply stops protecting its claims.
+        Deleting a ticket or a project should delete its sessions too (the
+        SQL backends cascade); graph-engine does not rely on it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProcessingSession" }
+      responses:
+        "200": { description: Saved (any body is ignored). }
+        "204": { description: Saved. }
+        default: { $ref: "#/components/responses/Error" }
+    get:
+      operationId: getProcessingSession
+      tags: [processing-sessions]
+      summary: "Since 1.2. Get one processing session."
+      x-since: "1.2"
+      description: |
+        graph-engine reads the session of a claimed node, and the caller's
+        own session, when `unstick-node` decides whether it may release the
+        node. A missing session is 404 (with no body, or with an error code
+        that is not in `ErrorCode`); graph-engine reads that as "no such
+        session".
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProcessingSession" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteProcessingSession
+      tags: [processing-sessions]
+      summary: "Since 1.2. Delete one processing session. A missing session is a no-op."
+      x-since: "1.2"
+      description: |
+        graph-engine deletes old sessions at `begin-session`: of the same
+        ticket's sessions, those whose heartbeat is more than 7 days old and
+        that hold no claim, at most 5 per `begin-session`. A ticket nobody
+        begins a session on again keeps its old sessions (they are harmless;
+        a plugin may delete such sessions itself).
+      responses:
+        "204": { description: Deleted. }
+        "200": { description: Deleted (any body is ignored). }
+        default: { $ref: "#/components/responses/Error" }
+
+  /processing-sessions/{sessionId}/heartbeat:
+    parameters: [{ $ref: "#/components/parameters/sessionId" }]
+    post:
+      operationId: touchProcessingSession
+      tags: [processing-sessions]
+      summary: "Since 1.2. Move a processing session's heartbeat forward."
+      x-since: "1.2"
+      description: |
+        Updates only the session's `heartbeat`, and only when the body's is
+        later (compare them as times) than the stored one; an earlier or
+        equal one is ignored and still answered with 200. Never touch the
+        session's other fields here. A missing session is 404 (as for
+        `getProcessingSession`).
+
+        graph-engine sends it on every command run with `--session` --
+        `get-executable`, `get-ticket`, `complete-node`, `unstick-node`,
+        `add-artifact`, and `wait-node` at most once a minute while it
+        waits -- so it is the most frequent of these requests. Keep it cheap.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [heartbeat]
+              properties:
+                heartbeat: { $ref: "#/components/schemas/Timestamp" }
+      responses:
+        "200": { description: Recorded, or ignored as not later than the stored heartbeat (any body is ignored). }
+        "204": { description: Recorded, or ignored as not later than the stored heartbeat. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        default: { $ref: "#/components/responses/Error" }
+
   /current-project:
     get:
       operationId: getCurrentProjectID
@@ -836,6 +990,7 @@ components:
     artifactId: { name: artifactId, in: path, required: true, schema: { type: string } }
     labelId: { name: labelId, in: path, required: true, schema: { type: string } }
     runId: { name: runId, in: path, required: true, schema: { type: string } }
+    sessionId: { name: sessionId, in: path, required: true, schema: { type: string } }
 
   responses:
     Error:
@@ -1018,10 +1173,49 @@ components:
         config_id: { type: string }
         created_at: { $ref: "#/components/schemas/Timestamp" }
         updated_at: { $ref: "#/components/schemas/Timestamp" }
+        claimed_by_name:
+          type: [string, "null"]
+          x-since: "1.2"
+          description: |
+            Since 1.2 (like the other four claim fields below). The display
+            name of whoever claimed the node with `get-executable`, while it
+            is `IN PROGRESS` / `IN REVIEW`. For display only. The five claim
+            fields are written only through `updateNode` (see `NodePatch`);
+            store them as given, return them unchanged (absent or `null` when
+            not set), and never change or clear them yourself. A 1.2 plugin
+            that drops them leaves every claim unrecorded, so `unstick-node`
+            releases other members' live claims without a check.
+        claimed_by_name_is_fallback:
+          type: [boolean, "null"]
+          x-since: "1.2"
+          description: "`true` when `claimed_by_name` is `<OS user>@<host>` because the claimer set no name (shown as \"(name not set)\")."
+        claim_token:
+          type: [string, "null"]
+          x-since: "1.2"
+          description: |
+            A token graph-engine mints for each claim (a UUID) and checks
+            when the node is completed with `complete-node --claim`. Return
+            it with the node; graph-engine itself shows it only to the
+            session that claimed the node.
+        claim_session_id:
+          type: [string, "null"]
+          x-since: "1.2"
+          description: The processing session the node was claimed in (see `ProcessingSession`); `null` for a claim made without `--session`.
+        claimed_at:
+          type: [string, "null"]
+          x-since: "1.2"
+          description: When the node was claimed (RFC 3339 in UTC), from the claimer's clock.
 
     NodePatch:
       type: object
-      description: "Absent key = unchanged. `assignee`: `null` clears, a string sets."
+      description: |
+        Absent key = unchanged. `assignee`: `null` clears, a string sets.
+        Since 1.2 the five claim fields work the same way (`null` clears).
+        graph-engine sends all five with every PATCH that carries `status`,
+        and never without it: the claimer's values when it moves the node to
+        `IN PROGRESS` / `IN REVIEW` with `get-executable`, all `null` on
+        every other status change (completion, loop-back, `unstick-node`,
+        `reopen-nodes`, ...). Apply them in the same request as `status`.
       properties:
         name: { type: string }
         type: { $ref: "#/components/schemas/NodeType" }
@@ -1032,6 +1226,11 @@ components:
         is_manual: { type: boolean }
         gate_id: { type: string }
         criteria: { type: string }
+        claimed_by_name: { type: [string, "null"], x-since: "1.2" }
+        claimed_by_name_is_fallback: { type: [boolean, "null"], x-since: "1.2" }
+        claim_token: { type: [string, "null"], x-since: "1.2" }
+        claim_session_id: { type: [string, "null"], x-since: "1.2" }
+        claimed_at: { type: [string, "null"], x-since: "1.2", description: RFC 3339 timestamp in UTC. }
 
     GraphEdge:
       type: object
@@ -1101,6 +1300,36 @@ components:
         snapshot:
           type: object
           description: The run's shared view. Opaque to the plugin; store it and return it unchanged.
+
+    ProcessingSession:
+      type: object
+      x-since: "1.2"
+      description: |
+        Since 1.2. One run of `process-ticket` over a ticket, created by
+        `graph-engine begin-session`. Its heartbeat is what tells whether the
+        claims made in it (`GraphNode.claim_session_id`) are still being
+        worked on: a session a person started is live while its heartbeat is
+        at most 60 minutes old; an autopilot worker's session (`run_id` set)
+        follows its run's heartbeat instead (10 minutes, see `AutopilotRun`).
+        Heartbeats come from each member's clock, so this assumes the
+        members' clocks are not minutes apart.
+      required: [id, project_id, ticket_id, actor_name, actor_name_is_fallback, machine_id, started_at, heartbeat]
+      properties:
+        id: { type: string, description: "The session ID (a lowercase UUID)." }
+        project_id: { type: string }
+        ticket_id: { type: string }
+        actor_name: { type: string, description: "Display name of the member who began the session. For display only." }
+        actor_name_is_fallback: { type: boolean, description: "`true` when `actor_name` is `<OS user>@<host>` because the member set no name." }
+        machine_id: { type: string, description: "The ID of the machine the session runs on." }
+        run_id: { type: string, description: "The autopilot run the session belongs to; absent for a session a person began by hand." }
+        started_at: { $ref: "#/components/schemas/Timestamp" }
+        heartbeat:
+          $ref: "#/components/schemas/Timestamp"
+          description: |
+            The session's last sign of life, from the member's clock.
+            graph-engine writes it with a fixed nine fractional digits.
+            Only `touchProcessingSession` moves it (forward only); never
+            rewrite it on graph-engine's behalf.
 
     CurrentProject:
       type: object
