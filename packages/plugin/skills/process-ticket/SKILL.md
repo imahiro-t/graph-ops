@@ -25,19 +25,32 @@ This returns `{"resolved": "ja"|"", "source": "user"|"none", "supported_locales"
 
 This is a call-scoped, non-persistent choice (see `--language`'s own description in `graph-engine help`) -- it never writes anything to `<userDir>/config.yaml` or a team `workflow.yaml`. Persisting a language choice across sessions is the onboarding skill's job (`graph-engine ui`'s settings, or re-running onboarding), not this skill's.
 
+### Begin a processing session
+
+Several people (or autopilot runs) can share one data source, so before touching the graph, begin a processing session for this ticket -- once per conversation:
+```bash
+graph-engine begin-session "<ticketId>"
+```
+It prints `{"session_id", "lease_minutes", "sessions_supported", "others", "same_run"}`. Keep `session_id`: from here on, pass `--session "<sessionId>"` to every `get-executable`, `get-ticket`, `complete-node`, `unstick-node` and `wait-node` call below, and give it to every subagent (step 3). Each such call is the session's heartbeat; a session that stays silent for `lease_minutes` (60) no longer protects the nodes it claimed. A call without `--session` still works, but the nodes it claims are not protected at all -- anyone's `unstick-node` releases them -- so do not leave it off.
+
+- `others` non-empty (a warning on stderr names them too): somebody else is processing this ticket right now -- each entry names who (`name`, with `name_is_fallback` for an unset name), the nodes they hold (`node_ids`), their last heartbeat, and `same_machine` when it is a session on this machine. Tell the user who it is before going on. It does not stop you, but never unstick or redo the nodes they hold.
+- `sessions_supported: false`: the data source cannot keep sessions (an HTTP data source older than protocol 1.2). Carry on without `--session` anywhere: claims are then not protected, and `unstick-node` releases them with a warning.
+
 ## 1. Check/run the seed
 
 Calling `get-executable` for the first time auto-generates the 2 seed nodes: "Plan Creation" (`plan`) and "Plan Review" (`plan_review`). Like any other node, drive these 2 nodes through the steps in "3. Execution loop" below (launching subagents). Per step 0 above, include `--language <code>` here if (and only if) `get-language-settings` reported `source: "none"`.
 
 ```bash
-graph-engine get-executable "<ticketId>" [--language <code>]
+graph-engine get-executable "<ticketId>" --session "<sessionId>" [--language <code>]
 ```
+
+Each node `get-executable` hands out is claimed in your name and session, and carries its own `claim_token` in that output (and only there -- `get-ticket` never shows it). Pass each node's token to the subagent that works it (step 3).
 
 ## 2. Decide how to expand the graph (once the seed is done and `get-executable` returns empty)
 
 Once both seed nodes (`plan`, `plan_review`) pass, `get-executable` returns an empty list. This means "the graph hasn't been expanded yet" -- at this point, **decide what node structure this ticket needs and expand it with `expand-graph --patch`**. There is no "use the default shape as-is" shortcut: every ticket's graph is assembled by an explicit patch, because which review gates apply and whether a documentation node is needed are per-ticket judgment calls, not a fixed template.
 
-1. Run `graph-engine get-ticket "<ticketId>"` to check the ticket's description and the `plan` node's artifact (the execution plan).
+1. Run `graph-engine get-ticket "<ticketId>" --session "<sessionId>"` to check the ticket's description and the `plan` node's artifact (the execution plan).
 2. Run `graph-engine get-workflow-catalog` to see every available review gate (`review_gates`, referenceable via `gate_ref`) -- this includes the standard four (`code_review`, `qa_review`, `security_review`, `non_functional_review`), situational ones the plugin ships (`accessibility_review`, `investigation_review`), and anything a team/user extension added on top. Treat this list as a pool of *available* checks, not a checklist to include wholesale -- a gate being enabled in the catalog only means it's a legal choice, not that this ticket needs it. The same call's `nodes` field is the plugin's fixed default template (types, names, `depends_on` shape) -- unlike `review_gates`, it is no longer team/project-configurable, but it's still worth reading as a naming/structure reference. It is a *reference*, not the fixed shape of every ticket's graph: step 4 below is not limited to reproducing it or the templates shown there. It no longer doubles as a registry of team-defined custom node types (a type that only ever appeared there, never in an actual ticket's patch, has no other trace) -- see step 3's last bullet for when a step needs a type not shown here.
 3. Decide the following, from the ticket description and the plan artifact:
    - **Does it involve implementation (code changes)?**
@@ -119,7 +132,7 @@ Once both seed nodes (`plan`, `plan_review`) pass, `get-executable` returns an e
    - If it's empty and only a manual `approval_gate` node remains (still `TODO`, never yet judged), wait for a human decision that may come from either the terminal or the Web UI:
      1. Start a watcher with the Bash tool's `run_in_background`, passing every such gate's node id and no `--timeout`:
         ```bash
-        graph-engine wait-node "<nodeId>" ["<nodeId>" ...]
+        graph-engine wait-node "<nodeId>" ["<nodeId>" ...] --session "<sessionId>"
         ```
         It polls the DB and exits as soon as any given node leaves `TODO`, printing `{"result":"changed","nodes":[{"id","status","rejection_reason"?}]}` (exit 0). Without `--timeout` it never times out; exit 1 means an error, e.g. `node <id> not found` when the gate was deleted while waiting.
      2. Tell the user, **in plain text**, what is being approved (the gate's name and the gist of the artifacts right before it) and that they can either answer approve/reject here in the terminal or approve/reject it in the Web UI. Then end your turn. **Do not use AskUserQuestion here**: it keeps the turn open, so the background watcher's completion notification could never resume the session when the decision is made in the Web UI.
@@ -137,10 +150,10 @@ Once both seed nodes (`plan`, `plan_review`) pass, `get-executable` returns an e
    - If `get-executable` itself fails (exits non-zero with an error), a failed call hands out nothing and tries to put back every node it had already claimed. What to do next depends on whether the error mentions `unstick-node`:
      - **The error does not mention `unstick-node`**: simply call `get-executable` again -- every claimed node was put back, so the retry sees them as runnable again.
      - **The error mentions `unstick-node`**: handle each case below that it contains (one error can contain both), then call `get-executable` again.
-       - `failed to release claimed node(s)` followed by a list of node IDs: this call claimed those nodes itself and could not put them back, and the error states they have no worker. Run `graph-engine unstick-node "<nodeId>"` on each listed node without further checks -- this is the one exception to checking with `get-ticket` first (see "5. Recovery after an iteration limit"), because the error already says nothing is working them.
-       - `claiming node <nodeId>: ...` naming a single node: the engine did **not** put this node back, because the failure may have come after its write (only reading the row back failed) or before it while another `get-executable` call (another session or another person) legitimately claimed the node -- and releasing that claim would hand the node out twice. `unstick-node` does not check the node's state itself, so check it with `get-ticket` first: run `graph-engine unstick-node "<nodeId>"` only if it shows `IN PROGRESS`/`IN REVIEW` **and** you have not handed it to any subagent in this session. If it is still `TODO` (or otherwise claimable), do nothing and just retry. If you know someone else is running it, leave it alone.
+       - `failed to release claimed node(s)` followed by a list of node IDs: this call claimed those nodes itself and could not put them back, and the error states they have no worker. Run `graph-engine unstick-node "<nodeId>" --session "<sessionId>"` on each listed node without further checks (they are this session's own claims, so it releases them) -- this is the one exception to checking with `get-ticket` first (see "5. Recovery after an iteration limit"), because the error already says nothing is working them.
+       - `claiming node <nodeId>: ...` naming a single node: the engine did **not** put this node back, because the failure may have come after its write (only reading the row back failed) or before it while another `get-executable` call (another session or another person) legitimately claimed the node -- and releasing that claim would hand the node out twice. Check it with `get-ticket`: if it shows `IN PROGRESS`/`IN REVIEW` and you have not handed it to any subagent in this session, run `graph-engine unstick-node "<nodeId>" --session "<sessionId>"` -- it releases the node if the claim is this session's, and refuses with `NODE_CLAIMED_BY_OTHER` if another live session holds it, in which case leave it alone (see "Releasing a claimed node" below). If it is still `TODO` (or otherwise claimable), do nothing and just retry.
 2. For **each node returned, launch one subagent via the Agent tool using the `graph-node-agent` subagent type** (this plugin's default agent definition for graph-node work -- see `${CLAUDE_PLUGIN_ROOT}/agents/graph-node-agent.md`; fall back to a generic Agent-tool call with the same task content if that subagent type isn't available in your environment). When multiple nodes are returned at once (e.g. the parallel review gates), **issue multiple Agent calls within the same message so they truly run in parallel**. Launch a subagent the same way even for a single node (this session itself never does node work).
-3. Give each subagent's task the ticket id and the node's id/type/name -- that's all `graph-node-agent` needs to load the ticket's context, fetch that node type's merged instructions (plugin default + any user/team extension content, resolved by the engine itself), do the work, save artifacts, and call `complete-node` on its own. This works the same way for the engine's built-in node types (`plan`, `investigation`, `gherkin_spec`, `implementation`, `review`, `review_gate`, `gherkin_test`, `documentation`, `report`, `release`) and for any custom node type this patch introduced -- a custom type simply has no plugin-default instruction layer, so the agent works from whatever user/team extension text exists for that exact type name (via `get-node-type-context`) or, absent that too, from the node's name.
+3. Give each subagent's task the ticket id, the node's id/type/name, the node's `claim_token` from `get-executable`'s output and this session's `session_id` -- that's all `graph-node-agent` needs to load the ticket's context, fetch that node type's merged instructions (plugin default + any user/team extension content, resolved by the engine itself), do the work, save artifacts, and call `complete-node` on its own. This works the same way for the engine's built-in node types (`plan`, `investigation`, `gherkin_spec`, `implementation`, `review`, `review_gate`, `gherkin_test`, `documentation`, `report`, `release`) and for any custom node type this patch introduced -- a custom type simply has no plugin-default instruction layer, so the agent works from whatever user/team extension text exists for that exact type name (via `get-node-type-context`) or, absent that too, from the node's name.
 4. Wait for every launched subagent to finish before moving on to the next `get-executable` call.
 
 ### Registering an artifact
@@ -151,8 +164,19 @@ For `text`/`gherkin`/`json`, the last argument is always literal content, never 
 
 ### Node completion notification
 ```bash
-graph-engine complete-node "<nodeId>" <true|false>
+graph-engine complete-node "<nodeId>" <true|false> --claim "<claimToken>" --session "<sessionId>"
 ```
+`--claim` refuses the completion (`INVALID_NODE_STATE`, nothing written) when the node has been released and claimed again since that token was handed out, so a stale verdict never lands on somebody else's claim. A manual node (an approval gate recorded from the terminal) has no token: leave `--claim` off there.
+
+### Releasing a claimed node (unstick-node)
+`unstick-node` checks who holds the node before it releases anything:
+```bash
+graph-engine unstick-node "<nodeId>" --session "<sessionId>"
+```
+- **Your own claim** -- made in this session, or (autopilot) in another session of the same run: released.
+- **A claim whose session has gone silent past its lease**, one made without a session, or one with no claim record at all (an older client, or an HTTP data source older than 1.2): released, with a warning on stderr. Read it: it says whose claim it was.
+- **A claim another session is still working on**: refused with `NODE_CLAIMED_BY_OTHER` (nothing written). The error names who holds it, since when, its last heartbeat and `same_machine`. Leave the node alone and tell the user. `--force` releases it anyway, but use it **only after a person has confirmed that nobody is working on that node any more** -- never on your own judgment.
+- **Your own earlier conversation's claim.** A session is one conversation, so when a person restarts process-ticket in a new conversation, the nodes the old one claimed show up as another session's (with `same_machine: true`) until its lease runs out. Same machine does not mean same conversation: another conversation on this machine may well still be running, so the engine never treats it as yours. Ask the user whether that earlier conversation has ended (or been stopped); only if they confirm it, use `--force` on those nodes. If they cannot tell, wait for the lease to run out instead.
 
 Repeat "3. Execution loop" until every automatic node is done or a manual node is reached.
 
@@ -198,12 +222,12 @@ This is a different entry point from step 4, with a different cause: nothing was
 ```bash
 graph-engine grant-iterations "<ticketId>" "<loopTargetNodeId>"   # +1 by default; --extra <n> for more
 graph-engine reopen-nodes "<ticketId>" "<loopTargetNodeId>"       # now succeeds; clears blocked
-graph-engine unstick-node "<failingReviewerNodeId>"               # only if it is still IN PROGRESS/IN REVIEW
+graph-engine unstick-node "<failingReviewerNodeId>" --session "<sessionId>"   # only if it is still IN PROGRESS/IN REVIEW
 ```
 
 - `grant-iterations` raises `max_iterations` and touches nothing else -- not the node's status, not its `iteration_count`, so the record of how many automatic attempts were already spent survives. It does not unblock the ticket on its own. Granting `k` (after which `reopen-nodes` succeeds) lets exactly `k` more review rounds run, and every one of them is judged at the **Final** tier. Grant to the loop target, never to the review node: the review node's own `max_iterations` is what fixes the tier boundaries, so raising it would shift them.
 - `reopen-nodes` then does the actual reset, as in step 4. It accepts a node in any of `DONE`, `REJECTED`, `TODO` and `AWAITING FIX`, so a loop target that a previous rejection had already rewound to `TODO` is recoverable from the CLI as well -- it used to take only `DONE`/`REJECTED` and refuse that state outright, which left editing the database from the Web UI as the only way out. A node it resets from `TODO` or `AWAITING FIX` spends no iteration; one it resets from `DONE`/`REJECTED` does.
-- `unstick-node` is for a node left at `IN PROGRESS`/`IN REVIEW`, the one pair of states `reopen-nodes` still refuses to touch (something may genuinely still be working it). The reviewer that failed is in exactly that state here, because the blocked loop-back wrote nothing. Check with `get-ticket` before calling it, and only call it once nothing is still working that node. After an ordinary, non-blocked loop-back you do not need it at all: the rewind puts claimed nodes back to `TODO` itself.
+- `unstick-node` is for a node left at `IN PROGRESS`/`IN REVIEW`, the one pair of states `reopen-nodes` still refuses to touch (something may genuinely still be working it). The reviewer that failed is in exactly that state here, because the blocked loop-back wrote nothing. Check with `get-ticket` before calling it, and only call it once nothing is still working that node; it follows the rules of "Releasing a claimed node" in step 3 (its subagent's claim is this session's own, so it is released). After an ordinary, non-blocked loop-back you do not need it at all: the rewind puts claimed nodes back to `TODO` itself.
 
 Then resume the normal execution loop (step 3).
 
