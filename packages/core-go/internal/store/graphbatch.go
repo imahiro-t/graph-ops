@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -119,8 +120,33 @@ func graphBatchTimestamps(base time.Time, n int) []string {
 // opposite orders; SQLite's _txlock=immediate already makes Begin take the
 // database's write lock), then the check is made against what is committed
 // now, then everything is written. Any error rolls the whole thing back.
+//
+// On MySQL the ticket row lock is the only lock the check needs: every
+// writer of a ticket's nodes (CreateNode, another batch) takes that lock
+// first, so while it is held nobody can add a node to this ticket. The
+// nodes are therefore read with a plain SELECT, not a locking read, and the
+// transaction runs at READ COMMITTED (d.graphBatchTx):
+//   - A locking read of "nodes WHERE ticket_id = ?" at REPEATABLE READ (the
+//     server default) takes next-key/gap locks on idx_nodes_ticket. For a
+//     ticket with no nodes yet that is the empty gap where its rows will go
+//     -- for tickets created one after another, the same gap at the end of
+//     the index. Gap locks do not conflict with each other, so two such
+//     tickets' batches both got one and then each INSERT waited on the
+//     other's: Error 1213, a deadlock between different tickets.
+//   - At READ COMMITTED every plain SELECT reads the latest committed rows,
+//     so the nodes seen after the ticket row lock is granted include
+//     everything committed by whoever held it before -- without relying on
+//     REPEATABLE READ taking its snapshot at the first plain read, and
+//     without the server's default level (SERIALIZABLE would turn the plain
+//     SELECT back into a locking read with gap locks) mattering.
+//
+// The INSERTs still take insert-intention locks, which wait only on another
+// transaction's gap lock; a batch holds none, so batches (and CreateNode,
+// a plain INSERT) of different tickets never block or deadlock each other.
+// TestGraphCreation_ConcurrentAcrossTickets_MySQL starts several new
+// tickets at once to keep it that way.
 func createGraphBatchSQL(db *sql.DB, d sqlDialect, ticketID string, b GraphBatch) error {
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(context.Background(), d.graphBatchTx)
 	if err != nil {
 		return err
 	}
@@ -137,7 +163,8 @@ func createGraphBatchSQL(db *sql.DB, d sqlDialect, ticketID string, b GraphBatch
 	}
 
 	existing := map[string]bool{}
-	rows, err := tx.Query(`SELECT id FROM nodes WHERE ticket_id = ?`+d.forUpdate, ticketID)
+	// A plain read on purpose -- see above.
+	rows, err := tx.Query(`SELECT id FROM nodes WHERE ticket_id = ?`, ticketID)
 	if err != nil {
 		return fmt.Errorf("listing nodes for ticket %s: %w", ticketID, err)
 	}

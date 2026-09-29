@@ -241,6 +241,7 @@ func isMySQLDuplicateKeyError(err error) bool {
 // explicit row locks (the pool has many connections) and error 1062.
 var mysqlDialect = sqlDialect{
 	forUpdate:         " FOR UPDATE",
+	graphBatchTx:      &sql.TxOptions{Isolation: sql.LevelReadCommitted},
 	isUniqueViolation: isMySQLDuplicateKeyError,
 }
 

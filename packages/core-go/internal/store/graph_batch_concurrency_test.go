@@ -41,6 +41,7 @@ func sqliteGraphRaceRepos(t *testing.T, n int) []store.GraphRepository {
 		if err := repo.Init(); err != nil {
 			t.Fatalf("Init: %v", err)
 		}
+		t.Cleanup(func() { store.CloseForTest(repo) }) //nolint:errcheck
 		repos[i] = repo
 	}
 	return repos
@@ -49,7 +50,10 @@ func sqliteGraphRaceRepos(t *testing.T, n int) []store.GraphRepository {
 func mysqlGraphRaceRepos(t *testing.T, n int) []store.GraphRepository {
 	repos := make([]store.GraphRepository, n)
 	for i := range repos {
-		repos[i] = mysqlRepoForClaimTest(t) // skips unless GRAPH_TEST_MYSQL_HOST is set
+		// Skips unless GRAPH_TEST_MYSQL_HOST is set.
+		repo := mysqlRepoForClaimTest(t)
+		t.Cleanup(func() { store.CloseForTest(repo) }) //nolint:errcheck
+		repos[i] = repo
 	}
 	return repos
 }
@@ -237,4 +241,104 @@ func TestGraphCreation_ConcurrentSeedAndExpand_SQLite(t *testing.T) {
 
 func TestGraphCreation_ConcurrentSeedAndExpand_MySQL(t *testing.T) {
 	testGraphCreationRace(t, mysqlGraphRaceRepos)
+}
+
+// graphRaceTickets is how many tickets testGraphCreationRaceAcrossTickets
+// starts at once; every ticket gets graphRaceCallers/graphRaceTickets
+// callers.
+const graphRaceTickets = 4
+
+// testGraphCreationRaceAcrossTickets starts several tickets that have no
+// nodes yet at the same moment, and then expands them all at the same
+// moment. A batch that took a locking read of nodes on MySQL (REPEATABLE
+// READ) locked the empty index gap such a ticket's rows go into -- the same
+// gap for tickets created one after another -- and two of them inserting
+// into it then deadlocked (Error 1213). Different tickets must never fail
+// each other, and each still gets its graph exactly once.
+func testGraphCreationRaceAcrossTickets(t *testing.T, open graphRaceRepos) {
+	repos := open(t, graphRaceCallers)
+	engines := make([]*engine.GraphEngine, len(repos))
+	for i, r := range repos {
+		engines[i] = engine.New(r)
+	}
+	repo, eng := repos[0], engines[0]
+	catalog, err := config.LoadWithRoots(t.TempDir(), t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("config.LoadWithRoots: %v", err)
+	}
+	project, err := repo.CreateProject("Graph Race Across Tickets", "")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	// The reference: one ticket's graph built by one session alone.
+	ref, err := eng.CreateTicket(project.ID, "reference", "")
+	if err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+	if _, err := eng.GetExecutableNodes(ref.ID, catalog); err != nil {
+		t.Fatalf("GetExecutableNodes(reference): %v", err)
+	}
+	seedNodes, _ := repo.ListNodesByTicket(ref.ID)
+	seedEdges, _ := repo.ListEdgesByTicket(ref.ID)
+	completeSeed(t, eng, repo, ref.ID, catalog)
+	if err := eng.ExpandGraph(ref.ID, catalog, nil); err != nil {
+		t.Fatalf("ExpandGraph(reference): %v", err)
+	}
+	fullNodes, _ := repo.ListNodesByTicket(ref.ID)
+	fullEdges, _ := repo.ListEdgesByTicket(ref.ID)
+
+	// Tickets created one after another, none with a node yet: their rows
+	// all go at the end of the nodes index, into the same gap.
+	tickets := make([]string, graphRaceTickets)
+	for i := range tickets {
+		tk, err := eng.CreateTicket(project.ID, fmt.Sprintf("race %d", i), "")
+		if err != nil {
+			t.Fatalf("CreateTicket: %v", err)
+		}
+		tickets[i] = tk.ID
+	}
+	ticketOf := func(caller int) string { return tickets[caller%len(tickets)] }
+
+	errs := race(len(engines), func(i int) error {
+		_, err := engines[i].GetExecutableNodes(ticketOf(i), catalog)
+		return err
+	})
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("caller %d (ticket %s): GetExecutableNodes: %v", i, ticketOf(i), err)
+		}
+	}
+	for _, id := range tickets {
+		checkGraphOnce(t, repo, id, len(seedNodes), len(seedEdges))
+		completeSeed(t, eng, repo, id, catalog)
+	}
+
+	errs = race(len(engines), func(i int) error {
+		return engines[i].ExpandGraph(ticketOf(i), catalog, nil)
+	})
+	won := map[string]int{}
+	for i, err := range errs {
+		switch {
+		case err == nil:
+			won[ticketOf(i)]++
+		case strings.Contains(err.Error(), "graph has already been expanded"):
+		default:
+			t.Fatalf("caller %d (ticket %s): ExpandGraph: %v", i, ticketOf(i), err)
+		}
+	}
+	for _, id := range tickets {
+		if won[id] != 1 {
+			t.Fatalf("ticket %s was expanded by %d callers, want exactly 1", id, won[id])
+		}
+		checkGraphOnce(t, repo, id, len(fullNodes), len(fullEdges))
+	}
+}
+
+func TestGraphCreation_ConcurrentAcrossTickets_SQLite(t *testing.T) {
+	testGraphCreationRaceAcrossTickets(t, sqliteGraphRaceRepos)
+}
+
+func TestGraphCreation_ConcurrentAcrossTickets_MySQL(t *testing.T) {
+	testGraphCreationRaceAcrossTickets(t, mysqlGraphRaceRepos)
 }

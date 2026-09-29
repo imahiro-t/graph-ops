@@ -23,6 +23,11 @@ type sqlDialect struct {
 	// forUpdate is appended to SELECTs that read a row the transaction is
 	// about to modify based on what it read.
 	forUpdate string
+	// graphBatchTx is the transaction options createGraphBatchSQL begins
+	// with (nil: the driver's default). MySQL uses READ COMMITTED there so
+	// the batch never takes gap locks on the nodes index -- see
+	// createGraphBatchSQL.
+	graphBatchTx *sql.TxOptions
 	// isUniqueViolation reports whether err is the driver's UNIQUE
 	// constraint violation, so the labels table's (project_id, name) index
 	// -- the last line of defense against two concurrent creates/renames --
