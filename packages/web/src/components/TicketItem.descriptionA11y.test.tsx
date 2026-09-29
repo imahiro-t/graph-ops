@@ -503,9 +503,13 @@ describe.each(['ja', 'en'] as const)('TicketItem description card accessibility 
     expect(heading).toHaveClass(...FOCUS_RING);
   });
 
-  it('keeps the heading out of the tab order', () => {
+  // Unlike the focus-move test above, this checks the heading on a plain
+  // render, before anything has moved the focus to it: tabindex=-1 is there
+  // from the start, so the heading never becomes an extra Tab stop.
+  it('keeps the heading out of the tab order from the first render, before any focus move', () => {
     renderExpanded();
     const heading = screen.getByText(i18n.t('ticketItem.description.title')).parentElement as HTMLElement;
+    expect(heading).not.toHaveFocus();
     expect(heading).toHaveAttribute('tabindex', '-1');
   });
 

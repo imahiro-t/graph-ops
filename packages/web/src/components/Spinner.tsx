@@ -6,7 +6,7 @@ import { Loader2 } from 'lucide-react';
 // switches the spin off there, the same way the skeleton rows' animate-pulse
 // is switched off. The plain animate-spin class stays on the element (rather
 // than a motion-safe variant of it), so tests and styles that look for
-// .animate-spin still find a spinner. spinnerSource.test.ts fails if
+// .animate-spin still find a spinner. src/sourceGuards.test.ts fails if
 // animate-spin is written anywhere else in src/.
 export const SPIN_CLASS = 'animate-spin motion-reduce:animate-none';
 
