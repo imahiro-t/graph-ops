@@ -46,11 +46,11 @@ describe('ErrorBox', () => {
   });
 
   it('adds the given className after the shared classes', () => {
-    render(<ErrorBox className="p-2.5 text-[11px] whitespace-pre-wrap">Something failed</ErrorBox>);
+    render(<ErrorBox className="p-2.5 text-[0.6875rem] whitespace-pre-wrap">Something failed</ErrorBox>);
     const box = screen.getByText('Something failed');
     for (const cls of COLOR_CLASSES) expect(box).toHaveClass(cls);
-    expect(box).toHaveClass('p-2.5', 'text-[11px]', 'whitespace-pre-wrap');
-    expect(box.className).toBe(`${ERROR_BOX_CLASS} p-2.5 text-[11px] whitespace-pre-wrap`);
+    expect(box).toHaveClass('p-2.5', 'text-[0.6875rem]', 'whitespace-pre-wrap');
+    expect(box.className).toBe(`${ERROR_BOX_CLASS} p-2.5 text-[0.6875rem] whitespace-pre-wrap`);
   });
 
   it('passes id and role="alert" through', () => {

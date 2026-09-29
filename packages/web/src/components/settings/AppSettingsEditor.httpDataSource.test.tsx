@@ -194,7 +194,7 @@ describe('AppSettingsEditor: HTTP custom data source', () => {
 // DFLT-00179: the URL/token hints and the URL's "currently in effect" line sit
 // on the bg-slate-50/50 box. slate-500 there is 4.64:1 (light) and slate-400 on
 // slate-900 is 6.96:1 (dark), both >= 4.5:1 (WCAG 1.4.3); the old slate-400 /
-// dark:slate-500 pair was 2.50:1 / 3.75:1. The font size stays text-[10px].
+// dark:slate-500 pair was 2.50:1 / 3.75:1. The font size stays text-[0.625rem].
 describe('AppSettingsEditor: HTTP custom data source secondary text contrast (DFLT-00179)', () => {
   beforeEach(() => {
     mockedFetchAppSettings.mockReset();
@@ -215,7 +215,7 @@ describe('AppSettingsEditor: HTTP custom data source secondary text contrast (DF
       screen.getByText(i18n.t('settings.appSettings.currentlyInEffect', { value: 'https://a.example.com' }))
     ];
     for (const el of lines) {
-      expect(el).toHaveClass('text-[10px]', 'text-slate-500', 'dark:text-slate-400');
+      expect(el).toHaveClass('text-[0.625rem]', 'text-slate-500', 'dark:text-slate-400');
       expect(el).not.toHaveClass('text-slate-400');
       expect(el).not.toHaveClass('dark:text-slate-500');
     }

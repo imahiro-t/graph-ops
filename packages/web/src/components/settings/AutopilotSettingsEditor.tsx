@@ -53,6 +53,11 @@ const CONTROLS: Record<AutopilotSettingKey, Control> = {
   stallTimeoutMinutes: { kind: 'number', min: 15, max: 1440 }
 };
 
+// A row's controls. Select rows add upto-15rem:flex-wrap and
+// upto-15rem:justify-end so the reset button drops under the select. Kept a
+// complete string literal (and never glued to a `${`) so Tailwind finds it.
+const CONTROLS_CLASS = 'flex items-center gap-2 shrink-0 narrow:shrink narrow:min-w-0 narrow:w-full';
+
 // A draft entry is the local value being edited: a string for select and
 // number fields (a number field keeps what was typed, so an invalid entry
 // reaches the server's validation instead of being silently dropped), a
@@ -198,7 +203,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
     }
     if (control.kind === 'select') {
       return (
-        <select {...common} value={String(shown)} onChange={e => set(e.target.value)} className={`${inputClass} narrow:flex-1`}>
+        <select {...common} value={String(shown)} onChange={e => set(e.target.value)} className={`${inputClass} narrow:flex-1 upto-15rem:basis-full upto-15rem:w-full`}>
           {control.options.map(o => (
             <option key={o} value={o}>
               {valueLabel(it.key, o)}
@@ -233,22 +238,22 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
         <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
           {t('settings.autopilot.title', { project: projectName || projectId })}
         </h3>
-        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">{t('settings.autopilot.description')}</p>
+        <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400 mt-1">{t('settings.autopilot.description')}</p>
         {data?.team_file && (
-          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 wrap-anywhere">
+          <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400 mt-1 wrap-anywhere">
             {t('settings.autopilot.teamFile', { path: data.team_file })}
           </p>
         )}
       </div>
 
       {error && (
-        <ErrorBox role="alert" className="p-2.5 text-[11px]">
+        <ErrorBox role="alert" className="p-2.5 text-[0.6875rem]">
           {error}
         </ErrorBox>
       )}
 
       {data && data.warnings.length > 0 && (
-        <ul className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-200 text-[11px] rounded-lg border border-amber-200 dark:border-amber-900 list-disc pl-6">
+        <ul className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-200 text-[0.6875rem] rounded-lg border border-amber-200 dark:border-amber-900 list-disc pl-6">
           {data.warnings.map((w, i) => (
             <li key={`${w.code}-${w.source ?? ''}-${w.key ?? ''}-${i}`}>{warningText(w)}</li>
           ))}
@@ -267,13 +272,21 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
               const hintId = `${inputId}-hint`;
               const sourceId = `${inputId}-source`;
               const canClear = !it.locked && (draft[it.key] ?? null) !== null;
+              // DFLT-00287: at the narrowest size (upto-15rem: -- 480px and
+              // below at 200% text) a select gets the row's full width and
+              // its reset button moves to the next line, right-aligned, so
+              // enough of the chosen option shows to tell the options apart.
+              // Checkboxes and number inputs are short, so they stay as they
+              // are. The DOM order (select, then reset) -- and so the tab
+              // order -- does not change.
+              const isSelect = CONTROLS[it.key].kind === 'select';
               return (
-                <div key={it.key} className="flex items-start gap-3 px-3 py-2.5 narrow:flex-wrap">
+                <div key={it.key} className="flex items-start gap-3 px-3 py-2.5 narrow:flex-wrap upto-15rem:px-2">
                   <div className="flex-1 min-w-0 narrow:basis-full">
                     <label htmlFor={inputId} className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                       {t(`settings.autopilot.keys.${it.key}.label`)}
                     </label>
-                    <p id={hintId} className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    <p id={hintId} className="text-[0.625rem] text-slate-500 dark:text-slate-400 mt-0.5">
                       {t(`settings.autopilot.keys.${it.key}.hint`)}
                     </p>
                     {/* Where the value comes from -- for a locked key, the reason
@@ -282,14 +295,18 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
                         control's description. */}
                     <p
                       id={sourceId}
-                      className="text-[10px] mt-0.5 flex items-center gap-1 text-slate-500 dark:text-slate-400"
+                      className="text-[0.625rem] mt-0.5 flex items-center gap-1 text-slate-500 dark:text-slate-400"
                       data-testid={`autopilot-source-${it.key}`}
                     >
                       {it.locked && <Lock className="w-3 h-3" aria-hidden="true" />}
                       {sourceText(it)}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0 narrow:shrink narrow:min-w-0 narrow:w-full">
+                  <div
+                    className={
+                      isSelect ? `${CONTROLS_CLASS} upto-15rem:flex-wrap upto-15rem:justify-end` : CONTROLS_CLASS
+                    }
+                  >
                     {renderControl(it, inputId, `${hintId} ${sourceId}`)}
                     {!it.locked && (
                       <IconButton
@@ -309,7 +326,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
           </div>
 
           {permissionShown === 'bypassPermissions' && (
-            <ErrorBox role="note" className="p-2.5 flex gap-2 text-[11px]">
+            <ErrorBox role="note" className="p-2.5 flex gap-2 text-[0.6875rem]">
               <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden="true" />
               <span>{t('settings.autopilot.bypassWarning')}</span>
             </ErrorBox>

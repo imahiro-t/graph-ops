@@ -302,3 +302,90 @@ describe('AutopilotSettingsEditor narrow reflow (DFLT-00261)', () => {
     expect(teamFile).not.toHaveClass('wrap-break-word');
   });
 });
+
+// DFLT-00287: at the narrowest size (upto-15rem: -- 480px and below at 200%
+// text) a select takes the row's full width and its reset button moves to
+// the next line, right-aligned, so enough of the chosen option shows to tell
+// the options apart. Label, description, reset button and tab order stay as
+// they were. jsdom does no layout or media queries, so the classes are
+// pinned; the real widths are measured in a browser (implementation notes).
+describe('AutopilotSettingsEditor select stacking at the narrowest size (DFLT-00287)', () => {
+  const SELECT_KEYS: AutopilotSettingKey[] = ['mainReflection', 'permissionMode', 'onFailure'];
+
+  beforeEach(async () => {
+    await i18n.changeLanguage('ja');
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
+  });
+
+  afterEach(async () => {
+    fetchSpy.mockRestore();
+    await i18n.changeLanguage('ja');
+  });
+
+  it.each(SELECT_KEYS)('stacks the %s select above its reset button', async key => {
+    stubServer(response());
+    renderEditor();
+
+    const select = (await screen.findByLabelText(label(key))) as HTMLSelectElement;
+    expect(select.tagName).toBe('SELECT');
+    expect(select).toHaveClass('upto-15rem:basis-full', 'upto-15rem:w-full');
+    const controls = select.parentElement as HTMLElement;
+    expect(controls).toHaveClass('upto-15rem:flex-wrap', 'upto-15rem:justify-end');
+    const selectCls = controls.getAttribute('class') ?? '';
+    expect(selectCls).toBe(selectCls.trim());
+    const reset = screen.getByRole('button', { name: i18n.t('settings.autopilot.clearLocalFor', { key: label(key) }) });
+    expect(controls).toContainElement(reset);
+    const row = controls.parentElement as HTMLElement;
+    expect(row).toHaveClass('px-3', 'upto-15rem:px-2');
+  });
+
+  it('leaves the checkbox and number controls unstacked', async () => {
+    stubServer(response());
+    renderEditor();
+
+    for (const key of ['autoApproveGates', 'maxTickets'] as AutopilotSettingKey[]) {
+      const input = await screen.findByLabelText(label(key));
+      const controls = input.parentElement as HTMLElement;
+      expect(controls).not.toHaveClass('upto-15rem:flex-wrap');
+      expect(controls).not.toHaveClass('upto-15rem:justify-end');
+      // No trailing space left by the unused select-only classes (DFLT-00297).
+      const cls = controls.getAttribute('class') ?? '';
+      expect(cls).toBe(cls.trim());
+      expect(input).not.toHaveClass('upto-15rem:basis-full');
+    }
+  });
+
+  it('keeps each select labelled, described, keyboard-operable and followed by its reset button', async () => {
+    const user = userEvent.setup();
+    stubServer(response({ onFailure: { value: 'continue', source: 'local', local: 'continue' } }));
+    renderEditor();
+
+    for (const key of SELECT_KEYS) {
+      const select = (await screen.findByLabelText(label(key))) as HTMLSelectElement;
+      const describedBy = select.getAttribute('aria-describedby')?.split(' ') ?? [];
+      expect(describedBy).toHaveLength(2);
+      for (const id of describedBy) expect(document.getElementById(id)).not.toBeNull();
+      expect(document.getElementById(describedBy[0])).toHaveTextContent(i18n.t(`settings.autopilot.keys.${key}.hint`));
+    }
+
+    // Changing the value (jsdom has no native select keyboard handling, so
+    // the option is picked directly) enables the reset button, which is the
+    // next tab stop after the select.
+    const select = screen.getByLabelText(label('mainReflection')) as HTMLSelectElement;
+    await user.selectOptions(select, 'merge');
+    expect(select.value).toBe('merge');
+    const reset = screen.getByRole('button', { name: i18n.t('settings.autopilot.clearLocalFor', { key: label('mainReflection') }) });
+    expect(reset).toBeEnabled();
+    select.focus();
+    await user.tab();
+    expect(reset).toHaveFocus();
+    await user.click(reset);
+    expect(select.value).toBe('branch');
+
+    // A key with a saved local value: its reset clears it back to the default.
+    const onFailure = screen.getByLabelText(label('onFailure')) as HTMLSelectElement;
+    expect(onFailure.value).toBe('continue');
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.autopilot.clearLocalFor', { key: label('onFailure') }) }));
+    expect(onFailure.value).toBe('stop');
+  });
+});

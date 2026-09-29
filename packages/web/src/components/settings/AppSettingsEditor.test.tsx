@@ -853,16 +853,16 @@ describe('AppSettingsEditor team settings directory', () => {
   });
 });
 
-// DFLT-00179: the 10px secondary lines (the "currently in effect" rows and the
+// DFLT-00179: the 0.625rem (10px at the default size) secondary lines (the "currently in effect" rows and the
 // hint rows) must meet WCAG 1.4.3 (>= 4.5:1) against the backgrounds they
 // actually sit on. Light: slate-500 on white (modal body) 4.76:1, on the
 // bg-slate-50/50 MySQL/HTTP box (composited ~#fbfcfe) 4.64:1. Dark: slate-400
 // on slate-900 6.96:1. The previous slate-400 (light, 2.56:1) / slate-500
 // (dark, 3.75:1) fell short. Darkening either box's background later would
 // push the light ratio below 4.5:1, so revisit these classes if it changes.
-// The font size must stay text-[10px] -- only the colour changed.
+// The font size must stay text-[0.625rem] -- only the colour changed.
 function expectSecondaryTextContrast(el: HTMLElement | null) {
-  expect(el).toHaveClass('text-[10px]', 'text-slate-500', 'dark:text-slate-400');
+  expect(el).toHaveClass('text-[0.625rem]', 'text-slate-500', 'dark:text-slate-400');
   expect(el).not.toHaveClass('text-slate-400');
   expect(el).not.toHaveClass('dark:text-slate-500');
 }
@@ -916,7 +916,7 @@ describe('AppSettingsEditor secondary text contrast (DFLT-00179)', () => {
 
     await user.click(screen.getByRole('radio', { name: i18n.t('settings.appSettings.storage.mysqlTlsDisabled') }));
     const warning = screen.getByText(i18n.t('settings.appSettings.storage.mysqlTlsDisabledWarning'));
-    expect(warning).toHaveClass('text-[10px]', 'text-red-600', 'dark:text-red-400');
+    expect(warning).toHaveClass('text-[0.625rem]', 'text-red-600', 'dark:text-red-400');
     expect(warning).not.toHaveClass('text-slate-500');
   });
 });
