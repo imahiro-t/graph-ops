@@ -1213,21 +1213,49 @@ export const TicketItem: React.FC<Props> = ({
   // height is capped while collapsed, so a longer text does not resize it;
   // the observer also watches its content (the MarkdownViewer root) so the
   // check follows both the window width and the text's height.
+  // DFLT-00288: the value means "the text overflows the box while
+  // collapsed", and it also decides whether the "Full text" button is shown.
+  // Expanded, the box has no height cap, so it cannot be measured then: the
+  // effect neither measures nor observes while expanded and keeps the last
+  // collapsed value, and measures again (before paint) right after the body
+  // is collapsed, so a width or text change made while expanded is picked up.
   const descriptionBodyRef = useRef<HTMLDivElement>(null);
-  const [isDescriptionScrollable, setIsDescriptionScrollable] = useState(false);
+  const [isCollapsedDescriptionOverflowing, setIsCollapsedDescriptionOverflowing] = useState(false);
 
   useLayoutEffect(() => {
-    if (!isExpanded) return;
+    if (!isExpanded || isDescriptionExpanded) return;
     const el = descriptionBodyRef.current;
     if (!el) return;
-    const update = () => setIsDescriptionScrollable(el.scrollHeight > el.clientHeight);
+    const update = () => setIsCollapsedDescriptionOverflowing(el.scrollHeight > el.clientHeight);
     update();
     const observer = new ResizeObserver(update);
     observer.observe(el);
     if (el.firstElementChild) observer.observe(el.firstElementChild);
     return () => observer.disconnect();
   }, [isExpanded, isDescriptionExpanded, description]);
-  const isDescriptionScrollRegion = !isDescriptionExpanded && isDescriptionScrollable;
+  const isDescriptionScrollRegion = !isDescriptionExpanded && isCollapsedDescriptionOverflowing;
+
+  // DFLT-00288: the "Full text" button is shown only when it does something
+  // -- while the collapsed text overflows, or while expanded (to collapse it
+  // again). A description that fits gets no button that changes nothing and
+  // no extra tab stop, the same rule DFLT-00272 applied to the body. While
+  // the button has focus it stays even if the text starts to fit (a wider
+  // window, a shorter text, collapsing a text that fits now), so the focus
+  // never drops to <body>; it goes once the focus moves elsewhere.
+  const [isDescriptionToggleFocused, setIsDescriptionToggleFocused] = useState(false);
+  // Invariant: no button rendered -> no focus state. blur is not reliably
+  // fired when an element is removed, so the focus state is reset when the
+  // button leaves the DOM (description emptied, ticket closed, unmount) by a
+  // React 19 callback-ref cleanup. The ref must be stable (useCallback with
+  // no deps): an inline function would run the cleanup on every render and
+  // clear the state while the button still has focus.
+  const descriptionToggleRef = useCallback((el: HTMLButtonElement | null) => {
+    if (!el) return;
+    return () => setIsDescriptionToggleFocused(false);
+  }, []);
+  const showDescriptionToggle =
+    description.length > 0 &&
+    (isDescriptionExpanded || isCollapsedDescriptionOverflowing || isDescriptionToggleFocused);
 
   const totalNodes = ticket.nodes.length;
   const doneNodes = ticket.nodes.filter(n => n.status === 'DONE').length;
@@ -2001,10 +2029,26 @@ export const TicketItem: React.FC<Props> = ({
                     </span>
                   </span>
                 )}
-                {description.length > 0 && (
+                {showDescriptionToggle && (
                   <button
+                    ref={descriptionToggleRef}
                     type="button"
                     onClick={() => setIsDescriptionExpanded(v => !v)}
+                    onFocus={() => setIsDescriptionToggleFocused(true)}
+                    // DFLT-00288: a blur caused by the page itself losing
+                    // focus (switching windows or tabs: no relatedTarget and
+                    // document.hasFocus() is false) is ignored, so a button
+                    // kept only by its focus is still there when the user
+                    // comes back and the browser restores the focus to it.
+                    // A move to another element (relatedTarget set) or any
+                    // other blur within the page clears the state as usual.
+                    // If the browser does not restore the focus (the user
+                    // clicks elsewhere first), that change is not seen here,
+                    // so the button may stay until it is focused and left
+                    // again -- harmless, as it still toggles the body.
+                    onBlur={e => {
+                      if (e.relatedTarget || document.hasFocus()) setIsDescriptionToggleFocused(false);
+                    }}
                     // DFLT-00262: tells assistive tech whether the body is
                     // open and which element it opens (WCAG 4.1.2), and shows
                     // the same focus ring as the other buttons (WCAG 2.4.7).

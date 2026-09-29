@@ -12,6 +12,14 @@
 //   2.1.1); a short body that fits adds no tab stop. A ResizeObserver on the
 //   box and its content keeps this in step with the width and the text.
 //   Expanded, it does not scroll, so it is neither a tab stop nor a landmark.
+// - DFLT-00288: the button is shown only while the collapsed text overflows
+//   or while the body is expanded (to collapse it again); a description that
+//   fits while collapsed has no button, so no control that changes nothing
+//   and no extra tab stop. While the button has focus it stays even if the
+//   text starts to fit, so the focus never drops to <body> (a blur caused by
+//   the page itself losing focus is ignored); it goes once the focus moves
+//   away. The focus state is cleared whenever the button leaves the DOM
+//   (description emptied, ticket closed), so it never keeps a later button.
 // - The refined time is text-[0.625rem] (10px at a 16px root) rather than
 //   text-[10px], so it follows the browser's default font size (WCAG 1.4.4).
 // jsdom does no layout or scrolling, so scrollHeight / clientHeight are
@@ -44,21 +52,26 @@ const makeTicket = (description = '説明の本文'): TicketDetail => ({
   artifacts: []
 });
 
-const renderExpanded = (description?: string) =>
-  render(
-    <TicketItem
-      ticket={makeTicket(description)}
-      isExpanded
-      onToggleExpand={vi.fn()}
-      onRefresh={vi.fn(async () => {})}
-      myName=""
-      projectLabels={[]}
-    />
-  );
+const itemElement = (description?: string, isExpanded = true) => (
+  <TicketItem
+    ticket={makeTicket(description)}
+    isExpanded={isExpanded}
+    onToggleExpand={vi.fn()}
+    onRefresh={vi.fn(async () => {})}
+    myName=""
+    projectLabels={[]}
+  />
+);
+
+const renderExpanded = (description?: string) => render(itemElement(description));
 
 const FOCUS_RING = ['focus:outline-hidden', 'focus-visible:ring-2', 'focus-visible:ring-blue-500', 'dark:focus-visible:ring-blue-400'];
 
 const fullTextButton = () => screen.getByRole('button', { name: i18n.t('ticketItem.description.fullText') });
+const queryFullTextButton = () => screen.queryByRole('button', { name: i18n.t('ticketItem.description.fullText') });
+// The description body, found without the button (which a body that fits
+// does not have): the box around the MarkdownViewer root.
+const descriptionBody = () => screen.getByTestId('markdown-viewer').parentElement as HTMLElement;
 const bodyRegionName = () => i18n.t('ticketItem.description.bodyRegion');
 
 // The element the button's aria-controls points at.
@@ -139,6 +152,7 @@ describe.each(['ja', 'en'] as const)('TicketItem description card accessibility 
   });
 
   it('tells the collapsed state with aria-expanded and points at the body with aria-controls', () => {
+    overflow();
     renderExpanded();
     const button = fullTextButton();
     expect(button).toHaveAttribute('aria-expanded', 'false');
@@ -148,6 +162,7 @@ describe.each(['ja', 'en'] as const)('TicketItem description card accessibility 
   });
 
   it('keeps the button label fixed and changes only aria-expanded when toggled', () => {
+    overflow();
     renderExpanded();
     const button = fullTextButton();
     const label = lng === 'ja' ? '全文' : 'Full text';
@@ -169,6 +184,7 @@ describe.each(['ja', 'en'] as const)('TicketItem description card accessibility 
   });
 
   it('shows the state with a chevron hidden from assistive tech that turns when expanded', () => {
+    overflow();
     renderExpanded();
     const button = fullTextButton();
     const icons = button.querySelectorAll('svg');
@@ -186,6 +202,7 @@ describe.each(['ja', 'en'] as const)('TicketItem description card accessibility 
   });
 
   it('gives the button the same focus-visible ring as the other buttons', () => {
+    overflow();
     renderExpanded();
     expect(fullTextButton()).toHaveClass('rounded-sm', 'text-[0.6875rem]', ...FOCUS_RING);
   });
@@ -216,17 +233,19 @@ describe.each(['ja', 'en'] as const)('TicketItem description card accessibility 
   it.each([
     ['jsdom default (0 / 0)', () => {}],
     ['equal heights (100 / 100)', fit]
-  ])('adds no tab stop or region for a collapsed body that fits: %s', async (_label, setLayout) => {
+  ])('shows no button and adds no tab stop or region for a collapsed body that fits: %s', async (_label, setLayout) => {
     setLayout();
     const user = userEvent.setup();
     renderExpanded();
-    const button = fullTextButton();
-    const body = controlledBody(button);
+    expect(queryFullTextButton()).toBeNull();
+    const body = descriptionBody();
     expect(body).toHaveAttribute('id');
+    expect(body).toHaveTextContent('説明の本文');
     expect(body).toHaveClass('max-h-56', 'overflow-y-auto');
     expectNotRegion(body);
 
-    button.focus();
+    await user.tab();
+    await user.tab();
     await user.tab();
     expect(body).not.toHaveFocus();
     expect(body.contains(document.activeElement)).toBe(false);
@@ -235,21 +254,24 @@ describe.each(['ja', 'en'] as const)('TicketItem description card accessibility 
   it('becomes a region when the body starts to overflow, and stops being one when it fits again', () => {
     fit();
     renderExpanded();
-    const body = controlledBody(fullTextButton());
+    const body = descriptionBody();
     expectNotRegion(body);
+    expect(queryFullTextButton()).toBeNull();
 
     overflow();
     fireResize();
     expect(screen.getByRole('region', { name: bodyRegionName() })).toBe(body);
     expect(body).toHaveAttribute('tabindex', '0');
+    expect(controlledBody(fullTextButton())).toBe(body);
 
     fit();
     fireResize();
     expectNotRegion(body);
-    expect(controlledBody(fullTextButton())).toBe(body);
+    expect(queryFullTextButton()).toBeNull();
   });
 
   it('observes both the body box and its content, and disconnects on unmount', () => {
+    overflow();
     const { unmount } = renderExpanded();
     const body = controlledBody(fullTextButton());
     const viewer = screen.getByTestId('markdown-viewer');
@@ -284,6 +306,182 @@ describe.each(['ja', 'en'] as const)('TicketItem description card accessibility 
     expect(screen.getByRole('region', { name: bodyRegionName() })).toBe(body);
     expect(body).toHaveAttribute('tabindex', '0');
     expect(body).toHaveClass('max-h-56', 'overflow-y-auto', ...FOCUS_RING);
+  });
+
+  it('shows the button for an overflowing collapsed body, collapsed and pointing at the body', () => {
+    overflow();
+    renderExpanded();
+    const button = fullTextButton();
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(controlledBody(button)).toBe(descriptionBody());
+    expect(screen.getByRole('region', { name: bodyRegionName() })).toBe(descriptionBody());
+  });
+
+  it('keeps the button while expanded even when the body stops overflowing, and collapses it again', async () => {
+    overflow();
+    const user = userEvent.setup();
+    renderExpanded();
+    await user.click(fullTextButton());
+    expect(fullTextButton()).toHaveAttribute('aria-expanded', 'true');
+
+    fit();
+    fireResize();
+    const button = fullTextButton();
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    expectNotRegion(descriptionBody());
+
+    await user.click(button);
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('neither measures nor observes while expanded, and measures again right after collapsing', () => {
+    overflow();
+    renderExpanded();
+    const body = descriptionBody();
+    fireEvent.click(fullTextButton());
+    expect(observers.some(r => !r.disconnected && r.targets.includes(body))).toBe(false);
+
+    // A transient "fits" while expanded is not recorded ...
+    fit();
+    fireResize();
+    expect(fullTextButton()).toHaveAttribute('aria-expanded', 'true');
+    expectNotRegion(body);
+
+    // ... and collapsing (without moving the focus) measures again.
+    overflow();
+    fireEvent.click(fullTextButton());
+    const button = fullTextButton();
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    const region = screen.getByRole('region', { name: bodyRegionName() });
+    expect(region).toBe(body);
+    expect(region).toHaveAttribute('tabindex', '0');
+    expect(region).toHaveAttribute('aria-label', bodyRegionName());
+  });
+
+  it('drops the button and the region right after collapsing, without focus, a body that fits now', () => {
+    overflow();
+    renderExpanded();
+    fireEvent.click(fullTextButton());
+    expect(document.activeElement).toBe(document.body);
+
+    fit();
+    expect(fullTextButton()).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(fullTextButton());
+    expect(queryFullTextButton()).toBeNull();
+    const body = descriptionBody();
+    expect(body).toHaveAttribute('id');
+    expectNotRegion(body);
+  });
+
+  it('follows the window width: the button appears and goes as the collapsed body overflows and fits', () => {
+    fit();
+    renderExpanded();
+    expect(queryFullTextButton()).toBeNull();
+
+    overflow();
+    fireResize();
+    expect(fullTextButton()).toBeInTheDocument();
+
+    fit();
+    fireResize();
+    expect(queryFullTextButton()).toBeNull();
+  });
+
+  it('follows a change of the description', () => {
+    fit();
+    const { rerender } = render(itemElement('短い説明'));
+    expect(queryFullTextButton()).toBeNull();
+
+    overflow();
+    rerender(itemElement('長い説明\n\n'.repeat(40)));
+    expect(fullTextButton()).toHaveAttribute('aria-expanded', 'false');
+
+    fit();
+    rerender(itemElement('短い説明'));
+    expect(queryFullTextButton()).toBeNull();
+  });
+
+  it('keeps a focused button when the body starts to fit, and drops it once the focus moves away', async () => {
+    overflow();
+    const user = userEvent.setup();
+    renderExpanded();
+    const button = fullTextButton();
+    act(() => button.focus());
+    expect(button).toHaveFocus();
+
+    fit();
+    fireResize();
+    expect(fullTextButton()).toBe(button);
+    expect(document.activeElement).toBe(button);
+    expect(document.activeElement).not.toBe(document.body);
+
+    await user.tab();
+    expect(queryFullTextButton()).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('keeps the focused button that collapsed a body that fits now, until the focus moves away', async () => {
+    overflow();
+    const user = userEvent.setup();
+    renderExpanded();
+    await user.click(fullTextButton());
+    fit();
+
+    const button = fullTextButton();
+    await user.click(button);
+    expect(fullTextButton()).toBe(button);
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(document.activeElement).toBe(button);
+    expectNotRegion(descriptionBody());
+
+    await user.tab();
+    expect(queryFullTextButton()).toBeNull();
+  });
+
+  it('ignores a blur caused by the page itself losing focus', () => {
+    overflow();
+    renderExpanded();
+    const button = fullTextButton();
+    act(() => button.focus());
+    fit();
+    fireResize();
+
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    fireEvent.blur(button);
+    expect(fullTextButton()).toBe(button);
+
+    hasFocus.mockRestore();
+    fireEvent.blur(button);
+    expect(queryFullTextButton()).toBeNull();
+  });
+
+  it('does not carry the focus state over when the ticket is closed and opened again', () => {
+    overflow();
+    const { rerender } = render(itemElement());
+    act(() => fullTextButton().focus());
+    expect(fullTextButton()).toHaveFocus();
+
+    rerender(itemElement(undefined, false));
+    expect(queryFullTextButton()).toBeNull();
+
+    fit();
+    rerender(itemElement(undefined, true));
+    expect(queryFullTextButton()).toBeNull();
+    expectNotRegion(descriptionBody());
+  });
+
+  it('does not carry the focus state over when the description is emptied and refilled', () => {
+    overflow();
+    const { rerender } = render(itemElement());
+    act(() => fullTextButton().focus());
+
+    rerender(itemElement(''));
+    expect(queryFullTextButton()).toBeNull();
+
+    fit();
+    rerender(itemElement('短い説明'));
+    expect(queryFullTextButton()).toBeNull();
   });
 
   it('sizes the refined time in rem so it follows the default font size', () => {
