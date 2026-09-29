@@ -44,7 +44,7 @@ export const GherkinViewer: React.FC<Props> = ({ content, scrollable = false, la
     if (trimmed.startsWith('Feature:')) {
       return (
         <div key={index} className="font-bold text-indigo-700 dark:text-indigo-400 py-0.5">
-          <span className="bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 px-1.5 py-0.5 rounded-sm text-[11px] mr-2">Feature</span>
+          <span className="bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 px-1.5 py-0.5 rounded-sm text-[0.6875rem] mr-2">Feature</span>
           {line.replace(/^(\s*)Feature:\s*/, '')}
         </div>
       );
@@ -58,7 +58,7 @@ export const GherkinViewer: React.FC<Props> = ({ content, scrollable = false, la
       lastStepKeyword = null;
       return (
         <div key={index} className="font-semibold text-slate-800 dark:text-slate-200 mt-2 py-0.5">
-          <span className="bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 px-1.5 py-0.5 rounded-sm text-[11px] mr-2">Scenario</span>
+          <span className="bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 px-1.5 py-0.5 rounded-sm text-[0.6875rem] mr-2">Scenario</span>
           {line.replace(/^(\s*)Scenario:\s*/, '')}
         </div>
       );

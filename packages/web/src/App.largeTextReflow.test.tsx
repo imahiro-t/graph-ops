@@ -45,7 +45,7 @@ import { PROJECT_MENU_WIDTH_REM } from './lib/popupPlacement';
 
 // The container-query variant for a popup narrower than 8rem (DFLT-00285).
 // Assembled at run time so Tailwind does not pick up extra classes from here.
-const BELOW_8REM = ['[@container(width<8rem)]', ''].join(':');
+const BELOW_8REM = ['cq-below-8rem', ''].join(':');
 
 const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path: '/work/alpha', created_at: '', updated_at: '' };
 
@@ -194,6 +194,17 @@ describe.each(['ja', 'en'] as const)('summary card, <main> and pagination in a 1
     expect(main).not.toHaveClass('sm:px-3');
   });
 
+  // DFLT-00290: from 7.5rem down (a 32px default font in a 160px window) it
+  // pads with px-1, so the expanded ticket's node rows have room for their
+  // status badges; with the default font that is 120px and below.
+  it('pads <main> with px-1 only from 7.5rem down', async () => {
+    await renderApp();
+    const main = screen.getByRole('main');
+    expect(main).toHaveClass('px-6', 'max-sm:px-3', `${NARROW}px-3`, 'upto-7_5rem:px-1');
+    expect(main).not.toHaveClass('px-1');
+    expect(main).not.toHaveClass(`${NARROW}px-1`);
+  });
+
   it('keeps the summary card\'s children inside the card and the numbers wrapping between items', async () => {
     await renderApp();
     const metrics = screen.getByTestId('summary-metrics');
@@ -285,7 +296,7 @@ describe.each(['ja', 'en'] as const)('summary card numbers with large text (%s)'
 // DFLT-00258: the rest of DFLT-00251's backlog on the summary card.
 describe.each(['ja', 'en'] as const)('summary card with a root font size set on the page (%s)', lng => {
   const NARROW = 'upto-15rem:';
-  const CARD_NARROW = '[@container(max-width:12rem)]:';
+  const CARD_NARROW = 'cq-upto-12rem:';
 
   beforeEach(async () => {
     seed();

@@ -59,7 +59,7 @@ const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALP', local_path
 
 const BREAKS_ANYWHERE = 'wrap-anywhere';
 const NARROW = 'upto-15rem:';
-const TINY = '[@media(max-width:200px)]:';
+const TINY = 'upto-200px:';
 
 // Six tickets on pages of five, so the pagination row is drawn.
 function seed() {

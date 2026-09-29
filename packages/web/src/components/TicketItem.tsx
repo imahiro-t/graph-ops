@@ -1121,10 +1121,12 @@ export const TicketItem: React.FC<Props> = ({
     // span is inline, and from 80rem up the badge is nowrap and never
     // shrinks), and is only a guard should the badge become a shrinking flex
     // box again. The measurements behind this are in
-    // TicketItem.nodeRowWrap.test.tsx.
+    // TicketItem.nodeRowWrap.test.tsx. DFLT-00290: the dot does not pulse
+    // under prefers-reduced-motion: reduce (WCAG 2.3.3), nor do the header's
+    // node ticks.
     return (
       <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full whitespace-nowrap below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:wrap-break-word below-80rem:rounded-xl upto-15rem:px-1 ${isNotStarted ? 'font-medium' : 'font-bold'} ${meta.chip.bg} ${meta.chip.text}${isInProgress ? ' flex items-center gap-1 below-80rem:block' : ''}`}>
-        {isInProgress && <span className="w-1.5 h-1.5 shrink-0 rounded-full bg-blue-500 animate-pulse below-80rem:inline-block below-80rem:mr-1 below-80rem:align-middle" />}
+        {isInProgress && <span className="w-1.5 h-1.5 shrink-0 rounded-full bg-blue-500 animate-pulse motion-reduce:animate-none below-80rem:inline-block below-80rem:mr-1 below-80rem:align-middle" />}
         {isInProgress ? <span className="min-w-0">{t(meta.labelKey)}</span> : t(meta.labelKey)}
       </span>
     );
@@ -1750,11 +1752,11 @@ export const TicketItem: React.FC<Props> = ({
                       title={isPendingApproval ? `${n.name} (${t('ticketItem.approvalGate.pendingStatus')})` : `${n.name} (${t(getStatusMeta(displayStatus).labelKey)})`}
                       className={`w-2.5 h-3.5 ${
                         isPendingApproval
-                          ? 'bg-amber-400 animate-pulse'
+                          ? 'bg-amber-400 animate-pulse motion-reduce:animate-none'
                           : displayStatus === 'DONE'
                           ? 'bg-emerald-500'
                           : displayStatus === 'IN PROGRESS'
-                          ? 'bg-blue-500 animate-pulse'
+                          ? 'bg-blue-500 animate-pulse motion-reduce:animate-none'
                           : displayStatus === 'IN REVIEW'
                           ? 'bg-purple-500'
                           : displayStatus === 'AWAITING FIX'
@@ -1899,11 +1901,18 @@ export const TicketItem: React.FC<Props> = ({
           and the Action Footer pad with p-2, which gives the autopilot
           column's untrusted-folder notice room for its dismiss button (it
           had 0px of content width, see AutopilotControls.tsx). A px query:
-          the 15rem one also matches 320-336px with a 32px default font. */}
+          the 15rem one also matches 320-336px with a 32px default font.
+          DFLT-00290: that is the named upto-200px: now (same condition; the
+          arbitrary [@media(max-width:200px)]: came out after every named
+          variant and would have beaten upto-7_5rem:p-1), and from 7.5rem down
+          (a 32px default font in a 240px window or narrower, 120px or
+          narrower at 16px) both pad with p-1, like the page, the node list's
+          panel body and the node rows, so a node row keeps room for its
+          status badge (at 32px x 160px it had 0px of content width). */}
       {isExpanded && (
         <div
           data-testid="ticket-details"
-          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 max-sm:p-3 upto-15rem:p-3 [@media(max-width:200px)]:p-2 space-y-6"
+          className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 p-6 max-sm:p-3 upto-15rem:p-3 upto-200px:p-2 upto-7_5rem:p-1 space-y-6"
         >
           {/* Metadata Bar */}
           <div className="flex flex-wrap items-center gap-y-2 gap-x-6 text-xs text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800 pb-3">
@@ -2416,13 +2425,15 @@ export const TicketItem: React.FC<Props> = ({
                   screen) it pads with p-3, and the node rows below with p-2,
                   so a node row keeps enough width for its approve/reject
                   buttons and type badge; at 100% (320px is 20rem) the query
-                  never matches. */}
+                  never matches. DFLT-00290: from 7.5rem down (a 32px default
+                  font in a 160px window) it pads with p-1, see the detail
+                  panel. */}
               <div
                 role="tabpanel"
                 id={artifactPanelId}
                 aria-labelledby={artifactTabId(activeTab)}
                 tabIndex={0}
-                className="p-4 upto-15rem:p-3 flex-1 min-h-0 overflow-y-auto focus:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+                className="p-4 upto-15rem:p-3 upto-7_5rem:p-1 flex-1 min-h-0 overflow-y-auto focus:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
               >
                 {/* 1. Nodes with Expandable Artifacts */}
                 {activeTab === 'nodes' && (
@@ -2495,10 +2506,16 @@ export const TicketItem: React.FC<Props> = ({
                               before), so with a 200% default font at
                               320-336px, or at 16px in a 160px window, the
                               status badge has room for "PROGRESS" and
-                              "AWAITING" on a line of their own. */}
+                              "AWAITING" on a line of their own.
+                              DFLT-00290: from 7.5rem down (a 32px default
+                              font in a 160px window) it pads 0.125rem at the
+                              sides, which with the page, detail panel and
+                              panel body padding less there leaves the row
+                              106px wide instead of 26px, so its status badge
+                              and the IN PROGRESS dot stay inside it. */}
                           <div
                             onClick={() => toggleNodeExpand(node.id)}
-                            className="flex flex-wrap items-center justify-between gap-x-1 gap-y-2 p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none below-80rem:gap-x-3 upto-15rem:px-1 upto-15rem:py-2"
+                            className="flex flex-wrap items-center justify-between gap-x-1 gap-y-2 p-3 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 select-none below-80rem:gap-x-3 upto-15rem:px-1 upto-15rem:py-2 upto-7_5rem:px-0.5"
                           >
                             {/* From 80rem up, flex-1 min-w-0 lets node.name
                                 (below) shrink and truncate first --
@@ -2662,8 +2679,10 @@ export const TicketItem: React.FC<Props> = ({
                                 </div>
                               )}
                               {getNodeBadge(getDisplayStatus(node))}
-                              {/* slate-600 / slate-300 for the hover background (DFLT-00162, see the sequence number above). */}
-                              <span className="text-[0.6875rem] text-slate-600 dark:text-slate-300 font-mono whitespace-nowrap">
+                              {/* slate-600 / slate-300 for the hover background (DFLT-00162, see the sequence number above).
+                                  DFLT-00290: from 7.5rem down it may wrap at its space ("06:59" / "AM"): with a
+                                  32px default font in a 160px window it is wider than the row's content. */}
+                              <span className="text-[0.6875rem] text-slate-600 dark:text-slate-300 font-mono whitespace-nowrap upto-7_5rem:whitespace-normal">
                                 {formatTime(node.updated_at, i18n.language)}
                               </span>
                             </div>
@@ -2920,13 +2939,14 @@ export const TicketItem: React.FC<Props> = ({
           {/* Action Footer: Claude Execution Panel. p-3 with large text on
               a narrow screen, like the details around it (DFLT-00227), and
               below sm whatever the text size (DFLT-00252). p-2 in a window
-              of 200 CSS px or less (DFLT-00259, see the detail panel). The
+              of 200 CSS px or less (DFLT-00259, see the detail panel), p-1
+              from 7.5rem down (DFLT-00290, likewise). The
               prompt box's border turns indigo on focus in dark mode as well
               (dark:focus:border-indigo-500, DFLT-00259): without it
               dark:border-slate-700 won over focus:border-indigo-500. */}
           <div
             data-testid="ticket-action-footer"
-            className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 [@media(max-width:200px)]:p-2 rounded-xl border border-slate-200 dark:border-slate-800"
+            className="bg-white dark:bg-slate-900 p-4 max-sm:p-3 upto-15rem:p-3 upto-200px:p-2 upto-7_5rem:p-1 rounded-xl border border-slate-200 dark:border-slate-800"
           >
             {/* The action row (DFLT-00181): the regular actions (refine, then
                 run) on the left, and at its right end, set apart from them,

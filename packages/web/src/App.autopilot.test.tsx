@@ -159,7 +159,7 @@ describe('autopilot in the Web UI', () => {
     // DFLT-00219: the divider shows on sm+ only while the row (a size
     // container) is at least 16rem wide, so it never stays behind at the
     // start of a wrapped line.
-    expect(group).toHaveClass('sm:[@container(min-width:16rem)]:border-l');
+    expect(group).toHaveClass('sm:cq-from-16rem:border-l');
     expect(group).not.toHaveClass('sm:border-l');
     // The autopilot column sits in a slot pushed to the right end of the row.
     const column = focusFallback(controls);
