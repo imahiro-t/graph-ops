@@ -1,6 +1,7 @@
 // DFLT-00084: the settings modal's label management tab.
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TRANSIENT_ANNOUNCEMENT_DURATION_MS } from '../../hooks/useTransientAnnouncement';
 import i18n from '../../i18n';
@@ -113,6 +114,35 @@ describe('LabelsEditor', () => {
       expect(button).toBeDisabled();
     }
     expect(mockedFetch).not.toHaveBeenCalled();
+  });
+
+  // DFLT-00343: the first frame (renderToStaticMarkup renders once and runs
+  // no effect) must show the loading line, not the "no labels" empty state,
+  // whenever there is a project to load -- and change nothing when there is
+  // none.
+  describe('first frame', () => {
+    it('shows the loading line, not the empty state, for the given project', () => {
+      mockedFetch.mockReturnValue(new Promise(() => {}));
+      const html = renderToStaticMarkup(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+      expect(html).toContain(i18n.t('settings.labels.loading'));
+      expect(html).not.toContain(i18n.t('settings.labels.empty'));
+      expect(mockedFetch).not.toHaveBeenCalled();
+    });
+
+    it('shows the loading line for the first project it falls back to when none is given', () => {
+      mockedFetch.mockReturnValue(new Promise(() => {}));
+      const html = renderToStaticMarkup(<LabelsEditor projects={testProjects} initialProjectId="" />);
+      expect(html).toContain(i18n.t('settings.labels.loading'));
+      expect(html).not.toContain(i18n.t('settings.labels.empty'));
+    });
+
+    it('keeps the no-projects message and shows no loading line when there is no project', () => {
+      mockedFetch.mockReturnValue(new Promise(() => {}));
+      const html = renderToStaticMarkup(<LabelsEditor projects={[]} initialProjectId="" />);
+      expect(html).toContain(i18n.t('settings.labels.noProjects'));
+      expect(html).not.toContain(i18n.t('settings.labels.loading'));
+      expect(mockedFetch).not.toHaveBeenCalled();
+    });
   });
 
   it('creates a label with the chosen palette color', async () => {

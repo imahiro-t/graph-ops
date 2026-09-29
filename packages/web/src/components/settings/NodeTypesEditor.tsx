@@ -48,7 +48,18 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const [tierText, setTierText] = useState('');
   const [savedTierText, setSavedTierText] = useState('');
   const [mergedText, setMergedText] = useState('');
-  const [loading, setLoading] = useState(false);
+  // Starts true: the first render already shows the loading line, so the
+  // right-hand editor is never drawn empty (an empty textarea and a save
+  // button) while the type list and then the selected type's text are on
+  // their way (DFLT-00343). loadSelected clears it once the text is in;
+  // when the first list load picks nothing to load -- it failed, or the
+  // list is empty -- loadTypes clears it instead (see initialListPendingRef).
+  const [loading, setLoading] = useState(true);
+  // True until the first loadTypes call has settled. Only that call may
+  // clear the initial `loading` (when it leaves nothing selected to load);
+  // the re-fetch after a save or delete must not, since it can overlap a
+  // loadSelected whose loading line has to stay up.
+  const initialListPendingRef = useRef(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const { savedFlash, showSavedFlash } = useSavedFlash();
@@ -118,10 +129,14 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       // change loadTypes's identity and re-fetch the whole list for no
       // reason (#3).
       setSelected(prev => (list.length > 0 && !list.some(info => info.type === prev) ? list[0].type : prev));
+      if (initialListPendingRef.current && list.length === 0) setLoading(false);
       return list;
     } catch (e) {
       setError(errorMessage(e, tRef.current('errors.UNKNOWN')));
+      if (initialListPendingRef.current) setLoading(false);
       return null;
+    } finally {
+      initialListPendingRef.current = false;
     }
   }, [tRef]);
 
