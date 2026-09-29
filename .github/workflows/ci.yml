@@ -85,7 +85,9 @@ jobs:
       # web workspace's `vitest` (which `npm test` above already runs) does
       # not type-check anything -- it's Vite's esbuild transform, not tsc.
       # This step's `tsc && vite build` remains the only thing that catches a
-      # TypeScript error in packages/web at all.
+      # TypeScript error in packages/web at all. Its build script also runs
+      # `tsc -p tsconfig.node.json`, which type-checks vite.config.ts and
+      # vitest.config.ts (the app's tsconfig.json covers only src/).
       - name: Type-check and build web
         run: npm run build --workspace=@graph-ops/web
 
