@@ -77,7 +77,7 @@ func (m *memShared) Begin(projectID string, decide func([]*Run) (*Run, []string,
 		m.dropped = append(m.dropped, id)
 	}
 	if len(failed) > 0 {
-		return errors.New("deleting settled autopilot run records: " + strings.Join(failed, "; ")), nil
+		return errors.New(strings.Join(failed, "; ")), nil
 	}
 	return nil, nil
 }
@@ -462,7 +462,7 @@ func TestShared_BeginLogsAFailedRetentionDelete(t *testing.T) {
 	if _, err := g.Load("proj-A", res.Run.ID); err != nil {
 		t.Fatalf("the run was not saved locally: %v", err)
 	}
-	want := "autopilot: deleting settled shared autopilot runs of project proj-A: deleting settled autopilot run records: run-bob-00: status 500 (they are deleted by a later start)"
+	want := "autopilot: deleting settled shared autopilot runs of project proj-A: run-bob-00: status 500 (they are deleted by a later start)"
 	if got := retentionLines(logs); len(got) != 1 || got[0] != want {
 		t.Fatalf("logged %q, want %q", got, want)
 	}

@@ -319,7 +319,9 @@ func (r *HTTPRepository) ListAutopilotRuns(projectID string) ([]domain.Autopilot
 const httpAutopilotRunDropLimit = 2
 
 // runDropErrors is the dropErr of BeginAutopilotRun: the DELETEs that
-// failed, reported as one line so a log line stays one line.
+// failed, reported as one line so a log line stays one line. The line is
+// only "run-a: <err>; run-b: <err>": the caller logs it after its own
+// description of the deletion, so it does not describe it again.
 type runDropErrors []runDropError
 
 type runDropError struct {
@@ -329,7 +331,6 @@ type runDropError struct {
 
 func (e runDropErrors) Error() string {
 	var b strings.Builder
-	b.WriteString("deleting settled autopilot run records: ")
 	for i, d := range e {
 		if i > 0 {
 			b.WriteString("; ")

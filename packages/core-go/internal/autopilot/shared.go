@@ -38,8 +38,8 @@ type SharedRuns interface {
 	// only happens where the data source cannot delete atomically (HTTP):
 	// the start has succeeded, and the records left are dropped by a later
 	// start. There, too, only the first few records of drop are deleted per
-	// start (store.AutopilotRunStore), so drop lists the ones to delete
-	// first first.
+	// start (store.AutopilotRunStore), so drop lists the records to delete
+	// first -- the oldest -- at its head.
 	Begin(projectID string, decide func(shared []*Run) (run *Run, drop []string, err error)) (dropErr error, err error)
 	// Save writes run's shared view, unless a copy with the same or a
 	// higher Revision is already there.

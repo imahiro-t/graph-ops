@@ -435,8 +435,8 @@ func TestHTTPBeginAutopilotRunReportsAFailedDrop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a failed DELETE failed the start: %v", err)
 	}
-	if dropErr == nil || !strings.Contains(dropErr.Error(), "run-old-1") || strings.ContainsAny(dropErr.Error(), "\r\n") {
-		t.Fatalf("dropErr = %v, want one line naming run-old-1", dropErr)
+	if dropErr == nil || !strings.HasPrefix(dropErr.Error(), "run-old-1: ") || strings.ContainsAny(dropErr.Error(), "\r\n") {
+		t.Fatalf("dropErr = %v, want one line starting with run-old-1", dropErr)
 	}
 	if findRecord(t, repo, projectID, "run-new") == nil {
 		t.Fatal("the record was not saved (no PUT)")
@@ -503,7 +503,7 @@ func TestHTTPBeginAutopilotRunGoesOnAfterAFailedDrop(t *testing.T) {
 		t.Fatalf("got err %v, dropErr %v; want only a dropErr", err, dropErr)
 	}
 	msg := dropErr.Error()
-	if strings.ContainsAny(msg, "\r\n") || !strings.Contains(msg, "run-old-1: ") || !strings.Contains(msg, "; run-old-2: ") {
+	if strings.ContainsAny(msg, "\r\n") || !strings.HasPrefix(msg, "run-old-1: ") || !strings.Contains(msg, "; run-old-2: ") {
 		t.Fatalf("dropErr = %q, want both runs on one line, separated by \"; \"", msg)
 	}
 	var status *httpStatusError

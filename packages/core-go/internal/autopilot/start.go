@@ -100,10 +100,11 @@ func (g *Registry) Begin(req BeginRequest) (BeginResult, error) {
 		sharedUsed bool
 		compensate func()
 		pruned     []string
-		// The retention's deletes asked of the data source, and what of
-		// them failed (see SharedRuns.Begin).
-		dropped int
-		dropErr error
+		// How many deletes the retention asked of the data source (not
+		// how many succeeded), and what of them failed (see
+		// SharedRuns.Begin).
+		dropAsked int
+		dropErr   error
 	)
 	err := g.WithLock(req.ProjectID, func(tx *Tx) error {
 		now := g.now()
@@ -150,7 +151,7 @@ func (g *Registry) Begin(req BeginRequest) (BeginResult, error) {
 				}
 				run = r
 				drop := SharedRetention(shared, r.ID, now)
-				dropped = len(drop)
+				dropAsked = len(drop)
 				return r, drop, nil
 			})
 			switch {
@@ -197,7 +198,7 @@ func (g *Registry) Begin(req BeginRequest) (BeginResult, error) {
 	// compensation puts back the run's own record, not the ones deleted.
 	// Nothing is reported when nothing was to be deleted, so a start that
 	// sent no DELETE does not say the data source is reachable again.
-	if sharedUsed && dropped > 0 {
+	if sharedUsed && dropAsked > 0 {
 		LogSharedError(g.Logf, SharedOpRetention, "deleting settled shared autopilot runs of project "+req.ProjectID,
 			"they are deleted by a later start", dropErr)
 	}
