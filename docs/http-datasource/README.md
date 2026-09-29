@@ -398,7 +398,7 @@ export GRAPHOPS_DATASOURCE_TOKEN="$(openssl rand -hex 32)"
 # start your plugin so that it listens on 127.0.0.1:8787 and expects that token
 
 curl -s -H "Authorization: Bearer $GRAPHOPS_DATASOURCE_TOKEN" http://127.0.0.1:8787/protocol
-# {"protocol":"graph-ops-datasource","version":"1.1"}
+# {"protocol":"graph-ops-datasource","version":"1.2"}
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8787/protocol
 # 401
 ```
