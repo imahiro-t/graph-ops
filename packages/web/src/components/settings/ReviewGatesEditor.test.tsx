@@ -9,6 +9,7 @@
 // and shows its reason there too.
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { ReviewGatesEditor } from './ReviewGatesEditor';
@@ -118,6 +119,22 @@ describe('ReviewGatesEditor', () => {
     mockedSaveCatalog.mockReset();
     mockedSaveCatalog.mockResolvedValue(undefined);
     await i18n.changeLanguage('ja');
+  });
+
+  // DFLT-00343: the first render must already be the loading line, not the
+  // editor with its empty defaults. render() runs effects straight away, so
+  // the DOM is already past the first frame; renderToStaticMarkup renders
+  // once and runs no effect, which is exactly that first frame.
+  it('shows the loading line, not an empty gate list, before the catalog has loaded', () => {
+    mockedFetchCatalog.mockReturnValue(new Promise(() => {}));
+    const html = renderToStaticMarkup(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    expect(html).toContain(i18n.t('settings.common.loading'));
+    expect(html).not.toContain(i18n.t('settings.reviewGates.intro'));
+    expect(html).not.toContain(i18n.t('settings.reviewGates.workflowMaxIterationsLabel'));
+    // The button's own text, not the word inside the intro paragraph.
+    expect(html).not.toContain(`${i18n.t('settings.common.save')}</button>`);
+    expect(html).not.toContain('<input');
+    expect(mockedFetchCatalog).not.toHaveBeenCalled();
   });
 
   it('disables the name field for a not-yet-overridden default gate and shows the rename-blocked hint', async () => {

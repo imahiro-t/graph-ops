@@ -187,7 +187,11 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const [savedMaxIterations, setSavedMaxIterations] = useState<number | null>(null);
   const [inheritedMaxIterations, setInheritedMaxIterations] = useState<number>(DEFAULT_MAX_ITERATIONS);
   const [warnings, setWarnings] = useState<SettingsCatalogWarning[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Starts true: the first render already shows the loading line, so the
+  // gate list is never drawn with its defaults for a frame before load() runs
+  // (DFLT-00323, DFLT-00343) -- a flicker, and a form someone could start
+  // editing or save with values that are not the stored ones.
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   // True while `error` is the empty-ID validation error, so the rows whose ID
