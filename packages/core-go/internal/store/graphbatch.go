@@ -145,6 +145,12 @@ func graphBatchTimestamps(base time.Time, n int) []string {
 // a plain INSERT) of different tickets never block or deadlock each other.
 // TestGraphCreation_ConcurrentAcrossTickets_MySQL starts several new
 // tickets at once to keep it that way.
+//
+// READ COMMITTED is also why a MySQL server that writes binary logs with
+// binlog_format=STATEMENT refuses the batch's INSERTs with Error 1665; ROW
+// (the server default since 8.0) and MIXED are fine.
+// MySQLRepository.CreateGraphBatch adds that cause and fix to the error
+// (explainMySQLGraphBatchError).
 func createGraphBatchSQL(db *sql.DB, d sqlDialect, ticketID string, b GraphBatch) error {
 	tx, err := db.BeginTx(context.Background(), d.graphBatchTx)
 	if err != nil {
@@ -278,7 +284,7 @@ func (r *SQLiteRepository) CreateGraphBatch(ticketID string, b GraphBatch) error
 
 // CreateGraphBatch implements GraphBatchCreator.
 func (r *MySQLRepository) CreateGraphBatch(ticketID string, b GraphBatch) error {
-	return createGraphBatchSQL(r.db, mysqlDialect, ticketID, b)
+	return explainMySQLGraphBatchError(createGraphBatchSQL(r.db, mysqlDialect, ticketID, b))
 }
 
 // httpDataSourceGraphBatchMinor is the protocol minor version that added

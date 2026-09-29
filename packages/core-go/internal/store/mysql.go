@@ -237,6 +237,31 @@ func isMySQLDuplicateKeyError(err error) bool {
 	return errors.As(err, &myErr) && myErr.Number == mysqlErDupEntry
 }
 
+// mysqlErBinlogStmtModeAndRowEngine is MySQL's
+// ER_BINLOG_STMT_MODE_AND_ROW_ENGINE: the server refuses a write because it
+// logs binary logs with binlog_format=STATEMENT and the transaction runs at
+// READ COMMITTED (or READ UNCOMMITTED), which statement-based logging cannot
+// replicate safely.
+const mysqlErBinlogStmtModeAndRowEngine = 1665
+
+// explainMySQLGraphBatchError adds the cause and the fix to a MySQL error
+// 1665 from createGraphBatchSQL, whose transaction runs at READ COMMITTED on
+// MySQL (mysqlDialect.graphBatchTx): the server's own message only says the
+// write is impossible at that level, not which GraphOps setting leads there.
+// The original error is kept (wrapped with %w, so its text stays in the
+// message and errors.As still finds the *mysqldriver.MySQLError). Every
+// other error -- nil, other MySQL numbers, ErrGraphChanged, APIError -- is
+// returned as the same value, so callers' errors.Is/As checks are unchanged.
+func explainMySQLGraphBatchError(err error) error {
+	var myErr *mysqldriver.MySQLError
+	if !errors.As(err, &myErr) || myErr.Number != mysqlErBinlogStmtModeAndRowEngine {
+		return err
+	}
+	return fmt.Errorf("%w (GraphOps creates a ticket's graph in a READ COMMITTED transaction on MySQL, "+
+		"which a server writing binary logs with binlog_format=STATEMENT refuses; "+
+		"set the server's binlog_format to ROW (the default since MySQL 8.0) or MIXED)", err)
+}
+
 // mysqlDialect is the shared label/ticket-update code's view of MySQL:
 // explicit row locks (the pool has many connections) and error 1062.
 var mysqlDialect = sqlDialect{

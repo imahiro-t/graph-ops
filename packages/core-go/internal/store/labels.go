@@ -26,7 +26,9 @@ type sqlDialect struct {
 	// graphBatchTx is the transaction options createGraphBatchSQL begins
 	// with (nil: the driver's default). MySQL uses READ COMMITTED there so
 	// the batch never takes gap locks on the nodes index -- see
-	// createGraphBatchSQL.
+	// createGraphBatchSQL. It is also why a server logging with
+	// binlog_format=STATEMENT refuses the batch with Error 1665
+	// (explainMySQLGraphBatchError).
 	graphBatchTx *sql.TxOptions
 	// isUniqueViolation reports whether err is the driver's UNIQUE
 	// constraint violation, so the labels table's (project_id, name) index
