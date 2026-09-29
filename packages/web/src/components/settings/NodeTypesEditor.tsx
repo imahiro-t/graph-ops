@@ -326,10 +326,25 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               >
                 <Icon aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-slate-400" />
                 <span title={displayName} className="truncate flex-1 upto-15rem:basis-[calc(100%-1.375rem)]">{displayName}</span>
+                {/* DFLT-00320: the badge text is 0.6875rem (11px at the
+                    default 16px, the size of IconButton's tooltip and
+                    LabelChip) -- 0.5625rem (9px) was too small to read.
+                    leading-none sets its line-height to 1. Without it the
+                    badge inherits the button's text-xs line-height as a
+                    computed length (16px, 32px at 200%), not as a ratio, so
+                    it was 16 + 4 = 20px tall before this change (40px on its
+                    own second line at 320px / 200%) and made the item taller
+                    than the name line: 36px vs 32px, 108px at 320px / 200%.
+                    With it the badge is 11 + 4 = 15px (30px on the second
+                    line at 320px / 200%), and the item is 32px / 98px.
+                    The text colour is slate-600 / dark:slate-300 (6.15:1 on
+                    slate-200, 6.97:1 on slate-700): the earlier slate-500 /
+                    dark:slate-400 were 3.86:1 / 4.04:1, below the 4.5:1 that
+                    WCAG 1.4.3 needs for 11px semibold text. */}
                 {!hasOverride && info.has_default && (
                   <span
                     title={t('settings.nodeTypes.defaultBadgeHint')}
-                    className="shrink-0 text-[0.5625rem] font-semibold px-1 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 upto-15rem:ml-[1.375rem]"
+                    className="shrink-0 text-[0.6875rem] leading-none font-semibold px-1 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 upto-15rem:ml-[1.375rem]"
                   >
                     {t('settings.nodeTypes.defaultBadge')}
                   </span>

@@ -913,9 +913,18 @@ describe('NodeTypesEditor names cut off with an ellipsis, full name in the edito
     const badge = screen.getByText(i18n.t('settings.nodeTypes.defaultBadge'));
     expect(itemButton('Implementation')).toContainElement(badge);
     expect(badge).toHaveClass('upto-15rem:ml-[1.375rem]');
-    // DFLT-00294: the badge text is 0.5625rem (9px at the default 16px), so it
-    // follows the browser's default font size like the rest of the editor.
-    expect(badge).toHaveClass('text-[0.5625rem]');
+    // DFLT-00294 / DFLT-00320: the badge text is in rem, so it follows the
+    // browser's default font size like the rest of the editor, and is
+    // 0.6875rem (11px at the default 16px) so it is readable; leading-none
+    // keeps the larger text from making the item taller.
+    expect(badge).toHaveClass('text-[0.6875rem]', 'leading-none');
+    expect(badge).not.toHaveClass('text-[0.5625rem]');
+    // DFLT-00320: the text colour meets WCAG 1.4.3 (4.5:1) on the badge's
+    // background: slate-600 on slate-200 is 6.15:1, slate-300 on slate-700
+    // (dark) is 6.97:1. The earlier slate-500 / slate-400 were 3.86:1 / 4.04:1.
+    expect(badge).toHaveClass('bg-slate-200', 'text-slate-600', 'dark:bg-slate-700', 'dark:text-slate-300');
+    expect(badge).not.toHaveClass('text-slate-500');
+    expect(badge).not.toHaveClass('dark:text-slate-400');
     const dot = itemButton('Gherkin Spec').querySelector(`[title="${i18n.t('settings.nodeTypes.overrideBadge')}"]`);
     expect(dot).toHaveClass('upto-15rem:ml-[1.375rem]');
   });

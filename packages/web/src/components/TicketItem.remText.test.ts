@@ -30,6 +30,10 @@ describe('TicketItem text sizes (DFLT-00281)', () => {
     expect(code.match(/text-\[\d+(?:\.\d+)?px\]/g) ?? []).toEqual([]);
   });
 
+  // DFLT-00320: font sizes set outside a text size class (such as the
+  // graph's former fontSize="9" attribute) are checked for every source file,
+  // this one included, by src/remText.test.ts.
+
   it('uses the rem equivalents instead (guards against the check above passing on stripped-out code)', () => {
     // Outside comments, at the time of DFLT-00281: 3 existing + 5 replaced
     // 10px sizes, and 8 existing + 13 replaced 11px sizes. Lower bounds, so
