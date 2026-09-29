@@ -228,15 +228,21 @@ export const App: React.FC = () => {
   // tooltip content changes, and a fresh element on every App render (the
   // ticket list polls) would re-measure and re-subscribe each time.
   const currentProjectName = currentProject?.name;
+  // With no project the tooltip is the button's visible label ("Select a
+  // project"), which a window of 200px or less hides (sr-only); it is enabled
+  // at that width only (DFLT-00293).
+  const noProjectLabel = t('projectSwitcher.noProject');
   const projectSwitcherTooltip = useMemo(
     () =>
-      currentProjectName === undefined ? undefined : (
+      currentProjectName === undefined ? (
+        noProjectLabel
+      ) : (
         <>
           <span className="block">{currentProjectName}</span>
           <span className="block">{currentProjectPathLabel}</span>
         </>
       ),
-    [currentProjectName, currentProjectPathLabel]
+    [currentProjectName, currentProjectPathLabel, noProjectLabel]
   );
   // DFLT-00293: a window of 200 CSS px or less, the same query as the
   // header's [@media(max-width:200px)]: classes, so the text labels are
@@ -1306,12 +1312,15 @@ export const App: React.FC = () => {
                   name stays the button's text (nameFromContent) and the
                   description is the local path alone (the hidden span
                   below). No tooltip while the popup is open -- it would
-                  cover the popup's first item -- or with no project. */}
+                  cover the popup's first item. With no project the tooltip
+                  is the "Select a project" label, shown only in a window of
+                  200px or less, where that label is hidden (DFLT-00293);
+                  wider, the label is visible and no tooltip is needed. */}
               <IconButton
                 ref={projectMenuButtonRef}
                 nameFromContent
                 tooltip={projectSwitcherTooltip}
-                tooltipDisabled={isProjectMenuOpen || !currentProject}
+                tooltipDisabled={isProjectMenuOpen || (!currentProject && !isTinyWindow)}
                 aria-describedby={currentProject ? projectSwitcherDescriptionId : undefined}
                 wrapperClassName="min-w-0 max-w-full"
                 onClick={toggleProjectMenu}

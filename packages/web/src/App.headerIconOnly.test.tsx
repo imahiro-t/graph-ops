@@ -276,3 +276,77 @@ describe.each([
     expect(button).toHaveAccessibleDescription('');
   });
 });
+
+// DFLT-00293: with no project the switcher's visible label ("Select a project") is
+// hidden (sr-only) in a window of 200px or less like the project name, so its
+// tooltip there is that label, on hover and keyboard focus, closed by Escape.
+// Wider than 200px the label is visible and no tooltip opens, as before.
+describe.each(['ja', 'en'] as const)('project switcher without a project (%s)', lng => {
+  const name = () => i18n.t('projectSwitcher.noProject');
+
+  it('hides the label visually only in a window of 200px or less', async () => {
+    seed({ tiny: true, withProject: false });
+    await i18n.changeLanguage(lng);
+    const header = await renderApp({ withProject: false });
+    const switcher = within(header).getByRole('button', { name: name() });
+    expect(within(switcher).getByText(name())).toHaveClass('truncate', SR_ONLY);
+    expect(switcher).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('shows the label as a tooltip on hover in a window of 200px or less, and Escape closes it', async () => {
+    seed({ tiny: true, withProject: false });
+    await i18n.changeLanguage(lng);
+    const user = userEvent.setup();
+    const header = await renderApp({ withProject: false });
+    const switcher = within(header).getByRole('button', { name: name() });
+    expect(openIconButtonTooltips()).toHaveLength(0);
+    await user.hover(switcher);
+    const tooltip = openIconButtonTooltip();
+    expect(tooltip.textContent).toBe(name());
+    expect(tooltip).toHaveAttribute('aria-hidden', 'true');
+    // The tooltip is not the description: the accessible description stays empty.
+    expect(switcher).toHaveAccessibleDescription('');
+    await user.keyboard('{Escape}');
+    expect(openIconButtonTooltips()).toHaveLength(0);
+  });
+
+  it('shows the label as a tooltip on keyboard focus in a window of 200px or less, and Escape closes it', async () => {
+    seed({ tiny: true, withProject: false });
+    await i18n.changeLanguage(lng);
+    const user = userEvent.setup();
+    const header = await renderApp({ withProject: false });
+    const switcher = within(header).getByRole('button', { name: name() });
+    for (let i = 0; i < 20 && document.activeElement !== switcher; i++) await user.tab();
+    expect(switcher).toHaveFocus();
+    const tooltip = openIconButtonTooltip();
+    expect(tooltip.textContent).toBe(name());
+    await user.keyboard('{Escape}');
+    expect(openIconButtonTooltips()).toHaveLength(0);
+    expect(switcher).toHaveFocus();
+  });
+
+  it('opens no tooltip wider than 200px, by hover or keyboard focus', async () => {
+    seed({ tiny: false, withProject: false });
+    await i18n.changeLanguage(lng);
+    const user = userEvent.setup();
+    const header = await renderApp({ withProject: false });
+    const switcher = within(header).getByRole('button', { name: name() });
+    await user.hover(switcher);
+    expect(openIconButtonTooltips()).toHaveLength(0);
+    await user.unhover(switcher);
+    for (let i = 0; i < 20 && document.activeElement !== switcher; i++) await user.tab();
+    expect(switcher).toHaveFocus();
+    expect(openIconButtonTooltips()).toHaveLength(0);
+  });
+
+  it('opens no tooltip while the project popup is open, in a window of 200px or less', async () => {
+    seed({ tiny: true, withProject: false });
+    await i18n.changeLanguage(lng);
+    const user = userEvent.setup();
+    const header = await renderApp({ withProject: false });
+    const switcher = within(header).getByRole('button', { name: name() });
+    await user.click(switcher);
+    expect(switcher).toHaveAttribute('aria-expanded', 'true');
+    expect(openIconButtonTooltips()).toHaveLength(0);
+  });
+});
