@@ -471,6 +471,9 @@ func (g *Registry) CancelReservation(projectID, runID string) error {
 		if err := json.Unmarshal(run.Reservation.Previous, &prev); err != nil {
 			return err
 		}
+		// Previous is not read through Load: sanitize the name before it is
+		// written back here and to the shared record.
+		prev.sanitizeStartedBy()
 		if err := tx.Save(&prev); err != nil {
 			return err
 		}

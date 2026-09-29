@@ -31,8 +31,9 @@ type RunView struct {
 	// subtrees beyond maxDepth or maxTickets, under a ticket in progress
 	// elsewhere, or under a failed one. Empty for a run that is not active.
 	Pending []string `json:"pending"`
-	// StartedBy is who started the run (DFLT-00326), left out when unknown
-	// (a run file from before). The machine ID is never sent.
+	// StartedBy is who started the run (DFLT-00326), its name sanitized
+	// (DFLT-00336); left out when unknown (a run file from before, or a name
+	// that is empty once sanitized). The machine ID is never sent.
 	StartedBy *RunStarter `json:"started_by,omitempty"`
 	// Mine: the run is this machine's -- in its local registry, or started
 	// with its machine ID -- so it is this machine that can resume it.
@@ -110,8 +111,10 @@ func (s *Service) Runs(projectID string) ([]RunView, error) {
 	for i := len(runs) - 1; i >= 0; i-- {
 		r := runs[i]
 		view := RunView{RunStatus: runStatus(r, now), Members: []string{}, Pending: []string{}, Mine: mine(r)}
-		if r.StartedBy != nil && r.StartedBy.Name != "" {
-			view.StartedBy = &RunStarter{Name: r.StartedBy.Name, NameIsFallback: r.StartedBy.NameIsFallback}
+		// Another member's name: sanitized again for display (DFLT-00336);
+		// one that becomes "" is left out, as unknown.
+		if name := r.StartedByName(); name != "" {
+			view.StartedBy = &RunStarter{Name: name, NameIsFallback: r.StartedBy.NameIsFallback}
 		}
 		if !view.Active {
 			if inactive >= RecentInactiveRuns {

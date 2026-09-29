@@ -398,6 +398,10 @@ func (g *Registry) Load(projectID, runID string) (*Run, error) {
 	if err := json.Unmarshal(data, &run); err != nil {
 		return nil, fmt.Errorf("reading autopilot run %s: %w", path, err)
 	}
+	// The file may hold another member's name (a run taken over or adopted,
+	// possibly by an older version): sanitize it like a shared record's.
+	// List and ListChecked read through here too.
+	run.sanitizeStartedBy()
 	return &run, nil
 }
 

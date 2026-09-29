@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/graph-ops/core-go/internal/displayname"
 	"github.com/graph-ops/core-go/internal/domain"
 )
 
@@ -183,7 +184,7 @@ func (r *Run) ToRecord() (domain.AutopilotRunRecord, error) {
 		Revision: r.Revision, Snapshot: snap,
 	}
 	if r.StartedBy != nil {
-		rec.StartedByName, rec.MachineID = r.StartedBy.Name, r.StartedBy.MachineID
+		rec.StartedByName, rec.MachineID = displayname.Sanitize(r.StartedBy.Name), r.StartedBy.MachineID
 	}
 	return rec, nil
 }
@@ -209,15 +210,43 @@ func RunFromRecord(rec domain.AutopilotRunRecord) (*Run, error) {
 	if r.Tickets == nil {
 		r.Tickets = map[string]*TicketState{}
 	}
+	r.sanitizeStartedBy()
 	return &r, nil
 }
 
-// StartedByName is the name of whoever started r, "" when unknown.
-func (r *Run) StartedByName() string {
+// sanitizeStartedBy passes the starter's name, which may come from another
+// member's machine (or a direct write to the data source), through
+// displayname.Sanitize (DFLT-00336). A name that becomes "" is an unknown
+// name; the machine ID is kept either way, since that -- not the name -- is
+// what BelongsTo matches.
+func (r *Run) sanitizeStartedBy() {
 	if r.StartedBy == nil {
-		return ""
+		return
 	}
-	return r.StartedBy.Name
+	r.StartedBy.Name = displayname.Sanitize(r.StartedBy.Name)
+	if r.StartedBy.Name == "" {
+		r.StartedBy.NameIsFallback = false
+	}
+}
+
+// startedByName is r's starter's name, sanitized, and whether it is the
+// "<OS user>@<host>" fallback; "" when unknown. Every display of the name
+// goes through it, even of a run that did not come through one of the
+// sanitizing reads (Sanitize is idempotent, so a second pass changes
+// nothing).
+func (r *Run) startedByName() (name string, fallback bool) {
+	if r.StartedBy == nil {
+		return "", false
+	}
+	name = displayname.Sanitize(r.StartedBy.Name)
+	return name, name != "" && r.StartedBy.NameIsFallback
+}
+
+// StartedByName is the name of whoever started r, sanitized for display;
+// "" when unknown.
+func (r *Run) StartedByName() string {
+	name, _ := r.startedByName()
+	return name
 }
 
 // BelongsTo reports whether r was started on the machine machineID: a run
@@ -229,9 +258,9 @@ func (r *Run) BelongsTo(machineID string) bool {
 
 // startedByDetails adds r's starter to an error's details.
 func startedByDetails(r *Run, details map[string]any) map[string]any {
-	if r.StartedBy != nil && r.StartedBy.Name != "" {
-		details["started_by"] = r.StartedBy.Name
-		details["name_is_fallback"] = r.StartedBy.NameIsFallback
+	if name, fallback := r.startedByName(); name != "" {
+		details["started_by"] = name
+		details["name_is_fallback"] = fallback
 	}
 	return details
 }
@@ -239,13 +268,14 @@ func startedByDetails(r *Run, details map[string]any) map[string]any {
 // startedBySuffix is " (started by <name>)" for an error message, "" when
 // the starter is unknown.
 func startedBySuffix(r *Run) string {
-	if r.StartedBy == nil || r.StartedBy.Name == "" {
+	name, fallback := r.startedByName()
+	if name == "" {
 		return ""
 	}
-	if r.StartedBy.NameIsFallback {
-		return fmt.Sprintf(" (started by %s, name not set)", r.StartedBy.Name)
+	if fallback {
+		return fmt.Sprintf(" (started by %s, name not set)", name)
 	}
-	return fmt.Sprintf(" (started by %s)", r.StartedBy.Name)
+	return fmt.Sprintf(" (started by %s)", name)
 }
 
 // KeepSharedSettledRuns is how many settled records -- runs that are not

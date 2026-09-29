@@ -6,7 +6,9 @@
 // It provides three things:
 //
 //   - a display name (Actor.Name): the home config's myName, or
-//     "<OS user>@<host>" when that is empty (Actor.NameIsFallback);
+//     "<OS user>@<host>" when that is empty (Actor.NameIsFallback),
+//     sanitized and capped by displayname.Sanitize (DFLT-00336) since other
+//     members' machines print it;
 //   - a machine ID (Actor.MachineID): a UUID generated once per home
 //     directory and kept in $HOME/.graph-ops/machine-id;
 //   - session IDs (NewSessionID): a fresh random ID per acquisition or
@@ -28,14 +30,18 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/graph-ops/core-go/internal/displayname"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 )
 
 // Actor is who is acting in this process.
 type Actor struct {
-	// Name is the display name: the home config's myName (trimmed), or
-	// "<OS user>@<host>" (a part that cannot be read is "unknown") when that
-	// is empty. Never "". For display only -- never compare it.
+	// Name is the display name: the home config's myName, or
+	// "<OS user>@<host>" (a part that cannot be read, or is empty once
+	// sanitized, is "unknown") when that is empty once sanitized. Always
+	// passed through displayname.Sanitize -- no control or invisible format
+	// characters, at most displayname.MaxRunes runes. Never "". For display
+	// only -- never compare it.
 	Name string `json:"name"`
 	// NameIsFallback is true when Name was made from the OS user and host
 	// because myName is not set, so a display can say "(name not set)".
@@ -83,24 +89,35 @@ func Resolve(homeDir string) (Actor, error) {
 // no myName.
 func DisplayName(homeDir string) (name string, fallback bool) {
 	cfg, _ := runtimeconfig.LoadHomeConfig(homeDir)
-	if n := strings.TrimSpace(cfg.MyName); n != "" {
+	if n := displayname.Sanitize(cfg.MyName); n != "" {
 		return n, false
 	}
 	u, err := currentUsername()
-	u = strings.TrimSpace(u)
-	if err != nil || u == "" {
-		u = unknownPart
+	if err != nil {
+		u = ""
 	}
 	// A Windows user name may carry a DOMAIN\ prefix; keep only the name.
+	u = strings.TrimSpace(u)
 	if i := strings.LastIndex(u, `\`); i >= 0 && i < len(u)-1 {
 		u = u[i+1:]
 	}
+	u = fallbackPart(u)
 	h, err := hostname()
-	h = strings.TrimSpace(h)
-	if err != nil || h == "" {
-		h = unknownPart
+	if err != nil {
+		h = ""
 	}
-	return u + "@" + h, true
+	h = fallbackPart(h)
+	// Each part is capped already; this caps the two together.
+	return displayname.Sanitize(u + "@" + h), true
+}
+
+// fallbackPart sanitizes one part of the "<OS user>@<host>" fallback name,
+// replacing one that is empty (or becomes empty) with "unknown".
+func fallbackPart(s string) string {
+	if s = displayname.Sanitize(s); s == "" {
+		return unknownPart
+	}
+	return s
 }
 
 // MachineID returns homeDir's machine ID, generating and saving it on first

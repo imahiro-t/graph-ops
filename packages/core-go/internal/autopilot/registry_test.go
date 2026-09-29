@@ -1,8 +1,10 @@
 package autopilot
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -372,4 +374,103 @@ func splitLines(s string) []string {
 		cur += string(r)
 	}
 	return append(out, cur)
+}
+
+// DFLT-00336: a run file holding another member's crafted name (taken over
+// or adopted, possibly by an older version) is sanitized when it is read.
+func TestRegistry_LoadAndListSanitizeTheStarter(t *testing.T) {
+	g, clock := newRegistry(t)
+	run := &Run{ID: "run-bob-1", ProjectID: "proj-A", Mode: ModeTree, RootTicketID: "R", State: RunStopped,
+		CreatedAt: clock.Now(), Heartbeat: clock.Now(), Generation: 1, Tickets: map[string]*TicketState{}}
+	saveRun(t, g, run)
+	path, err := g.runPath("proj-A", run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["started_by"] = map[string]any{"name": craftedName, "name_is_fallback": false, "machine_id": "machine-b"}
+	data, _ = json.Marshal(raw)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := g.Load("proj-A", run.ID)
+	if err != nil || loaded.StartedBy == nil || loaded.StartedBy.Name != craftedClean || loaded.StartedBy.MachineID != "machine-b" {
+		t.Fatalf("Load = %+v, %v", loaded, err)
+	}
+	runs, err := g.List("proj-A")
+	if err != nil || len(runs) != 1 || runs[0].StartedBy.Name != craftedClean {
+		t.Fatalf("List = %v, %v", runs, err)
+	}
+	var viaTx *Run
+	if err := g.WithLock("proj-A", func(tx *Tx) error {
+		var err error
+		viaTx, err = tx.Load(run.ID)
+		return err
+	}); err != nil || viaTx.StartedBy.Name != craftedClean {
+		t.Fatalf("Tx.Load = %+v, %v", viaTx, err)
+	}
+}
+
+// Cancelling a reservation puts back the run it took over with the name
+// sanitized, locally and in the data source: Previous is not read through
+// Load.
+func TestRegistry_CancelReservationSanitizesTheRestoredStarter(t *testing.T) {
+	g, clock, m := sharedRegistry(t)
+	stopped := &Run{ID: "run-a-1", ProjectID: "proj-A", Mode: ModeTree, RootTicketID: "R", State: RunStopped,
+		CreatedAt: clock.Now(), Heartbeat: clock.Now(), Generation: 1, Tickets: map[string]*TicketState{},
+		StartedBy: &StartedBy{Name: "Alice", MachineID: "machine-a"}}
+	saveRun(t, g, stopped)
+	res, err := g.Begin(BeginRequest{RootID: "R", ProjectID: "proj-A", RootStatus: domain.TicketDone, Mode: ModeTree,
+		Reserve: true, Settings: Defaults(), Actor: alice})
+	if err != nil || !res.TookOver || res.Run.Reservation == nil {
+		t.Fatalf("reserve takeover: %+v %v", res, err)
+	}
+	// Plant a crafted name in the saved Previous, as an older version or a
+	// hand edit could have.
+	if err := g.WithLock("proj-A", func(tx *Tx) error {
+		r, err := tx.Load(stopped.ID)
+		if err != nil {
+			return err
+		}
+		var prev map[string]any
+		if err := json.Unmarshal(r.Reservation.Previous, &prev); err != nil {
+			return err
+		}
+		prev["started_by"] = map[string]any{"name": craftedName, "machine_id": "machine-a"}
+		r.Reservation.Previous, _ = json.Marshal(prev)
+		return tx.Save(r)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.CancelReservation("proj-A", stopped.ID); err != nil {
+		t.Fatal(err)
+	}
+	back, _ := g.Load("proj-A", stopped.ID)
+	if back.State != RunStopped || back.StartedBy == nil || back.StartedBy.Name != craftedClean {
+		t.Fatalf("restored = %+v", back.StartedBy)
+	}
+	data, _ := os.ReadFile(mustRunPath(t, g, stopped.ID))
+	if strings.Contains(string(data), `\u001b`) {
+		t.Fatalf("the restored run file still holds the escape: %s", data)
+	}
+	if rec, ok := m.get(stopped.ID); !ok || rec.StartedByName != craftedClean || rec.State != RunStopped {
+		t.Fatalf("shared record = %+v", rec)
+	}
+}
+
+func mustRunPath(t *testing.T, g *Registry, runID string) string {
+	t.Helper()
+	p, err := g.runPath("proj-A", runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

@@ -1,13 +1,16 @@
 package autopilot
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
+	"github.com/graph-ops/core-go/internal/displayname"
 	"github.com/graph-ops/core-go/internal/domain"
 )
 
@@ -425,5 +428,131 @@ func TestShared_BeginStampsBegunAt(t *testing.T) {
 	again, err := sharedBegin(g, "R")
 	if err != nil || !again.TookOver || !again.Run.BegunAt.Equal(clock.Now()) || !again.Run.CreatedAt.Equal(res.Run.CreatedAt) {
 		t.Fatalf("taken over: %+v, %v", again, err)
+	}
+}
+
+// DFLT-00336: a starter's name read back from the data source is sanitized
+// and capped, whether it came in the column or only in the snapshot.
+const craftedName = "\x1b[2J\x1b[31mMallory\u202e\n[graph-engine] ok\r\x07"
+
+const craftedClean = "[2J[31mMallory [graph-engine] ok"
+
+func TestShared_RunFromRecordSanitizesTheStarter(t *testing.T) {
+	base := func() domain.AutopilotRunRecord {
+		return domain.AutopilotRunRecord{ID: "run-x-1", ProjectID: "p", RootTicketID: "R", Mode: ModeTree, State: RunRunning,
+			Heartbeat: "2026-09-01T09:00:00Z", Revision: 1}
+	}
+	// The column.
+	rec := base()
+	rec.StartedByName, rec.MachineID = craftedName, "m"
+	r, err := RunFromRecord(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.StartedBy == nil || r.StartedBy.Name != craftedClean || r.StartedBy.MachineID != "m" {
+		t.Fatalf("column: started by %+v", r.StartedBy)
+	}
+	// The snapshot only (a record written by hand, columns left empty).
+	rec = base()
+	rec.Snapshot = []byte(`{"started_by":{"name":` + jsonString(t, craftedName+strings.Repeat("山", 300)) + `,"name_is_fallback":true,"machine_id":""}}`)
+	r, err = RunFromRecord(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.StartedBy == nil || !strings.HasPrefix(r.StartedBy.Name, craftedClean+" 山") ||
+		utf8.RuneCountInString(r.StartedBy.Name) != displayname.MaxRunes || !r.StartedBy.NameIsFallback {
+		t.Fatalf("snapshot: started by %+v", r.StartedBy)
+	}
+	// A name of control and invisible characters only is unknown; the
+	// machine ID stays, so which machine the run belongs to is unchanged.
+	rec = base()
+	rec.StartedByName, rec.MachineID = "\x1b\n\u200b\u202e", "machine-b"
+	rec.Snapshot = []byte(`{"started_by":{"name":"x","name_is_fallback":true,"machine_id":"machine-b"}}`)
+	r, err = RunFromRecord(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.StartedBy == nil || r.StartedBy.Name != "" || r.StartedBy.NameIsFallback || r.StartedBy.MachineID != "machine-b" ||
+		r.BelongsTo("machine-a") || !r.BelongsTo("machine-b") {
+		t.Fatalf("empty once sanitized: started by %+v", r.StartedBy)
+	}
+	// Ordinary names are left alone.
+	for _, name := range []string{"山田 太郎", "taro@mac01"} {
+		rec = base()
+		rec.StartedByName, rec.MachineID = name, "m"
+		if r, _ := RunFromRecord(rec); r.StartedBy.Name != name {
+			t.Fatalf("%q became %q", name, r.StartedBy.Name)
+		}
+	}
+}
+
+func jsonString(t *testing.T, s string) string {
+	t.Helper()
+	b, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// The displays sanitize even a run that did not come through a sanitizing
+// read, and show a name that sanitizes to nothing as unknown.
+func TestShared_StarterDisplaysAreSanitized(t *testing.T) {
+	r := &Run{ID: "run-x-1", StartedBy: &StartedBy{Name: craftedName, MachineID: "m"}}
+	if got := r.StartedByName(); got != craftedClean {
+		t.Fatalf("StartedByName = %q", got)
+	}
+	if got := startedBySuffix(r); got != " (started by "+craftedClean+")" {
+		t.Fatalf("startedBySuffix = %q", got)
+	}
+	d := startedByDetails(r, map[string]any{})
+	if d["started_by"] != craftedClean || d["name_is_fallback"] != false {
+		t.Fatalf("details = %v", d)
+	}
+	r.StartedBy.NameIsFallback = true
+	if got := startedBySuffix(r); got != " (started by "+craftedClean+", name not set)" {
+		t.Fatalf("fallback startedBySuffix = %q", got)
+	}
+
+	blank := &Run{ID: "run-x-2", StartedBy: &StartedBy{Name: "\x1b\r\n\u2066", NameIsFallback: true, MachineID: "m"}}
+	unknown := &Run{ID: "run-x-3"}
+	for _, r := range []*Run{blank, unknown} {
+		if r.StartedByName() != "" || startedBySuffix(r) != "" || len(startedByDetails(r, map[string]any{})) != 0 {
+			t.Fatalf("%s: shown as %q / %q / %v", r.ID, r.StartedByName(), startedBySuffix(r), startedByDetails(r, map[string]any{}))
+		}
+	}
+}
+
+// The column written to the data source is sanitized and capped too.
+func TestShared_ToRecordSanitizesTheStarter(t *testing.T) {
+	r := &Run{ID: "run-x-1", ProjectID: "p", Mode: ModeTree, RootTicketID: "R", State: RunRunning,
+		StartedBy: &StartedBy{Name: craftedName + strings.Repeat("a", 300), MachineID: "m"}, Tickets: map[string]*TicketState{}}
+	rec, err := r.ToRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(rec.StartedByName, craftedClean+" a") || utf8.RuneCountInString(rec.StartedByName) != displayname.MaxRunes {
+		t.Fatalf("started_by_name = %q", rec.StartedByName)
+	}
+}
+
+// A start refused by another member's run, whose record carries a crafted
+// name, says who started it without the escapes and line breaks.
+func TestShared_AlreadyRunningShowsASanitizedStarter(t *testing.T) {
+	g, clock, m := sharedRegistry(t)
+	now := clock.Now()
+	m.records["run-bob-1"] = domain.AutopilotRunRecord{ID: "run-bob-1", ProjectID: "proj-A", RootTicketID: "R", Mode: ModeTree,
+		State: RunRunning, Heartbeat: formatTime(now), CreatedAt: formatTime(now), UpdatedAt: formatTime(now),
+		StartedByName: craftedName, MachineID: "machine-b", Revision: 1}
+	_, err := sharedBegin(g, "R")
+	var apiErr *domain.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != ErrCodeAlreadyRunning {
+		t.Fatalf("Begin = %v", err)
+	}
+	if strings.ContainsAny(apiErr.Message, "\x1b\r\n\x07\u202e") || !strings.Contains(apiErr.Message, "(started by "+craftedClean+")") {
+		t.Fatalf("message = %q", apiErr.Message)
+	}
+	if apiErr.Details["started_by"] != craftedClean {
+		t.Fatalf("details = %v", apiErr.Details)
 	}
 }

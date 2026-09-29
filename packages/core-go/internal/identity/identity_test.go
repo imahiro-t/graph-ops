@@ -1,12 +1,17 @@
 package identity
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
+
+	"github.com/graph-ops/core-go/internal/displayname"
 )
 
 func writeHomeConfig(t *testing.T, home, myName string) {
@@ -22,14 +27,11 @@ func writeHomeConfig(t *testing.T, home, myName string) {
 }
 
 func quote(s string) string {
-	out := `"`
-	for _, r := range s {
-		if r == '"' || r == '\\' {
-			out += `\`
-		}
-		out += string(r)
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
 	}
-	return out + `"`
+	return string(b)
 }
 
 func stubOS(t *testing.T, user string, userErr error, host string, hostErr error) {
@@ -191,5 +193,63 @@ func TestNewSessionIDIsAUniqueUUIDv4(t *testing.T) {
 			t.Fatalf("%q repeated", id)
 		}
 		seen[id] = true
+	}
+}
+
+// DFLT-00336: the name is sanitized and capped when it is resolved, since
+// other members' machines print it.
+func TestResolveSanitizesAndCapsMyName(t *testing.T) {
+	home := t.TempDir()
+	writeHomeConfig(t, home, "\x1b[2J\u202eAlice\nfake line"+strings.Repeat("x", 300))
+	a, err := Resolve(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.NameIsFallback || strings.ContainsAny(a.Name, "\x1b\n\u202e") ||
+		!strings.HasPrefix(a.Name, "[2JAlice fake line") || utf8.RuneCountInString(a.Name) != displayname.MaxRunes {
+		t.Fatalf("got %+v", a)
+	}
+}
+
+// A myName made only of control or invisible characters is no name.
+func TestResolveFallsBackWhenMyNameSanitizesToNothing(t *testing.T) {
+	home := t.TempDir()
+	writeHomeConfig(t, home, "\x1b\n\t\u200b\u202e")
+	stubOS(t, "taro", nil, "mac01", nil)
+	a, err := Resolve(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Name != "taro@mac01" || !a.NameIsFallback {
+		t.Fatalf("got %+v, want taro@mac01 (fallback)", a)
+	}
+}
+
+// The OS user and host names are sanitized too; a part that becomes empty
+// is "unknown", and the whole is capped.
+func TestResolveSanitizesTheFallbackParts(t *testing.T) {
+	cases := []struct{ user, host, want string }{
+		{"ta\x1b[1mro", "mac\n01", "ta[1mro@mac 01"},
+		{"DOMAIN\\ta\u202ero", "mac01", "taro@mac01"},
+		{"\x1b\x07", "mac01", "unknown@mac01"},
+		{"taro", "\u200b\t", "taro@unknown"},
+		{"山田", "mac01", "山田@mac01"},
+	}
+	for _, c := range cases {
+		home := t.TempDir()
+		stubOS(t, c.user, nil, c.host, nil)
+		a, err := Resolve(home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a.Name != c.want || !a.NameIsFallback {
+			t.Fatalf("user %q host %q: got %+v, want %s (fallback)", c.user, c.host, a, c.want)
+		}
+	}
+	home := t.TempDir()
+	stubOS(t, strings.Repeat("u", 100), nil, strings.Repeat("h", 100), nil)
+	a, _ := Resolve(home)
+	if n := utf8.RuneCountInString(a.Name); n != displayname.MaxRunes || !strings.HasPrefix(a.Name, strings.Repeat("u", 100)+"@") {
+		t.Fatalf("long parts: %q (%d runes)", a.Name, n)
 	}
 }

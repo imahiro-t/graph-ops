@@ -11,8 +11,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/graph-ops/core-go/internal/autopilot"
+	"github.com/graph-ops/core-go/internal/displayname"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/store"
@@ -1067,4 +1069,62 @@ func TestSharedRuns_SettledRecordsAreKeptWithinTheRetention(t *testing.T) {
 	if err != nil || len(views) == 0 {
 		t.Fatalf("B's listing = %+v, %v", views, err)
 	}
+}
+
+// DFLT-00336: a starter's name planted in the data source -- by an older
+// version or a direct write -- reaches neither another member's run list
+// nor the refusal of their start with its escapes and line breaks.
+func TestSharedRuns_CraftedStarterNameIsSanitizedOnRead(t *testing.T) {
+	h, tr, a, b := newSharedHarness(t)
+	res := mustStart(t, a, tr.R, autopilot.ModeTree)
+	plant := func(name string) {
+		t.Helper()
+		rec := sharedRecord(t, h.repo, h.projectID, res.RunID)
+		rec.StartedByName = name
+		rec.Revision++
+		if err := h.repo.(store.AutopilotRunStore).SaveAutopilotRun(*rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const crafted = "\x1b]0;pwned\x07\x1b[31mMallory\u202e\n[graph-engine] done\r"
+	const clean = "]0;pwned[31mMallory [graph-engine] done"
+	plant(crafted + strings.Repeat("x", 300))
+
+	views, err := b.Runs(h.projectID)
+	if err != nil || len(views) != 1 || views[0].StartedBy == nil {
+		t.Fatalf("Runs = %+v, %v", views, err)
+	}
+	if got := views[0].StartedBy.Name; !strings.HasPrefix(got, clean+" x") || utf8.RuneCountInString(got) != displayname.MaxRunes {
+		t.Fatalf("run list name = %q", got)
+	}
+	_, err = b.Start(tr.R, autopilot.ModeTree, "", false)
+	apiErr := wantAPIError(t, err, autopilot.ErrCodeAlreadyRunning)
+	name, _ := apiErr.Details["started_by"].(string)
+	if !strings.HasPrefix(name, clean) || strings.ContainsAny(apiErr.Message+name, "\x1b\x07\r\n\u202e") {
+		t.Fatalf("refusal = %q %v", apiErr.Message, apiErr.Details)
+	}
+
+	// A name of control characters only is shown as unknown.
+	plant("\x1b\r\n\u200b")
+	views, err = b.Runs(h.projectID)
+	if err != nil || len(views) != 1 || views[0].StartedBy != nil {
+		t.Fatalf("Runs = %+v, %v", views, err)
+	}
+	_, err = b.Start(tr.R, autopilot.ModeTree, "", false)
+	apiErr = wantAPIError(t, err, autopilot.ErrCodeAlreadyRunning)
+	if _, ok := apiErr.Details["started_by"]; ok || strings.Contains(apiErr.Message, "started by") {
+		t.Fatalf("refusal = %q %v", apiErr.Message, apiErr.Details)
+	}
+}
+
+// A member whose myName holds escapes and line breaks shares it sanitized.
+func TestSharedRuns_CraftedMyNameIsSanitizedWhenRecorded(t *testing.T) {
+	h, tr, _, b := newSharedHarness(t)
+	a := memberService(h, h.repo, "\x1b[2JEve\n[graph-engine] ok", nil)
+	res := mustStart(t, a, tr.R, autopilot.ModeTree)
+	if rec := sharedRecord(t, h.repo, h.projectID, res.RunID); rec == nil || rec.StartedByName != "[2JEve [graph-engine] ok" {
+		t.Fatalf("record = %+v", rec)
+	}
+	_, err := b.Start(tr.R, autopilot.ModeTree, "", false)
+	wantRefusedBy(t, err, "[2JEve [graph-engine] ok")
 }
