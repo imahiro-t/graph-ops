@@ -11,7 +11,9 @@ import path from 'node:path';
 // pending-approval badge, labels, the Gherkin / Markdown viewers, the modals,
 // tooltips, the autopilot decisions, the ticket family and the node types
 // list's "default" badge). This reads every non-test source file under src/
-// and fails if a px text size comes back outside comments.
+// and fails if a px text size comes back outside comments. (DFLT-00320 also
+// moved the execution graph's SVG fontSize attribute to rem and added a check
+// for numeric fontSize attributes / styles.)
 //
 // Class names are matched by regular expressions or assembled at run time on
 // purpose: Tailwind scans src/ for candidates, so writing a px text class
@@ -62,8 +64,23 @@ const REPLACED: Record<string, Partial<Record<'0.5625' | '0.625' | '0.6875', num
   'components/CreateTicketModal.tsx': { '0.6875': 1 },
   'components/MarkdownViewer.tsx': { '0.6875': 3 },
   'components/ProjectSetupModal.tsx': { '0.6875': 4 },
-  'components/settings/NodeTypesEditor.tsx': { '0.5625': 1 }
+  // DFLT-00320 moved the "default" badge from 0.5625rem to 0.6875rem (the
+  // other 3 are the editor's existing 11px sizes).
+  'components/settings/NodeTypesEditor.tsx': { '0.6875': 4 },
+  // DFLT-00320: the execution graph's node name labels (a fontSize="9"
+  // attribute before).
+  'components/TicketItem.tsx': { '0.5625': 1 }
 };
+
+// DFLT-00320: a font size given as a number -- an SVG fontSize attribute
+// (fontSize="9", fontSize={9}) or a fontSize style ({ fontSize: 9 },
+// { fontSize: '9px' }) -- is in px / user units and ignores the browser's
+// default font size, and a text-[Npx] check does not see it.
+const NUMERIC_FONT_SIZE = [
+  /fontSize\s*=\s*(?:"\s*[\d.]|'\s*[\d.]|\{\s*[\d.'"])/g,
+  /fontSize\s*:\s*['"]?\s*\d/g,
+  /font-size\s*[:=]/g
+];
 
 describe('src/ text sizes (DFLT-00294)', () => {
   it('finds the source files to check', () => {
@@ -77,6 +94,11 @@ describe('src/ text sizes (DFLT-00294)', () => {
 
   it.each(SOURCES)('%s uses no px text size (a text-[Npx] class) outside comments', name => {
     expect(code(name).match(PX_TEXT) ?? []).toEqual([]);
+  });
+
+  it.each(SOURCES)('%s sets no numeric font size (fontSize attribute or style) outside comments', name => {
+    const src = code(name);
+    for (const re of NUMERIC_FONT_SIZE) expect(src.match(re) ?? []).toEqual([]);
   });
 
   it.each(Object.entries(REPLACED))('%s uses the rem sizes instead', (name, sizes) => {

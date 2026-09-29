@@ -30,6 +30,15 @@ describe('TicketItem text sizes (DFLT-00281)', () => {
     expect(code.match(/text-\[\d+(?:\.\d+)?px\]/g) ?? []).toEqual([]);
   });
 
+  // DFLT-00320: an SVG fontSize attribute (or a fontSize style) with a
+  // number is in px / user units and ignores the browser's default font
+  // size, and slipped past the class check above.
+  it('sets no numeric fontSize attribute or style outside comments', () => {
+    expect(code.match(/fontSize\s*=\s*(?:"\s*[\d.]|'\s*[\d.]|\{\s*[\d.'"])/g) ?? []).toEqual([]);
+    expect(code.match(/fontSize\s*:\s*['"]?\s*\d/g) ?? []).toEqual([]);
+    expect(code.match(/font-size\s*[:=]/g) ?? []).toEqual([]);
+  });
+
   it('uses the rem equivalents instead (guards against the check above passing on stripped-out code)', () => {
     // Outside comments, at the time of DFLT-00281: 3 existing + 5 replaced
     // 10px sizes, and 8 existing + 13 replaced 11px sizes. Lower bounds, so

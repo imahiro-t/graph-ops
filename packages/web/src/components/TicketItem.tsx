@@ -48,6 +48,8 @@ import { isSubmitShortcut } from '../lib/keyboardShortcuts';
 import { focusIfLost } from '../lib/focusAfterRemoval';
 import { plainCopyProps } from '../lib/plainCopy';
 import { withBreaks, WORD_JOINER } from '../lib/wbr';
+import { graphNodeLabel } from '../lib/graphNodeLabel';
+import { rootFontSizePx } from '../lib/popupPlacement';
 
 interface Props {
   ticket: TicketDetail;
@@ -1387,6 +1389,13 @@ export const TicketItem: React.FC<Props> = ({
   const svgWidth = Math.max(300, maxPerLevel * colSpacing + 60);
   const svgHeight = Math.max(180, (maxLevel + 1) * rowSpacing + 46);
 
+  // DFLT-00320: how much larger than the default 16px the root font is. The
+  // node name labels are sized in rem, so they grow with it; on a parallel
+  // row graphNodeLabel then shortens them by estimated width so neighbours
+  // 78 units apart don't overlap. Read on each render (a later change of the
+  // browser's text size is picked up on the next re-render).
+  const graphFontScale = Math.max(1, rootFontSizePx() / 16);
+
   const nodePos = new Map<string, { x: number; y: number }>();
   levelGroups.forEach((ids, lvl) => {
     const rowWidth = (ids.length - 1) * colSpacing;
@@ -2254,6 +2263,10 @@ export const TicketItem: React.FC<Props> = ({
                     isReviewType(n.type) ? '#a855f7' :
                     null;
                   const outerR = isInProgress ? 8 : 6;
+                  const label = graphNodeLabel(n.name, {
+                    parallel: (levelGroups.get(level.get(n.id) || 0)?.length ?? 1) > 1,
+                    fontScale: graphFontScale
+                  });
 
                   return (
                     <g key={n.id}>
@@ -2283,15 +2296,29 @@ export const TicketItem: React.FC<Props> = ({
                         stroke="#ffffff"
                         strokeWidth="2"
                       />
+                      {/* DFLT-00320: the size is text-[0.5625rem], not a
+                          fontSize attribute -- an SVG fontSize attribute is
+                          in user units (px) and ignores the browser's default
+                          font size. CSS px inside the SVG are user units
+                          scaled by the viewBox like before, so at the default
+                          16px this is still 9 units. The baseline is split
+                          into a fixed y + 6 and dy 1.3333em: 6 + 9 * 1.3333 =
+                          y + 18 at the default size (unchanged), and y + 30 at
+                          200%, where the text's top (~y + 14) clears a gate's
+                          ring (radius up to 11) and its bottom (~y + 34)
+                          stays above the next row's ring (y + 41). A
+                          shortened label carries the full name as a <title>
+                          (graphNodeLabel explains the shortening). */}
                       <text
                         x={pos.x}
-                        y={pos.y + 18}
-                        fontSize="9"
+                        y={pos.y + 6}
+                        dy="1.3333em"
                         fontWeight="600"
                         textAnchor="middle"
-                        className="select-none fill-slate-700 dark:fill-slate-300"
+                        className="select-none text-[0.5625rem] fill-slate-700 dark:fill-slate-300"
                       >
-                        {n.name.length > 12 ? n.name.slice(0, 12) + '…' : n.name}
+                        {label.truncated && <title>{n.name}</title>}
+                        {label.text}
                       </text>
                     </g>
                   );

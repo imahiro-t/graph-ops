@@ -326,10 +326,19 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               >
                 <Icon aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-slate-400" />
                 <span title={displayName} className="truncate flex-1 upto-15rem:basis-[calc(100%-1.375rem)]">{displayName}</span>
+                {/* DFLT-00320: the badge text is 0.6875rem (11px at the
+                    default 16px, the size of IconButton's tooltip and
+                    LabelChip) -- 0.5625rem (9px) was too small to read.
+                    leading-none sets its line-height to 1: without it the
+                    badge inherits the button's text-xs line-height ratio
+                    (1.333), and the larger text would make the item taller.
+                    With it the badge is 11 + 4 = 15px at the default size
+                    (within the 16px name line) and 22 + 8 = 30px on its own
+                    second line at 320px / 200% (32px before this change). */}
                 {!hasOverride && info.has_default && (
                   <span
                     title={t('settings.nodeTypes.defaultBadgeHint')}
-                    className="shrink-0 text-[0.5625rem] font-semibold px-1 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 upto-15rem:ml-[1.375rem]"
+                    className="shrink-0 text-[0.6875rem] leading-none font-semibold px-1 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 upto-15rem:ml-[1.375rem]"
                   >
                     {t('settings.nodeTypes.defaultBadge')}
                   </span>
