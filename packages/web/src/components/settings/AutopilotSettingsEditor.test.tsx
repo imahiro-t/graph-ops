@@ -1,7 +1,7 @@
 // DFLT-00142 phase 2: the "オートパイロット" settings tab. fetch is stubbed
 // (not the settingsApi functions) so the tests see the real PUT body and the
 // real error translation path.
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
@@ -131,7 +131,7 @@ describe('AutopilotSettingsEditor', () => {
     await waitFor(() => expect(putBodies).toEqual([{ maxTickets: 30 }]));
     // Announced by the always-mounted live region (SC 4.1.3); the visible
     // flash is aria-hidden so it is not read twice.
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(i18n.t('settings.common.saveSuccess')));
+    await waitFor(() => expect(screen.getByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' })).toBeInTheDocument());
     expect(screen.getByTestId('autopilot-source-maxTickets')).toHaveTextContent(i18n.t('settings.autopilot.source.local'));
     expect((screen.getByLabelText(label('maxTickets')) as HTMLInputElement).value).toBe('30');
     expect(onDirty).toHaveBeenLastCalledWith(false);
@@ -266,7 +266,7 @@ describe('AutopilotSettingsEditor', () => {
     await user.clear(screen.getByLabelText(label('maxTickets')));
     await user.type(screen.getByLabelText(label('maxTickets')), '30');
     await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(i18n.t('settings.common.saveSuccess')));
+    await waitFor(() => expect(screen.getByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' })).toBeInTheDocument());
     const flash = screen.getByText(i18n.t('settings.common.saveSuccess'), { selector: 'span[aria-hidden="true"]' });
     expect(flash.className).toContain('text-emerald-700');
     expect(flash.className).toContain('dark:text-emerald-400');
@@ -414,5 +414,138 @@ describe('AutopilotSettingsEditor select stacking at the narrowest size (DFLT-00
     expect(onFailure.value).toBe('continue');
     await user.click(screen.getByRole('button', { name: i18n.t('settings.autopilot.clearLocalFor', { key: label('onFailure') }) }));
     expect(onFailure.value).toBe('stop');
+  });
+});
+
+// DFLT-00350: a failed load shows the error and a retry button instead of the
+// form, and a project switch never shows the previous project's settings or
+// error, nor applies an answer that arrives for it late.
+describe('AutopilotSettingsEditor load failure and project switch', () => {
+  type Pending = { url: string; resolve: (r: Response) => void; reject: (e: unknown) => void };
+  let pending: Pending[];
+  const retryButton = () => screen.getByRole('button', { name: i18n.t('settings.common.retry') });
+  const loadingLine = () => screen.queryByText(i18n.t('settings.common.loading'), { selector: '[role="status"]' });
+  const errorBody = (message: string) => jsonResponse({ error: { code: 'INTERNAL', message } }, 500);
+  const forProject = (id: string, overrides: Parameters<typeof response>[0] = {}) => ({
+    ...response(overrides),
+    project_id: id
+  });
+  const settle = (url: string) => {
+    const i = pending.findIndex(p => p.url === url);
+    expect(i).toBeGreaterThanOrEqual(0);
+    return pending.splice(i, 1)[0];
+  };
+  const editor = (projectId: string) => (
+    <AutopilotSettingsEditor projectId={projectId} projectName={projectId} onDirtyChange={vi.fn()} />
+  );
+  const urlOf = (id: string) => `/api/projects/${id}/autopilot-settings`;
+
+  beforeEach(async () => {
+    await i18n.changeLanguage('ja');
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
+    pending = [];
+    fetchSpy.mockImplementation(
+      (input: RequestInfo | URL) =>
+        new Promise<Response>((resolve, reject) => { pending.push({ url: String(input), resolve, reject }); })
+    );
+  });
+
+  afterEach(async () => {
+    fetchSpy.mockRestore();
+    await i18n.changeLanguage('ja');
+  });
+
+  it('shows the loading line as a status', () => {
+    render(editor('proj-A'));
+    expect(screen.getByRole('status')).toHaveTextContent(i18n.t('settings.common.loading'));
+  });
+
+  it('shows the error and a retry button, not the form, and loads the settings on retry', async () => {
+    const user = userEvent.setup();
+    render(editor('proj-A'));
+    await act(async () => { settle(urlOf('proj-A')).resolve(errorBody('settings exploded')); });
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.queryByLabelText(label('maxTickets'))).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
+    expect(screen.getByText(i18n.t('settings.autopilot.description'))).toBeInTheDocument();
+
+    const button = retryButton();
+    button.focus();
+    await user.keyboard('{Enter}');
+    expect(button).toHaveFocus();
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    await user.keyboard('{Enter}');
+    expect(pending).toHaveLength(1);
+
+    await act(async () => { settle(urlOf('proj-A')).resolve(jsonResponse(forProject('proj-A'))); });
+
+    const input = await screen.findByLabelText(label('maxTickets'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toHaveAttribute('tabindex', '-1'));
+    expect(document.activeElement?.contains(input)).toBe(true);
+  });
+
+  it('keeps the error and the retry button when the retry fails again', async () => {
+    const user = userEvent.setup();
+    render(editor('proj-A'));
+    await act(async () => { settle(urlOf('proj-A')).resolve(errorBody('first')); });
+    const first = await screen.findByRole('alert');
+
+    retryButton().focus();
+    await user.keyboard('{Enter}');
+    await act(async () => { settle(urlOf('proj-A')).resolve(errorBody('second')); });
+
+    await waitFor(() => expect(screen.getByRole('alert')).not.toBe(first));
+    expect(retryButton()).toHaveFocus();
+    expect(retryButton()).not.toHaveAttribute('aria-busy');
+    expect(screen.queryByLabelText(label('maxTickets'))).not.toBeInTheDocument();
+  });
+
+  it('shows the loading line, not the previous project\'s settings, right after projectId changes', async () => {
+    const { rerender } = render(editor('proj-A'));
+    await act(async () => {
+      settle(urlOf('proj-A')).resolve(
+        jsonResponse({ ...forProject('proj-A', { maxTickets: { value: 77, local: 77, source: 'local' } }), team_file: '/team/a.json' })
+      );
+    });
+    expect(await screen.findByDisplayValue('77')).toBeInTheDocument();
+
+    rerender(editor('proj-B'));
+
+    expect(loadingLine()).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('77')).not.toBeInTheDocument();
+    expect(screen.queryByText(/\/team\/a\.json/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
+  });
+
+  it('does not show the previous project\'s load error after projectId changes', async () => {
+    const { rerender } = render(editor('proj-A'));
+    await act(async () => { settle(urlOf('proj-A')).resolve(errorBody('A failed')); });
+    await screen.findByRole('alert');
+
+    rerender(editor('proj-B'));
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(loadingLine()).toBeInTheDocument();
+  });
+
+  it.each([
+    ['succeeds', (p: Pending) => p.resolve(jsonResponse(forProject('proj-A', { maxTickets: { value: 55, local: 55, source: 'local' } })))],
+    ['fails', (p: Pending) => p.resolve(errorBody('late A failure'))]
+  ])('ignores a late answer for the previous project (it %s)', async (_how, finish) => {
+    const { rerender } = render(editor('proj-A'));
+    rerender(editor('proj-B'));
+    await act(async () => {
+      settle(urlOf('proj-B')).resolve(jsonResponse(forProject('proj-B', { maxTickets: { value: 44, local: 44, source: 'local' } })));
+    });
+    expect(await screen.findByDisplayValue('44')).toBeInTheDocument();
+
+    await act(async () => { finish(settle(urlOf('proj-A'))); });
+
+    expect(screen.getByDisplayValue('44')).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('55')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
