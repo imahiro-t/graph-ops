@@ -66,6 +66,17 @@ const ranges = (selection: Selection): Range[] => {
 //   only font-weight, font-style, color and text-decoration-line from its
 //   computed style, as an inline style. font-weight, font-style and color
 //   are written only where they differ from the parent, as they inherit.
+// - Inside an unselectable element kept only as the holder of selectable
+//   parts, a separator -- one space, SEPARATOR -- goes between each two
+//   neighbouring child copies, unless the text on either side of that point
+//   already ends or starts with white space (DFLT-00318). Losing the class
+//   loses the layout's spacing (flex gap), and JSX puts no white space
+//   between elements, so the header row's ticket ID and title had run
+//   together. A space, not a line break, as Chromium's own copy of the row
+//   pasted as rich text keeps the two apart on one line. It goes only
+//   between the children of a holder -- also where the holder is the
+//   range's common ancestor -- never outside one, so a copy that passes
+//   through no holder is written as before.
 // - Each range is wrapped in a span carrying its common ancestor's styles,
 //   which the range's own text directly under that ancestor would lose
 //   otherwise. A range left with nothing to copy gives no span.
@@ -169,7 +180,7 @@ const rangeHtml = (doc: Document, range: Range, styleOf: StyleOf): Element | nul
   if (common === base) {
     for (const child of Array.from(base.childNodes)) {
       const copy = copyNode(range, child, on, base, styleOf);
-      if (copy) wrap.appendChild(copy);
+      if (copy) appendCopy(wrap, copy, !on);
     }
   } else {
     // The range lies within one text (or other character data) node.
@@ -179,6 +190,30 @@ const rangeHtml = (doc: Document, range: Range, styleOf: StyleOf): Element | nul
   if (!wrap.hasChildNodes()) return null;
   setInlineStyle(wrap, inlineStyle(styleOf(base), null));
   return wrap;
+};
+
+// The separator between two neighbouring child copies in a holder: a
+// space, since Chromium's own copy of the header row keeps the ticket ID and
+// the title apart on one line when pasted as rich text (DFLT-00318).
+const SEPARATOR = ' ';
+
+const WHITE_SPACE = /\s/;
+
+// Appends `copy` to `parent`, the copy of an element. In a holder -- an
+// unselectable element kept only for its selectable parts -- it is set apart
+// from the child copy before it by SEPARATOR, unless the text already has
+// white space at that point.
+const appendCopy = (parent: Node, copy: Node, holder: boolean): void => {
+  const before = parent.lastChild;
+  if (holder && before) {
+    const end = before.textContent?.slice(-1) ?? '';
+    const start = copy.textContent?.charAt(0) ?? '';
+    if (!WHITE_SPACE.test(end) && !WHITE_SPACE.test(start)) {
+      const separator = parent.ownerDocument?.createTextNode(SEPARATOR);
+      if (separator) parent.appendChild(separator);
+    }
+  }
+  parent.appendChild(copy);
 };
 
 const CHARACTER_DATA = new Set<number>([
@@ -193,7 +228,8 @@ const CHARACTER_DATA = new Set<number>([
 // shallow with its held part inside, and character data is cut at the
 // range's ends; a text's copy is also rid of U+200B / U+2060. `on` is the
 // parent's selectability and `parent` the source element whose styles the
-// copy is written against.
+// copy is written against. The child copies of an unselectable element are
+// set apart by SEPARATOR (appendCopy).
 const copyNode = (
   range: Range,
   node: Node,
@@ -223,7 +259,7 @@ const copyNode = (
   const copy = el.cloneNode(false) as Element;
   for (const child of Array.from(el.childNodes)) {
     const childCopy = copyNode(range, child, selfOn, el, styleOf);
-    if (childCopy) copy.appendChild(childCopy);
+    if (childCopy) appendCopy(copy, childCopy, !selfOn);
   }
   // An unselectable element stays only as the holder of a selectable part.
   if (!selfOn && !copy.hasChildNodes()) return null;

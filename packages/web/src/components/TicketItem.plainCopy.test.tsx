@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
 import { formatDateTime } from '../i18n/formatDate';
 import { installPlainCopy, PLAIN_COPY_ATTR } from '../lib/plainCopy';
-import { plainText, WBR_MARK, WORD_JOINER, ZWSP } from '../lib/wbr';
+import { plainText, stripInvisible, WBR_MARK, WORD_JOINER, ZWSP } from '../lib/wbr';
 import { dispatchCopy, select, selectContents } from '../test/copyEvent';
 import { Label, TicketDetail } from '../types';
 import { TicketItem } from './TicketItem';
@@ -244,5 +244,48 @@ describe('the ticket ID copy button with the copy listener installed (DFLT-00310
       fireEvent.click(screen.getByTestId('ticket-copy-id'));
     });
     expect(writeText).toHaveBeenCalledWith('TEST-00310');
+  });
+});
+
+// DFLT-00318: the header row's ID and title sit in its select-none row with
+// no white space between them (JSX), so the copy of a selection from the ID
+// into a label sets them apart by one space in text/html. jsdom loads no
+// Tailwind, so the two user-select classes are given here.
+describe('copying from the header row into a label (DFLT-00318)', () => {
+  let sheet: HTMLStyleElement;
+
+  beforeEach(async () => {
+    await i18n.changeLanguage('ja');
+    sheet = document.createElement('style');
+    sheet.textContent = '.select-none { user-select: none }\n.select-text { user-select: text }';
+    document.head.appendChild(sheet);
+  });
+
+  afterEach(() => {
+    sheet.remove();
+  });
+
+  // The copy read as text, with a <br> read as a line break.
+  const readText = (root: Node): string => {
+    if (root.nodeType === Node.TEXT_NODE) return root.nodeValue ?? '';
+    if (root.nodeName === 'BR') return '\n';
+    return Array.from(root.childNodes).map(readText).join('');
+  };
+
+  it('sets the ticket ID and the title apart by one space in text/html', () => {
+    renderTicket();
+    const id = screen.getByTestId('ticket-header-id').firstChild as Text;
+    expect(id.nodeValue).toBe('TEST-00310');
+    const label = metaLabel(expectedLabel('ticketItem.createdAtVisible', 'ja'));
+    const selection = select(id, 0, label.firstChild as Text);
+    const { event, written } = dispatchCopy(id);
+    expect(event.defaultPrevented).toBe(true);
+    const html = document.createElement('div');
+    html.innerHTML = written['text/html'];
+    const text = readText(html);
+    expect(text).toContain('TEST-00310 タイトル');
+    expect(text).not.toContain('TEST-00310タイトル');
+    expect(text).toContain('作成日時:');
+    expect(written['text/plain']).toBe(stripInvisible(selection.toString()));
   });
 });

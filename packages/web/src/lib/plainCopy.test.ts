@@ -513,4 +513,136 @@ describe('plainCopy text/html (DFLT-00317)', () => {
     expectNoInvisible(html);
     expect(html).toContain('値 &lt;wbr/&gt;');
   });
+  // DFLT-00318: in an unselectable holder, neighbouring child copies are set
+  // apart by one space, so the header row's ID and title do not run together.
+  describe('separators in an unselectable holder (DFLT-00318)', () => {
+    // The copy read as text, with a <br> read as a line break, which
+    // textContent would drop.
+    const readText = (root: Node): string => {
+      if (root.nodeType === Node.TEXT_NODE) return root.nodeValue ?? '';
+      if (root.nodeName === 'BR') return '\n';
+      return Array.from(root.childNodes).map(readText).join('');
+    };
+    // The nodes between two copies that are siblings.
+    const between = (first: Node, last: Node): Node[] => {
+      expect(first.parentNode).toBe(last.parentNode);
+      const out: Node[] = [];
+      for (let node = first.nextSibling; node && node !== last; node = node.nextSibling) out.push(node);
+      return out;
+    };
+    const expectOneSeparator = (first: Node, last: Node) => {
+      const nodes = between(first, last);
+      expect(nodes).toHaveLength(1);
+      expect(nodes[0].nodeType).toBe(Node.TEXT_NODE);
+      expect(nodes[0].nodeValue).toBe(' ');
+    };
+
+    // The header row: a select-none row holding a group with no user-select
+    // of its own, in which the ID and the title are select-text among
+    // unselectable buttons, screen-reader text and chips, with no white
+    // space between the elements (as JSX writes them).
+    const header = (id = 'DFLT-00317', title = 'ラベルを含むコピー') =>
+      '<div id="header" class="select-none"><div id="group"><button>▶</button>' +
+      `<span id="id" class="select-text">${id}</span><button>コピー</button>` +
+      '<span class="sr-only">コピーしました</span><span>TODO</span><span>Medium</span>' +
+      `<span id="title" class="select-text">${title}</span></div>` +
+      '<div><button>アーカイブ</button></div></div>' +
+      `<div id="bar"><span id="label" ${PLAIN_COPY_ATTR}="">${LABEL}</span></div>`;
+
+    it.each([
+      [
+        'inherited values (Chromium)',
+        (el: Element) => (el.closest('.select-text') ? 'text' : el.closest('.select-none') ? 'none' : 'auto')
+      ],
+      [
+        'auto for a child (Firefox)',
+        (el: Element) => (el.matches('.select-text') ? 'text' : el.matches('.select-none') ? 'none' : 'auto')
+      ]
+    ])('sets the ID and the title apart by one space, with %s', (_name, pick) => {
+      withUserSelect(pick);
+      mount(header());
+      select(textOf('id'), 0, textOf('label'));
+      const html = copyHtml();
+      const root = parse(html);
+      expectOneSeparator(copyOf(root, 'DFLT-00317'), copyOf(root, 'ラベルを含むコピー'));
+      const text = readText(root);
+      expect(text).toContain('DFLT-00317 ラベルを含むコピー');
+      expect(text).not.toContain('DFLT-00317ラベル');
+      for (const left of ['▶', 'コピーしました', 'TODO', 'Medium', 'アーカイブ']) expect(text).not.toContain(left);
+      expect(root.querySelectorAll('br')).toHaveLength(0);
+      expect(root.querySelectorAll('[class], [id]')).toHaveLength(0);
+    });
+
+    it('sets each two of three children apart, and none before the first or after the last', () => {
+      mount(
+        '<div id="holder" class="select-none"><span id="a" class="select-text">一</span><span>×</span>' +
+          '<span id="b" class="select-text">二</span><span id="c" class="select-text">三</span></div>' +
+          `<div><span id="label" ${PLAIN_COPY_ATTR}="">${LABEL}</span></div>`
+      );
+      select(textOf('a'), 0, textOf('label'));
+      const root = parse(copyHtml());
+      const [a, b, c] = ['一', '二', '三'].map(text => copyOf(root, text));
+      expectOneSeparator(a, b);
+      expectOneSeparator(b, c);
+      expect(a.previousSibling).toBeNull();
+      expect(c.nextSibling).toBeNull();
+      expect(readText(root)).toContain('一 二 三');
+    });
+
+    it.each([
+      ['the one before ends with it', 'DFLT-00317 ', 'タイトル'],
+      ['the one after starts with it', 'DFLT-00317', ' タイトル']
+    ])('adds none where %s white space', (_name, id, title) => {
+      mount(header(id, title));
+      select(textOf('id'), 0, textOf('label'));
+      const root = parse(copyHtml());
+      expect(between(copyOf(root, id), copyOf(root, title))).toHaveLength(0);
+      expect(readText(root)).toContain('DFLT-00317 タイトル');
+    });
+
+    it('adds none around a child left alone in its holder', () => {
+      mount(header());
+      select(textOf('title'), 0, textOf('label'));
+      const root = parse(copyHtml());
+      const title = copyOf(root, 'ラベルを含むコピー');
+      expect(title.previousSibling).toBeNull();
+      expect(title.nextSibling).toBeNull();
+      expect(readText(root)).not.toContain('ラベルを含むコピー ');
+    });
+
+    it("sets the children apart where the holder is the range's common ancestor", () => {
+      mount(
+        '<div id="holder" class="select-none"><span id="a" class="select-text">前</span><span>×</span>' +
+          `<span class="select-text"><span ${PLAIN_COPY_ATTR}="">${LABEL}</span></span></div>`
+      );
+      selectContents(byId('holder'));
+      const root = parse(copyHtml());
+      const wrap = root.firstElementChild as Element;
+      expect(wrap.childNodes).toHaveLength(3);
+      expect(wrap.childNodes[1].nodeValue).toBe(' ');
+      expect(readText(root)).toBe('前 作成日時:');
+    });
+
+    it('keeps text/plain as the selection without the invisible characters', () => {
+      mount(header());
+      const selection = select(textOf('id'), 0, textOf('label'));
+      const { written } = dispatchCopy(document.body);
+      expect(written['text/plain']).toBe(stripInvisible(selection.toString()));
+    });
+
+    it.each([
+      ['a label alone', () => selectContents(byId('label'))],
+      ['a label with its value', () => select(textOf('label'), 0, textOf('value'))],
+      ['part of one element', () => select(textOf('label'), 1, textOf('label'), 3)]
+    ])('writes %s, which passes through no holder, as Range.cloneContents does', (_name, make) => {
+      mount(
+        `<div id="row"><span id="label" ${PLAIN_COPY_ATTR}="">${LABEL}</span><span id="value">2026-09-29</span>` +
+          '<span class="select-none">UI改善</span></div>'
+      );
+      const selection = make();
+      const html = copyHtml();
+      expect(unwrapped(html)).toBe(cloned(selection.getRangeAt(0)));
+      expect(html).not.toContain('<br');
+    });
+  });
 });
