@@ -1442,8 +1442,9 @@ export const TicketItem: React.FC<Props> = ({
 
   // DFLT-00320: how much larger than the default 16px the root font is. The
   // node name labels are sized in rem, so they grow with it; on a parallel
-  // row graphNodeLabel then shortens them by estimated width so neighbours
-  // 78 units apart don't overlap. Read on each render (a later change of the
+  // row graphNodeLabel shortens them by estimated width (at the default size
+  // too, since DFLT-00335) so neighbours 78 units apart don't overlap, with a
+  // smaller budget the larger the font. Read on each render (a later change of the
   // browser's text size is picked up on the next re-render).
   const graphFontScale = Math.max(1, rootFontSizePx() / 16);
 

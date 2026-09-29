@@ -2,8 +2,10 @@
 // default font size. The label is sized with text-[0.5625rem] (9 user units at
 // the default 16px) instead of a fontSize attribute, its baseline is
 // y + 6 plus dy 1.3333em (y + 18 at the default size, as before), and on a
-// parallel row at a larger font it is shortened by estimated width so it does
-// not run into its neighbour 78 units away, with the full name in a <title>.
+// parallel row it is shortened by estimated width so it does not run into its
+// neighbour 78 units away, with the full name in a <title>. DFLT-00335 extended
+// that shortening from larger fonts to the default size; a single-node row
+// keeps the 12-character rule at every size.
 // jsdom does no layout, so overlaps were checked in a real browser (see the
 // ticket's implementation notes); this checks the label text, classes and
 // attributes, and that every shortened label fits the width budget.
@@ -31,6 +33,8 @@ const EN_LONG = 'security-review'; // 15 half-width characters
 const MIXED = 'API設計レビュー';
 const THIRTEEN_JA = 'あいうえおかきくけこさしす';
 const THIRTEEN_EN = 'abcdefghijklm';
+const QA_REVIEW = 'QAレビュー';
+const A11Y_REVIEW = 'アクセシビリティレビュー'; // 12 full-width characters
 
 // Estimated width of a label in user units at the given font scale.
 const widthUnits = (text: string, fontScale: number) =>
@@ -62,15 +66,86 @@ describe('graphNodeLabel', () => {
     }
   });
 
-  describe.each([true, false])('at the default font size (parallel: %s)', parallel => {
+  describe('at the default font size on a single-node row', () => {
     it('keeps names of up to 12 characters and cuts longer ones to 12 + "…", as before', () => {
-      const opts = { parallel, fontScale: 1 };
+      const opts = { parallel: false, fontScale: 1 };
       expect(graphNodeLabel('review', opts)).toEqual({ text: 'review', truncated: false });
       expect(graphNodeLabel(JA_LONG, opts)).toEqual({ text: JA_LONG, truncated: false });
       expect(graphNodeLabel('abcdefghijkl', opts)).toEqual({ text: 'abcdefghijkl', truncated: false });
       expect(graphNodeLabel(THIRTEEN_EN, opts)).toEqual({ text: 'abcdefghijkl…', truncated: true });
       expect(graphNodeLabel(THIRTEEN_JA, opts)).toEqual({ text: 'あいうえおかきくけこさし…', truncated: true });
       expect(graphNodeLabel(EN_LONG, opts)).toEqual({ text: 'security-rev…', truncated: true });
+    });
+  });
+
+  describe('at the default font size on a parallel row (DFLT-00335)', () => {
+    const opts = { parallel: true, fontScale: 1 };
+
+    it('shortens by estimated width within the 8em budget', () => {
+      // 1em * 7 + … (1em) = 8em.
+      expect(graphNodeLabel(JA_LONG, opts)).toEqual({ text: 'セキュリティレ…', truncated: true });
+      expect(graphNodeLabel(A11Y_REVIEW, opts)).toEqual({ text: 'アクセシビリテ…', truncated: true });
+      expect(graphNodeLabel(THIRTEEN_JA, opts)).toEqual({ text: 'あいうえおかき…', truncated: true });
+      // s e c u y (0.65em each) + r i t - r (0.5em each) = 5.75em, + e
+      // (0.65em) = 6.4em, + … = 7.4em; the next v (0.65em) would make it 8.05em.
+      expect(graphNodeLabel(EN_LONG, opts)).toEqual({ text: 'security-re…', truncated: true });
+      // a..k = 6.7em, + … = 7.7em; the next l (0.5em) would make it 8.2em.
+      expect(graphNodeLabel(THIRTEEN_EN, opts)).toEqual({ text: 'abcdefghijk…', truncated: true });
+      // A P I (0.8em each) + 設計レビ (1em each) = 6.4em, + … = 7.4em; with ュ
+      // it would be 8.4em.
+      expect(graphNodeLabel(MIXED, opts)).toEqual({ text: 'API設計レビ…', truncated: true });
+      // Q A (0.8em each) + レビュー (1em each) = 5.6em.
+      expect(graphNodeLabel(QA_REVIEW, opts)).toEqual({ text: QA_REVIEW, truncated: false });
+      // 7.2em.
+      expect(graphNodeLabel('abcdefghijkl', opts)).toEqual({ text: 'abcdefghijkl', truncated: false });
+      expect(graphNodeLabel('review', opts)).toEqual({ text: 'review', truncated: false });
+    });
+
+    it('still applies the 12-character cap to names that fit the width', () => {
+      // 13 narrow characters are 6.5em, within 8em, but longer than 12.
+      expect(graphNodeLabel('iiiiiiiiiiiii', opts)).toEqual({ text: 'iiiiiiiiiiii…', truncated: true });
+    });
+
+    it('treats a font scale below 1, or NaN, as the default size', () => {
+      for (const fontScale of [0.5, Number.NaN]) {
+        expect(graphNodeLabel(A11Y_REVIEW, { parallel: true, fontScale })).toEqual({
+          text: 'アクセシビリテ…',
+          truncated: true
+        });
+      }
+    });
+
+    it('leaves a gap between "QAレビュー" and "アクセシビリティレビュー" side by side', () => {
+      // Labels are centred 78 units apart, so the half-widths of the two
+      // neighbours must add up to no more than 78 less the 6-unit gap.
+      const halfWidths =
+        widthUnits(graphNodeLabel(QA_REVIEW, opts).text, 1) / 2 +
+        widthUnits(graphNodeLabel(A11Y_REVIEW, opts).text, 1) / 2;
+      expect(halfWidths).toBeCloseTo(25.2 + 36);
+      expect(halfWidths).toBeLessThanOrEqual(78 - 6);
+    });
+  });
+
+  describe.each([1, 1.25, 2])('on a parallel row at font scale %s', fontScale => {
+    const opts = { parallel: true, fontScale };
+
+    it('keeps every label within the 72-unit budget', () => {
+      for (const name of [
+        JA_LONG, EN_LONG, MIXED, 'review', THIRTEEN_JA, THIRTEEN_EN, QA_REVIEW, A11Y_REVIEW, 'WWWWWWWWWW', 'MMMMMMMM'
+      ]) {
+        const { text } = graphNodeLabel(name, opts);
+        expect(widthUnits(text, fontScale)).toBeLessThanOrEqual(GRAPH_LABEL_WIDTH_BUDGET_UNITS);
+      }
+    });
+
+    it('keeps labels of every ASCII character within the budget by their Arial Bold widths too', () => {
+      // Unlike the check above, this measures with the reference widths, not
+      // with the estimate itself ("…" at 1em, as in Arial Bold).
+      for (const ch of Object.keys(ARIAL_BOLD_WIDTHS)) {
+        const { text } = graphNodeLabel(ch.repeat(12), opts);
+        const em = Array.from(text).reduce((sum, c) => sum + (c === '…' ? 1 : ARIAL_BOLD_WIDTHS[c] / 1000), 0);
+        expect(em * GRAPH_LABEL_BASE_FONT_UNITS * fontScale).toBeLessThanOrEqual(GRAPH_LABEL_WIDTH_BUDGET_UNITS);
+      }
     });
   });
 
@@ -88,23 +163,6 @@ describe('graphNodeLabel', () => {
       // Q, A (0.8em each) + レ (1em) + … (1em) = 3.6em.
       expect(graphNodeLabel('QAレビュー', opts)).toEqual({ text: 'QAレ…', truncated: true });
       expect(graphNodeLabel('review', opts)).toEqual({ text: 'review', truncated: false });
-    });
-
-    it('keeps every label within the 72-unit budget', () => {
-      for (const name of [JA_LONG, EN_LONG, MIXED, 'review', THIRTEEN_JA, THIRTEEN_EN, 'WWWWWWWWWW', 'MMMMMMMM']) {
-        const { text } = graphNodeLabel(name, opts);
-        expect(widthUnits(text, 2)).toBeLessThanOrEqual(GRAPH_LABEL_WIDTH_BUDGET_UNITS);
-      }
-    });
-
-    it('keeps labels of the widest ASCII characters within the budget by their Arial Bold widths too', () => {
-      // Unlike the check above, this measures with the reference widths, not
-      // with the estimate itself ("…" at 1em, as in Arial Bold).
-      for (const ch of Object.keys(ARIAL_BOLD_WIDTHS)) {
-        const { text } = graphNodeLabel(ch.repeat(12), opts);
-        const em = Array.from(text).reduce((sum, c) => sum + (c === '…' ? 1 : ARIAL_BOLD_WIDTHS[c] / 1000), 0);
-        expect(em * GRAPH_LABEL_BASE_FONT_UNITS * 2).toBeLessThanOrEqual(GRAPH_LABEL_WIDTH_BUDGET_UNITS);
-      }
     });
 
     it('never shortens a label to the ellipsis alone', () => {
@@ -156,14 +214,14 @@ const edge = (from: string, to: string, condition = 'success'): GraphEdge => ({
 
 // implementation (a single-node row, long Japanese name) -> two parallel
 // review gates with long full-width / half-width names.
-const nodes = [
+const defaultNodes = [
   node('impl', 'implementation', 'とても長い実装ノードの名前です'),
   node('g1', 'review_gate', JA_LONG),
   node('g2', 'review_gate', EN_LONG)
 ];
 const edges = [edge('impl', 'g1'), edge('impl', 'g2')];
 
-const renderGraph = () => {
+const renderGraph = (nodes: GraphNode[] = defaultNodes) => {
   const ticket: TicketDetail = {
     id: 'TEST-00320',
     project_id: 'proj-1',
@@ -230,14 +288,29 @@ describe('TicketItem execution graph node labels (DFLT-00320)', () => {
     });
   });
 
-  it('keeps the 12-character rule at the default 16px, with a <title> only on shortened labels', () => {
+  it('shortens parallel labels by width at the default 16px too, keeping the full name in a <title>', () => {
     const { impl, g1, g2 } = renderGraph();
+    expect(shownText(g1)).toBe('セキュリティレ…');
+    expect(g1.querySelector('title')).toHaveTextContent(JA_LONG);
+    expect(shownText(g2)).toBe('security-re…');
+    expect(g2.querySelector('title')).toHaveTextContent(EN_LONG);
+    // A single-node row keeps the 12-character rule.
     expect(shownText(impl)).toBe('とても長い実装ノードの名…');
     expect(impl.querySelector('title')).toHaveTextContent('とても長い実装ノードの名前です');
-    expect(shownText(g1)).toBe(JA_LONG);
+  });
+
+  it('adds a <title> at the default 16px only to the parallel label that is shortened', () => {
+    const { impl, g1, g2 } = renderGraph([
+      node('impl', 'implementation', '実装'),
+      node('g1', 'review_gate', QA_REVIEW),
+      node('g2', 'review_gate', A11Y_REVIEW)
+    ]);
+    expect(shownText(impl)).toBe('実装');
+    expect(impl.querySelector('title')).toBeNull();
+    expect(shownText(g1)).toBe(QA_REVIEW);
     expect(g1.querySelector('title')).toBeNull();
-    expect(shownText(g2)).toBe('security-rev…');
-    expect(g2.querySelector('title')).toHaveTextContent(EN_LONG);
+    expect(shownText(g2)).toBe('アクセシビリテ…');
+    expect(g2.querySelector('title')).toHaveTextContent(A11Y_REVIEW);
   });
 
   it('shortens parallel labels by width at 200%, keeping the full name in a <title>', () => {

@@ -5,16 +5,20 @@
 // (a parallel level) are centred 78 user units apart, so a label wider than
 // that runs into its neighbour. Widening the columns would only shrink the
 // whole SVG (it scales to its box through the viewBox) and bring the text back
-// down, so a larger font is handled by shortening the label instead.
+// down, so a long name is handled by shortening the label instead.
 //
-// - At the default size (fontScale 1), and on a row with a single node, the
-//   label keeps the long-standing rule: more than 12 characters become 12
-//   characters and "…". So nothing changes at the default 16px.
-// - On a parallel row at a larger font, the label is shortened by its
-//   estimated width, not by a character count, so full-width (Japanese) names
-//   fit as well as ASCII ones: the width budget is 72 user units (the 78-unit
-//   column pitch less 6 units of gap), i.e. 72 / (9 * fontScale) em. The
-//   12-character cap still applies on top of it.
+// - On a row with a single node, the label keeps the long-standing rule: more
+//   than 12 characters become 12 characters and "…", at any font size. So a
+//   single-node row looks the same as before at the default 16px.
+// - On a parallel row, at any font size including the default, the label is
+//   shortened by its estimated width, not by a character count, so
+//   full-width (Japanese) names fit as well as ASCII ones: the width budget is
+//   72 user units (the 78-unit column pitch less 6 units of gap), i.e.
+//   72 / (9 * fontScale) em -- 8em at the default size. The 12-character cap
+//   still applies on top of it. DFLT-00320 applied this only above the
+//   default size, to leave the default look alone; DFLT-00335 extended it to
+//   the default size, where 12 full-width characters (12em, 108 units) did
+//   not fit the 78-unit pitch either.
 //
 // The width estimate is an approximation, not a measurement (jsdom cannot
 // measure SVG text, and the render must not wait for layout). It is sized so
@@ -68,16 +72,20 @@ export function graphNodeLabel(
   name: string,
   opts: { parallel: boolean; fontScale: number }
 ): GraphNodeLabel {
-  if (!opts.parallel || !(opts.fontScale > 1)) {
-    // The long-standing rule, unchanged (including counting UTF-16 units),
-    // so the graph looks exactly as before at the default font size.
+  if (!opts.parallel) {
+    // A single-node row: the long-standing rule, unchanged (including
+    // counting UTF-16 units), so such a row looks as before at the default
+    // font size.
     return name.length > GRAPH_LABEL_MAX_CHARS
       ? { text: name.slice(0, GRAPH_LABEL_MAX_CHARS) + ELLIPSIS, truncated: true }
       : { text: name, truncated: false };
   }
 
   const chars = Array.from(name);
-  const budgetEm = GRAPH_LABEL_WIDTH_BUDGET_UNITS / (GRAPH_LABEL_BASE_FONT_UNITS * opts.fontScale);
+  // Never below the default size: a scale under 1 (or NaN) must not widen the
+  // budget past 8em. (Math.max(1, NaN) would be NaN.)
+  const fontScale = opts.fontScale > 1 ? opts.fontScale : 1;
+  const budgetEm = GRAPH_LABEL_WIDTH_BUDGET_UNITS / (GRAPH_LABEL_BASE_FONT_UNITS * fontScale);
   if (chars.length <= GRAPH_LABEL_MAX_CHARS && graphLabelWidthEm(name) <= budgetEm) {
     return { text: name, truncated: false };
   }
