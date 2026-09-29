@@ -16,23 +16,42 @@
 //   column pitch less 6 units of gap), i.e. 72 / (9 * fontScale) em. The
 //   12-character cap still applies on top of it.
 //
-// The width estimate is a deliberately conservative approximation, not a
-// measurement (jsdom cannot measure SVG text, and the render must not wait
-// for layout): any code point at or above U+1100 (Hangul Jamo onwards, which
-// takes in kana, kanji and full-width forms) counts as 1em, everything below
-// as 0.65em (a little over the ~0.6em average of a semibold Latin letter).
+// The width estimate is an approximation, not a measurement (jsdom cannot
+// measure SVG text, and the render must not wait for layout). It is sized so
+// that no printable ASCII character is estimated narrower than in Arial /
+// Helvetica Bold, a bold (700) face and so wider than the labels' semibold
+// (600) text; TicketItem.graphLabel.test.tsx checks it against those widths:
+// - any code point at or above U+1100 (Hangul Jamo onwards, which takes in
+//   kana, kanji and full-width forms): 1em;
+// - the widest ASCII characters, M W m @ % (0.83-0.98em in Arial Bold): 1em;
+// - other capital letters, w and & (up to 0.78em): 0.8em;
+// - narrow ASCII characters -- i j l f t r, the space and narrow punctuation
+//   such as . , : ; ' " ( ) [ ] { } - / | * (up to 0.47em): 0.5em;
+// - everything else below U+1100 (the other lower-case letters, digits and
+//   punctuation; up to 0.61em): 0.65em.
 // Treating every code point from U+1100 up as full width makes some symbols
-// shorter than they need to be, and "…" (U+2026) is counted as 1em too; both
-// errors lean towards leaving a gap, never towards an overlap.
+// shorter than they need to be, and "…" (U+2026) is counted as 1em too; those
+// errors leave a gap. The estimate is not an upper bound everywhere, though:
+// a system font whose glyphs are wider than Arial Bold's, or a name made of
+// wide non-ASCII Latin characters such as Æ or Œ (about 1em, counted as 0.8em
+// or 0.65em), can still come out wider than estimated. The 6-unit gap left
+// out of the budget absorbs small differences of that kind.
 
 export const GRAPH_LABEL_MAX_CHARS = 12;
 export const GRAPH_LABEL_BASE_FONT_UNITS = 9;
 export const GRAPH_LABEL_WIDTH_BUDGET_UNITS = 72;
 const ELLIPSIS = '…';
 
+// Width classes of the estimate (see above).
+const WIDE_ASCII = /^[MWm@%]$/;
+const CAPITAL_WIDTH = /^[\p{Lu}w&]$/u;
+const NARROW_ASCII = /^[ijlftr !'",.:;()[\]{}\-/\\|`*]$/;
+
 // Estimated advance width of one code point, in em.
 export function graphLabelCharEm(ch: string): number {
-  return (ch.codePointAt(0) ?? 0) >= 0x1100 ? 1 : 0.65;
+  if ((ch.codePointAt(0) ?? 0) >= 0x1100 || WIDE_ASCII.test(ch)) return 1;
+  if (CAPITAL_WIDTH.test(ch)) return 0.8;
+  return NARROW_ASCII.test(ch) ? 0.5 : 0.65;
 }
 
 // Estimated width of a whole label, in em.
