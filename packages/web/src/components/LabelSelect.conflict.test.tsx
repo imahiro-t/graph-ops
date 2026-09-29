@@ -1,8 +1,10 @@
 // DFLT-00330: a label change is conditioned on the displayed ticket's
 // updated_at, and a 409 TICKET_CHANGED reloads the ticket for another try.
+// DFLT-00351: a reload that fails says so instead of claiming the latest
+// version was loaded.
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import i18n from '../i18n';
 import { Label } from '../types';
 import { ApiCodeError } from '../lib/apiError';
@@ -162,6 +164,66 @@ describe('LabelSelect if_updated_at (DFLT-00330)', () => {
     const expected = i18n.getResource(lang, 'translation', 'errors.TICKET_CHANGED') as string;
     expect(expected).toBeTruthy();
     expect(await screen.findByRole('alert')).toHaveTextContent(expected);
+  });
+
+  // DFLT-00351: the conflict message follows what the reload did.
+  const conflictThenReload = async (onSaved: Mock) => {
+    mockedSet.mockRejectedValueOnce(conflict());
+    const { user, open, box } = setup([BUG], U0, onSaved);
+    await open();
+    await user.click(box('改善'));
+    await screen.findByRole('alert');
+    // The save (and its reload) is over once the checkboxes are usable again.
+    await waitFor(() => expect(box('改善')).toHaveAttribute('aria-disabled', 'false'));
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(box('改善')).not.toBeChecked();
+    return screen.getByRole('alert');
+  };
+
+  it('says the latest could not be loaded when the reload resolves to false', async () => {
+    const alert = await conflictThenReload(vi.fn().mockResolvedValue(false));
+    expect(alert).toHaveTextContent(i18n.t('ticket.labels.conflictReloadFailed'));
+    expect(alert).not.toHaveTextContent(i18n.t('errors.TICKET_CHANGED'));
+  });
+
+  it('says the latest could not be loaded when the reload returns false synchronously', async () => {
+    const alert = await conflictThenReload(vi.fn().mockReturnValue(false));
+    expect(alert).toHaveTextContent(i18n.t('ticket.labels.conflictReloadFailed'));
+  });
+
+  it('says the latest could not be loaded when the reload rejects', async () => {
+    const alert = await conflictThenReload(vi.fn().mockRejectedValue(new Error('offline')));
+    expect(alert).toHaveTextContent(i18n.t('ticket.labels.conflictReloadFailed'));
+    expect(alert).not.toHaveTextContent(i18n.t('errors.TICKET_CHANGED'));
+  });
+
+  it.each([
+    ['true', true],
+    ['undefined', undefined]
+  ])('keeps the TICKET_CHANGED text when the reload resolves to %s', async (_name, result) => {
+    const alert = await conflictThenReload(vi.fn().mockResolvedValue(result));
+    expect(alert).toHaveTextContent(i18n.t('errors.TICKET_CHANGED'));
+    expect(alert).not.toHaveTextContent(i18n.t('ticket.labels.conflictReloadFailed'));
+  });
+
+  it.each(['ja', 'en'])('shows the %s text for a conflict whose reload failed', async lang => {
+    await i18n.changeLanguage(lang);
+    const expected = i18n.getResource(lang, 'translation', 'ticket.labels.conflictReloadFailed') as string;
+    expect(expected).toBeTruthy();
+    const alert = await conflictThenReload(vi.fn().mockResolvedValue(false));
+    expect(alert).toHaveTextContent(expected);
+  });
+
+  it('ignores the reload result after a successful save', async () => {
+    mockedSet.mockResolvedValueOnce({ updated_at: U1 });
+    const onSaved = vi.fn().mockResolvedValue(false);
+    const { user, open, box } = setup([BUG], U0, onSaved);
+    await open();
+    await user.click(box('改善'));
+    await waitFor(() => expect(box('改善')).toHaveAttribute('aria-disabled', 'false'));
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(box('改善')).toBeChecked();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('keeps the generic save error for any other failure', async () => {

@@ -28,8 +28,11 @@ interface Props {
   // The displayed ticket's updated_at, sent as if_updated_at with every
   // label change (DFLT-00330).
   updatedAt: string;
-  // Called after a successful save so the parent re-fetches the ticket.
-  onSaved: () => void | Promise<void>;
+  // Called after a successful save so the parent re-fetches the ticket, and
+  // after a 409 TICKET_CHANGED to load it as it is now. Returning false (or
+  // resolving to false) or rejecting means that reload failed (DFLT-00351);
+  // anything else is taken as a success.
+  onSaved: () => void | boolean | Promise<void | boolean>;
 }
 
 // A ticket's label picker (DFLT-00084): an edit button opening a checkbox
@@ -60,7 +63,10 @@ interface Props {
 // open must not conflict with the first, and a parent re-fetch that is
 // older than that save must not take it back. A 409 TICKET_CHANGED says so,
 // reloads the ticket and shows its labels as they are now, so the change
-// can be made again on top of them. The priority and the assignee are not
+// can be made again on top of them. DFLT-00351: if that reload fails, the
+// message says the latest version could not be loaded and asks to reload
+// after a moment instead -- the ticket on screen is still the stale one, so
+// trying again at once would only conflict again. The priority and the assignee are not
 // conditioned (TicketItem): each is a single value the click sets outright.
 export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, updatedAt, onSaved }) => {
   const { t } = useTranslation();
@@ -181,11 +187,15 @@ export const LabelSelect: React.FC<Props> = ({ ticketId, labels, projectLabels, 
         // props.
         setSelectedIds(labelIdsKey === '' ? [] : labelIdsKey.split(','));
         setError(t('errors.TICKET_CHANGED'));
+        let reloaded: boolean;
         try {
-          await onSaved();
+          reloaded = (await onSaved()) !== false;
         } catch {
-          // The reload failing leaves the message; polling reloads later.
+          reloaded = false;
         }
+        // The ticket on screen is still the stale one: say so rather than
+        // claim the latest was loaded (DFLT-00351).
+        if (!reloaded) setError(t('ticket.labels.conflictReloadFailed'));
       } else {
         setError(t('ticket.labels.saveError', { message: errorMessage(err, t('errors.UNKNOWN')) }));
       }

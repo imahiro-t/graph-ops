@@ -58,7 +58,9 @@ interface Props {
   // Opens another ticket of the list (DFLT-00142): used by the parent/
   // children links. Optional so a caller without a list can omit it.
   onOpenTicket?: (id: string) => void;
-  onRefresh: () => void | Promise<void>;
+  // May resolve to whether the reload succeeded (App's refreshTickets does):
+  // only LabelSelect looks at that (DFLT-00351), everything here ignores it.
+  onRefresh: () => void | boolean | Promise<void | boolean>;
   // Called in place of onRefresh once this ticket has been deleted
   // (DFLT-00191), so the list can refresh itself and move focus off the card
   // that is about to disappear. Omitted means onRefresh is called instead.

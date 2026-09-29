@@ -662,7 +662,19 @@ export const App: React.FC = () => {
   const expandedTicketIdsRef = useLatest(expandedTicketIds);
   const ticketFetchSeqRef = useRef(0);
   const ticketFetchesInFlightRef = useRef(new Map<string, number>());
-  const fetchAllTickets = useCallback(async (projectId: string) => {
+  //
+  // DFLT-00351: the run resolves to whether the list could be fetched, and
+  // never rejects -- every caller that ignores the result (the poll, the
+  // toolbar's refresh button, the create-ticket launch, the settings modal)
+  // keeps behaving as before. Only LabelSelect looks at it, to tell a
+  // conflict whose reload failed from one whose reload brought the ticket
+  // back. No project to load is not a failure. A superseded run counts as
+  // a success too: the list was fetched, and the run that took its place is
+  // the one that puts the latest on screen. The expanded tickets' details
+  // are left out of the result (fetchTicketDetail keeps swallowing its own
+  // failures): a ticket's labels and updated_at come back in the list, so a
+  // fetched list is all a conflict needs to be shown again.
+  const fetchAllTickets = useCallback(async (projectId: string): Promise<boolean> => {
     const seq = ++ticketFetchSeqRef.current;
     if (!projectId) {
       setTicketList(null);
@@ -670,7 +682,7 @@ export const App: React.FC = () => {
       // just deleted from the settings modal, say), and those skip their
       // own setLoading(false). Nothing else would clear the spinner.
       setLoading(false);
-      return;
+      return true;
     }
     const isSuperseded = () => seq !== ticketFetchSeqRef.current || projectId !== currentProjectIdRef.current;
     const inFlight = ticketFetchesInFlightRef.current;
@@ -681,7 +693,7 @@ export const App: React.FC = () => {
       if (!res.ok) throw new Error(`GET /api/tickets: ${res.status}`);
       const summaries: TicketGraph[] = await res.json();
 
-      if (isSuperseded()) return;
+      if (isSuperseded()) return true;
       // Artifacts are carried over only from this same project's list; a
       // list tagged with another project has nothing to contribute.
       setTicketList(prev => ({
@@ -692,6 +704,7 @@ export const App: React.FC = () => {
 
       const expanded = summaries.filter(t => expandedTicketIdsRef.current.has(t.id));
       await Promise.all(expanded.map(t => fetchTicketDetail(t.id)));
+      return true;
     } catch (e) {
       console.error('Failed to load tickets', e);
       // A failed refresh keeps the list it already had for this project. A
@@ -701,6 +714,7 @@ export const App: React.FC = () => {
       if (!isSuperseded()) {
         setTicketList(prev => (prev?.projectId === projectId ? prev : { projectId, value: [] }));
       }
+      return false;
     } finally {
       const remaining = (inFlight.get(projectId) ?? 1) - 1;
       if (remaining > 0) inFlight.set(projectId, remaining);
@@ -714,6 +728,8 @@ export const App: React.FC = () => {
   // uses (the toolbar's refresh button, a ticket edit, the create-ticket
   // launch, a label change), so none of them has to thread the project id
   // through by hand -- and none of them can accidentally fetch unscoped.
+  // It resolves to fetchAllTickets' result, whether the list could be
+  // fetched; only LabelSelect uses it (DFLT-00351).
   const refreshTickets = useCallback(
     () => fetchAllTickets(currentProjectIdRef.current),
     [fetchAllTickets, currentProjectIdRef]

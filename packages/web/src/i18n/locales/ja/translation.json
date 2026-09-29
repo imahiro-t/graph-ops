@@ -767,6 +767,7 @@
       "editVisible": "ラベルを<wbr/>編集",
       "groupLabel": "チケット {{id}} のラベル",
       "noRegistered": "設定画面でラベルを登録してください。",
+      "conflictReloadFailed": "他のメンバーが先にこのチケットを変更したため、ラベルは保存されませんでした。最新の内容を読み込めませんでした。少し待ってから再読み込みし、もう一度操作してください。",
       "saveError": "ラベルを保存できませんでした: {{message}}",
       "more": "+{{count}}",
       "moreSr": "他{{count}}件のラベル: {{names}}"

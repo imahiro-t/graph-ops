@@ -768,6 +768,7 @@
       "editVisible": "Edit labels",
       "groupLabel": "Labels of ticket {{id}}",
       "noRegistered": "Register labels in Settings first.",
+      "conflictReloadFailed": "Another member changed this ticket first, so the labels were not saved. The latest version could not be loaded; wait a moment, reload, and try again.",
       "saveError": "Could not save labels: {{message}}",
       "more": "+{{count}}",
       "moreSr": "{{count}} more labels: {{names}}"
