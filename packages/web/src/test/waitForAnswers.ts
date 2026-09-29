@@ -1,11 +1,17 @@
-// Ways for App tests to wait for an answer from the fake backend that
-// nothing on screen always shows has arrived (DFLT-00296).
+// Shared helpers for App tests to wait until an answer from the fake backend
+// has arrived (DFLT-00296).
 //
 // App fetches several things independently at startup (the project list,
 // the autopilot runs, the page size, ...), so seeing the first ticket does
 // not imply that any of the others has been answered. A test that relies on
 // one of them waits for it explicitly, through one of these helpers, rather
-// than keeping its own copy of the waiting logic.
+// than keeping its own copy of the waiting logic. There are two ways to wait:
+//
+// - For an answer that nothing on screen always shows has arrived, wait
+//   until the app has read its body, with trackBodyReads.
+// - For an answer that draws something only once it has arrived, wait for
+//   that element to appear, with a finder such as findPreviousPage (the
+//   pager, drawn once the page size has arrived).
 import { act, screen, waitFor } from '@testing-library/react';
 import { expect } from 'vitest';
 import i18n from '../i18n';
@@ -22,6 +28,15 @@ export type RequestMatch = (url: string, method: string) => boolean;
 // The returned function waits until at least one matching request has been
 // made and every one made so far has had its body read, then lets the last
 // answer reach the state and the render.
+//
+// Only answers the app always reads with json() may be tracked, since the
+// count of bodies read moves only when json() finishes. If the app leaves
+// the body of even one matching answer unread (for example a non-2xx answer
+// it turns into an error without calling json(), or one it reads some other
+// way), the returned function never sees every body read and keeps waiting
+// until waitFor times out. So `match` must pick only answers whose body the
+// app always reads; keep error answers out of it. (A request that fails
+// before answering is a different case: it is counted as read, see below.)
 export function trackBodyReads(backend: FakeBackend, match: RequestMatch): () => Promise<void> {
   let made = 0;
   let read = 0;
