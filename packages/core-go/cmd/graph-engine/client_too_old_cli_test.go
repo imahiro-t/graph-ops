@@ -108,7 +108,8 @@ func TestExplainOpenStoreError_ClientTooOldHasNoTLSAdvice(t *testing.T) {
 // advice to stop that server -- rather than a bare "unexpected status 503"
 // (DFLT-00331). The server here is a real one, started while the record
 // still matched it, as a server left running across another member's
-// update would be; its first DB request is what finds it out of date.
+// update would be; its first DB request is what finds it out of date. The
+// message names the refused call and prints the code once (DFLT-00353).
 func TestUI_ReusedServerOlderThanTheDBReportsClientTooOld(t *testing.T) {
 	repo, _, dbPath := newSubprocessSQLiteRepo(t)
 	proj, err := repo.CreateProject("P", "TEST")
@@ -134,11 +135,45 @@ func TestUI_ReusedServerOlderThanTheDBReportsClientTooOld(t *testing.T) {
 			continue
 		}
 		msg := err.Error()
-		for _, want := range []string{"CLIENT_TOO_OLD: the UI server already running at " + stale.URL, "Stop that server", "Updating to a new release", "The server said: CLIENT_TOO_OLD"} {
+		if prefix := "CLIENT_TOO_OLD: " + name + " was refused by the UI server already running at " + stale.URL; !strings.HasPrefix(msg, prefix) {
+			t.Errorf("%s: message does not start with %q:\n%s", name, prefix, msg)
+		}
+		for _, want := range []string{"Stop that server", "Updating to a new release", "The server said: this database needs graph-engine schema version"} {
 			if !strings.Contains(msg, want) {
 				t.Errorf("%s: message does not contain %q:\n%s", name, want, msg)
 			}
 		}
+		if n := strings.Count(msg, "CLIENT_TOO_OLD"); n != 1 {
+			t.Errorf("%s: CLIENT_TOO_OLD appears %d times, want once:\n%s", name, n, msg)
+		}
+	}
+}
+
+// A CLIENT_TOO_OLD message without the server's usual "CLIENT_TOO_OLD: "
+// prefix (another server's wording) is quoted as it is, and the code is still
+// printed once.
+func TestUIServerStatusError_ClientTooOldWithoutPrefix(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"code":"CLIENT_TOO_OLD","message":"plain text"}}`))
+	}))
+	defer ts.Close()
+
+	_, err := fetchProjectsViaAPI(ts.URL)
+	var apiErr *domain.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != domain.ErrCodeClientTooOld {
+		t.Fatalf("err = %v, want CLIENT_TOO_OLD", err)
+	}
+	msg := err.Error()
+	if !strings.HasPrefix(msg, "CLIENT_TOO_OLD: GET /api/projects was refused by the UI server already running at "+ts.URL) {
+		t.Errorf("message does not name the call:\n%s", msg)
+	}
+	if !strings.HasSuffix(msg, "The server said: plain text") {
+		t.Errorf("server message not quoted as it is:\n%s", msg)
+	}
+	if n := strings.Count(msg, "CLIENT_TOO_OLD"); n != 1 {
+		t.Errorf("CLIENT_TOO_OLD appears %d times, want once:\n%s", n, msg)
 	}
 }
 

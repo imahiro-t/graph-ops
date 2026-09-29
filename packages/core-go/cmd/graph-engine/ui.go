@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/graph-ops/core-go/internal/browser"
@@ -358,7 +359,11 @@ type uiServerErrorBody struct {
 // This process has itself passed the same check (openStore), so updating is
 // not the fix here -- stopping that server so `ui` starts this graph-engine's
 // own is. The error keeps the code first, like every CLIENT_TOO_OLD the CLI
-// prints, and exits non-zero through main.
+// prints, and exits non-zero through main. The code appears only there: the
+// server's message, quoted at the end, starts with its own "CLIENT_TOO_OLD: ",
+// which is dropped so the line does not repeat it. The call is named, as the
+// other codes' errors name it, so the person can tell which request was
+// refused.
 func uiServerStatusError(baseURL, call string, resp *http.Response) error {
 	var body uiServerErrorBody
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
@@ -366,11 +371,12 @@ func uiServerStatusError(baseURL, call string, resp *http.Response) error {
 		return fmt.Errorf("%s: unexpected status %d", call, resp.StatusCode)
 	}
 	if body.Error.Code == domain.ErrCodeClientTooOld {
+		serverSaid := strings.TrimPrefix(body.Error.Message, string(domain.ErrCodeClientTooOld)+": ")
 		return domain.NewAPIError(domain.ErrCodeClientTooOld,
-			"CLIENT_TOO_OLD: the UI server already running at %s was started by a graph-engine older than the database, "+
-				"so it answers every database request with CLIENT_TOO_OLD. Stop that server (see \"Updating to a new release\" in the README "+
+			"CLIENT_TOO_OLD: %s was refused by the UI server already running at %s: that server was started by a graph-engine "+
+				"older than the database, so it refuses every database request. Stop that server (see \"Updating to a new release\" in the README "+
 				"for how) and run this command again from an updated graph-engine to start a new one. The server said: %s",
-			baseURL, body.Error.Message)
+			call, baseURL, serverSaid)
 	}
 	return fmt.Errorf("%s: unexpected status %d: %s: %s", call, resp.StatusCode, body.Error.Code, body.Error.Message)
 }
