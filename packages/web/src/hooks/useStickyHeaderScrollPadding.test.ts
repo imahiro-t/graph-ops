@@ -6,9 +6,11 @@
 // (offsetHeight 0, as in jsdom) leaves the padding off: without a
 // ResizeObserver, or with a matchMedia result lacking addEventListener, a
 // measurable pinned header still gets its height as the padding.
+// DFLT-00278: the pinned padding is the height plus STICKY_HEADER_FOCUS_GAP
+// (0.5rem), written as calc(); jsdom keeps the calc() string as is.
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useStickyHeaderScrollPadding } from './useStickyHeaderScrollPadding';
+import { STICKY_HEADER_FOCUS_GAP, pinnedScrollPadding, useStickyHeaderScrollPadding } from './useStickyHeaderScrollPadding';
 
 const padding = () => document.documentElement.style.scrollPaddingTop;
 
@@ -20,6 +22,10 @@ function mountWith(height: number, pinnable = true) {
   const hook = renderHook(({ p }) => useStickyHeaderScrollPadding(ref, p), { initialProps: { p: pinnable } });
   return { header, ...hook };
 }
+
+// The expected pinned value for a 114px header, spelled out so a change to
+// the formula shows up here.
+const PINNED_114 = 'calc(114px + 0.5rem)';
 
 const lgMatching = (extra: Record<string, unknown> = {}) => vi.fn(() => ({ matches: true, ...extra }));
 
@@ -33,6 +39,14 @@ describe('useStickyHeaderScrollPadding with missing or partial APIs', () => {
     vi.restoreAllMocks();
     document.documentElement.style.scrollPaddingTop = '';
     document.body.innerHTML = '';
+  });
+
+  it('pins the padding at the header height plus a 0.5rem gap', () => {
+    vi.stubGlobal('matchMedia', lgMatching({ addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    mountWith(114);
+    expect(STICKY_HEADER_FOCUS_GAP).toBe('0.5rem');
+    expect(pinnedScrollPadding(114)).toBe(PINNED_114);
+    expect(padding()).toBe(`calc(114px + ${STICKY_HEADER_FOCUS_GAP})`);
   });
 
   it('leaves the padding off where the header reads 0 tall (jsdom default)', () => {
@@ -49,11 +63,11 @@ describe('useStickyHeaderScrollPadding with missing or partial APIs', () => {
     expect(() => unmount()).not.toThrow();
   });
 
-  it('still uses the header height without a ResizeObserver', () => {
+  it('still uses the header height plus the gap without a ResizeObserver', () => {
     vi.stubGlobal('ResizeObserver', undefined);
     vi.stubGlobal('matchMedia', lgMatching({ addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     const { unmount } = mountWith(114);
-    expect(padding()).toBe('114px');
+    expect(padding()).toBe(PINNED_114);
     unmount();
     expect(padding()).toBe('');
   });
@@ -61,7 +75,7 @@ describe('useStickyHeaderScrollPadding with missing or partial APIs', () => {
   it('works with a ResizeObserver stub that has only observe() and disconnect()', () => {
     vi.stubGlobal('matchMedia', lgMatching({ addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     const { unmount } = mountWith(114);
-    expect(padding()).toBe('114px');
+    expect(padding()).toBe(PINNED_114);
     expect(() => unmount()).not.toThrow();
     expect(padding()).toBe('');
   });
@@ -71,7 +85,7 @@ describe('useStickyHeaderScrollPadding with missing or partial APIs', () => {
     const removeListener = vi.fn();
     vi.stubGlobal('matchMedia', lgMatching({ addListener, removeListener }));
     const { unmount } = mountWith(114);
-    expect(padding()).toBe('114px');
+    expect(padding()).toBe(PINNED_114);
     expect(addListener).toHaveBeenCalledTimes(1);
     unmount();
     expect(removeListener).toHaveBeenCalledWith(addListener.mock.calls[0][0]);
@@ -81,7 +95,7 @@ describe('useStickyHeaderScrollPadding with missing or partial APIs', () => {
   it('works with a matchMedia result that has neither listener API', () => {
     vi.stubGlobal('matchMedia', lgMatching());
     const { unmount } = mountWith(114);
-    expect(padding()).toBe('114px');
+    expect(padding()).toBe(PINNED_114);
     expect(() => unmount()).not.toThrow();
     expect(padding()).toBe('');
   });
@@ -90,11 +104,11 @@ describe('useStickyHeaderScrollPadding with missing or partial APIs', () => {
     vi.stubGlobal('matchMedia', lgMatching({ addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     document.documentElement.style.scrollPaddingTop = '8px';
     const { rerender, unmount } = mountWith(114);
-    expect(padding()).toBe('114px');
+    expect(padding()).toBe(PINNED_114);
     rerender({ p: false });
     expect(padding()).toBe('');
     rerender({ p: true });
-    expect(padding()).toBe('114px');
+    expect(padding()).toBe(PINNED_114);
     unmount();
     expect(padding()).toBe('8px');
   });

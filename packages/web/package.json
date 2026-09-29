@@ -5,6 +5,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
+    "predev": "node ../../scripts/check-local-deps.js",
     "dev": "vite --port 3000",
     "prebuild": "node ../../scripts/check-local-deps.js",
     "build": "tsc && vite build",
@@ -13,6 +14,7 @@
     "lint": "eslint src vite.config.ts vitest.config.ts --max-warnings 0",
     "pretest": "node ../../scripts/check-local-deps.js",
     "test": "vitest run",
+    "pretest:watch": "node ../../scripts/check-local-deps.js",
     "test:watch": "vitest"
   },
   "dependencies": {

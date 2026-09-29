@@ -100,7 +100,7 @@ const MAX_HEADER_LABELS = 3;
 // 2048px at 32px), so large text gets the wrapping layout instead of a
 // single line that ran up to 480px past the panel (see the tab row below).
 const artifactTabClass = (active: boolean) =>
-  `[@media_not_all_and_(min-width:64rem)]:min-w-0 py-3 px-3 [@media(min-width:64rem)]:px-4 upto-15rem:px-2 upto-15rem:py-2 text-xs font-bold border-b-2 flex upto-15rem:flex-wrap items-center gap-x-2 gap-y-1 transition ${
+  `below-64rem:min-w-0 py-3 px-3 from-64rem:px-4 upto-15rem:px-2 upto-15rem:py-2 text-xs font-bold border-b-2 flex upto-15rem:flex-wrap items-center gap-x-2 gap-y-1 transition ${
     active
       ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
       : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
@@ -325,7 +325,7 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
         aria-required="true"
         aria-invalid={errorId ? true : undefined}
         aria-describedby={errorId}
-        className="grow basis-32 min-w-0 text-[11px] border border-red-300 dark:border-red-800 rounded-sm px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-hidden focus:ring-1 focus:ring-red-400"
+        className="grow basis-32 min-w-0 text-[0.6875rem] border border-red-300 dark:border-red-800 rounded-sm px-2 py-1 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-hidden focus:ring-1 focus:ring-red-400"
       />
       {/* DFLT-00207: while submitting the confirm button is aria-disabled, not
           disabled, so the focus the user put on it stays there (a disabled
@@ -340,7 +340,7 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
         disabled={!isSubmitting && draft.trim() === ''}
         aria-disabled={isSubmitting || undefined}
         {...submittingProps(isSubmitting)}
-        className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded-sm text-[11px] font-bold flex items-center gap-1 transition shrink-0 max-w-full wrap-anywhere"
+        className="px-2 py-1 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded-sm text-[0.6875rem] font-bold flex items-center gap-1 transition shrink-0 max-w-full wrap-anywhere"
       >
         {isSubmitting ? (
           <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
@@ -355,7 +355,7 @@ const RejectReasonPrompt: React.FC<RejectReasonPromptProps> = ({
         type="button"
         onClick={onCancel}
         disabled={isSubmitting}
-        className="px-2 py-1 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-50 text-[11px] font-semibold shrink-0 max-w-full wrap-anywhere"
+        className="px-2 py-1 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-50 text-[0.6875rem] font-semibold shrink-0 max-w-full wrap-anywhere"
       >
         {t('ticketItem.approvalGate.cancelReject')}
       </button>
@@ -1158,7 +1158,7 @@ export const TicketItem: React.FC<Props> = ({
         href={href}
         target="_blank"
         rel="noreferrer"
-        className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 text-[11px]"
+        className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 text-[0.6875rem]"
       >
         <ExternalLink aria-hidden="true" className="w-3 h-3" />
         {t('ticketItem.openInNewTab')}
@@ -1181,7 +1181,7 @@ export const TicketItem: React.FC<Props> = ({
     return (
       <a
         href={`/api/artifacts/${artifact.id}/content?download=1`}
-        className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1 text-[11px]"
+        className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1 text-[0.6875rem]"
       >
         <Download aria-hidden="true" className="w-3 h-3" />
         {t('ticketItem.download')}
@@ -2089,7 +2089,7 @@ export const TicketItem: React.FC<Props> = ({
             <div ref={graphPanelRef} className="lg:col-span-4 min-w-0 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col min-h-128">
               <div className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-2 w-full text-left flex items-center justify-between shrink-0 max-lg:flex-wrap max-lg:gap-x-2 max-lg:wrap-anywhere">
                 <span id={graphTitleId} className="max-lg:min-w-0">{t('ticketItem.graphTitle')}</span>
-                <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold">{t('ticketItem.progress', { percent: progressPercent })}</span>
+                <span className="text-[0.625rem] text-indigo-600 dark:text-indigo-400 font-semibold">{t('ticketItem.progress', { percent: progressPercent })}</span>
               </div>
               <div
                 ref={graphScrollRef}
@@ -2232,13 +2232,13 @@ export const TicketItem: React.FC<Props> = ({
               {/* sticky left-0 below lg keeps the hint in view while the
                   graph's box is scrolled sideways (DFLT-00241). */}
               {hasParallelRows && (
-                <div className="w-full mt-2 text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold flex items-center gap-1 shrink-0 max-lg:sticky max-lg:left-0">
+                <div className="w-full mt-2 text-[0.625rem] text-indigo-600 dark:text-indigo-400 font-semibold flex items-center gap-1 shrink-0 max-lg:sticky max-lg:left-0">
                   <Layers aria-hidden="true" className="w-3 h-3" />
                   {t('ticketItem.parallelHint')}
                 </div>
               )}
               </div>
-              <div className="w-full mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400 shrink-0 max-lg:wrap-anywhere">
+              <div className="w-full mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.6875rem] text-slate-500 dark:text-slate-400 shrink-0 max-lg:wrap-anywhere">
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> {t('ticketItem.legend.done')}</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> {t('ticketItem.legend.inProgress')}</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-500" /> {t('ticketItem.legend.review')}</span>
@@ -2299,12 +2299,12 @@ export const TicketItem: React.FC<Props> = ({
                   a real browser (see the tickets' implementation notes). */}
               <div
                 data-testid="ticket-artifact-tabs"
-                className="flex flex-wrap [@media(min-width:80rem)]:flex-nowrap items-center justify-between gap-y-1 border-b border-slate-200 dark:border-slate-800 px-4 upto-15rem:px-2 pb-2 [@media(min-width:80rem)]:pb-0 bg-slate-50 dark:bg-slate-800 shrink-0"
+                className="flex flex-wrap from-80rem:flex-nowrap items-center justify-between gap-y-1 border-b border-slate-200 dark:border-slate-800 px-4 upto-15rem:px-2 pb-2 from-80rem:pb-0 bg-slate-50 dark:bg-slate-800 shrink-0"
               >
               <div
                 role="tablist"
                 aria-label={t('ticketItem.tabListLabel')}
-                className="flex flex-wrap [@media(min-width:64rem)]:flex-nowrap [@media_not_all_and_(min-width:64rem)]:min-w-0"
+                className="flex flex-wrap from-64rem:flex-nowrap below-64rem:min-w-0"
               >
                 {ARTIFACT_TABS.map((tab) => {
                   const selected = activeTab === tab;
@@ -2345,7 +2345,7 @@ export const TicketItem: React.FC<Props> = ({
                       className={artifactTabClass(selected)}
                     >
                       {icon}
-                      <span className="[@media_not_all_and_(min-width:64rem)]:min-w-0 wrap-break-word">{t(`ticketItem.tabs.${tab}`, { count })}</span>
+                      <span className="below-64rem:min-w-0 wrap-break-word">{t(`ticketItem.tabs.${tab}`, { count })}</span>
                     </button>
                   );
                 })}
@@ -2353,7 +2353,7 @@ export const TicketItem: React.FC<Props> = ({
               {ticket.artifacts.length > 0 && (
                 <a
                   href={`/api/tickets/${ticket.id}/artifacts/download`}
-                  className="ml-auto min-w-0 [@media(min-width:64rem)]:shrink-0 flex upto-15rem:flex-wrap items-center gap-1.5 px-3 upto-15rem:px-2 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:border-indigo-400 dark:hover:border-indigo-500 transition"
+                  className="ml-auto min-w-0 from-64rem:shrink-0 flex upto-15rem:flex-wrap items-center gap-1.5 px-3 upto-15rem:px-2 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:border-indigo-400 dark:hover:border-indigo-500 transition"
                   title={t('ticketItem.downloadAllArtifacts')}
                 >
                   <Download aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />
@@ -2487,7 +2487,7 @@ export const TicketItem: React.FC<Props> = ({
                                 but its min-content contribution is 0, so the
                                 left group's min-w-min counts only the other
                                 parts (the id and the badges). */}
-                            <div className="flex items-center gap-2.5 flex-1 min-w-0 [@media(min-width:80rem)]:min-w-min below-80rem:basis-auto below-80rem:flex-wrap below-80rem:gap-y-1.5">
+                            <div className="flex items-center gap-2.5 flex-1 min-w-0 from-80rem:min-w-min below-80rem:basis-auto below-80rem:flex-wrap below-80rem:gap-y-1.5">
                               {/* Named toggle for the node row (DFLT-00152).
                                   No onClick of its own: its click bubbles to
                                   the row's toggleNodeExpand, so it toggles
@@ -2530,7 +2530,7 @@ export const TicketItem: React.FC<Props> = ({
                                 className="shrink-0 below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full"
                                 labelClassName="below-80rem:whitespace-normal below-80rem:wrap-anywhere"
                               />
-                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate min-w-0 [@media(min-width:80rem)]:w-0 [@media(min-width:80rem)]:basis-[content] below-80rem:whitespace-normal below-80rem:wrap-anywhere">
+                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate min-w-0 from-80rem:w-0 from-80rem:basis-[content] below-80rem:whitespace-normal below-80rem:wrap-anywhere">
                                 {node.name}
                               </span>
                               {node.iteration_count > 0 && (
@@ -2544,7 +2544,7 @@ export const TicketItem: React.FC<Props> = ({
                                   other manual node types (e.g. release) to
                                   avoid showing two overlapping badges. */}
                               {node.is_manual && node.type !== 'approval_gate' && (
-                                <span className="text-pink-600 dark:text-pink-400 font-bold text-[0.625rem] px-1.5 py-0.2 border border-pink-300 dark:border-pink-800 bg-pink-50 dark:bg-pink-950 rounded-sm shrink-0 whitespace-nowrap below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:wrap-anywhere">
+                                <span className="text-pink-600 dark:text-pink-400 font-bold text-[0.625rem] px-1.5 border border-pink-300 dark:border-pink-800 bg-pink-50 dark:bg-pink-950 rounded-sm shrink-0 whitespace-nowrap below-80rem:shrink below-80rem:min-w-0 below-80rem:max-w-full below-80rem:whitespace-normal below-80rem:wrap-anywhere">
                                   {t('ticketItem.manualApproval')}
                                 </span>
                               )}
@@ -2590,7 +2590,7 @@ export const TicketItem: React.FC<Props> = ({
                                     aria-disabled={isApprovalSubmitting || undefined}
                                     {...submittingProps(isApprovalSubmitting)}
                                     data-testid={`node-approve-${node.id}`}
-                                    className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded-sm text-[11px] font-bold flex items-center gap-1 transition below-80rem:min-w-0 below-80rem:max-w-full below-80rem:flex-wrap below-80rem:wrap-anywhere upto-15rem:px-1"
+                                    className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-white rounded-sm text-[0.6875rem] font-bold flex items-center gap-1 transition below-80rem:min-w-0 below-80rem:max-w-full below-80rem:flex-wrap below-80rem:wrap-anywhere upto-15rem:px-1"
                                   >
                                     {isApprovalSubmitting ? (
                                       <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin" />
@@ -2609,7 +2609,7 @@ export const TicketItem: React.FC<Props> = ({
                                     aria-disabled={isApprovalSubmitting || undefined}
                                     {...submittingProps(isApprovalSubmitting)}
                                     data-testid={`node-reject-${node.id}`}
-                                    className="px-2 py-1 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800 rounded-sm text-[11px] font-bold flex items-center gap-1 transition below-80rem:min-w-0 below-80rem:max-w-full below-80rem:flex-wrap below-80rem:wrap-anywhere upto-15rem:px-1"
+                                    className="px-2 py-1 bg-white dark:bg-slate-900 hover:bg-red-50 dark:hover:bg-red-950 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed text-red-600 dark:text-red-400 border border-red-300 dark:border-red-800 rounded-sm text-[0.6875rem] font-bold flex items-center gap-1 transition below-80rem:min-w-0 below-80rem:max-w-full below-80rem:flex-wrap below-80rem:wrap-anywhere upto-15rem:px-1"
                                   >
                                     <X aria-hidden="true" className="w-3 h-3" />
                                     {t('ticketItem.approvalGate.reject')}
@@ -2619,7 +2619,7 @@ export const TicketItem: React.FC<Props> = ({
                               )}
                               {getNodeBadge(getDisplayStatus(node))}
                               {/* slate-600 / slate-300 for the hover background (DFLT-00162, see the sequence number above). */}
-                              <span className="text-[11px] text-slate-600 dark:text-slate-300 font-mono whitespace-nowrap">
+                              <span className="text-[0.6875rem] text-slate-600 dark:text-slate-300 font-mono whitespace-nowrap">
                                 {formatTime(node.updated_at, i18n.language)}
                               </span>
                             </div>
@@ -2669,7 +2669,7 @@ export const TicketItem: React.FC<Props> = ({
                             <div
                               id={approvalErrorId(node.id)}
                               role={approvalErrors[node.id].announce ? 'alert' : undefined}
-                              className="px-3 pb-2 -mt-1 text-[11px] text-red-600 dark:text-red-400 font-medium"
+                              className="px-3 pb-2 -mt-1 text-[0.6875rem] text-red-600 dark:text-red-400 font-medium"
                             >
                               {approvalErrors[node.id].message}
                             </div>
@@ -2679,7 +2679,7 @@ export const TicketItem: React.FC<Props> = ({
                           {isNodeExpanded && (
                             <div className="border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 space-y-3">
                               {nodeArtifacts.length === 0 ? (
-                                <div className="text-slate-500 dark:text-slate-400 italic text-[11px]">
+                                <div className="text-slate-500 dark:text-slate-400 italic text-[0.6875rem]">
                                   {t('ticketItem.noArtifactsForNode')}
                                 </div>
                               ) : (
@@ -2694,7 +2694,7 @@ export const TicketItem: React.FC<Props> = ({
                                       </span>
                                       <span className="flex items-center gap-2">
                                         {downloadLink(art)}
-                                        <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-sm">
+                                        <span className="text-[0.625rem] uppercase font-mono px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-sm">
                                           {art.type}
                                         </span>
                                       </span>
@@ -2757,7 +2757,7 @@ export const TicketItem: React.FC<Props> = ({
                             <span>{g.name}</span>
                             <span className="flex items-center gap-3">
                               {openInNewTabLink(g)}
-                              <span className="text-[10px] text-slate-500 dark:text-slate-400">{formatDateTime(g.created_at, i18n.language)}</span>
+                              <span className="text-[0.625rem] text-slate-500 dark:text-slate-400">{formatDateTime(g.created_at, i18n.language)}</span>
                             </span>
                           </div>
                           {g.content && (
@@ -2822,7 +2822,7 @@ export const TicketItem: React.FC<Props> = ({
                             </span>
                             <span className="flex items-center gap-2">
                               {downloadLink(a)}
-                              <span className="text-[10px] px-2 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 uppercase font-mono">
+                              <span className="text-[0.625rem] px-2 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 uppercase font-mono">
                                 {a.type}
                               </span>
                             </span>
@@ -2860,7 +2860,7 @@ export const TicketItem: React.FC<Props> = ({
                           ) : a.type === 'html' ? (
                             <div className="mt-2">{openInNewTabLink(a)}</div>
                           ) : a.content ? (
-                            <pre className="font-mono text-[11px] text-slate-700 dark:text-slate-300 max-h-32 overflow-y-auto whitespace-pre-wrap mt-2 p-2 bg-white dark:bg-slate-900 rounded-sm border border-slate-200 dark:border-slate-700">
+                            <pre className="font-mono text-[0.6875rem] text-slate-700 dark:text-slate-300 max-h-32 overflow-y-auto whitespace-pre-wrap mt-2 p-2 bg-white dark:bg-slate-900 rounded-sm border border-slate-200 dark:border-slate-700">
                               {a.content}
                             </pre>
                           ) : null}
@@ -2977,7 +2977,7 @@ export const TicketItem: React.FC<Props> = ({
             {statusMessage && (
               <div
                 aria-hidden="true"
-                className="mt-3 p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] rounded-lg border border-slate-200 dark:border-slate-700"
+                className="mt-3 p-2.5 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[0.6875rem] rounded-lg border border-slate-200 dark:border-slate-700"
               >
                 {statusMessage}
               </div>

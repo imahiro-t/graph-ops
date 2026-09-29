@@ -8,8 +8,8 @@
 // older Node -- e.g. 20.10 -- vitest 4 and eslint 10 do not work properly:
 // tests using fake timers time out one by one instead of reporting anything
 // about the Node version. check-local-deps.js calls this check first, so
-// packages/web's prelint / pretest / prebuild stop here with the required and
-// the current version side by side.
+// packages/web's prelint / pretest / prebuild / predev / pretest:watch stop
+// here with the required and the current version side by side.
 //
 // Only the development requirement lives here. What end users need to RUN the
 // plugin (node on PATH, see README "Requirements") is unrelated and unchanged.
@@ -119,7 +119,7 @@ function checkNodeVersion(options) {
     '',
     'The requirement is declared as engines.node in package.json and in .nvmrc; CI uses the same',
     `Node.js ${minimum.major}. On an older Node.js, vitest 4 and eslint 10 fail in confusing ways (e.g. tests`,
-    'using fake timers time out), so lint / test / build stop here instead.',
+    'using fake timers time out), so lint / test / build / dev / test:watch stop here instead.',
     'This is only the development requirement; running the GraphOps plugin itself is unaffected.'
   );
   return { ok: false, message: lines.join('\n') };

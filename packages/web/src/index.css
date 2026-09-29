@@ -18,20 +18,38 @@
    page's html font-size.) */
 @custom-variant narrow (@media (width < 48rem));
 
-/* DFLT-00260: named rem media-query variants. They replace the arbitrary
-   [@media_not_all_and_(min-width:80rem)]: and [@media(max-width:15rem)]:
+/* DFLT-00260 / DFLT-00281: named rem media-query variants. They replace
+   the arbitrary [@media_not_all_and_(min-width:80rem)]:,
+   [@media(max-width:15rem)]: (DFLT-00260), [@media_not_all_and_(min-width:64rem)]:,
+   [@media(min-width:64rem)]: and [@media(min-width:80rem)]: (DFLT-00281)
    prefixes with the same media conditions. rem, not px, so the breakpoints
    follow the browser's default font size (DFLT-00253).
    Ordering caveat: when two variants set the same property on one element
-   the one emitted later in the CSS wins. These come out after the core
-   screen variants (sm:, max-sm:, max-lg:, ...), below-80rem before
-   upto-15rem, and before @container variants -- the same places the
-   arbitrary prefixes had. So `below-80rem:gap-x-3 upto-15rem:gap-x-1` gives
-   gap-x-1 at 15rem and below, and `max-sm:p-3 upto-15rem:p-2` gives p-2
-   there, but an [@container(...)]: variant on the same property wins over
-   both. tailwindVariants.test.ts pins this order down. */
+   the one emitted later in the CSS wins. The order is: the core screen
+   variants (sm:, max-sm:, max-lg:, ...), narrow:, then these in the order
+   they are declared here (below-80rem, upto-15rem, below-64rem, from-64rem,
+   from-80rem), and only then every arbitrary variant ([@container(...)]:,
+   [@media(max-width:200px)]:, ...). So `below-80rem:gap-x-3
+   upto-15rem:gap-x-1` gives gap-x-1 at 15rem and below, and
+   `max-sm:p-3 upto-15rem:p-2` gives p-2 there, but an arbitrary variant on
+   the same property wins over all of them.
+   That last point is where naming a variant changes the result: an
+   arbitrary prefix was emitted among the other arbitrary ones (after the
+   [@container(...)]: variants), a named one comes out before all of them.
+   below-80rem / upto-15rem have been ahead of @container since DFLT-00260;
+   below-64rem / from-64rem / from-80rem moved ahead of @container in
+   DFLT-00281, and from-64rem / from-80rem also moved ahead of
+   [@media(max-width:200px)]: (below-64rem already was). No element sets
+   the same property through one of these and an arbitrary variant at the
+   moment (below-64rem / from-64rem / from-80rem are only used in
+   TicketItem.tsx, which uses [@media(max-width:200px)]: only for p-2 and
+   no [@container(...)]: at all), so nothing renders differently.
+   tailwindVariants.test.ts pins this order down. */
 @custom-variant below-80rem (@media not all and (min-width: 80rem));
 @custom-variant upto-15rem (@media (max-width: 15rem));
+@custom-variant below-64rem (@media not all and (min-width: 64rem));
+@custom-variant from-64rem (@media (min-width: 64rem));
+@custom-variant from-80rem (@media (min-width: 80rem));
 
 /* v3 values, pinned: breakpoints, text line heights and the color palette.
    v4 redefines the default colors in OKLCH, and they differ slightly from
