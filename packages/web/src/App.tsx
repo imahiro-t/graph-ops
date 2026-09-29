@@ -1250,8 +1250,13 @@ export const App: React.FC = () => {
           tooltip (hover and keyboard focus) is on only at that width
           (isTinyWindow, the same query in script), so the label can still
           be read; the language button always had its tooltip, and the
-          switcher's tooltip gives the project name. Wider than 200px they
-          look and behave as before. The
+          switcher's tooltip gives the project name. DFLT-00307: at that
+          width those four buttons (the switcher, Launch Claude, language,
+          New Ticket) also open their tooltip on a touch long press
+          (longPressTooltip), as a touch neither hovers nor moves keyboard
+          focus; a tap still runs the button at once. Theme and settings,
+          icon-only at every width, are left as they are. Wider than 200px
+          they look and behave as before. The
           "updated" row does not wrap: its time shrinks and wraps inside
           itself next to the refresh button, as it already did in English
           at 320-328px with a 32px root (letting the row wrap moved the time
@@ -1321,6 +1326,7 @@ export const App: React.FC = () => {
                 nameFromContent
                 tooltip={projectSwitcherTooltip}
                 tooltipDisabled={isProjectMenuOpen || (!currentProject && !isTinyWindow)}
+                longPressTooltip={isTinyWindow}
                 aria-describedby={currentProject ? projectSwitcherDescriptionId : undefined}
                 wrapperClassName="min-w-0 max-w-full"
                 onClick={toggleProjectMenu}
@@ -1452,6 +1458,7 @@ export const App: React.FC = () => {
               nameFromContent
               label={t('header.launchClaude')}
               tooltipDisabled={!isTinyWindow}
+              longPressTooltip={isTinyWindow}
               wrapperClassName="min-w-0 max-w-full"
               onClick={() => setIsClaudeGlobalOpen(true)}
               className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold text-indigo-700 dark:text-indigo-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 upto-200px:px-2 transition min-w-0 max-w-full"
@@ -1468,6 +1475,7 @@ export const App: React.FC = () => {
             <IconButton
               onClick={() => i18n.changeLanguage(currentLanguage === 'ja' ? 'en' : 'ja')}
               label={t('header.language.toggleTitle', { lang: t(`header.language.${currentLanguage}`) })}
+              longPressTooltip={isTinyWindow}
               wrapperClassName="min-w-0 max-w-full"
               className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700 transition flex items-center gap-1.5 min-w-0 max-w-full"
             >
@@ -1507,13 +1515,25 @@ export const App: React.FC = () => {
                   focus, so that tooltip opens on hover only -- the same
                   limit the title always had. aria-disabled (focusable)
                   would add a stop to the header's Tab order at every width,
-                  so it is not used. */}
+                  so it is not used.
+                - DFLT-00307: at 200px or less a touch long press opens that
+                  tooltip too (longPressTooltip), and while the button is
+                  disabled there it takes pointer-events-none, so every
+                  pointer event lands on IconButton's wrapper <span>, which
+                  runs the long press. Browsers differ in which events a
+                  natively disabled button gets (iOS Safari, Android and
+                  Firefox could not all be checked), and this does not
+                  depend on any of them. Nothing is lost: a disabled button
+                  takes no click anyway, has no title at that width, and
+                  its hover is tracked on the wrapper as well. Wider, or
+                  with a project, the class is not added. */}
             <IconButton
               ref={newTicketButtonRef}
               nameFromContent
               label={newTicketLabel}
               tooltip={newTicketTooltip}
               tooltipDisabled={!isTinyWindow}
+              longPressTooltip={isTinyWindow}
               wrapperClassName="min-w-0 max-w-full"
               onClick={() => {
                 // Clear any leftover status message from a previous create
@@ -1527,7 +1547,7 @@ export const App: React.FC = () => {
               disabled={!currentProject}
               title={isTinyWindow ? undefined : newTicketDisabledReason}
               aria-describedby={newTicketDisabledReason === undefined ? undefined : newTicketDescriptionId}
-              className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 upto-200px:px-2 transition min-w-0 max-w-full"
+              className={`px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs font-semibold flex items-center gap-1.5 upto-200px:px-2 transition min-w-0 max-w-full ${isTinyWindow && !currentProject ? 'pointer-events-none' : ''}`}
             >
               <Plus aria-hidden="true" className="w-4 h-4 shrink-0" />
               <span className="min-w-0 wrap-anywhere upto-200px:sr-only">{newTicketLabel}</span>
