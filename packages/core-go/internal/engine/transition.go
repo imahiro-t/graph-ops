@@ -74,7 +74,10 @@ func (e *GraphEngine) applyTransition(ticketID string, t store.NodeTransition) (
 // Applied means what it means on the atomic path: a step's conditions held
 // (on the fresh read) and its writes, if any, were made. A step that writes
 // nothing is only a check -- a required one was checked above, before any
-// write; any other is checked on a fresh read where it stands.
+// write; any other is checked on a fresh read where it stands, that is after
+// the writes of the steps before it (the atomic path judges every step on
+// the state before any write, so the two can differ only when one node has
+// both a write and such a check, which no caller does today).
 func (e *GraphEngine) applyNodeTransitionSequential(ticketID string, t store.NodeTransition) (store.NodeTransitionResult, error) {
 	if err := t.Validate(ticketID); err != nil {
 		return store.NodeTransitionResult{}, err

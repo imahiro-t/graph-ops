@@ -394,6 +394,11 @@ func applyNodeTransitionSQL(db *sql.DB, d sqlDialect, ticketID string, t NodeTra
 		nodes[id] = n
 	}
 
+	// The spec asks a plugin to advance updated_at past the previous value
+	// when the clock would repeat it. This does not: writes to one ticket's
+	// nodes are serialized by the ticket row lock and the clock has
+	// nanosecond (macOS: microsecond) resolution, so a repeat is not
+	// expected in practice.
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	applied := make([]bool, len(t.Steps))
 	for i, st := range t.Steps {
