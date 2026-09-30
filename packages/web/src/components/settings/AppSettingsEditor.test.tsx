@@ -205,6 +205,9 @@ describe('AppSettingsEditor', () => {
       await waitFor(() => expect(document.activeElement).not.toBe(document.body));
       expect(document.activeElement).toHaveAttribute('tabindex', '-1');
       expect(document.activeElement).toContainElement(screen.getByText(i18n.t('settings.appSettings.storage.title')));
+      // ...which is a named group, so a screen reader says what appeared.
+      expect(document.activeElement).toHaveAccessibleName(i18n.t('settings.tabs.appSettings'));
+      expect(document.activeElement).toBe(screen.getByRole('group', { name: i18n.t('settings.tabs.appSettings') }));
     });
 
     it('keeps the error, the retry button and the focus on it when the retry fails again', async () => {
