@@ -22,6 +22,8 @@ import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/f
 import { IconButton } from '../IconButton';
 import { submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
+import { LoadFailure, useFocusAfterRetry } from './LoadFailure';
+import { LoadingLine } from './LoadingLine';
 import { CHECKBOX_FOCUS_CLASS } from '../checkboxFocus';
 import { Spinner } from '../Spinner';
 
@@ -193,7 +195,17 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // editing or save with values that are not the stored ones.
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // A failed save (or the re-fetch that follows a save) and the empty-ID
+  // validation error, shown above the form without hiding it.
   const [error, setError] = useState('');
+  // Why the gates could not be loaded, '' once they have been (DFLT-00350).
+  // While this is set the form is not drawn at all -- it would hold empty or
+  // default rows, and saving them would overwrite the stored gates -- and
+  // LoadFailure takes its place. The re-fetch after a save does not go
+  // through load() and is not a load failure: the rows on screen are what
+  // was just saved, so its failure stays in `error`.
+  const [loadError, setLoadError] = useState('');
+  const [loadFailures, setLoadFailures] = useState(0);
   // True while `error` is the empty-ID validation error, so the rows whose ID
   // is (still) empty can be marked invalid and point at the message.
   const [emptyIdErrorShown, setEmptyIdErrorShown] = useState(false);
@@ -279,21 +291,36 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     setWarnings(fetched.warnings);
   }, []);
 
-  const load = useCallback(async () => {
+  // Resolves to whether the gates were loaded.
+  const load = useCallback(async (): Promise<boolean> => {
     clearDeleteNotice();
     setLoading(true);
     setError('');
     setEmptyIdErrorShown(false);
     try {
       applyFetched(await fetchRows());
+      setLoadError('');
+      return true;
     } catch (e) {
-      setError(errorMessage(e, tRef.current('errors.UNKNOWN')));
+      setLoadError(errorMessage(e, tRef.current('errors.UNKNOWN')));
+      setLoadFailures(n => n + 1);
+      return false;
     } finally {
       setLoading(false);
     }
   }, [fetchRows, applyFetched, tRef, clearDeleteNotice]);
 
   useEffect(() => { load(); }, [load]);
+
+  // After a successful retry focus moves to the form's container (see
+  // useFocusAfterRetry): the focused retry button is gone.
+  const focusFormAfterRetry = useFocusAfterRetry(() => containerRef.current);
+  // While the load has failed, `loading` is true only during a retry (load()
+  // runs on mount and from here), so it is what LoadFailure shows as
+  // `retrying`; LoadFailure itself ignores clicks while it is.
+  const retryLoad = async () => {
+    if (await load()) focusFormAfterRetry();
+  };
 
   // Editing any field on a not-yet-overridden default row is what actually
   // creates its override -- see GateRow's doc comment.
@@ -405,16 +432,29 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // Every row's preview toggle shows this text and starts its name with it.
   const previewLabel = t('settings.reviewGates.mergedPreviewLabel');
 
-  if (loading) {
+  // Checked before `loading` (see LoadFailure): a retry keeps this view (and
+  // the focused retry button) until its result is in. Only the intro stays
+  // with it -- no rows, iteration limit, save or "Add Review Gate".
+  if (loadError) {
     return (
-      <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
-        <Spinner className="w-4 h-4" /> {t('settings.common.loading')}
+      <div className="flex flex-col gap-3">
+        <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.intro')}</p>
+        <LoadFailure
+          message={t('settings.common.loadFailed', { message: loadError })}
+          retrying={loading}
+          onRetry={() => void retryLoad()}
+          failureKey={loadFailures}
+        />
       </div>
     );
   }
 
+  if (loading) return <LoadingLine />;
+
   return (
-    <div ref={containerRef} className="flex flex-col gap-3 h-full min-h-0 narrow:h-auto">
+    // tabIndex -1: where focus goes after a successful retry. No outline: it
+    // is not a control.
+    <div ref={containerRef} tabIndex={-1} className="flex flex-col gap-3 h-full min-h-0 narrow:h-auto focus:outline-hidden">
       <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.intro')}</p>
       {error && <ErrorBox id={errorId} role="alert" className="p-2.5 text-[0.6875rem] whitespace-pre-wrap">{error}</ErrorBox>}
 

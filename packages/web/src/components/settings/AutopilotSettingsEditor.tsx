@@ -10,7 +10,7 @@
 // (AUTOPILOT_SETTING_LOCKED), so sending it would fail every save. Values are
 // not validated here -- the server's single validation is the one that
 // counts, and its 400 is shown translated.
-import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, CheckCircle2, Lock, RotateCcw, Save } from 'lucide-react';
 import { StatusLiveRegion } from '../StatusLiveRegion';
@@ -29,6 +29,8 @@ import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 import { submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
+import { LoadFailure, useFocusAfterRetry } from './LoadFailure';
+import { LoadingLine } from './LoadingLine';
 import { Spinner } from '../Spinner';
 
 interface Props {
@@ -91,13 +93,27 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
   const idPrefix = useId();
   const [data, setData] = useState<AutopilotSettingsResponse | null>(null);
   const [draft, setDraft] = useState<Draft>({});
-  // Starts true whenever there is a project to load for: the first render
-  // then already shows the loading line, so the settings are never drawn with
-  // their defaults for a frame before load() runs (DFLT-00323, DFLT-00343).
-  // With no project the component returns the noProject message and never
-  // loads, so there is nothing to wait for.
-  const [loading, setLoading] = useState(projectId !== '');
+  // The project whose settings are in `data`, '' while none is. Set only by
+  // a successful load for the latest request, and cleared when a load
+  // starts, so `loadedProjectId !== projectId` means "this project's
+  // settings are not in yet": the first render, and the one right after
+  // projectId changes (before the effect has started the next load), show
+  // the loading line rather than the defaults or the previous project's
+  // rows, warnings and team file (DFLT-00323, DFLT-00343, DFLT-00350).
+  const [loadedProjectId, setLoadedProjectId] = useState('');
+  // The project the latest load was started for: an answer (success or
+  // failure) for any other project is dropped, and so is a save's answer
+  // once the project has changed under it.
+  const requestedProjectIdRef = useRef('');
+  // Why the settings could not be loaded, with the project it belongs to:
+  // shown (in place of the form, with a retry button) only while that
+  // project is the current one. A retry leaves it until its result is in.
+  const [loadError, setLoadError] = useState<{ projectId: string; message: string } | null>(null);
+  const [loadFailures, setLoadFailures] = useState(0);
+  // The project a retry is running for (see loadError).
+  const [retryingFor, setRetryingFor] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // A failed save, shown above the form.
   const [error, setError] = useState('');
   const { savedFlash, showSavedFlash } = useSavedFlash();
 
@@ -125,28 +141,56 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
     setDraft(draftFrom(res.items));
   }, []);
 
-  const load = useCallback(async () => {
-    if (!projectId) return;
-    setLoading(true);
+  // Resolves to whether the settings were loaded (for the latest request).
+  // retry: the same project's load again after a failure, which keeps the
+  // failure on screen until its result is in.
+  const load = useCallback(async (retry = false): Promise<boolean> => {
+    requestedProjectIdRef.current = projectId;
+    if (!projectId) return false;
+    setLoadedProjectId('');
+    if (!retry) setLoadError(null);
     setError('');
     try {
-      apply(await fetchAutopilotSettings(tRef.current, projectId));
+      const res = await fetchAutopilotSettings(tRef.current, projectId);
+      if (requestedProjectIdRef.current !== projectId) return false;
+      apply(res);
+      setLoadedProjectId(projectId);
+      setLoadError(null);
+      return true;
     } catch (e) {
-      setError(errorMessage(e, tRef.current('errors.UNKNOWN')));
-    } finally {
-      setLoading(false);
+      if (requestedProjectIdRef.current !== projectId) return false;
+      setLoadError({ projectId, message: errorMessage(e, tRef.current('errors.UNKNOWN')) });
+      setLoadFailures(n => n + 1);
+      return false;
     }
   }, [projectId, tRef, apply]);
 
   useEffect(() => { load(); }, [load]);
 
+  const rowsRef = useRef<HTMLDivElement>(null);
+  const focusRowsAfterRetry = useFocusAfterRetry(() => rowsRef.current);
+  const retryLoad = async () => {
+    const retryProject = projectId;
+    setRetryingFor(retryProject);
+    const ok = await load(true);
+    setRetryingFor(prev => (prev === retryProject ? null : prev));
+    if (ok) focusRowsAfterRetry();
+  };
+
   const handleSave = async () => {
+    // The answer is only used while the same project is shown: once the
+    // project has changed, applying it would put the old project's settings
+    // (or its error) in the new one's form.
+    const savingFor = projectId;
     setSaving(true);
     setError('');
     try {
-      apply(await saveAutopilotSettings(t, projectId, patch));
+      const res = await saveAutopilotSettings(t, savingFor, patch);
+      if (requestedProjectIdRef.current !== savingFor) return;
+      apply(res);
       showSavedFlash();
     } catch (e) {
+      if (requestedProjectIdRef.current !== savingFor) return;
       setError(errorMessage(e, t('errors.UNKNOWN')));
     } finally {
       setSaving(false);
@@ -238,6 +282,12 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
     return it.locked ? it.value : (draft.permissionMode ?? it.default);
   })();
 
+  // In this order (see LoadFailure): the current project's load failure,
+  // then loading, then the form. A failed load never sets loadedProjectId,
+  // so the loading test would otherwise hide the failure for good.
+  const failed = loadError !== null && loadError.projectId === projectId;
+  const loaded = !failed && loadedProjectId === projectId;
+
   return (
     <div className="h-full min-h-0 overflow-y-auto flex flex-col gap-3 narrow:h-auto narrow:overflow-visible">
       <div>
@@ -245,34 +295,45 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
           {t('settings.autopilot.title', { project: projectName || projectId })}
         </h3>
         <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400 mt-1">{t('settings.autopilot.description')}</p>
-        {data?.team_file && (
+        {loaded && data?.team_file && (
           <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400 mt-1 wrap-anywhere">
             {t('settings.autopilot.teamFile', { path: data.team_file })}
           </p>
         )}
       </div>
 
-      {error && (
-        <ErrorBox role="alert" className="p-2.5 text-[0.6875rem]">
-          {error}
-        </ErrorBox>
-      )}
-
-      {data && data.warnings.length > 0 && (
-        <ul className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-200 text-[0.6875rem] rounded-lg border border-amber-200 dark:border-amber-900 list-disc pl-6">
-          {data.warnings.map((w, i) => (
-            <li key={`${w.code}-${w.source ?? ''}-${w.key ?? ''}-${i}`}>{warningText(w)}</li>
-          ))}
-        </ul>
-      )}
-
-      {loading && !data ? (
-        <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs py-8 justify-center">
-          <Spinner className="w-4 h-4" /> {t('settings.common.loading')}
-        </div>
+      {failed ? (
+        <LoadFailure
+          message={t('settings.common.loadFailed', { message: loadError.message })}
+          retrying={retryingFor === projectId}
+          onRetry={() => void retryLoad()}
+          failureKey={loadFailures}
+        />
+      ) : !loaded ? (
+        <LoadingLine />
       ) : (
         <>
-          <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg">
+          {error && (
+            <ErrorBox role="alert" className="p-2.5 text-[0.6875rem]">
+              {error}
+            </ErrorBox>
+          )}
+
+          {data && data.warnings.length > 0 && (
+            <ul className="p-2.5 bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-200 text-[0.6875rem] rounded-lg border border-amber-200 dark:border-amber-900 list-disc pl-6">
+              {data.warnings.map((w, i) => (
+                <li key={`${w.code}-${w.source ?? ''}-${w.key ?? ''}-${i}`}>{warningText(w)}</li>
+              ))}
+            </ul>
+          )}
+
+          {/* tabIndex -1 and the ref: where focus goes after a successful
+              retry. No outline: it is not a control. */}
+          <div
+            ref={rowsRef}
+            tabIndex={-1}
+            className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg focus:outline-hidden"
+          >
             {items.map(it => {
               const inputId = `${idPrefix}-${it.key}`;
               const hintId = `${inputId}-hint`;
