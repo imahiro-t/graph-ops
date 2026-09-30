@@ -112,7 +112,13 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
   const [loadFailures, setLoadFailures] = useState(0);
   // The project a retry is running for (see loadError).
   const [retryingFor, setRetryingFor] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  // How many saves are running, per project. The form and buttons are busy
+  // only while the shown project has one of its own: a save for another
+  // project leaves them alone, and switching away and back while a save is
+  // still running shows it busy again, so a second save of the same project
+  // cannot start (and be overwritten by the first one's answer) meanwhile.
+  const [savesRunning, setSavesRunning] = useState<Record<string, number>>({});
+  const saving = (savesRunning[projectId] ?? 0) > 0;
   // A failed save, shown above the form.
   const [error, setError] = useState('');
   const { savedFlash, showSavedFlash } = useSavedFlash();
@@ -181,19 +187,24 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
     // The answer is only used while the same project is shown: once the
     // project has changed, applying it would put the old project's settings
     // (or its error) in the new one's form.
-    const savingFor = projectId;
-    setSaving(true);
+    const saveProject = projectId;
+    setSavesRunning(prev => ({ ...prev, [saveProject]: (prev[saveProject] ?? 0) + 1 }));
     setError('');
     try {
-      const res = await saveAutopilotSettings(t, savingFor, patch);
-      if (requestedProjectIdRef.current !== savingFor) return;
+      const res = await saveAutopilotSettings(t, saveProject, patch);
+      if (requestedProjectIdRef.current !== saveProject) return;
       apply(res);
       showSavedFlash();
     } catch (e) {
-      if (requestedProjectIdRef.current !== savingFor) return;
+      if (requestedProjectIdRef.current !== saveProject) return;
       setError(errorMessage(e, t('errors.UNKNOWN')));
     } finally {
-      setSaving(false);
+      // Only this save's own count: a save started since (for another
+      // project) stays busy until its own answer is in.
+      setSavesRunning(prev => {
+        const { [saveProject]: running = 0, ...rest } = prev;
+        return running > 1 ? { ...rest, [saveProject]: running - 1 } : rest;
+      });
     }
   };
 
