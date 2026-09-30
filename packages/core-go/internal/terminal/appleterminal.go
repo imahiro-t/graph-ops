@@ -692,8 +692,9 @@ var tabRetryableError = regexp.MustCompile(`\((` + strings.Join([]string{
 // TabPhaseSystemEventsOK on, both permissions are granted, so a timeout is
 // Terminal answering slowly: it does not disable the tab by itself, and
 // the runner disables it after runner.MaxSlowTabTimeouts of them in a row
-// (TabFailure.SlowTimeout). Before DFLT-00361 every timeout disabled the tab, so one
-// slow moment in a long run sent all its later sessions to new windows.
+// (TabFailure.SlowTimeout). Before DFLT-00361 every timeout disabled the
+// tab, so one slow moment in a long run sent all its later sessions to new
+// windows.
 //
 // Otherwise it is an allow list: only the script's own quick errors
 // (9101-9104) keep the tab for the next launch; everything else -- a missing
