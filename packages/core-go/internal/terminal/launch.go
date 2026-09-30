@@ -134,8 +134,47 @@ type LaunchOutcome struct {
 	// launches of the same run should not try a tab again. The quick,
 	// passing failures -- a window that could not be found, a tab that did
 	// not appear, Terminal not coming to the front, more than one new tab
-	// at once, another process still opening a tab -- leave it false.
+	// at once, another process still opening a tab -- leave it false, and
+	// so does a timeout after Terminal and System Events both answered
+	// (TabFailure.SlowTimeout), which the caller counts instead.
 	DisableTab bool
+	// TabFailure details the failure when TabError is set (DFLT-00361), so
+	// the caller can record why each launch fell back to a new window.
+	TabFailure *TabFailure
+}
+
+// Kinds of tab failure (TabFailure.Kind).
+const (
+	// TabFailureScriptError: osascript ended with an error (the script's
+	// own 9101-9104, a missing permission, osascript not runnable, ...).
+	TabFailureScriptError = "script-error"
+	// TabFailureTimeout: osascript was killed on tabScriptTimeout.
+	TabFailureTimeout = "timeout"
+	// TabFailureLockBusy: other graph-ops processes kept the tab lock for
+	// all of tabLockWait, so the script never ran.
+	TabFailureLockBusy = "lock-busy"
+)
+
+// TabFailure is why one launch's tab could not be opened.
+type TabFailure struct {
+	// Kind is one of the TabFailure* kinds.
+	Kind string
+	// Phase is the last phase the script logged (the TabPhase* constants),
+	// "" when it logged none or never ran.
+	Phase string
+	// KeystrokeSent: Cmd+T had been sent, so a new tab may have been left
+	// empty (Phase is TabPhaseKeystrokeSent or later).
+	KeystrokeSent bool
+	// ErrorNumber is the number osascript reported with its error, 0 when
+	// there was none (a timeout, lock-busy, osascript not runnable).
+	ErrorNumber int
+}
+
+// SlowTimeout reports whether f is a timeout after Terminal and System
+// Events both answered (TabPhaseSystemEventsOK or later): Terminal
+// answering slowly rather than a permission prompt nobody answers.
+func (f *TabFailure) SlowTimeout() bool {
+	return f != nil && f.Kind == TabFailureTimeout && tabPhaseRank(f.Phase) >= tabPhaseRank(TabPhaseSystemEventsOK)
 }
 
 // LaunchWithOptions is LaunchWithArgs with the autopilot's options. The

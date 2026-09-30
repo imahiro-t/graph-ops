@@ -311,9 +311,10 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 		"frontID is targetID",
 		`keystroke "t" using command down`,
 		"knownTTYs does not contain v",
-		"if tty of t is newTTY then",
+		"set newID to my windowOfTTY(newTTY)",
+		"first tab of window id newID whose tty is newTTY",
 		"set targetBounds to bounds of window id targetID",
-		"newBounds is targetBounds",
+		"my sameWindowBounds(targetBounds, newBounds)",
 		"if not sameWindow then error",
 		"number 9101",
 		"number 9102",
@@ -350,7 +351,7 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 		"knownTTYs does not contain v",
 		"number 9104",
 		"number 9102",
-		"newBounds is targetBounds",
+		"my sameWindowBounds(targetBounds, newBounds)",
 		"if not sameWindow then error",
 		"do script",
 	}
@@ -362,8 +363,8 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 		}
 		last = i
 	}
-	if strings.Count(script, "keystroke") != 1 {
-		t.Error("keystroke must appear exactly once")
+	if strings.Count(script, "keystroke \"t\"") != 1 || strings.Count(script, "keystroke") != 2 {
+		t.Error("the keystroke must be sent exactly once (the other mention is the keystroke-sent phase)")
 	}
 	// Timing (DFLT-00269): 0.2 seconds between the front check and Cmd+T,
 	// the new tab polled every 0.2 seconds for 30 rounds (about 6 seconds),
@@ -389,8 +390,8 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 	if tabWait := between("repeat 30 times", "number 9102"); !strings.Contains(tabWait, "delay 0.2") || strings.Contains(tabWait, "delay 0.1") {
 		t.Errorf("the new tab must be polled every 0.2 seconds, 30 times; the loop is %q", tabWait)
 	}
-	if bounds := between("repeat 10 times", "if not sameWindow then error"); !strings.Contains(bounds, "delay 0.1") || strings.Contains(bounds, "delay 0.2") {
-		t.Error("the bounds check must keep polling every 0.1 seconds")
+	if bounds := between("set sameWindow to false", "if not sameWindow then error"); !strings.Contains(bounds, "repeat 20 times") || !strings.Contains(bounds, "delay 0.1") || strings.Contains(bounds, "delay 0.2") {
+		t.Error("the bounds check must poll every 0.1 seconds for 20 rounds (about 2 seconds)")
 	}
 	lines := strings.Split(strings.TrimSpace(script), "\n")
 	if len(lines) < 2 || strings.TrimSpace(lines[len(lines)-1]) != "end run" ||
@@ -404,7 +405,7 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 		t.Error("the Go constants must match the script's error numbers")
 	}
 	for _, n := range []int{tabErrWindowNotFound, tabErrTabNotOpened, tabErrNotFrontmost, tabErrNewTabAmbiguous} {
-		if classifyTabFailure(false, fmt.Sprintf("execution error: x (%d)", n)) {
+		if classifyTabFailure(false, TabPhaseKeystrokeSent, fmt.Sprintf("execution error: x (%d)", n)) {
 			t.Errorf("error %d must be retryable", n)
 		}
 	}
@@ -441,7 +442,7 @@ func TestClassifyTabFailure_FrontmostLoopRethrow(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := classifyTabFailure(false, tc.msg); got != tc.wantDisable {
+			if got := classifyTabFailure(false, TabPhaseSystemEventsOK, tc.msg); got != tc.wantDisable {
 				t.Fatalf("classifyTabFailure(%q) = %v, want %v", tc.msg, got, tc.wantDisable)
 			}
 		})
@@ -552,6 +553,9 @@ func TestLaunchWithOptions_TabLockBusyFallsBack(t *testing.T) {
 	}
 	if out.UsedTab || out.DisableTab || !strings.Contains(out.TabError, "other graph-ops processes kept the Terminal tab lock") {
 		t.Fatalf("outcome = %+v, want a retryable fallback naming the lock", out)
+	}
+	if f := out.TabFailure; f == nil || *f != (TabFailure{Kind: TabFailureLockBusy}) || f.SlowTimeout() {
+		t.Fatalf("failure = %+v, want lock-busy with no phase, no error number and no Cmd+T", f)
 	}
 	if len(*calls) != 1 {
 		t.Fatalf("calls = %+v, want only open", *calls)

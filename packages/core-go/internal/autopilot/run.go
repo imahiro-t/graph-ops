@@ -138,6 +138,18 @@ type Run struct {
 	// opens its sessions in new windows without trying a tab. Cleared by the
 	// same starts that set TerminalTTY.
 	TerminalTabDisabled string `json:"terminal_tab_disabled,omitempty"`
+	// TerminalTabSlowTimeouts counts the tab launches in a row that timed
+	// out after Terminal and System Events both answered (Terminal
+	// answering slowly, DFLT-00361): the one that makes it
+	// runner.MaxSlowTabTimeouts disables the tab. Only a tab that opens
+	// resets it; other failures leave it as it is. Cleared by the same
+	// starts that set TerminalTTY.
+	TerminalTabSlowTimeouts int `json:"terminal_tab_slow_timeouts,omitempty"`
+	// TerminalTabFailures keeps why each launch that tried a tab fell back
+	// to a new window, oldest first, at most MaxTabFailureRecords of them
+	// (DFLT-00361). Starts leave it as it is, so the history spans the
+	// run's orchestrators.
+	TerminalTabFailures []TabFailureRecord `json:"terminal_tab_failures,omitempty"`
 	// StartedBy is who started the run, or last took it over or adopted it
 	// (DFLT-00326): the name other members see, and the machine that alone
 	// may take the run over. nil in a run file written before DFLT-00326,
@@ -165,6 +177,41 @@ type StartedBy struct {
 	// MachineID is the starting machine's ID: only that machine takes the
 	// run over.
 	MachineID string `json:"machine_id,omitempty"`
+}
+
+// TabFailureRecord is one launch whose Terminal.app tab could not be
+// opened (Run.TerminalTabFailures). The fields mirror terminal.TabFailure,
+// which this package cannot import.
+type TabFailureRecord struct {
+	At       time.Time `json:"at"`
+	TicketID string    `json:"ticket_id"`
+	Role     string    `json:"role"`
+	// Kind is script-error, timeout or lock-busy (the tab lock stayed busy,
+	// so no script ran).
+	Kind string `json:"kind,omitempty"`
+	// ErrorNumber is osascript's error number, when it reported one.
+	ErrorNumber int `json:"error_number,omitempty"`
+	// Message is the launch's TabError (at most about 300 characters).
+	Message string `json:"message"`
+	// Phase is the last phase the tab script reached ("" for none).
+	Phase string `json:"phase,omitempty"`
+	// KeystrokeSent: Cmd+T had been sent, so a new tab may have been left
+	// empty.
+	KeystrokeSent bool `json:"keystroke_sent"`
+	// DisabledRun: this failure disabled the tab for the rest of the run.
+	DisabledRun bool `json:"disabled_run"`
+}
+
+// MaxTabFailureRecords bounds Run.TerminalTabFailures.
+const MaxTabFailureRecords = 50
+
+// RecordTabFailure appends rec to the run's tab failures, dropping the
+// oldest beyond MaxTabFailureRecords.
+func (r *Run) RecordTabFailure(rec TabFailureRecord) {
+	r.TerminalTabFailures = append(r.TerminalTabFailures, rec)
+	if n := len(r.TerminalTabFailures) - MaxTabFailureRecords; n > 0 {
+		r.TerminalTabFailures = append([]TabFailureRecord(nil), r.TerminalTabFailures[n:]...)
+	}
 }
 
 // Reservation remembers what a reservation replaced.

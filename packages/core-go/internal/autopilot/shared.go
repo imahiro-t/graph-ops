@@ -158,7 +158,7 @@ func ResetSharedErrorLog() {
 
 // SharedView returns a deep copy of r without what only means something on
 // this machine: the terminal tab it drives (TerminalTTY,
-// TerminalTabDisabled), the JSON a reservation keeps to undo itself
+// TerminalTabDisabled, TerminalTabSlowTimeouts, TerminalTabFailures), the JSON a reservation keeps to undo itself
 // (Reservation.Previous), and each ticket's worktree, branch names and
 // fingerprints.
 func (r *Run) SharedView() (*Run, error) {
@@ -183,6 +183,7 @@ func (r *Run) SharedView() (*Run, error) {
 // record is ever used to rebuild a local run, this needs another look.
 func (r *Run) dropLocalOnly() {
 	r.TerminalTTY, r.TerminalTabDisabled = "", ""
+	r.TerminalTabSlowTimeouts, r.TerminalTabFailures = 0, nil
 	if r.Reservation != nil {
 		r.Reservation.Previous = nil
 	}
