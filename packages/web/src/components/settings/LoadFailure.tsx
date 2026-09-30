@@ -34,6 +34,16 @@ import { focusIfLost } from '../../lib/focusAfterRemoval';
 import { ErrorBox } from './ErrorBox';
 import { Spinner } from '../Spinner';
 
+// A load failure as the hooks that own one (useListLoader,
+// useSelectedTextLoader) hand it to their editor: the raw error text (the
+// editor words it for LoadFailure's `message`) and the rest of Props.
+export interface LoadFailureState {
+  message: string;
+  retrying: boolean;
+  failureKey: number;
+  onRetry: () => void;
+}
+
 interface Props {
   /** The error text to show, already worded by the caller. */
   message: string;

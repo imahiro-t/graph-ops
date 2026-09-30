@@ -2,14 +2,13 @@
 // instructions appended for one node type (GET/PUT
 // /api/settings/node-types(/{type})). See internal/config.ResolveNodeTypeContext
 // for the append-by-default merge semantics this editor exposes.
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Save, CheckCircle2, Plus, Trash2, Check, X } from 'lucide-react';
 import { SettingsNodeTypeInfo } from '../../types';
 import { fetchSettingsNodeType, fetchSettingsNodeTypes, saveSettingsNodeType } from '../../lib/settingsApi';
 import { getNodeTypeMeta } from '../../nodeTypeMeta';
 import { errorMessage } from '../../lib/apiError';
-import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 import { useTransientAnnouncement } from '../../hooks/useTransientAnnouncement';
 import { StatusLiveRegion } from '../StatusLiveRegion';
@@ -19,9 +18,10 @@ import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 import { focusIfLost, focusKeySelector, neighborAfterRemoval } from '../../lib/focusAfterRemoval';
 import { submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
-import { LoadFailure, useFocusAfterRetry } from './LoadFailure';
+import { LoadFailure } from './LoadFailure';
 import { LoadingLine } from './LoadingLine';
 import { useSelectedTextLoader } from './useSelectedTextLoader';
+import { useListLoader } from './useListLoader';
 import { LIST_HEADING_CLASS, LIST_ITEM_FOCUS_CLASS, LIST_LAYOUT_CLASS, LIST_PANE_CLASS } from './listPane';
 import { Spinner } from '../Spinner';
 
@@ -43,33 +43,17 @@ interface Props {
 
 export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const { t } = useTranslation();
-  // See src/hooks/useLatest.ts -- keeps loadTypes below
-  // insensitive to language changes (F-1).
-  const tRef = useLatest(t);
   const [types, setTypes] = useState<SettingsNodeTypeInfo[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [tierText, setTierText] = useState('');
   const [savedTierText, setSavedTierText] = useState('');
   const [mergedText, setMergedText] = useState('');
   // What the right-hand pane shows is derived at render time from the state
-  // below and useSelectedTextLoader's (DFLT-00343, DFLT-00350; see the
-  // pane's JSX for the order), so no
+  // below, useListLoader's and useSelectedTextLoader's (DFLT-00343,
+  // DFLT-00350, DFLT-00356; see the pane's JSX for the order), so no
   // frame -- the first one, or the one right after a switch, before the
   // effect has started the next load -- ever shows an empty editor, or the
   // previous type's text or error, where the selected type's belongs.
-  //
-  // Whether the type list has been fetched once. False at first, so the
-  // first render already shows the loading line. A list fetch that fails
-  // while this is false (the first one or a retry of it) is listLoadError,
-  // shown in place of the editor with a retry button; once it is true, a
-  // failed re-fetch (after a save or delete) goes to the non-blocking
-  // `error` instead -- the list on screen is still right then. The ref
-  // mirrors it for loadTypes, which must keep a stable identity.
-  const [listLoaded, setListLoaded] = useState(false);
-  const listLoadedRef = useRef(false);
-  const [listLoadError, setListLoadError] = useState('');
-  const [listFailures, setListFailures] = useState(0);
-  const [listRetrying, setListRetrying] = useState(false);
   const [saving, setSaving] = useState(false);
   // A failed save, add or delete, and a failed list re-fetch once the list
   // has been loaded: shown above the editor without hiding it.
@@ -97,10 +81,26 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const listRef = useRef<HTMLDivElement>(null);
   const editorPaneRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // After a successful list retry the focused retry button is gone, so
-  // focus moves to the right-hand pane (the editor may still be loading the
-  // selected type's text).
-  const focusPaneAfterRetry = useFocusAfterRetry(() => editorPaneRef.current);
+  // The type list: fetched on mount, with its failure and retry rules (see
+  // useListLoader). A failed re-fetch after a save or delete goes to the
+  // non-blocking `error`. After a successful retry the focused retry button
+  // is gone, so focus moves to the right-hand pane (the editor may still be
+  // loading the selected type's text).
+  const typeList = useListLoader({
+    fetchList: fetchSettingsNodeTypes,
+    onLoaded: list => {
+      setTypes(list);
+      // Re-select a valid entry whenever the currently-selected type is no
+      // longer in the refreshed list -- covers both the initial mount
+      // (selected === '') and a type just deleted out from under the
+      // current selection (see removeType). Written as a setState updater
+      // (reading `selected` via `prev`, not the outer closure) so a stale
+      // `selected` from an earlier render is never used (#3).
+      setSelected(prev => (list.length > 0 && !list.some(info => info.type === prev) ? list[0].type : prev));
+    },
+    onReloadError: setError,
+    getFocusTarget: () => editorPaneRef.current
+  });
   // The selected type's text: fetched on each switch, with its failure,
   // retry and stale-answer rules (see useSelectedTextLoader). A successful
   // retry moves focus to the textarea.
@@ -145,47 +145,6 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     if (!document.activeElement || document.activeElement === document.body) addTypeButtonRef.current?.focus();
   }, [isAddingType]);
 
-  // Resolves to the refreshed list, or null when it could not be fetched
-  // (the error is shown and the list on screen is left as it was).
-  const loadTypes = useCallback(async (): Promise<SettingsNodeTypeInfo[] | null> => {
-    try {
-      const list = await fetchSettingsNodeTypes(tRef.current);
-      setTypes(list);
-      // Re-select a valid entry whenever the currently-selected type is no
-      // longer in the refreshed list -- covers both the initial mount
-      // (selected === '') and a type just deleted out from under the
-      // current selection (see removeType). Written as a setState updater
-      // (reading `selected` via `prev`, not the outer closure) so this
-      // callback doesn't need `selected` in its own dependency array --
-      // otherwise picking a different type in the left-hand list would
-      // change loadTypes's identity and re-fetch the whole list for no
-      // reason (#3).
-      setSelected(prev => (list.length > 0 && !list.some(info => info.type === prev) ? list[0].type : prev));
-      listLoadedRef.current = true;
-      setListLoaded(true);
-      setListLoadError('');
-      return list;
-    } catch (e) {
-      const message = errorMessage(e, tRef.current('errors.UNKNOWN'));
-      if (listLoadedRef.current) {
-        setError(message);
-      } else {
-        setListLoadError(message);
-        setListFailures(n => n + 1);
-      }
-      return null;
-    }
-  }, [tRef]);
-
-  useEffect(() => { loadTypes(); }, [loadTypes]);
-
-  const retryList = async () => {
-    setListRetrying(true);
-    const list = await loadTypes();
-    setListRetrying(false);
-    if (list !== null) focusPaneAfterRetry();
-  };
-
   // Switches the selected type, asking first when the current one has
   // unsaved edits -- same shape as TemplatesEditor's select and the same
   // wording (unsavedChangesConfirmOptions), so every list in the settings
@@ -221,7 +180,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       setSavedTierText(res.tier_text);
       setMergedText(res.merged_text);
       showSavedFlash();
-      await loadTypes();
+      await typeList.reload();
     } catch (e) {
       setError(errorMessage(e, t('errors.UNKNOWN')));
     } finally {
@@ -238,7 +197,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     // selection while the list failure (or loading line) hides the editor,
     // and the list a retry then fetches would replace it, unsaved type and
     // all. The add button is disabled then too.
-    if (!listLoaded) return;
+    if (!typeList.loaded) return;
     const name = newTypeName.trim();
     if (!name) return;
     if (!isValidTypeName(name)) {
@@ -304,7 +263,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         setSavedTierText('');
         setMergedText('');
       }
-      const list = await loadTypes();
+      const list = await typeList.reload();
       // null: the refresh failed, so the row is still on screen with focus
       // on its button. Still listed: another tier still defines the type,
       // so its row (and focused button) stays.
@@ -500,7 +459,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
               data-focus-key={ADD_TYPE_FOCUS_KEY}
               onClick={() => setIsAddingType(true)}
               // Until the list has been fetched (see confirmAddType).
-              disabled={!listLoaded}
+              disabled={!typeList.loaded}
               className="w-full px-2 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 rounded-sm text-[0.6875rem] font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition border border-slate-200 dark:border-slate-700"
             >
               <Plus aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.nodeTypes.addType')}
@@ -537,14 +496,14 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
             selected === '' is an empty list, not a load in progress: it
             falls through to the editor as before, or it would never leave
             the loading line. */}
-        {listLoadError ? (
+        {typeList.failure ? (
           <LoadFailure
-            message={t('settings.common.loadFailed', { message: listLoadError })}
-            retrying={listRetrying}
-            onRetry={() => void retryList()}
-            failureKey={listFailures}
+            message={t('settings.common.loadFailed', { message: typeList.failure.message })}
+            retrying={typeList.failure.retrying}
+            onRetry={typeList.failure.onRetry}
+            failureKey={typeList.failure.failureKey}
           />
-        ) : !listLoaded ? (
+        ) : !typeList.loaded ? (
           <LoadingLine />
         ) : selectedText.failure ? (
           <LoadFailure
