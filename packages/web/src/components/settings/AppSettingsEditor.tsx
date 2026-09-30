@@ -205,7 +205,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
   // with the same message remounts the alert, so it is announced again.
   const [loadFailures, setLoadFailures] = useState(0);
   // A successful retry unmounts the focused retry button; focus then moves to
-  // the form's container (see useFocusAfterRetry).
+  // the form's container, a group named after the tab (see useFocusAfterRetry).
   const formContainerRef = useRef<HTMLDivElement>(null);
   const focusFormAfterRetry = useFocusAfterRetry(() => formContainerRef.current);
   const { savedFlash, showSavedFlash } = useSavedFlash();
@@ -609,9 +609,16 @@ export const AppSettingsEditor: React.FC<Props> = ({
   return (
     // tabIndex -1 and the ref: where focus goes after a successful retry
     // (see useFocusAfterRetry). No outline: it is not a control.
+    // Named so that focus landing here says what appeared -- an unnamed
+    // container announces nothing (DFLT-00349). role="group" because a div
+    // without a role cannot be named (ARIA 1.2); role="form" would add a
+    // landmark inside the modal, and this holds more than the saved form.
+    // The name is the settings tab's own label, so the two never disagree.
     <div
       ref={formContainerRef}
       tabIndex={-1}
+      role="group"
+      aria-label={t('settings.tabs.appSettings')}
       className="flex flex-col gap-4 h-full min-h-0 overflow-auto narrow:h-auto narrow:overflow-visible focus:outline-hidden"
     >
       {confirmDialog}

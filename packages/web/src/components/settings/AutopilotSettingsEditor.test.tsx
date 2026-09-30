@@ -421,7 +421,8 @@ describe('AutopilotSettingsEditor select stacking at the narrowest size (DFLT-00
 // form, and a project switch never shows the previous project's settings or
 // error, nor applies an answer that arrives for it late.
 describe('AutopilotSettingsEditor load failure and project switch', () => {
-  type Pending = { url: string; resolve: (r: Response) => void; reject: (e: unknown) => void };
+  // method tells a load (GET) from a save (PUT): both use the same URL.
+  type Pending = { url: string; method: string; resolve: (r: Response) => void; reject: (e: unknown) => void };
   let pending: Pending[];
   const retryButton = () => screen.getByRole('button', { name: i18n.t('settings.common.retry') });
   const loadingLine = () => screen.queryByText(i18n.t('settings.common.loading'), { selector: '[role="status"]' });
@@ -430,13 +431,15 @@ describe('AutopilotSettingsEditor load failure and project switch', () => {
     ...response(overrides),
     project_id: id
   });
-  const settle = (url: string) => {
-    const i = pending.findIndex(p => p.url === url);
+  const settle = (url: string, method = 'GET') => {
+    const i = pending.findIndex(p => p.url === url && p.method === method);
     expect(i).toBeGreaterThanOrEqual(0);
     return pending.splice(i, 1)[0];
   };
-  const editor = (projectId: string) => (
-    <AutopilotSettingsEditor projectId={projectId} projectName={projectId} onDirtyChange={vi.fn()} />
+  // Pass the same onDirtyChange to render and rerender to follow its calls
+  // across a project switch.
+  const editor = (projectId: string, onDirtyChange: (dirty: boolean) => void = vi.fn()) => (
+    <AutopilotSettingsEditor projectId={projectId} projectName={projectId} onDirtyChange={onDirtyChange} />
   );
   const urlOf = (id: string) => `/api/projects/${id}/autopilot-settings`;
 
@@ -445,8 +448,10 @@ describe('AutopilotSettingsEditor load failure and project switch', () => {
     fetchSpy = vi.spyOn(globalThis, 'fetch');
     pending = [];
     fetchSpy.mockImplementation(
-      (input: RequestInfo | URL) =>
-        new Promise<Response>((resolve, reject) => { pending.push({ url: String(input), resolve, reject }); })
+      (input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((resolve, reject) => {
+          pending.push({ url: String(input), method: init?.method ?? 'GET', resolve, reject });
+        })
     );
   });
 
@@ -547,5 +552,183 @@ describe('AutopilotSettingsEditor load failure and project switch', () => {
     expect(screen.getByDisplayValue('44')).toBeInTheDocument();
     expect(screen.queryByDisplayValue('55')).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  // DFLT-00355: the save in progress belongs to the project it was started
+  // for. Its busy state never reaches another project's form, and its answer
+  // is dropped once the project has changed.
+  const saveText = () => i18n.t('settings.common.save');
+  const savingText = () => i18n.t('settings.common.saving');
+  // The save button, whether idle ("保存") or busy ("保存中").
+  const saveButton = () => {
+    const buttons = screen.getAllByRole('button').filter(b => {
+      const text = b.textContent?.trim() ?? '';
+      return text === saveText() || text.includes(savingText());
+    });
+    expect(buttons).toHaveLength(1);
+    return buttons[0];
+  };
+  const expectBusy = (busy: boolean) => {
+    const button = saveButton();
+    if (busy) {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute('aria-busy', 'true');
+      expect(button).toHaveTextContent(savingText());
+    } else {
+      expect(button).not.toHaveAttribute('aria-busy');
+      expect(button).not.toHaveTextContent(savingText());
+    }
+  };
+  const maxTicketsInput = () => screen.getByLabelText(label('maxTickets')) as HTMLInputElement;
+  const loadWith = async (id: string, maxTickets: number) => {
+    await act(async () => {
+      settle(urlOf(id)).resolve(jsonResponse(forProject(id, { maxTickets: { value: maxTickets, local: maxTickets, source: 'local' } })));
+    });
+    expect(await screen.findByDisplayValue(String(maxTickets))).toBeInTheDocument();
+  };
+  const typeMaxTickets = async (user: ReturnType<typeof userEvent.setup>, value: string) => {
+    await user.clear(maxTicketsInput());
+    await user.type(maxTicketsInput(), value);
+  };
+
+  it('keeps the form busy while its own save runs, and releases it with the saved value', async () => {
+    const user = userEvent.setup();
+    render(editor('proj-A'));
+    await loadWith('proj-A', 20);
+
+    await typeMaxTickets(user, '30');
+    await user.click(saveButton());
+
+    expectBusy(true);
+    expect(maxTicketsInput()).toBeDisabled();
+    expect(pending.map(p => p.method)).toEqual(['PUT']);
+
+    await act(async () => {
+      settle(urlOf('proj-A'), 'PUT').resolve(
+        jsonResponse(forProject('proj-A', { maxTickets: { value: 30, local: 30, source: 'local' } }))
+      );
+    });
+
+    expectBusy(false);
+    expect(saveButton()).toBeDisabled(); // nothing left to save
+    expect(maxTicketsInput()).not.toBeDisabled();
+    expect(maxTicketsInput().value).toBe('30');
+    expect(screen.getByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['succeeds', (p: Pending) => p.resolve(jsonResponse(forProject('proj-A', { maxTickets: { value: 55, local: 55, source: 'local' } })))],
+    ['fails', (p: Pending) => p.resolve(errorBody('late A save failure'))]
+  ])('does not show the previous project\'s save as busy, and ignores its late answer (it %s)', async (_how, finish) => {
+    const user = userEvent.setup();
+    const onDirty = vi.fn();
+    const { rerender } = render(editor('proj-A', onDirty));
+    await loadWith('proj-A', 20);
+    await typeMaxTickets(user, '30');
+    await user.click(saveButton());
+    expectBusy(true);
+    expect(maxTicketsInput()).toBeDisabled();
+
+    rerender(editor('proj-B', onDirty));
+    await loadWith('proj-B', 44);
+
+    // B is not busy while A's save is still running.
+    expectBusy(false);
+    expect(maxTicketsInput()).not.toBeDisabled();
+    await typeMaxTickets(user, '46');
+    expect(saveButton()).toBeEnabled();
+    expect(onDirty).toHaveBeenLastCalledWith(true);
+    const dirtyCalls = onDirty.mock.calls.length;
+
+    await act(async () => { finish(settle(urlOf('proj-A'), 'PUT')); });
+
+    // A's answer changes nothing in B: value, error, busy or dirty state.
+    expect(maxTicketsInput().value).toBe('46');
+    expect(screen.queryByDisplayValue('55')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expectBusy(false);
+    expect(saveButton()).toBeEnabled();
+    expect(maxTicketsInput()).not.toBeDisabled();
+    expect(onDirty.mock.calls.length).toBe(dirtyCalls);
+    expect(onDirty).toHaveBeenLastCalledWith(true);
+    expect(screen.queryByText(i18n.t('settings.common.saveSuccess'))).not.toBeInTheDocument();
+    expect(pending).toHaveLength(0);
+  });
+
+  it('keeps the new project\'s own save busy when the previous project\'s save answers first', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(editor('proj-A'));
+    await loadWith('proj-A', 20);
+    await typeMaxTickets(user, '30');
+    await user.click(saveButton());
+
+    rerender(editor('proj-B'));
+    await loadWith('proj-B', 44);
+    await typeMaxTickets(user, '46');
+    await user.click(saveButton());
+    expectBusy(true);
+
+    await act(async () => {
+      settle(urlOf('proj-A'), 'PUT').resolve(
+        jsonResponse(forProject('proj-A', { maxTickets: { value: 30, local: 30, source: 'local' } }))
+      );
+    });
+
+    expectBusy(true);
+    expect(maxTicketsInput()).toBeDisabled();
+
+    await act(async () => {
+      settle(urlOf('proj-B'), 'PUT').resolve(
+        jsonResponse(forProject('proj-B', { maxTickets: { value: 46, local: 46, source: 'local' } }))
+      );
+    });
+
+    expectBusy(false);
+    expect(maxTicketsInput()).not.toBeDisabled();
+    expect(maxTicketsInput().value).toBe('46');
+  });
+
+  it('shows a project busy again when switched back to while its own save still runs', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(editor('proj-A'));
+    await loadWith('proj-A', 20);
+    await typeMaxTickets(user, '30');
+    await user.click(saveButton());
+
+    rerender(editor('proj-B'));
+    await loadWith('proj-B', 44);
+    await typeMaxTickets(user, '46');
+    await user.click(saveButton());
+    expectBusy(true);
+
+    rerender(editor('proj-A'));
+    await loadWith('proj-A', 20);
+
+    // A's first save is still running, so A is busy and no second save of
+    // A can start (its answer would be overwritten by the first one's).
+    expectBusy(true);
+    expect(maxTicketsInput()).toBeDisabled();
+    expect(pending.map(p => `${p.method} ${p.url}`).sort()).toEqual([`PUT ${urlOf('proj-A')}`, `PUT ${urlOf('proj-B')}`]);
+
+    // B's save answering changes nothing in A.
+    await act(async () => {
+      settle(urlOf('proj-B'), 'PUT').resolve(
+        jsonResponse(forProject('proj-B', { maxTickets: { value: 46, local: 46, source: 'local' } }))
+      );
+    });
+    expectBusy(true);
+    expect(maxTicketsInput()).toBeDisabled();
+    expect(maxTicketsInput().value).toBe('20');
+
+    // A's own save answering releases A with the saved value.
+    await act(async () => {
+      settle(urlOf('proj-A'), 'PUT').resolve(
+        jsonResponse(forProject('proj-A', { maxTickets: { value: 30, local: 30, source: 'local' } }))
+      );
+    });
+    expectBusy(false);
+    expect(maxTicketsInput()).not.toBeDisabled();
+    expect(maxTicketsInput().value).toBe('30');
+    expect(pending).toHaveLength(0);
   });
 });

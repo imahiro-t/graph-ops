@@ -24,6 +24,7 @@ vi.mock('../../lib/labelsApi', () => ({
 import { createLabel, deleteLabel, fetchLabels, updateLabel } from '../../lib/labelsApi';
 import { LabelsEditor } from './LabelsEditor';
 import { submittingName } from '../../test/submittingName';
+import { deferred } from '../../test/deferred';
 
 type Mock = ReturnType<typeof vi.fn>;
 const mockedFetch = fetchLabels as unknown as Mock;
@@ -830,17 +831,6 @@ describe('LabelsEditor announcing row saves', () => {
   const bug = label('label-bug', 'バグ', 'red', 2);
   const feat = label('label-feat', '機能追加', 'blue', 0);
 
-  // A promise the test settles by hand, to look at the row mid-request.
-  function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (reason: unknown) => void;
-    const promise = new Promise<T>((res, rej) => {
-      resolve = res;
-      reject = rej;
-    });
-    return { promise, resolve, reject };
-  }
-
   beforeEach(() => {
     mockedFetch.mockReset();
     mockedUpdate.mockReset();
@@ -1396,16 +1386,6 @@ describe("LabelsEditor keeping each row's error", () => {
   const taken = () => i18n.t('errors.LABEL_NAME_TAKEN');
   const bug = label('label-bug', 'バグ', 'red', 2);
   const feat = label('label-feat', '機能追加', 'blue', 0);
-
-  function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (reason: unknown) => void;
-    const promise = new Promise<T>((res, rej) => {
-      resolve = res;
-      reject = rej;
-    });
-    return { promise, resolve, reject };
-  }
 
   // Row A (label-bug) fails every update; row B (label-feat) saves whatever
   // it is given.

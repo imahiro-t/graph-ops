@@ -4,21 +4,21 @@
 // See internal/config.ResolveSkillContext for the append-by-default merge
 // semantics this editor exposes -- structurally a copy of NodeTypesEditor,
 // minus the plugin-default layer skills don't have.
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Save, CheckCircle2 } from 'lucide-react';
 import { SettingsSkillInfo } from '../../types';
 import { fetchSettingsSkill, fetchSettingsSkills, saveSettingsSkill } from '../../lib/settingsApi';
 import { errorMessage } from '../../lib/apiError';
-import { useLatest } from '../../hooks/useLatest';
 import { useSavedFlash } from '../../hooks/useSavedFlash';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 import { submittingProps } from '../Submitting';
 import { ErrorBox } from './ErrorBox';
-import { LoadFailure, useFocusAfterRetry } from './LoadFailure';
+import { LoadFailure } from './LoadFailure';
 import { LoadingLine } from './LoadingLine';
 import { useSelectedTextLoader } from './useSelectedTextLoader';
+import { useListLoader } from './useListLoader';
 import { LIST_HEADING_CLASS, LIST_ITEM_FOCUS_CLASS, LIST_LAYOUT_CLASS, LIST_PANE_CLASS } from './listPane';
 import { StatusLiveRegion } from '../StatusLiveRegion';
 import { Spinner } from '../Spinner';
@@ -43,9 +43,6 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const { t } = useTranslation();
   // In-app confirmation (DFLT-00148), on top of the settings modal.
   const { confirm, confirmDialog } = useConfirmDialog();
-  // See src/hooks/useLatest.ts -- keeps loadSkills below
-  // insensitive to language changes (F-1).
-  const tRef = useLatest(t);
   const tierTextId = useId();
   const mergedPreviewLabelId = useId();
   const [skills, setSkills] = useState<SettingsSkillInfo[]>([]);
@@ -54,18 +51,9 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const [savedTierText, setSavedTierText] = useState('');
   const [mergedText, setMergedText] = useState('');
   // What the right-hand pane shows is derived at render time from the state
-  // below and useSelectedTextLoader's, the same way as NodeTypesEditor's (DFLT-00343, DFLT-00350): no
-  // frame shows an empty editor, or the previous skill's text or error.
-  //
-  // Whether the skill list has been fetched once; a fetch that fails while
-  // it is false is listLoadError (shown with a retry button in place of the
-  // editor), a later one (after a save) goes to the non-blocking `error`.
-  // The ref mirrors it for loadSkills, which must keep a stable identity.
-  const [listLoaded, setListLoaded] = useState(false);
-  const listLoadedRef = useRef(false);
-  const [listLoadError, setListLoadError] = useState('');
-  const [listFailures, setListFailures] = useState(0);
-  const [listRetrying, setListRetrying] = useState(false);
+  // below, useListLoader's and useSelectedTextLoader's, the same way as
+  // NodeTypesEditor's (DFLT-00343, DFLT-00350, DFLT-00356): no frame shows
+  // an empty editor, or the previous skill's text or error.
   const [saving, setSaving] = useState(false);
   // A failed save, and a failed list re-fetch once the list has been
   // loaded: shown above the editor without hiding it.
@@ -74,7 +62,23 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
   const editorPaneRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const focusPaneAfterRetry = useFocusAfterRetry(() => editorPaneRef.current);
+  // The skill list, loaded the same way as NodeTypesEditor's (see
+  // useListLoader): a failed re-fetch after a save goes to the non-blocking
+  // `error`, and a successful retry moves focus to the right-hand pane.
+  const skillList = useListLoader({
+    fetchList: fetchSettingsSkills,
+    onLoaded: list => {
+      setSkills(list);
+      // Functional updater (reads `selected` via `prev`) so a stale
+      // `selected` from an earlier render is never used (#7, mirrors
+      // NodeTypesEditor's #3). An empty list resets it to '' (DFLT-00357),
+      // the same as NodeTypesEditor's, so the pane shows the empty-list note
+      // rather than a skill that is no longer listed.
+      setSelected(prev => (list.length === 0 ? '' : !prev ? list[0].name : prev));
+    },
+    onReloadError: setError,
+    getFocusTarget: () => editorPaneRef.current
+  });
   // The selected skill's text, loaded the same way as NodeTypesEditor's
   // (see useSelectedTextLoader).
   const selectedText = useSelectedTextLoader({
@@ -91,44 +95,6 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
   const isDirty = tierText !== savedTierText;
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
-
-  // Resolves to whether the list was fetched.
-  const loadSkills = useCallback(async (): Promise<boolean> => {
-    try {
-      const list = await fetchSettingsSkills(tRef.current);
-      setSkills(list);
-      // Functional updater (reads `selected` via `prev`) so this callback
-      // doesn't need `selected` in its own dependency array -- otherwise
-      // picking a different skill in the left-hand list would change
-      // loadSkills's identity and re-fetch the whole list for no reason
-      // (#7, mirrors NodeTypesEditor's #3). An empty list resets it to ''
-      // (DFLT-00357), the same as NodeTypesEditor's, so the pane shows the
-      // empty-list note rather than a skill that is no longer listed.
-      setSelected(prev => (list.length === 0 ? '' : !prev ? list[0].name : prev));
-      listLoadedRef.current = true;
-      setListLoaded(true);
-      setListLoadError('');
-      return true;
-    } catch (e) {
-      const message = errorMessage(e, tRef.current('errors.UNKNOWN'));
-      if (listLoadedRef.current) {
-        setError(message);
-      } else {
-        setListLoadError(message);
-        setListFailures(n => n + 1);
-      }
-      return false;
-    }
-  }, [tRef]);
-
-  useEffect(() => { loadSkills(); }, [loadSkills]);
-
-  const retryList = async () => {
-    setListRetrying(true);
-    const ok = await loadSkills();
-    setListRetrying(false);
-    if (ok) focusPaneAfterRetry();
-  };
 
   // Switches the selected skill, asking first when the current one has
   // unsaved edits -- mirrors NodeTypesEditor's / TemplatesEditor's select.
@@ -158,7 +124,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
       setSavedTierText(res.tier_text);
       setMergedText(res.merged_text);
       showSavedFlash();
-      await loadSkills();
+      await skillList.reload();
     } catch (e) {
       setError(errorMessage(e, t('errors.UNKNOWN')));
     } finally {
@@ -219,14 +185,14 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
             note in place of the editor (DFLT-00357). The check is the list's
             length, not selected === '', and comes before the selected
             skill's failure / loading lines, which never show for ''. */}
-        {listLoadError ? (
+        {skillList.failure ? (
           <LoadFailure
-            message={t('settings.common.loadFailed', { message: listLoadError })}
-            retrying={listRetrying}
-            onRetry={() => void retryList()}
-            failureKey={listFailures}
+            message={t('settings.common.loadFailed', { message: skillList.failure.message })}
+            retrying={skillList.failure.retrying}
+            onRetry={skillList.failure.onRetry}
+            failureKey={skillList.failure.failureKey}
           />
-        ) : !listLoaded ? (
+        ) : !skillList.loaded ? (
           <LoadingLine />
         ) : skills.length === 0 ? (
           <p className="text-xs text-slate-500 dark:text-slate-400">{t('settings.skills.emptyList')}</p>

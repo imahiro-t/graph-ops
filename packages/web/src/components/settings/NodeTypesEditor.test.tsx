@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { NodeTypesEditor } from './NodeTypesEditor';
+import { Deferred, deferred } from '../../test/deferred';
 import { SettingsNodeTypeInfo } from '../../types';
 import { openIconButtonTooltip, setupHoverUser, startHoverFakeTimers, waitForHoverOpenDelay } from '../../test/iconButtonTooltip';
 
@@ -1169,12 +1170,6 @@ describe('NodeTypesEditor load failures and switching', () => {
   const reviewItem = () => screen.getByRole('button', { name: new RegExp(`^${i18n.t('nodeType.review')}`) });
   const addButton = () => screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') });
   type Detail = { type: string; tier_text: string; merged_text: string };
-  const deferred = <T,>() => {
-    let resolve!: (v: T) => void;
-    let reject!: (e: unknown) => void;
-    const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
-    return { promise, resolve, reject };
-  };
 
   beforeEach(() => {
     mockedFetchTypes.mockReset();
@@ -1337,8 +1332,8 @@ describe('NodeTypesEditor load failures and switching', () => {
   });
 
   it.each([
-    ['succeeds', (d: ReturnType<typeof deferred<Detail>>) => d.resolve({ type: 'implementation', tier_text: 'late-implementation-text', merged_text: 'late' })],
-    ['fails', (d: ReturnType<typeof deferred<Detail>>) => d.reject(new Error('late implementation failure'))]
+    ['succeeds', (d: Deferred<Detail>) => d.resolve({ type: 'implementation', tier_text: 'late-implementation-text', merged_text: 'late' })],
+    ['fails', (d: Deferred<Detail>) => d.reject(new Error('late implementation failure'))]
   ])('ignores the previous type\'s answer that arrives after a switch (it %s)', async (_how, settle) => {
     const user = userEvent.setup();
     const first = deferred<Detail>();
