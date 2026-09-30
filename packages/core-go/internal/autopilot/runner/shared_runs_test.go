@@ -336,15 +336,23 @@ func TestSharedRuns_WaitRefreshesTheSharedHeartbeat(t *testing.T) {
 	if DefaultPollInterval >= autopilot.ActiveThreshold {
 		t.Fatalf("DefaultPollInterval %s is not below ActiveThreshold %s", DefaultPollInterval, autopilot.ActiveThreshold)
 	}
+	// Wait is ended by the session's report on the wantPolls-th poll, not by
+	// its real-time timeout: the fake Sleep advances only the fake clock, so a
+	// short real-time timeout could expire during the first sample on a loaded
+	// machine and return before any poll happened (DFLT-00344).
+	const wantPolls = 3
 	h, tr, a, _ := newSharedHarness(t)
 	h.svc = a
 	res := mustStart(t, a, tr.T, autopilot.ModeTicket)
-	h.behave[tr.T] = func(w *workerCall) {} // the session never reports
+	h.behave[tr.T] = func(w *workerCall) {} // the session reports from Sleep below, on poll wantPolls
 	act := h.next(res.RunID)
 	h.launch1(res.RunID, act.Ticket)
 	polls := 0
 	a.Sleep = func(time.Duration) {
 		polls++
+		if polls > wantPolls {
+			t.Fatalf("wait kept polling after the report (poll %d)", polls)
+		}
 		h.clock.Advance(DefaultPollInterval)
 		rec := sharedRecord(t, h.repo, h.projectID, res.RunID)
 		local := localRun(t, a, h.projectID, res.RunID)
@@ -354,12 +362,28 @@ func TestSharedRuns_WaitRefreshesTheSharedHeartbeat(t *testing.T) {
 		if h.clock.Now().Sub(local.Heartbeat) > DefaultPollInterval {
 			t.Fatalf("poll %d: heartbeat %s is older than one poll", polls, local.Heartbeat)
 		}
+		if polls == wantPolls {
+			// Checked above first: after the report the next sample no longer
+			// refreshes the heartbeat, it returns the reported result.
+			rep, err := a.Report(res.RunID, act.Ticket, autopilot.TicketDone, "", "done")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !rep.Recorded {
+				t.Fatalf("report was not recorded: %+v", rep)
+			}
+		}
 	}
-	if _, err := a.Wait(res.RunID, act.Ticket, 30*time.Millisecond); err != nil {
+	// The timeout is only a safety net should the report fail to end Wait.
+	got, err := a.Wait(res.RunID, act.Ticket, time.Minute)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if polls == 0 {
-		t.Fatal("wait did not poll")
+	if !got.Reported() || got.Result != autopilot.TicketDone {
+		t.Fatalf("wait = %+v, want the reported %s result", got, autopilot.TicketDone)
+	}
+	if polls != wantPolls {
+		t.Fatalf("wait polled %d times, want %d", polls, wantPolls)
 	}
 }
 
