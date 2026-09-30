@@ -112,7 +112,10 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
   const [loadFailures, setLoadFailures] = useState(0);
   // The project a retry is running for (see loadError).
   const [retryingFor, setRetryingFor] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  // The project a save is running for, or null. Like retryingFor, a save
+  // for another project leaves the current one's form and buttons alone.
+  const [savingFor, setSavingFor] = useState<string | null>(null);
+  const saving = savingFor !== null && savingFor === projectId;
   // A failed save, shown above the form.
   const [error, setError] = useState('');
   const { savedFlash, showSavedFlash } = useSavedFlash();
@@ -181,19 +184,21 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
     // The answer is only used while the same project is shown: once the
     // project has changed, applying it would put the old project's settings
     // (or its error) in the new one's form.
-    const savingFor = projectId;
-    setSaving(true);
+    const saveProject = projectId;
+    setSavingFor(saveProject);
     setError('');
     try {
-      const res = await saveAutopilotSettings(t, savingFor, patch);
-      if (requestedProjectIdRef.current !== savingFor) return;
+      const res = await saveAutopilotSettings(t, saveProject, patch);
+      if (requestedProjectIdRef.current !== saveProject) return;
       apply(res);
       showSavedFlash();
     } catch (e) {
-      if (requestedProjectIdRef.current !== savingFor) return;
+      if (requestedProjectIdRef.current !== saveProject) return;
       setError(errorMessage(e, t('errors.UNKNOWN')));
     } finally {
-      setSaving(false);
+      // Only this save's own busy state: a save started since (for the
+      // project switched to) stays busy until its own answer is in.
+      setSavingFor(prev => (prev === saveProject ? null : prev));
     }
   };
 
