@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/graph-ops/core-go/internal/displayname"
 	"github.com/graph-ops/core-go/internal/domain"
 )
 
@@ -289,24 +290,31 @@ func decideBegin(req BeginRequest, local, shared []*Run, now time.Time, res *Beg
 				cand, foreign = r, true
 			}
 		}
+		// From here on cand may be another member's run, read from the
+		// data source: its ID, root and mode are sanitized in the messages
+		// and details (DFLT-00339). req.RunID is the caller's own --run,
+		// which nothing has checked the shape of, so it goes through
+		// displayname.ID too.
 		if cand == nil {
-			return nil, nil, domain.NewAPIError(ErrCodeRunNotFound, "AUTOPILOT_RUN_NOT_FOUND: run %s not found in project %s", req.RunID, req.ProjectID)
+			return nil, nil, domain.NewAPIError(ErrCodeRunNotFound, "AUTOPILOT_RUN_NOT_FOUND: run %s not found in project %s",
+				displayname.ID(req.RunID), displayname.OptionalID(req.ProjectID))
 		}
 		if cand.RootTicketID != req.RootID || cand.Mode != req.Mode {
 			return nil, nil, domain.NewAPIError(domain.ErrCodeValidation,
-				"VALIDATION_ERROR: run %s is a %s run of %s, not a %s run of %s", cand.ID, cand.Mode, cand.RootTicketID, req.Mode, req.RootID)
+				"VALIDATION_ERROR: run %s is a %s run of %s, not a %s run of %s",
+				displayname.ID(cand.ID), displayname.Sanitize(cand.Mode), displayname.ID(cand.RootTicketID), req.Mode, req.RootID)
 		}
 		if foreign {
 			if cand.IsActive(now) {
 				return nil, nil, alreadyRunning(cand)
 			}
 			if cand.State == RunFinished {
-				return nil, nil, domain.NewAPIError(ErrCodeInvalidRunState, "AUTOPILOT_INVALID_STATE: run %s has finished; start without --run to begin a new run", cand.ID)
+				return nil, nil, domain.NewAPIError(ErrCodeInvalidRunState, "AUTOPILOT_INVALID_STATE: run %s has finished; start without --run to begin a new run", displayname.ID(cand.ID))
 			}
 			return nil, nil, domain.NewAPIError(ErrCodeInvalidRunState,
 				"AUTOPILOT_INVALID_STATE: run %s was started on another machine%s, so it cannot be taken over here; start without --run to begin a new run",
-				cand.ID, startedBySuffix(cand)).
-				WithDetails(startedByDetails(cand, map[string]any{"run_id": cand.ID}))
+				displayname.ID(cand.ID), startedBySuffix(cand)).
+				WithDetails(startedByDetails(cand, map[string]any{"run_id": displayname.ID(cand.ID)}))
 		}
 		switch {
 		case cand.State == RunStarting && cand.Reservation != nil && !cand.Interrupted(now):
@@ -326,7 +334,7 @@ func decideBegin(req BeginRequest, local, shared []*Run, now time.Time, res *Beg
 		case cand.State == RunStopped || cand.Interrupted(now):
 			// Taken over below, like an ordinary start would.
 		case cand.State == RunFinished:
-			return nil, nil, domain.NewAPIError(ErrCodeInvalidRunState, "AUTOPILOT_INVALID_STATE: run %s has finished; start without --run to begin a new run", cand.ID)
+			return nil, nil, domain.NewAPIError(ErrCodeInvalidRunState, "AUTOPILOT_INVALID_STATE: run %s has finished; start without --run to begin a new run", displayname.ID(cand.ID))
 		default:
 			return nil, nil, alreadyRunning(cand)
 		}
@@ -423,10 +431,13 @@ func stamp(run *Run, actor *StartedBy, now time.Time, sharedByID map[string]*Run
 	run.BegunAt = now
 }
 
+// alreadyRunning is the refusal of a start because of the active run r,
+// which may be another member's: its ID and root are sanitized for the
+// message and details (DFLT-00339).
 func alreadyRunning(r *Run) error {
 	return domain.NewAPIError(ErrCodeAlreadyRunning, "AUTOPILOT_ALREADY_RUNNING: run %s is already running%s (heartbeat %s)",
-		r.ID, startedBySuffix(r), r.Heartbeat.UTC().Format(time.RFC3339)).
-		WithDetails(startedByDetails(r, map[string]any{"run_id": r.ID, "root_ticket_id": r.RootTicketID}))
+		displayname.ID(r.ID), startedBySuffix(r), r.Heartbeat.UTC().Format(time.RFC3339)).
+		WithDetails(runDetails(r))
 }
 
 // checkOverlap refuses req if an active run other than self owns its root,
@@ -447,10 +458,12 @@ func checkOverlap(runs []*Run, self *Run, req BeginRequest, now time.Time) error
 			return err
 		}
 		if conflict {
+			// r may be another member's run: sanitized for display
+			// (DFLT-00339); the check above used the raw values.
 			return domain.NewAPIError(ErrCodeAlreadyRunning,
 				"AUTOPILOT_ALREADY_RUNNING: ticket %s overlaps the active %s run %s rooted at %s%s",
-				req.RootID, r.Mode, r.ID, r.RootTicketID, startedBySuffix(r)).
-				WithDetails(startedByDetails(r, map[string]any{"run_id": r.ID, "root_ticket_id": r.RootTicketID}))
+				req.RootID, displayname.Sanitize(r.Mode), displayname.ID(r.ID), displayname.ID(r.RootTicketID), startedBySuffix(r)).
+				WithDetails(runDetails(r))
 		}
 	}
 	return nil

@@ -40,6 +40,17 @@ func ID(id string) string {
 	return id
 }
 
+// OptionalID is ID for a field that may legitimately be empty (DFLT-00339):
+// "" stays "", anything else goes through ID. It keeps an empty column --
+// a run's project ID, the ticket of a session that is not there -- from
+// being shown as InvalidID.
+func OptionalID(id string) string {
+	if id == "" {
+		return ""
+	}
+	return ID(id)
+}
+
 // Timestamp returns ts when it parses as an RFC3339 time (which admits no
 // control characters) and is of a sane length, and UnknownTime otherwise.
 func Timestamp(ts string) string {

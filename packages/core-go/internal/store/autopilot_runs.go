@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/graph-ops/core-go/internal/displayname"
 	"github.com/graph-ops/core-go/internal/domain"
 )
 
@@ -205,7 +206,10 @@ func beginAutopilotRun(db *sql.DB, d sqlDialect, projectID string, decide func([
 			continue
 		}
 		if _, err := tx.Exec(`DELETE FROM autopilot_runs WHERE id = ? AND project_id = ?`, id, projectID); err != nil {
-			return fmt.Errorf("deleting settled autopilot run %s: %w", id, err)
+			// id is another member's run ID, read from the data source:
+			// the DELETE uses it as it is, the message a sanitized copy
+			// (DFLT-00339).
+			return fmt.Errorf("deleting settled autopilot run %s: %w", displayname.ID(id), err)
 		}
 	}
 	return tx.Commit()
@@ -321,7 +325,9 @@ const httpAutopilotRunDropLimit = 2
 // runDropErrors is the dropErr of BeginAutopilotRun: the DELETEs that
 // failed, reported as one line so a log line stays one line. The line is
 // only "run-a: <err>; run-b: <err>": the caller logs it after its own
-// description of the deletion, so it does not describe it again.
+// description of the deletion, so it does not describe it again. The IDs
+// are other members' run IDs, read from the data source, so each is
+// sanitized for the line (displayname.ID, DFLT-00339).
 type runDropErrors []runDropError
 
 type runDropError struct {
@@ -335,7 +341,7 @@ func (e runDropErrors) Error() string {
 		if i > 0 {
 			b.WriteString("; ")
 		}
-		b.WriteString(d.id)
+		b.WriteString(displayname.ID(d.id))
 		b.WriteString(": ")
 		b.WriteString(oneLine(d.err.Error()))
 	}

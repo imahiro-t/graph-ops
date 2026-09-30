@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/graph-ops/core-go/internal/autopilot"
+	"github.com/graph-ops/core-go/internal/displayname"
 )
 
 // This file is what the Web UI reads and starts runs through (plan phase 5):
@@ -129,14 +130,29 @@ func (s *Service) Runs(projectID string) ([]RunView, error) {
 				return nil, err
 			}
 		}
-		view.Members = append(view.Members, r.RootTicketID)
+		// Worked out on r's raw values; only what goes into the view is
+		// sanitized (DFLT-00339): the root, and so the head of Members and
+		// possibly of Pending, comes from the run record, which may be
+		// another member's. The rest are the DB's IDs, which come out
+		// unchanged.
+		members := []string{r.RootTicketID}
 		if r.Mode == autopilot.ModeTree {
-			view.Members = append(view.Members, idx.descendants(r.RootTicketID)...)
+			members = append(members, idx.descendants(r.RootTicketID)...)
 		}
-		view.Pending = append(view.Pending, autopilot.Pending(r, idx.tree(r.RootTicketID, r.Mode), foreignLaunched(sameMachine(runs, owner, owner(r)), r.ID, now))...)
+		pending := autopilot.Pending(r, idx.tree(r.RootTicketID, r.Mode), foreignLaunched(sameMachine(runs, owner, owner(r)), r.ID, now))
+		view.Members = displayIDs(view.Members, members)
+		view.Pending = displayIDs(view.Pending, pending)
 		out = append(out, view)
 	}
 	return out, nil
+}
+
+// displayIDs appends ids to dst, each through displayname.ID.
+func displayIDs(dst, ids []string) []string {
+	for _, id := range ids {
+		dst = append(dst, displayname.ID(id))
+	}
+	return dst
 }
 
 // sameMachine is the runs of runs owned by machine: only a run of the same

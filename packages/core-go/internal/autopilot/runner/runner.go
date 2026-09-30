@@ -28,6 +28,7 @@ import (
 	"github.com/graph-ops/core-go/internal/autopilot"
 	"github.com/graph-ops/core-go/internal/claudetrust"
 	"github.com/graph-ops/core-go/internal/config"
+	"github.com/graph-ops/core-go/internal/displayname"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
@@ -1554,14 +1555,28 @@ func (s *Service) Status(projectID string) ([]RunStatus, error) {
 	return out, nil
 }
 
+// runStatus is r as `autopilot status` and the runs API (Runs) show it.
+// r may be another member's run, read from the data source, so every string
+// is sanitized for display here (DFLT-00339): IDs through displayname.ID
+// (OptionalID where a field may be empty), short code values through
+// displayname.Sanitize, the awaiting-human note through displayname.Text.
+// Legitimate values come out unchanged. Only the returned view is
+// sanitized; r itself -- what the callers match on -- is not touched.
+//
+// Two ticket IDs that are not ID-shaped both become displayname.InvalidID
+// in Tickets and so collapse into one entry; only a doctored record has
+// such IDs.
 func runStatus(r *autopilot.Run, now time.Time) RunStatus {
-	rs := RunStatus{RunID: r.ID, ProjectID: r.ProjectID, Mode: r.Mode, Root: r.RootTicketID, State: r.State,
-		Active: r.IsActive(now), Heartbeat: r.Heartbeat, StopReason: r.StopReason, Tickets: map[string]string{}}
+	rs := RunStatus{RunID: displayname.OptionalID(r.ID), ProjectID: displayname.OptionalID(r.ProjectID),
+		Mode: displayname.Sanitize(r.Mode), Root: displayname.OptionalID(r.RootTicketID), State: displayname.Sanitize(r.State),
+		Active: r.IsActive(now), Heartbeat: r.Heartbeat, StopReason: displayname.Sanitize(r.StopReason), Tickets: map[string]string{}}
 	for id, st := range r.Tickets {
-		rs.Tickets[id] = st.Status
+		rs.Tickets[displayname.ID(id)] = displayname.Sanitize(st.Status)
 	}
+	// Inside the check, so a run with no session shows no current ticket
+	// rather than displayname.InvalidID.
 	if st := r.ActiveSession(); st != nil {
-		rs.Current, rs.CurrentRole, rs.AwaitingHuman = st.ID, st.Role, st.AwaitingHuman
+		rs.Current, rs.CurrentRole, rs.AwaitingHuman = displayname.ID(st.ID), displayname.Sanitize(st.Role), displayname.Text(st.AwaitingHuman)
 	}
 	return rs
 }

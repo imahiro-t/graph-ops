@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/store/httpdatasourcetest"
@@ -628,5 +629,38 @@ func TestHTTPBeginAutopilotRunSkipsTheSavedRecord(t *testing.T) {
 	}
 	if findRecord(t, repo, projectID, "run-new") == nil {
 		t.Fatal("the saved record was deleted")
+	}
+}
+
+// DFLT-00339: the IDs in a dropErr are other members' run IDs, read from the
+// data source; one crafted with control characters is shown as
+// displayname.InvalidID, a legitimate one as it is -- and the DELETE itself
+// still goes to the raw ID.
+func TestHTTPBeginAutopilotRunDropErrorSanitizesTheIDs(t *testing.T) {
+	const crafted = "run-x\x1b[31m\nError: forged\r\u009b‮​"
+	unsafe := func(s string) bool {
+		for _, r := range s {
+			if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+				return true
+			}
+		}
+		return false
+	}
+	msg := runDropErrors{{id: crafted, err: errors.New("boom")}, {id: "run-old-1", err: errors.New("bang")}}.Error()
+	if unsafe(msg) || msg != "(invalid id): boom; run-old-1: bang" {
+		t.Fatalf("runDropErrors = %q", msg)
+	}
+
+	repo, f, projectID := startFailingDeletes(t, "upstream failed")
+	f.fail[crafted] = true
+	dropErr, err := beginDropping(repo, projectID, "run-new", crafted)
+	if err != nil || dropErr == nil {
+		t.Fatalf("got err %v, dropErr %v; want only a dropErr", err, dropErr)
+	}
+	if msg := dropErr.Error(); unsafe(msg) || !strings.HasPrefix(msg, "(invalid id): ") {
+		t.Fatalf("dropErr = %q", msg)
+	}
+	if sent := f.sent(); len(sent) != 1 || sent[0] != crafted {
+		t.Fatalf("DELETEs sent = %q, want the raw ID", sent)
 	}
 }
