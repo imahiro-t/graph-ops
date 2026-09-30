@@ -51,6 +51,19 @@ const textareaOf = (prefix: string) =>
 
 const saveButton = () => screen.getByRole('button', { name: i18n.t('settings.common.save') });
 
+// The saved notice, told apart from the loading line (also role="status",
+// DFLT-00350) by its text.
+const savedStatus = () =>
+  screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' });
+
+const deferred = <T,>() => {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>(r => { resolve = r; });
+  return { promise, resolve };
+};
+
+const retryButton = () => screen.getByRole('button', { name: i18n.t('settings.common.retry') });
+
 describe('TemplatesEditor', () => {
   beforeEach(() => {
     for (const m of [fetchPlan, savePlan, fetchReview, saveReview, fetchReport, saveReport]) m.mockReset();
@@ -224,11 +237,90 @@ describe('TemplatesEditor', () => {
     expect(listButton('review')).toHaveAttribute('aria-current', 'true');
   });
 
-  it('shows the error when loading a template fails', async () => {
+  // DFLT-00350: a failed load shows the error and a retry button in place of
+  // the editor, so an empty textarea cannot be saved over the stored override.
+  it('shows the error and a retry button, not an empty editor, when loading a template fails', async () => {
     fetchPlan.mockRejectedValue(new Error('load failed'));
     render(<TemplatesEditor onDirtyChange={vi.fn()} />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('load failed');
+    expect(retryButton()).toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: i18n.t('settings.planTemplate.mergedPreviewLabel') })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('loads the template on retry and moves focus to the textarea', async () => {
+    const user = userEvent.setup();
+    fetchPlan.mockRejectedValueOnce(new Error('load failed'));
+    const pending = deferred<{ tier_text: string; merged_text: string }>();
+    fetchPlan.mockReturnValueOnce(pending.promise);
+    render(<TemplatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByRole('alert');
+
+    const button = retryButton();
+    button.focus();
+    await user.keyboard('{Enter}');
+
+    // While the retry runs, the failure and the focused retry button stay,
+    // and a second press sends nothing.
+    expect(fetchPlan).toHaveBeenCalledTimes(2);
+    expect(button).toBeInTheDocument();
+    expect(button).toHaveFocus();
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    expect(button).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    await user.keyboard('{Enter}');
+    expect(fetchPlan).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      pending.resolve({ tier_text: 'plan-tier', merged_text: 'plan-merged' });
+    });
+
+    const textarea = await textareaOf('settings.planTemplate');
+    expect(textarea).toHaveValue('plan-tier');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await waitFor(() => expect(textarea).toHaveFocus());
+  });
+
+  it('keeps the error and the retry button when the retry fails again', async () => {
+    const user = userEvent.setup();
+    fetchPlan.mockRejectedValue(new Error('load failed'));
+    render(<TemplatesEditor onDirtyChange={vi.fn()} />);
+    const firstAlert = await screen.findByRole('alert');
+
+    const button = retryButton();
+    button.focus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(fetchPlan).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(retryButton()).not.toHaveAttribute('aria-busy'));
+    // A new alert element, so the same wording is announced again.
+    expect(screen.getByRole('alert')).not.toBe(firstAlert);
+    expect(screen.getByRole('alert')).toHaveTextContent('load failed');
+    expect(retryButton()).toHaveFocus();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  });
+
+  it('report: shows no textarea when loading the report template fails', async () => {
+    const user = userEvent.setup();
+    fetchReport.mockRejectedValue(new Error('report load failed'));
+    render(<TemplatesEditor onDirtyChange={vi.fn()} />);
+    await textareaOf('settings.planTemplate');
+    await user.click(listButton('report'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('report load failed');
+    expect(retryButton()).toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
+  });
+
+  it('announces the loading line as a status', async () => {
+    fetchPlan.mockReturnValue(new Promise(() => {}));
+    render(<TemplatesEditor onDirtyChange={vi.fn()} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent(i18n.t('settings.common.loading'));
   });
 
   it('keeps the input unsaved when saving a review override fails', async () => {
@@ -268,12 +360,6 @@ describe('TemplatesEditor', () => {
   });
 
   describe('accessibility review (a11y F-1 / F-2)', () => {
-    const deferred = <T,>() => {
-      let resolve!: (v: T) => void;
-      const promise = new Promise<T>(r => { resolve = r; });
-      return { promise, resolve };
-    };
-
     // Class pairs chosen for WCAG 1.4.3 (>= 4.5:1): slate-500 on white 4.76:1,
     // slate-400 on slate-900 6.96:1, emerald-700 on white 5.48:1,
     // emerald-400 on slate-900 well above 4.5:1.
@@ -302,7 +388,7 @@ describe('TemplatesEditor', () => {
       await user.type(textarea, 'x');
       await user.click(saveButton());
 
-      const status = await screen.findByRole('status');
+      const status = await savedStatus();
       expect(status).toHaveTextContent(i18n.t('settings.common.saveSuccess'));
       expect(status).toHaveClass('text-emerald-700', 'dark:text-emerald-400');
       expect(status).not.toHaveClass('text-emerald-600');
@@ -330,7 +416,7 @@ describe('TemplatesEditor', () => {
         pending.resolve({ tier_text: 'plan-tier edited', merged_text: 'plan-tier edited' });
       });
 
-      expect(await screen.findByRole('status')).toBeInTheDocument();
+      expect(await savedStatus()).toBeInTheDocument();
       expect(saveButton()).toBeDisabled();
       expect(textarea).toHaveFocus();
     });
@@ -367,7 +453,7 @@ describe('TemplatesEditor', () => {
         pending.resolve({ tier_text: 'plan-tier edited', merged_text: 'plan-tier edited' });
       });
 
-      expect(await screen.findByRole('status')).toBeInTheDocument();
+      expect(await savedStatus()).toBeInTheDocument();
       expect(reviewItem).toHaveFocus();
       expect(textarea).not.toHaveFocus();
     });

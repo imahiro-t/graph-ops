@@ -5,6 +5,11 @@
 // breaks, terminal escape sequences or bidirectional overrides in a name
 // that everybody else's CLI, error messages and Web UI then print.
 //
+// Since DFLT-00339 the same rules also cover the other strings of another
+// member's autopilot run record that reach a display -- mode, state, stop
+// reason, the current session's role and awaiting-human note (Text) -- and
+// the IDs among them (tokens.go).
+//
 // The package depends on the standard library only, and must stay that
 // way: domain, identity, autopilot and autopilot/runner all use it, and
 // identity already depends on autopilot (through runtimeconfig), so a
@@ -21,6 +26,10 @@ import (
 // data sources' started_by_name column (VARCHAR(255), counted in
 // characters under utf8mb4) with room to spare.
 const MaxRunes = 128
+
+// MaxTextRunes is the longest a sanitized free-form text (Text) can be, in
+// runes: the same bound as a run summary's (autopilot.SummaryMaxChars).
+const MaxTextRunes = 500
 
 // Sanitize returns s made safe to display:
 //
@@ -39,7 +48,17 @@ const MaxRunes = 128
 // that as an unknown name. Ordinary names -- "山田 太郎", "taro@mac01" --
 // come back unchanged. Sanitize is idempotent:
 // Sanitize(Sanitize(s)) == Sanitize(s).
-func Sanitize(s string) string {
+func Sanitize(s string) string { return sanitize(s, MaxRunes) }
+
+// Text is Sanitize for a free-form text that may be longer than a name --
+// a run's awaiting-human note, say (DFLT-00339): the same rules, with the
+// result cut to MaxTextRunes runes instead of MaxRunes. Ordinary sentences,
+// Japanese punctuation and full-width spaces included, come back unchanged.
+// Text is idempotent too.
+func Text(s string) string { return sanitize(s, MaxTextRunes) }
+
+// sanitize is Sanitize with the result cut to max runes.
+func sanitize(s string, max int) string {
 	s = strings.ToValidUTF8(s, string(utf8.RuneError))
 	var b strings.Builder
 	b.Grow(len(s))
@@ -61,14 +80,14 @@ func Sanitize(s string) string {
 			continue
 		}
 		if space != 0 && n > 0 {
-			if n+1 >= MaxRunes {
+			if n+1 >= max {
 				break
 			}
 			b.WriteRune(space)
 			n++
 		}
 		space = 0
-		if n >= MaxRunes {
+		if n >= max {
 			break
 		}
 		b.WriteRune(r)

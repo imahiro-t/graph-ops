@@ -25,6 +25,21 @@ func TestID(t *testing.T) {
 	}
 }
 
+func TestOptionalID(t *testing.T) {
+	for in, want := range map[string]string{
+		"":              "",
+		"DFLT-00339":    "DFLT-00339",
+		"proj-64195d2b": "proj-64195d2b",
+		"DFLT\n00339":   InvalidID,
+		"proj\x1b[31m":  InvalidID,
+		"proj\u202e":    InvalidID,
+	} {
+		if got := OptionalID(in); got != want {
+			t.Errorf("OptionalID(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestTimestamp(t *testing.T) {
 	for in, want := range map[string]string{
 		"2026-09-29T12:00:00.000000000Z": "2026-09-29T12:00:00.000000000Z",

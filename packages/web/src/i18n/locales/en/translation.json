@@ -393,6 +393,7 @@
       "noChangesToSave": "No changes to save.",
       "loading": "Loading...",
       "retry": "Retry",
+      "loadFailed": "The settings could not be loaded ({{message}}). The editor stays hidden until they load, so the saved content cannot be overwritten with empty or default values. Please retry.",
       "inheritedFromDefault": "Inherited from the plugin default",
       "yes": "Yes",
       "no": "No",
@@ -595,6 +596,7 @@
     "labels": {
       "title": "Labels",
       "description": "Manage the labels tickets can carry, for the selected project. Changes are saved immediately and shared with your team.",
+      "loadFailed": "The labels could not be loaded ({{message}}). New labels cannot be created until the list loads. Please retry.",
       "selectProject": "Select a project to edit its labels.",
       "loading": "Loading...",
       "empty": "No labels yet.",
