@@ -2044,6 +2044,43 @@ describe('LabelsEditor load failure, retry and project switch', () => {
     expect(statusTexts()).toContain(i18n.t('settings.labels.loading'));
   });
 
+  // DFLT-00357: while the list is loading the existing labels are not on
+  // screen, so the create form is disabled as it is on a load failure.
+  it('disables the create form while the list is loading, and enables it once the list is in', async () => {
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    const createButton = () => createForm().getByRole('button', { name: i18n.t('settings.labels.create') });
+
+    expect(statusTexts()).toContain(i18n.t('settings.labels.loading'));
+    expect(nameInput()).toBeDisabled();
+    expect(createButton()).toBeDisabled();
+
+    await act(async () => { take('proj-A').resolve([label('label-bug', 'バグ', 'red', 2)]); });
+    await screen.findByTestId('label-row-label-bug');
+    expect(nameInput()).toBeEnabled();
+
+    await user.type(nameInput(), 'ドキュメント');
+    expect(createButton()).toBeEnabled();
+  });
+
+  it('disables the create form again while the next project\'s list is loading after a switch', async () => {
+    const user = userEvent.setup();
+    render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);
+    await act(async () => { take('proj-A').resolve([label('label-bug', 'バグ', 'red', 2)]); });
+    await screen.findByTestId('label-row-label-bug');
+    expect(nameInput()).toBeEnabled();
+
+    await user.selectOptions(selector(), 'proj-B');
+
+    expect(statusTexts()).toContain(i18n.t('settings.labels.loading'));
+    expect(nameInput()).toBeDisabled();
+    expect(createForm().getByRole('button', { name: i18n.t('settings.labels.create') })).toBeDisabled();
+
+    await act(async () => { take('proj-B').resolve([]); });
+    await screen.findByText(i18n.t('settings.labels.empty'));
+    expect(nameInput()).toBeEnabled();
+  });
+
   it('shows neither the loading line nor a load failure with no project selected', async () => {
     const user = userEvent.setup();
     render(<LabelsEditor projects={testProjects} initialProjectId="proj-A" />);

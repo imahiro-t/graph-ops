@@ -89,6 +89,11 @@ describe('SkillsEditor', () => {
       await waitFor(() => expect(screen.queryByText(i18n.t('settings.common.loading'))).not.toBeInTheDocument());
       expect(mockedFetchSkills).toHaveBeenCalledTimes(1);
       expect(mockedFetchSkill).not.toHaveBeenCalled();
+      // DFLT-00357: a note says the list is empty, in place of an editor
+      // with nothing to edit.
+      expect(screen.getByText(i18n.t('settings.skills.emptyList'))).toBeInTheDocument();
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
     });
   });
 
@@ -405,7 +410,7 @@ describe('SkillsEditor load failures and switching', () => {
   it('shows the loading line as a status', () => {
     mockedFetchSkills.mockReturnValue(new Promise(() => {}));
     render(<SkillsEditor onDirtyChange={vi.fn()} />);
-    expect(screen.getByRole('status')).toHaveTextContent(i18n.t('settings.common.loading'));
+    expect(screen.getByText(i18n.t('settings.common.loading'), { selector: '[role="status"]' })).toBeInTheDocument();
   });
 
   it('loads the list and the first skill on retry and moves focus to the editor pane', async () => {
@@ -455,6 +460,43 @@ describe('SkillsEditor load failures and switching', () => {
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
     expect(loadingStatus()).not.toBeInTheDocument();
     expect(mockedFetchSkill).not.toHaveBeenCalled();
+    expect(screen.getByText(i18n.t('settings.skills.emptyList'))).toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  });
+
+  // DFLT-00357: the saved confirmation is a status, so it is announced.
+  it('shows the save confirmation as a status after a successful save', async () => {
+    const user = userEvent.setup();
+    mockedSaveSkill.mockResolvedValue({ name: 'create-ticket', tier_text: 'edited', merged_text: 'edited' });
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    const textarea = await screen.findByDisplayValue('create-ticket-tier-text');
+
+    await user.clear(textarea);
+    await user.type(textarea, 'edited');
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
+
+    // Announced by the always-mounted live region (SC 4.1.3); the visible
+    // flash is aria-hidden so it is not read twice.
+    expect(await screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' })).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('settings.common.saveSuccess'), { selector: '[aria-hidden="true"]' })).toHaveClass('text-emerald-700', 'dark:text-emerald-400');
+  });
+
+  // DFLT-00357: a list that turns up empty on a later fetch clears the
+  // selection and shows the note, not the skill that is no longer listed.
+  it('shows the empty-list note when a re-fetch after a save returns no skills', async () => {
+    const user = userEvent.setup();
+    mockedSaveSkill.mockResolvedValue({ name: 'create-ticket', tier_text: 'edited', merged_text: 'edited' });
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    const textarea = await screen.findByDisplayValue('create-ticket-tier-text');
+    mockedFetchSkills.mockResolvedValueOnce([]);
+
+    await user.clear(textarea);
+    await user.type(textarea, 'edited');
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
+
+    expect(await screen.findByText(i18n.t('settings.skills.emptyList'))).toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.skills.names.createTicket') })).not.toBeInTheDocument();
   });
 
   it('keeps the editor and shows a non-blocking error when the list re-fetch after a save fails', async () => {

@@ -402,6 +402,13 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         document.max_iterations = maxIterations;
       }
       await saveSettingsCatalog(t, document);
+    } catch (e) {
+      // The save itself failed: nothing was written, so the rows stay dirty.
+      setError(errorMessage(e, t('errors.UNKNOWN')));
+      setSaving(false);
+      return;
+    }
+    try {
       // Re-derive rows from the server rather than patching local state --
       // a deleted override needs to reappear as a non-overridden default row
       // (if it's still part of merged_catalog), which a simple
@@ -409,7 +416,14 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       applyFetched(await fetchRows());
       showSavedFlash();
     } catch (e) {
-      setError(errorMessage(e, t('errors.UNKNOWN')));
+      // DFLT-00357: the save went through and only the re-fetch failed. Take
+      // what is on screen as saved (clearing isDirty) and say so, and report
+      // the re-fetch failure on its own -- the server-derived parts (default
+      // rows coming back, previews, warnings) may be stale until reopened.
+      setSavedGates(gates);
+      setSavedMaxIterations(maxIterations);
+      showSavedFlash();
+      setError(t('settings.reviewGates.refetchFailed', { message: errorMessage(e, t('errors.UNKNOWN')) }));
     } finally {
       setSaving(false);
     }
@@ -705,8 +719,12 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           <Plus aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.reviewGates.addGate')}
         </button>
         <div className="flex items-center gap-2 narrow:flex-wrap">
+          {/* The flash disappears after 2 seconds; the always-mounted live
+              region is what announces it (SC 4.1.3), like
+              AutopilotSettingsEditor's. The visible flash is aria-hidden. */}
+          <StatusLiveRegion message={savedFlash ? t('settings.common.saveSuccess') : ''} />
           {savedFlash && (
-            <span className="text-emerald-600 text-xs flex items-center gap-1">
+            <span aria-hidden="true" className="text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-1">
               <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}
             </span>
           )}

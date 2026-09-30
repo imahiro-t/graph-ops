@@ -173,8 +173,9 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   //   project is selected (DFLT-00350). Cleared by the next load (a project
   //   switch) or a successful retry; a retry leaves it on screen, with its
   //   focused retry button, until its own result is in. While it is shown
-  //   the create form is disabled: the list is not known, so nothing is
-  //   created against it.
+  //   -- and likewise while the list is still loading (DFLT-00357) -- the
+  //   create form is disabled: the list is not known, so nothing is created
+  //   against it.
   // - createError: the create form's last attempt failed. Cleared only by
   //   the next create (or a load), never by a row's action.
   // - rowErrors: per label id, the last failed rename/recolor/delete of that
@@ -355,10 +356,11 @@ export const LabelsEditor: React.FC<Props> = ({ projects, initialProjectId, onLa
   // hide the failure for good.
   const loadFailed = canEdit && loadError !== null && loadError.projectId === projectId;
   const listLoading = canEdit && !loadFailed && projectId !== loadedProjectId;
-  // The create form is disabled with no project, and while the list could
-  // not be loaded (completion criterion: nothing is saved from the failed
-  // state).
-  const createDisabled = !canEdit || loadFailed;
+  // The create form is disabled with no project, while the list could not
+  // be loaded (completion criterion: nothing is saved from the failed
+  // state), and while it is still loading (DFLT-00357) -- either way the
+  // existing labels are not on screen, so a duplicate name could slip in.
+  const createDisabled = !canEdit || loadFailed || listLoading;
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();

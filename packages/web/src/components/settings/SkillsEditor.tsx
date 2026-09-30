@@ -20,6 +20,7 @@ import { LoadingLine } from './LoadingLine';
 import { useSelectedTextLoader } from './useSelectedTextLoader';
 import { useListLoader } from './useListLoader';
 import { LIST_HEADING_CLASS, LIST_ITEM_FOCUS_CLASS, LIST_LAYOUT_CLASS, LIST_PANE_CLASS } from './listPane';
+import { StatusLiveRegion } from '../StatusLiveRegion';
 import { Spinner } from '../Spinner';
 
 interface Props {
@@ -70,8 +71,10 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
       setSkills(list);
       // Functional updater (reads `selected` via `prev`) so a stale
       // `selected` from an earlier render is never used (#7, mirrors
-      // NodeTypesEditor's #3).
-      setSelected(prev => (!prev && list.length > 0 ? list[0].name : prev));
+      // NodeTypesEditor's #3). An empty list resets it to '' (DFLT-00357),
+      // the same as NodeTypesEditor's, so the pane shows the empty-list note
+      // rather than a skill that is no longer listed.
+      setSelected(prev => (list.length === 0 ? '' : !prev ? list[0].name : prev));
     },
     onReloadError: setError,
     getFocusTarget: () => editorPaneRef.current
@@ -132,6 +135,11 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   return (
     <div className={LIST_LAYOUT_CLASS}>
       {confirmDialog}
+      {/* Announces the save flash (SC 4.1.3). It sits here rather than in the
+          button row because that row is only rendered while a skill is
+          selected; the visible flash there is aria-hidden so it is not read
+          twice, like AutopilotSettingsEditor's. */}
+      <StatusLiveRegion message={savedFlash ? t('settings.common.saveSuccess') : ''} />
       {/* Left: skill list. See listPane.ts for why the heading is sticky
           and the list has scroll padding. */}
       <div className={LIST_PANE_CLASS}>
@@ -173,8 +181,10 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
       <div ref={editorPaneRef} tabIndex={-1} className="flex-1 min-w-0 flex flex-col gap-3 focus:outline-hidden">
         {error && <ErrorBox className="p-2.5 text-[0.6875rem]">{error}</ErrorBox>}
         {/* The same order as NodeTypesEditor's (see LoadFailure): a failure
-            before loading; selected === '' (an empty list) falls through to
-            the editor. */}
+            before loading, then -- once the list is loaded and empty -- a
+            note in place of the editor (DFLT-00357). The check is the list's
+            length, not selected === '', and comes before the selected
+            skill's failure / loading lines, which never show for ''. */}
         {skillList.failure ? (
           <LoadFailure
             message={t('settings.common.loadFailed', { message: skillList.failure.message })}
@@ -184,6 +194,8 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
           />
         ) : !skillList.loaded ? (
           <LoadingLine />
+        ) : skills.length === 0 ? (
+          <p className="text-xs text-slate-500 dark:text-slate-400">{t('settings.skills.emptyList')}</p>
         ) : selectedText.failure ? (
           <LoadFailure
             message={t('settings.common.loadFailed', { message: selectedText.failure.message })}
@@ -224,7 +236,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
             </div>
             <div className="flex justify-end items-center gap-2 narrow:flex-wrap">
               {savedFlash && (
-                <span className="text-emerald-600 text-xs flex items-center gap-1">
+                <span aria-hidden="true" className="text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-1">
                   <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}
                 </span>
               )}

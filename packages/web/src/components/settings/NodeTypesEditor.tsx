@@ -95,8 +95,10 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       // (selected === '') and a type just deleted out from under the
       // current selection (see removeType). Written as a setState updater
       // (reading `selected` via `prev`, not the outer closure) so a stale
-      // `selected` from an earlier render is never used (#3).
-      setSelected(prev => (list.length > 0 && !list.some(info => info.type === prev) ? list[0].type : prev));
+      // `selected` from an earlier render is never used (#3). An empty list
+      // resets it to '' (DFLT-00357): otherwise deleting the last type would
+      // leave its name selected, and headed on the right, after it is gone.
+      setSelected(prev => (list.length === 0 ? '' : !list.some(info => info.type === prev) ? list[0].type : prev));
     },
     onReloadError: setError,
     getFocusTarget: () => editorPaneRef.current
@@ -285,6 +287,11 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     <div className={LIST_LAYOUT_CLASS}>
       {confirmDialog}
       <StatusLiveRegion message={deleteNotice} />
+      {/* Announces the save flash (SC 4.1.3). It sits here rather than in the
+          button row because that row is only rendered while a type is
+          selected; the visible flash there is aria-hidden so it is not read
+          twice, like AutopilotSettingsEditor's. */}
+      <StatusLiveRegion message={savedFlash ? t('settings.common.saveSuccess') : ''} />
       {/* Left: type list. See listPane.ts for why the heading is sticky
           and the list has scroll padding. */}
       <div ref={listRef} className={`${LIST_PANE_CLASS} flex flex-col`}>
@@ -493,9 +500,11 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
         {/* In this order (see LoadFailure): a failure before loading, since a
             failed load never marks the item as loaded and a retry keeps the
             failure (and its focused retry button) up until its result is in.
-            selected === '' is an empty list, not a load in progress: it
-            falls through to the editor as before, or it would never leave
-            the loading line. */}
+            A loaded, empty list shows a note in place of the editor
+            (DFLT-00357). It is checked by the list's length rather than by
+            selected === '' (which the list loader also resets then), and
+            comes before the selected type's failure / loading lines --
+            neither shows for '', since nothing is fetched for it. */}
         {typeList.failure ? (
           <LoadFailure
             message={t('settings.common.loadFailed', { message: typeList.failure.message })}
@@ -505,6 +514,8 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           />
         ) : !typeList.loaded ? (
           <LoadingLine />
+        ) : types.length === 0 ? (
+          <p className="text-xs text-slate-500 dark:text-slate-400">{t('settings.nodeTypes.emptyList')}</p>
         ) : selectedText.failure ? (
           <LoadFailure
             message={t('settings.common.loadFailed', { message: selectedText.failure.message })}
@@ -545,7 +556,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
             </div>
             <div className="flex justify-end items-center gap-2 narrow:flex-wrap">
               {savedFlash && (
-                <span className="text-emerald-600 text-xs flex items-center gap-1">
+                <span aria-hidden="true" className="text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-1">
                   <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}
                 </span>
               )}
