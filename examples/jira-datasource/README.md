@@ -339,8 +339,9 @@ requests in flight finish.
 
 ## Limitations
 
-- **Protocol 1.1: autopilot runs are not shared, node claims are not
-  recorded, and neither a graph nor a conditional ticket edit is atomic.** The sample stays at protocol 1.1 and does not implement 1.2's
+- **Protocol 1.1: autopilot runs are not shared, node claims and deciders
+  are not recorded, and neither a graph, a node transition nor a conditional
+  ticket edit is atomic.** The sample stays at protocol 1.1 and does not implement 1.2's
   `autopilot-runs` endpoints.
   graph-engine therefore keeps each member's autopilot runs on that member's
   machine only (and says so once per process): a member's `autopilot start`
@@ -359,7 +360,22 @@ requests in flight finish.
   UI's label changes are checked by graph-engine reading the ticket and
   comparing `updated_at` before it writes: an edit another member saves
   between that read and the write is still overwritten without being
-  detected (graph-engine says so once per process). A plugin that wants these protections implements
+  detected (graph-engine says so once per process). Nor does it implement
+  1.2's node transitions (`POST /tickets/{ticketId}/node-transition`,
+  `applyNodeTransition`) or `if_status` on a ticket `PATCH`, so
+  graph-engine carries out `complete-node`, the Web UI's Approve / Reject,
+  `reopen-nodes`, `grant-iterations` and `unstick-node` with one
+  `createArtifact` / `updateNode` / `updateTicket` request at a time, which
+  is not atomic (graph-engine says so once per process): an approve and a
+  reject of the same approval gate sent at the same moment can both get
+  through, two `reopen-nodes` or `grant-iterations` at once can spend or
+  lose an iteration, a ticket status write may overwrite another member's
+  concurrent `CLOSED` (graph-engine reads the ticket and compares before its
+  `PATCH`, which only narrows the window), and who approved, rejected or
+  completed a manual node (an `approval_gate`, a `release` or a custom
+  `is_manual` node; the `decided_by_*` fields) is not recorded; a completion
+  without `--claim` also cannot tell a node that was rewound and handed out
+  again since it was read. A plugin that wants these protections implements
   protocol 1.2 (see the [developer manual](../../docs/http-datasource/README.md)).
 - **One plugin process per Jira site.** Properties are updated with
   read-modify-write under an in-process per-issue lock; two plugin processes
