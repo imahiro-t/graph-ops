@@ -328,6 +328,7 @@ func decideBegin(req BeginRequest, local, shared []*Run, now time.Time, res *Beg
 			// The adopting orchestrator is the run's first window now,
 			// whatever the reservation (or a run it took over) held.
 			cand.TerminalTTY, cand.TerminalTabDisabled = req.TerminalTTY, ""
+			cand.TerminalTabSlowTimeouts = 0
 			res.Adopted = true
 			stamp(cand, req.Actor, now, sharedByID)
 			return cand, original, nil
@@ -404,8 +405,11 @@ func decideBegin(req BeginRequest, local, shared []*Run, now time.Time, res *Beg
 	// so a tty left by an earlier orchestrator (whose number the system
 	// may since have given to an unrelated tab) is never used, and a
 	// disabled tab path gets another chance (a permission may have been
-	// granted since). A reservation holds none until it is adopted.
+	// granted since), with its count of slow timeouts reset; the history
+	// of tab failures is kept. A reservation holds none until it is
+	// adopted.
 	cand.TerminalTTY, cand.TerminalTabDisabled = req.TerminalTTY, ""
+	cand.TerminalTabSlowTimeouts = 0
 	if req.Reserve {
 		cand.TerminalTTY = ""
 		cand.State = RunStarting

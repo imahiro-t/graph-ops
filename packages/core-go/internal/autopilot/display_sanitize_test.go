@@ -79,7 +79,9 @@ func craftedRecord(t *testing.T, id, root, mode, state string, heartbeat time.Ti
 		Stops:       []StopRecord{{At: heartbeat, Reason: evil, Ticket: evil, Detail: evil}},
 		Reservation: &Reservation{Previous: []byte(evil)},
 		TerminalTTY: evil, TerminalTabDisabled: evil,
-		StartedBy: &StartedBy{Name: evil, MachineID: "machine-b"},
+		TerminalTabSlowTimeouts: 1,
+		TerminalTabFailures:     []TabFailureRecord{{At: heartbeat, TicketID: evil, Role: evil, Kind: evil, Message: evil, Phase: evil}},
+		StartedBy:               &StartedBy{Name: evil, MachineID: "machine-b"},
 	}
 	data, err := json.Marshal(snap)
 	if err != nil {
@@ -237,7 +239,7 @@ func TestDisplaySanitize_RunFromRecordKeepsTheMatchedValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.TerminalTTY != "" || r.TerminalTabDisabled != "" || r.Reservation == nil || r.Reservation.Previous != nil {
+	if r.TerminalTTY != "" || r.TerminalTabDisabled != "" || r.TerminalTabSlowTimeouts != 0 || r.TerminalTabFailures != nil || r.Reservation == nil || r.Reservation.Previous != nil {
 		t.Fatalf("local-only run fields kept: %q %q %+v", r.TerminalTTY, r.TerminalTabDisabled, r.Reservation)
 	}
 	for _, st := range r.Tickets {

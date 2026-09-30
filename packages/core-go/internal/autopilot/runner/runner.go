@@ -848,6 +848,7 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 
 	// Outside the lock: git and the terminal can take seconds.
 	var outcome terminal.LaunchOutcome
+	var disabledRun bool
 	launchErr := func() error {
 		if repoErr != nil {
 			return repoErr
@@ -890,10 +891,9 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 			st.Worktree = workDir
 		}
 		// In the same record as the launch itself: a tab failure that will
-		// repeat disables the tab path for the rest of the run.
-		if outcome.DisableTab && run.TerminalTabDisabled == "" {
-			run.TerminalTabDisabled = outcome.TabError
-		}
+		// repeat disables the tab path for the rest of the run, and every
+		// tab failure is kept with its details (DFLT-00361).
+		disabledRun = recordTabOutcome(run, outcome, ticketID, role, s.now())
 		sample.observe(st, s.now())
 		out = LaunchResult{Launched: ticketID, Role: role, Worktree: workDir, Next: fmt.Sprintf("graph-engine autopilot wait %s %s", runID, ticketID), UntrustedFolder: untrusted}
 		if role == autopilot.RoleWork {
@@ -902,13 +902,72 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		return nil
 	})
 	if outcome.TabError != "" {
-		if outcome.DisableTab {
-			s.logf("the %s session of %s opened in a new Terminal window because a tab could not be opened (%s); the rest of run %s opens its sessions in new windows", role, ticketID, outcome.TabError, runID)
+		if disabledRun {
+			s.logf("the %s session of %s opened in a new Terminal window because a tab could not be opened (%s%s); the rest of run %s opens its sessions in new windows", role, ticketID, outcome.TabError, describeTabFailure(outcome.TabFailure), runID)
 		} else {
-			s.logf("the %s session of %s opened in a new Terminal window because a tab could not be opened (%s)", role, ticketID, outcome.TabError)
+			s.logf("the %s session of %s opened in a new Terminal window because a tab could not be opened (%s%s)", role, ticketID, outcome.TabError, describeTabFailure(outcome.TabFailure))
 		}
 	}
 	return out, err
+}
+
+// MaxSlowTabTimeouts is how many tab launches in a row may time out after
+// Terminal and System Events both answered (terminal.TabFailure.SlowTimeout:
+// Terminal answering slowly) before the tab is disabled for the rest of the
+// run (DFLT-00361): one such timeout falls back to a new window for that
+// launch only, and the second in a row stops every later launch from
+// waiting tabScriptTimeout again. Only a tab that opens resets the count;
+// the other failures (9101-9104, lock-busy, a permission prompt's timeout)
+// leave it as it is.
+const MaxSlowTabTimeouts = 2
+
+// recordTabOutcome records a launch's Terminal.app tab outcome on run:
+// a tab that opened resets the count of slow timeouts; a tab that could not
+// be opened updates that count, disables the tab when the failure will
+// repeat (outcome.DisableTab) or is the MaxSlowTabTimeouts-th slow timeout
+// in a row, and is added to run.TerminalTabFailures. It returns whether
+// this launch disabled the tab.
+func recordTabOutcome(run *autopilot.Run, outcome terminal.LaunchOutcome, ticketID, role string, now time.Time) bool {
+	if outcome.UsedTab {
+		run.TerminalTabSlowTimeouts = 0
+		return false
+	}
+	if outcome.TabError == "" {
+		return false
+	}
+	disable := outcome.DisableTab
+	if outcome.TabFailure.SlowTimeout() {
+		run.TerminalTabSlowTimeouts++
+		if run.TerminalTabSlowTimeouts >= MaxSlowTabTimeouts {
+			disable = true
+		}
+	}
+	disabledRun := disable && run.TerminalTabDisabled == ""
+	if disabledRun {
+		run.TerminalTabDisabled = outcome.TabError
+	}
+	rec := autopilot.TabFailureRecord{At: now, TicketID: ticketID, Role: role, Message: outcome.TabError, DisabledRun: disabledRun}
+	if f := outcome.TabFailure; f != nil {
+		rec.Kind, rec.ErrorNumber, rec.Phase, rec.KeystrokeSent = f.Kind, f.ErrorNumber, f.Phase, f.KeystrokeSent
+	}
+	run.RecordTabFailure(rec)
+	return disabledRun
+}
+
+// describeTabFailure is the details of a tab failure the warning adds after
+// its message ("" when there are none).
+func describeTabFailure(f *terminal.TabFailure) string {
+	if f == nil || f.Kind == "" {
+		return ""
+	}
+	desc := "; " + f.Kind
+	if f.Phase != "" {
+		desc += ", after " + f.Phase
+	}
+	if f.EmptyTabPossible() {
+		desc += ", an empty tab may be left"
+	}
+	return desc
 }
 
 // MaxLaunchAttempts is how many launches of one session in a row may fail
