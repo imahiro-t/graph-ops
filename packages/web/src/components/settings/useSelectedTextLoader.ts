@@ -23,7 +23,7 @@ import { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { errorMessage } from '../../lib/apiError';
 import { useLatest } from '../../hooks/useLatest';
-import { useFocusAfterRetry } from './LoadFailure';
+import { LoadFailureState, useFocusAfterRetry } from './LoadFailure';
 
 export interface SelectedText {
   tier_text: string;
@@ -43,12 +43,7 @@ interface Options<T extends SelectedText> {
   getFocusTarget: () => HTMLElement | null | undefined;
 }
 
-export interface SelectedTextFailure {
-  message: string;
-  retrying: boolean;
-  failureKey: number;
-  onRetry: () => void;
-}
+export type SelectedTextFailure = LoadFailureState;
 
 interface Result {
   /** What the pane shows for the selected item. 'ready' also for ''. */

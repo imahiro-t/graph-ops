@@ -9,6 +9,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { TemplatesEditor } from './TemplatesEditor';
+import { deferred } from '../../test/deferred';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -55,12 +56,6 @@ const saveButton = () => screen.getByRole('button', { name: i18n.t('settings.com
 // DFLT-00350) by its text.
 const savedStatus = () =>
   screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' });
-
-const deferred = <T,>() => {
-  let resolve!: (v: T) => void;
-  const promise = new Promise<T>(r => { resolve = r; });
-  return { promise, resolve };
-};
 
 const retryButton = () => screen.getByRole('button', { name: i18n.t('settings.common.retry') });
 
