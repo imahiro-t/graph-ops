@@ -401,6 +401,7 @@
     },
     "nodeTypes": {
       "listTitle": "Node Types",
+      "emptyList": "No node types yet. Add one with “Add Node Type”.",
       "overrideBadge": "Overridden",
       "mergedPreviewLabel": "Merged preview (plugin default + your override; a team tier is not included)",
       "tierTextLabel": "Your override",
@@ -444,6 +445,7 @@
       "cannotRenameDefaultHint": "This is a plugin-default review gate -- its name can't be changed. The name stays tied to the locale so translated names keep showing up when the locale is switched.",
       "cannotChangeDefaultIdHint": "This is a plugin-default review gate -- its ID can't be changed, even once it has been overridden. Use \"Add Review Gate\" for a gate with a different ID.",
       "tableEmpty": "No review gates defined yet.",
+      "refetchFailed": "Saved, but the latest settings could not be reloaded ({{message}}). What is shown may be out of date; reopen the settings to see the latest.",
       "mergedPreviewLabel": "Merged preview (plugin default + your override; a team tier is not included)",
       "mergedCriteriaLabel": "Merged criteria",
       "mergedCriteriaGateSuffix": "for {{name}}",
@@ -460,6 +462,7 @@
     },
     "skills": {
       "listTitle": "Skills",
+      "emptyList": "No skills yet.",
       "overrideBadge": "Overridden",
       "mergedPreviewLabel": "Merged preview (plugin default + your override; a team tier is not included)",
       "tierTextLabel": "Your override",

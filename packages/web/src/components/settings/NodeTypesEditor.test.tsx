@@ -90,7 +90,30 @@ describe('NodeTypesEditor', () => {
       await waitFor(() => expect(screen.queryByText(i18n.t('settings.common.loading'))).not.toBeInTheDocument());
       expect(mockedFetchTypes).toHaveBeenCalledTimes(1);
       expect(mockedFetchType).not.toHaveBeenCalled();
+      // DFLT-00357: a note says the list is empty, in place of an editor
+      // with nothing to edit.
+      expect(screen.getByText(i18n.t('settings.nodeTypes.emptyList'))).toBeInTheDocument();
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
     });
+  });
+
+  // DFLT-00357: the saved confirmation is a status, so it is announced.
+  it('shows the save confirmation as a status after a successful save', async () => {
+    const user = userEvent.setup();
+    mockedSaveType.mockReset();
+    mockedSaveType.mockResolvedValue({ type: 'implementation', tier_text: 'edited', merged_text: 'edited' });
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    const textarea = await screen.findByDisplayValue('implementation-tier-text');
+
+    await user.clear(textarea);
+    await user.type(textarea, 'edited');
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.common.save') }));
+
+    // Announced by the always-mounted live region (SC 4.1.3); the visible
+    // flash is aria-hidden so it is not read twice.
+    expect(await screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' })).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('settings.common.saveSuccess'), { selector: '[aria-hidden="true"]' })).toHaveClass('text-emerald-700', 'dark:text-emerald-400');
   });
 
   it('selects the first type on initial mount and fetches its detail', async () => {
@@ -474,6 +497,29 @@ describe('NodeTypesEditor focus after deleting a type', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') })).toHaveFocus());
     expect(document.activeElement).not.toBe(document.body);
+    // DFLT-00357: the pane says the list is empty instead of heading the
+    // deleted type over an empty editor.
+    expect(screen.getByText(i18n.t('settings.nodeTypes.emptyList'))).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'custom_a' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  });
+
+  // DFLT-00357: adding a type after the last one is gone brings the editor
+  // back for the new type.
+  it('replaces the empty-list note with the new type\'s editor when a type is added after deleting the last one', async () => {
+    serveList([custom('custom_a')]);
+    const { container } = render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    await deleteAndConfirm(container, 'custom_a', 'custom_a');
+    await screen.findByText(i18n.t('settings.nodeTypes.emptyList'));
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: i18n.t('settings.nodeTypes.addType') }));
+    await user.type(screen.getByLabelText(i18n.t('settings.nodeTypes.newTypeLabel')), 'custom_b{Enter}');
+
+    expect(await screen.findByDisplayValue('custom_b-tier-text')).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('settings.nodeTypes.emptyList'))).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'custom_b' })).toBeInTheDocument();
+    expect(screen.queryByTestId('node-type-discard-confirm')).not.toBeInTheDocument();
   });
 
   it('keeps focus on the delete button when the delete request fails', async () => {
@@ -1197,6 +1243,8 @@ describe('NodeTypesEditor load failures and switching', () => {
     expect(screen.queryByText(i18n.t('settings.common.loading'))).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: i18n.t('settings.common.retry') })).not.toBeInTheDocument();
     expect(mockedFetchType).not.toHaveBeenCalled();
+    expect(screen.getByText(i18n.t('settings.nodeTypes.emptyList'))).toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   });
 
   it('disables "add node type" while the list is loading or failed', async () => {

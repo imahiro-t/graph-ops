@@ -271,7 +271,7 @@ describe('ReviewGatesEditor', () => {
 
       const gates = await waitFor(savedGates);
       expect(gates.code_review).toEqual({ additional_criteria: 'also docs' });
-      expect(await screen.findByText(i18n.t('settings.common.saveSuccess'))).toBeInTheDocument();
+      expect(await screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' })).toBeInTheDocument();
     });
 
     it('does not write a field changed and then changed back (including toggling enabled twice)', async () => {
@@ -426,7 +426,7 @@ describe('ReviewGatesEditor', () => {
       mockedFetchCatalog.mockResolvedValue(WITH_PARTIAL_DEFAULT_OVERRIDE);
       await user.type(fieldsOf('settings.reviewGates.additionalCriteriaLabel')[0], 'also docs');
       await user.click(saveButton());
-      await screen.findByText(i18n.t('settings.common.saveSuccess'));
+      await screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' });
 
       expect(fieldsOf('settings.reviewGates.idLabel')[0]).toBeDisabled();
     });
@@ -529,7 +529,7 @@ describe('ReviewGatesEditor', () => {
       const doc = await waitFor(savedDocument);
       expect(doc.max_iterations).toBe(5);
       expect(doc.review_gates).toEqual({ qa_review: CATALOG_RESPONSE.tier_document.review_gates!.qa_review });
-      await screen.findByText(i18n.t('settings.common.saveSuccess'));
+      await screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' });
       expect(limitSelect()).toHaveValue('5');
       expect(onDirtyChange).toHaveBeenLastCalledWith(false);
     });
@@ -556,7 +556,7 @@ describe('ReviewGatesEditor', () => {
 
       const doc = await waitFor(savedDocument);
       expect(doc.max_iterations ?? null).toBeNull();
-      await screen.findByText(i18n.t('settings.common.saveSuccess'));
+      await screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' });
       expect(limitSelect()).toHaveValue('');
       expect(limitSelect().selectedOptions[0].textContent).toBe(inheritLabel(3));
       expect(onDirtyChange).toHaveBeenLastCalledWith(false);
@@ -641,7 +641,7 @@ describe('ReviewGatesEditor', () => {
       await user.click(saveButton());
       const doc = await waitFor(savedDocument);
       expect(doc.max_iterations).toBe(4);
-      await screen.findByText(i18n.t('settings.common.saveSuccess'));
+      await screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' });
       expect(screen.queryByRole('note')).not.toBeInTheDocument();
     });
 
@@ -1415,7 +1415,9 @@ describe('ReviewGatesEditor removal announcement', () => {
     vi.useRealTimers();
   });
 
-  const liveRegion = () => screen.getAllByRole('status').find(el => el.getAttribute('aria-live') === 'polite')!;
+  // The removal region is the editor's last polite region; the save flash's
+  // region (DFLT-00357) sits earlier, in the button row.
+  const liveRegion = () => screen.getAllByRole('status').filter(el => el.getAttribute('aria-live') === 'polite').at(-1)!;
   const deleteButton = (name: string) =>
     screen.getByRole('button', { name: i18n.t('settings.reviewGates.deleteGateAriaLabel', { name }) });
   // A row with neither an ID nor a name is named by its row number
@@ -1551,7 +1553,7 @@ describe('ReviewGatesEditor removal announcement', () => {
 
     await waitFor(() => expect(mockedSaveCatalog).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockedFetchCatalog).toHaveBeenCalledTimes(3));
-    await screen.findByText(i18n.t('settings.common.saveSuccess'));
+    await screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' });
     expect(liveRegion()).toBe(region);
     expect(region).toHaveTextContent('');
   });
@@ -1781,5 +1783,81 @@ describe('ReviewGatesEditor load failure', () => {
     expect(screen.getByDisplayValue('Code Review')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: i18n.t('settings.common.save') })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: i18n.t('settings.common.retry') })).not.toBeInTheDocument();
+  });
+});
+
+// DFLT-00357: handleSave fetches the catalog once to build the document and
+// once more (fetchRows) after the save. A failed save and a failed re-fetch
+// after a successful save are told apart: only the former leaves the rows
+// unsaved.
+describe('ReviewGatesEditor saving, then re-fetching the rows', () => {
+  const saveButton = () => screen.getByRole('button', { name: i18n.t('settings.common.save') });
+  const criteriaFields = () => screen.getAllByLabelText(i18n.t('settings.reviewGates.criteriaLabel')) as HTMLInputElement[];
+
+  beforeEach(async () => {
+    mockedFetchCatalog.mockReset();
+    mockedFetchCatalog.mockResolvedValue(CATALOG_RESPONSE);
+    mockedSaveCatalog.mockReset();
+    mockedSaveCatalog.mockResolvedValue(undefined);
+    await i18n.changeLanguage('ja');
+  });
+
+  it('shows the save confirmation as a status after a successful save', async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+
+    await user.type(criteriaFields()[0], ' extra');
+    await user.click(saveButton());
+
+    // Announced by the always-mounted live region (SC 4.1.3); the visible
+    // flash is aria-hidden so it is not read twice.
+    expect(await screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' })).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('settings.common.saveSuccess'), { selector: '[aria-hidden="true"]' })).toHaveClass('text-emerald-700', 'dark:text-emerald-400');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('treats the rows as saved and says so, and reports the re-fetch failure apart, when only the re-fetch fails', async () => {
+    const onDirtyChange = vi.fn();
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={onDirtyChange} />);
+    await screen.findByDisplayValue('Code Review');
+
+    await user.type(criteriaFields()[0], ' extra');
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+    // The first call builds the document to save; the second is the re-fetch.
+    mockedFetchCatalog.mockResolvedValueOnce(CATALOG_RESPONSE).mockRejectedValueOnce(new Error('refetch boom'));
+    await user.click(saveButton());
+
+    // Announced by the always-mounted live region (SC 4.1.3); the visible
+    // flash is aria-hidden so it is not read twice.
+    expect(await screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' })).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('settings.common.saveSuccess'), { selector: '[aria-hidden="true"]' })).toHaveClass('text-emerald-700', 'dark:text-emerald-400');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      i18n.t('settings.reviewGates.refetchFailed', { message: 'refetch boom' })
+    );
+    expect(mockedSaveCatalog).toHaveBeenCalledTimes(1);
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    expect(saveButton()).toBeDisabled();
+    // What was typed stays on screen as the saved value.
+    expect(criteriaFields()[0]).toHaveValue('code criteria extra');
+  });
+
+  it('keeps the rows unsaved and shows only the error when the save itself fails', async () => {
+    const onDirtyChange = vi.fn();
+    const user = userEvent.setup();
+    mockedSaveCatalog.mockRejectedValue(new Error('save boom'));
+    render(<ReviewGatesEditor onDirtyChange={onDirtyChange} />);
+    await screen.findByDisplayValue('Code Review');
+
+    await user.type(criteriaFields()[0], ' extra');
+    await user.click(saveButton());
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('save boom');
+    expect(screen.getByRole('alert')).not.toHaveTextContent(i18n.t('settings.reviewGates.refetchFailed', { message: 'save boom' }));
+    expect(screen.queryByText(i18n.t('settings.common.saveSuccess'))).not.toBeInTheDocument();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+    expect(saveButton()).not.toBeDisabled();
+    expect(criteriaFields()[0]).toHaveValue('code criteria extra');
   });
 });

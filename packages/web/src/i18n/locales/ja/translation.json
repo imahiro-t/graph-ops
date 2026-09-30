@@ -400,6 +400,7 @@
     },
     "nodeTypes": {
       "listTitle": "ノード種別一覧",
+      "emptyList": "ノード種別はまだありません。「ノード種別を追加」から追加できます。",
       "overrideBadge": "上書きあり",
       "mergedPreviewLabel": "継承後のプレビュー（プラグイン既定＋ユーザー上書き。チーム層は含みません）",
       "tierTextLabel": "ユーザー上書き",
@@ -443,6 +444,7 @@
       "cannotRenameDefaultHint": "プラグイン既定のレビューゲートのため名前は変更できません。ロケール切り替えで翻訳された名前が表示されるよう、名前は固定されています。",
       "cannotChangeDefaultIdHint": "プラグイン既定のレビューゲートのため ID は変更できません（上書きした後も同じです）。別の ID のゲートが必要なときは「レビューゲートを追加」を使ってください。",
       "tableEmpty": "レビューゲートはまだ定義されていません。",
+      "refetchFailed": "保存しましたが、最新の設定を読み込み直せませんでした（{{message}}）。表示が最新でない可能性があります。画面を開き直すと最新の内容を表示します。",
       "mergedPreviewLabel": "継承後のプレビュー（プラグイン既定＋ユーザー上書き。チーム層は含みません）",
       "mergedCriteriaLabel": "合成後の合格基準",
       "mergedCriteriaGateSuffix": "（{{name}}）",
@@ -459,6 +461,7 @@
     },
     "skills": {
       "listTitle": "スキル一覧",
+      "emptyList": "スキルはまだありません。",
       "overrideBadge": "上書きあり",
       "mergedPreviewLabel": "継承後のプレビュー（プラグイン既定＋ユーザー上書き。チーム層は含みません）",
       "tierTextLabel": "ユーザー上書き",
