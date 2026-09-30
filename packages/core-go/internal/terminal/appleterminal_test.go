@@ -363,8 +363,8 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 		}
 		last = i
 	}
-	if strings.Count(script, "keystroke \"t\"") != 1 || strings.Count(script, "keystroke") != 2 {
-		t.Error("the keystroke must be sent exactly once (the other mention is the keystroke-sent phase)")
+	if strings.Count(script, "keystroke \"t\"") != 1 || strings.Count(script, "keystroke") != 3 {
+		t.Error("the keystroke must be sent exactly once (the other mentions are the keystroke-sending and keystroke-sent phases)")
 	}
 	// Timing (DFLT-00269): 0.2 seconds between the front check and Cmd+T,
 	// the new tab polled every 0.2 seconds for 30 rounds (about 6 seconds),

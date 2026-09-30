@@ -158,9 +158,9 @@ func ResetSharedErrorLog() {
 
 // SharedView returns a deep copy of r without what only means something on
 // this machine: the terminal tab it drives (TerminalTTY,
-// TerminalTabDisabled, TerminalTabSlowTimeouts, TerminalTabFailures), the JSON a reservation keeps to undo itself
-// (Reservation.Previous), and each ticket's worktree, branch names and
-// fingerprints.
+// TerminalTabDisabled, TerminalTabSlowTimeouts, TerminalTabFailures), the
+// JSON a reservation keeps to undo itself (Reservation.Previous), and each
+// ticket's worktree, branch names and fingerprints.
 func (r *Run) SharedView() (*Run, error) {
 	v, err := cloneRun(r)
 	if err != nil {

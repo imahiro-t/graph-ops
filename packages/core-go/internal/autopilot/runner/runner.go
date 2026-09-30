@@ -964,7 +964,7 @@ func describeTabFailure(f *terminal.TabFailure) string {
 	if f.Phase != "" {
 		desc += ", after " + f.Phase
 	}
-	if f.KeystrokeSent {
+	if f.EmptyTabPossible() {
 		desc += ", an empty tab may be left"
 	}
 	return desc

@@ -195,8 +195,9 @@ type TabFailureRecord struct {
 	Message string `json:"message"`
 	// Phase is the last phase the tab script reached ("" for none).
 	Phase string `json:"phase,omitempty"`
-	// KeystrokeSent: Cmd+T had been sent, so a new tab may have been left
-	// empty.
+	// KeystrokeSent: Cmd+T had definitely been sent, so a new tab may have
+	// been left empty. A timeout at the keystroke-sending phase may have
+	// sent it as well; Message says so then.
 	KeystrokeSent bool `json:"keystroke_sent"`
 	// DisabledRun: this failure disabled the tab for the rest of the run.
 	DisabledRun bool `json:"disabled_run"`

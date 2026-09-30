@@ -203,7 +203,7 @@ const (
 // tabScriptTimeout. openAppleTerminalTab takes the last one as how far the
 // script got: whether Terminal and System Events answered at all (a
 // timeout before that is a permission prompt nobody answers), and whether
-// Cmd+T was already sent (a new tab may then be left empty).
+// Cmd+T was already sent or on its way (a new tab may then be left empty).
 //
 // `do script` is the last statement: every failure before it ends the
 // script with an error, so falling back to a new window never runs the
@@ -319,6 +319,7 @@ on run argv
 	end if
 	log "graph-ops-phase: frontmost"
 	delay 0.2
+	log "graph-ops-phase: keystroke-sending"
 	tell application "System Events" to tell process "Terminal" to keystroke "t" using command down
 	log "graph-ops-phase: keystroke-sent"
 	set newTTY to missing value
@@ -361,6 +362,7 @@ on run argv
 		end try
 	end if
 	if newTab is missing value then error "graph-ops: the new tab in the Terminal window of " & targetTTY & " closed" number 9102
+	log "graph-ops-phase: tab-found"
 	set sameWindow to false
 	set boundsNote to "could not be read"
 	repeat 20 times
@@ -378,7 +380,6 @@ on run argv
 		delay 0.1
 	end repeat
 	if not sameWindow then error "graph-ops: the new tab did not open in the Terminal window of " & targetTTY & " (bounds " & boundsNote & ")" number 9102
-	log "graph-ops-phase: tab-found"
 	log "graph-ops-phase: command-sending"
 	tell application "Terminal" to do script shellCommand in newTab
 end run`
@@ -541,13 +542,20 @@ const (
 	// not a permission prompt.
 	TabPhaseSystemEventsOK = "system-events-ok"
 	// TabPhaseFrontmost: Terminal was seen frontmost with the target window
-	// in front.
+	// in front. Cmd+T has not been sent yet.
 	TabPhaseFrontmost = "frontmost"
+	// TabPhaseKeystrokeSending: Cmd+T is about to be sent to System Events.
+	// A script error here is System Events refusing the keystroke (no tab
+	// opened), but a timeout here may be System Events slow to answer an
+	// event it still carries out, so a new tab may have been left empty
+	// (TabFailure.EmptyTabPossible) even though KeystrokeSent is false.
+	TabPhaseKeystrokeSending = "keystroke-sending"
 	// TabPhaseKeystrokeSent: Cmd+T was sent. A failure from here on may
 	// leave the new tab empty.
 	TabPhaseKeystrokeSent = "keystroke-sent"
-	// TabPhaseTabFound: the new tab was found and judged to be in the
-	// orchestrator's window.
+	// TabPhaseTabFound: the new tab was found, before checking that it is
+	// in the orchestrator's window; a failure here is that check (bounds
+	// that do not match, or a timeout while waiting for them to).
 	TabPhaseTabFound = "tab-found"
 	// TabPhaseCommandSending: `do script` is about to run. A timeout here
 	// may have started the session in the tab as well as in the fallback
@@ -558,7 +566,8 @@ const (
 // tabPhases lists the phases in the order the script reaches them.
 var tabPhases = []string{
 	TabPhaseWindowFound, TabPhaseSystemEventsOK, TabPhaseFrontmost,
-	TabPhaseKeystrokeSent, TabPhaseTabFound, TabPhaseCommandSending,
+	TabPhaseKeystrokeSending, TabPhaseKeystrokeSent, TabPhaseTabFound,
+	TabPhaseCommandSending,
 }
 
 // tabPhasePrefix starts every phase line of the script's output.
@@ -653,6 +662,8 @@ func tabTimeoutMessage(phase string) string {
 	switch {
 	case phase == TabPhaseCommandSending:
 		msg += "; the session may have started in the new tab as well"
+	case phase == TabPhaseKeystrokeSending:
+		msg += "; Cmd+T may have been sent, so a new tab may have been left empty"
 	case tabPhaseRank(phase) >= tabPhaseRank(TabPhaseKeystrokeSent):
 		msg += "; a new tab may have been left empty"
 	}
@@ -679,9 +690,9 @@ var tabRetryableError = regexp.MustCompile(`\((` + strings.Join([]string{
 // launch. That also takes in Terminal merely answering slowly at the start
 // (reading its tabs before Cmd+T, activating it), as it always did. From
 // TabPhaseSystemEventsOK on, both permissions are granted, so a timeout is
-// Terminal answering slowly: it does not disable the tab by itself, and the
-// runner disables it after runner.MaxSlowTabTimeouts of them in a row (TabFailure.
-// SlowTimeout). Before DFLT-00361 every timeout disabled the tab, so one
+// Terminal answering slowly: it does not disable the tab by itself, and
+// the runner disables it after runner.MaxSlowTabTimeouts of them in a row
+// (TabFailure.SlowTimeout). Before DFLT-00361 every timeout disabled the tab, so one
 // slow moment in a long run sent all its later sessions to new windows.
 //
 // Otherwise it is an allow list: only the script's own quick errors

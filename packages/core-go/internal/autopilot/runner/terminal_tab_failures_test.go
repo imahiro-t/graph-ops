@@ -207,3 +207,22 @@ func TestLaunch_PromptTimeoutDisablesAtOnce(t *testing.T) {
 		t.Fatalf("run: disabled %q, records %+v, slow %d", got.TerminalTabDisabled, got.TerminalTabFailures, got.TerminalTabSlowTimeouts)
 	}
 }
+
+// The warning says an empty tab may be left whenever one may be: Cmd+T
+// sent, or osascript killed while the keystroke was on its way.
+func TestDescribeTabFailure_EmptyTab(t *testing.T) {
+	for _, tc := range []struct {
+		f    *terminal.TabFailure
+		want string
+	}{
+		{nil, ""},
+		{&terminal.TabFailure{Kind: terminal.TabFailureTimeout, Phase: terminal.TabPhaseFrontmost}, "; timeout, after frontmost"},
+		{&terminal.TabFailure{Kind: terminal.TabFailureTimeout, Phase: terminal.TabPhaseKeystrokeSending}, "; timeout, after keystroke-sending, an empty tab may be left"},
+		{&terminal.TabFailure{Kind: terminal.TabFailureScriptError, Phase: terminal.TabPhaseKeystrokeSending, ErrorNumber: 1002}, "; script-error, after keystroke-sending"},
+		{&terminal.TabFailure{Kind: terminal.TabFailureScriptError, Phase: terminal.TabPhaseTabFound, KeystrokeSent: true, ErrorNumber: 9102}, "; script-error, after tab-found, an empty tab may be left"},
+	} {
+		if got := describeTabFailure(tc.f); got != tc.want {
+			t.Errorf("describeTabFailure(%+v) = %q, want %q", tc.f, got, tc.want)
+		}
+	}
+}

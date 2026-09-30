@@ -152,17 +152,31 @@ func TestAppleTerminalTabScript_Phases(t *testing.T) {
 	if first := lineOf(`application "System Events"`); first != se {
 		t.Errorf("the first Apple event to System Events must be the frontmost one (line %d), found one on line %d", se, first)
 	}
-	// frontmost after the 9103, keystroke-sent right after the keystroke.
+	// frontmost after the 9103, keystroke-sending right before the
+	// keystroke (so a timeout at frontmost never has Cmd+T on its way), and
+	// keystroke-sent right after it.
 	if lineOf(logLine(TabPhaseFrontmost)) < lineOf("number 9103") || lineOf(logLine(TabPhaseFrontmost)) > lineOf(`keystroke "t"`) {
 		t.Error("frontmost must be logged between the 9103 and the keystroke")
+	}
+	if lineOf(logLine(TabPhaseKeystrokeSending))+1 != lineOf(`keystroke "t"`) {
+		t.Error("keystroke-sending must directly precede the keystroke")
 	}
 	if lineOf(logLine(TabPhaseKeystrokeSent)) != lineOf(`keystroke "t"`)+1 {
 		t.Error("keystroke-sent must directly follow the keystroke")
 	}
-	// tab-found after the last 9102, command-sending right before do script,
-	// which stays the last statement.
-	if lineOf(logLine(TabPhaseTabFound)) < lineOf("if not sameWindow then error") {
-		t.Error("tab-found must come after the window check")
+	// tab-found right after the new tab is taken (the 9102 for a closed
+	// tab) and before the bounds wait, so a timeout during that wait is
+	// told apart from one at command-sending.
+	if lineOf(logLine(TabPhaseTabFound)) != lineOf("if newTab is missing value then error")+1 {
+		t.Error("tab-found must directly follow finding the new tab")
+	}
+	if lineOf(logLine(TabPhaseTabFound)) > lineOf("set sameWindow to false") {
+		t.Error("tab-found must come before the bounds wait")
+	}
+	// command-sending right before do script, which stays the last
+	// statement, and after the bounds check.
+	if lineOf(logLine(TabPhaseCommandSending)) < lineOf("if not sameWindow then error") {
+		t.Error("command-sending must come after the window check")
 	}
 	if lineOf(logLine(TabPhaseCommandSending))+1 != lineOf("do script shellCommand in newTab") {
 		t.Error("command-sending must directly precede do script")
@@ -213,6 +227,7 @@ func TestClassifyTabFailure_TimeoutsByPhase(t *testing.T) {
 		{TabPhaseWindowFound, true},
 		{TabPhaseSystemEventsOK, false},
 		{TabPhaseFrontmost, false},
+		{TabPhaseKeystrokeSending, false},
 		{TabPhaseKeystrokeSent, false},
 		{TabPhaseTabFound, false},
 		{TabPhaseCommandSending, false},
@@ -262,11 +277,15 @@ func TestLaunchWithOptions_TabFailureDetails(t *testing.T) {
 		want        TabFailure
 		wantDisable bool
 		wantInError string
+		// wantEmptyTab is TabFailure.EmptyTabPossible, and whether TabError
+		// says a new tab may have been left empty.
+		wantEmptyTab bool
 	}{
 		{
 			name:    "9102 on the bounds after Cmd+T",
-			respond: exitFailure(phaseOutput(TabPhaseKeystrokeSent, "54:97: execution error: graph-ops: the new tab did not open in the Terminal window of /dev/ttys003 (bounds target {0, 25, 800, 600}, new tab {400, 25, 1200, 600}) (9102)")),
-			want:    TabFailure{Kind: TabFailureScriptError, Phase: TabPhaseKeystrokeSent, KeystrokeSent: true, ErrorNumber: 9102}, wantInError: "new tab {400, 25, 1200, 600}",
+			respond: exitFailure(phaseOutput(TabPhaseTabFound, "54:97: execution error: graph-ops: the new tab did not open in the Terminal window of /dev/ttys003 (bounds target {0, 25, 800, 600}, new tab {400, 25, 1200, 600}) (9102)")),
+			want:    TabFailure{Kind: TabFailureScriptError, Phase: TabPhaseTabFound, KeystrokeSent: true, ErrorNumber: 9102}, wantInError: "new tab {400, 25, 1200, 600}",
+			wantEmptyTab: true,
 		},
 		{
 			name:    "9101 before any phase",
@@ -299,14 +318,36 @@ func TestLaunchWithOptions_TabFailureDetails(t *testing.T) {
 			want:    TabFailure{Kind: TabFailureTimeout, Phase: TabPhaseFrontmost}, wantInError: "after frontmost (Terminal answering slowly)",
 		},
 		{
+			// The keystroke's Apple event may be carried out even though
+			// osascript was killed waiting for its answer.
+			name:    "slow timeout while Cmd+T is on its way",
+			respond: timeoutAfter(TabPhaseKeystrokeSending),
+			want:    TabFailure{Kind: TabFailureTimeout, Phase: TabPhaseKeystrokeSending}, wantInError: "after keystroke-sending (Terminal answering slowly); Cmd+T may have been sent, so a new tab may have been left empty",
+			wantEmptyTab: true,
+		},
+		{
+			// System Events refusing the keystroke opened no tab.
+			name:    "keystroke refused",
+			respond: exitFailure(phaseOutput(TabPhaseKeystrokeSending, "execution error: System Events got an error: osascript is not allowed to send keystrokes. (1002)")),
+			want:    TabFailure{Kind: TabFailureScriptError, Phase: TabPhaseKeystrokeSending, ErrorNumber: 1002}, wantDisable: true, wantInError: "(1002)",
+		},
+		{
 			name:    "slow timeout after Cmd+T",
 			respond: timeoutAfter(TabPhaseKeystrokeSent),
 			want:    TabFailure{Kind: TabFailureTimeout, Phase: TabPhaseKeystrokeSent, KeystrokeSent: true}, wantInError: "a new tab may have been left empty",
+			wantEmptyTab: true,
+		},
+		{
+			name:    "slow timeout waiting for the new tab's window",
+			respond: timeoutAfter(TabPhaseTabFound),
+			want:    TabFailure{Kind: TabFailureTimeout, Phase: TabPhaseTabFound, KeystrokeSent: true}, wantInError: "after tab-found (Terminal answering slowly); a new tab may have been left empty",
+			wantEmptyTab: true,
 		},
 		{
 			name:    "slow timeout while sending the command",
 			respond: timeoutAfter(TabPhaseCommandSending),
 			want:    TabFailure{Kind: TabFailureTimeout, Phase: TabPhaseCommandSending, KeystrokeSent: true}, wantInError: "may have started in the new tab as well",
+			wantEmptyTab: true,
 		},
 		{
 			name: "osascript missing",
@@ -336,6 +377,12 @@ func TestLaunchWithOptions_TabFailureDetails(t *testing.T) {
 			}
 			if out.UsedTab || out.DisableTab != tc.wantDisable || !strings.Contains(out.TabError, tc.wantInError) {
 				t.Fatalf("outcome = %+v, want DisableTab=%v and %q in TabError", out, tc.wantDisable, tc.wantInError)
+			}
+			if out.TabFailure.EmptyTabPossible() != tc.wantEmptyTab {
+				t.Fatalf("EmptyTabPossible = %v, want %v", out.TabFailure.EmptyTabPossible(), tc.wantEmptyTab)
+			}
+			if out.TabFailure.Kind == TabFailureTimeout && tc.want.Phase != TabPhaseCommandSending && strings.Contains(out.TabError, "left empty") != tc.wantEmptyTab {
+				t.Fatalf("TabError %q: mentions an empty tab = %v, want %v", out.TabError, !tc.wantEmptyTab, tc.wantEmptyTab)
 			}
 			if strings.Contains(out.TabError, tabPhasePrefix) {
 				t.Fatalf("TabError %q carries phase lines", out.TabError)

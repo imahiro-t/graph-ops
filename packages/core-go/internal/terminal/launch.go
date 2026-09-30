@@ -162,8 +162,10 @@ type TabFailure struct {
 	// Phase is the last phase the script logged (the TabPhase* constants),
 	// "" when it logged none or never ran.
 	Phase string
-	// KeystrokeSent: Cmd+T had been sent, so a new tab may have been left
-	// empty (Phase is TabPhaseKeystrokeSent or later).
+	// KeystrokeSent: Cmd+T had definitely been sent, so a new tab may have
+	// been left empty (Phase is TabPhaseKeystrokeSent or later). A timeout
+	// at TabPhaseKeystrokeSending may have sent it too without this being
+	// set; EmptyTabPossible covers both.
 	KeystrokeSent bool
 	// ErrorNumber is the number osascript reported with its error, 0 when
 	// there was none (a timeout, lock-busy, osascript not runnable).
@@ -175,6 +177,14 @@ type TabFailure struct {
 // answering slowly rather than a permission prompt nobody answers.
 func (f *TabFailure) SlowTimeout() bool {
 	return f != nil && f.Kind == TabFailureTimeout && tabPhaseRank(f.Phase) >= tabPhaseRank(TabPhaseSystemEventsOK)
+}
+
+// EmptyTabPossible reports whether f may have left an empty tab behind:
+// Cmd+T had been sent (KeystrokeSent), or osascript timed out while the
+// keystroke was on its way (TabPhaseKeystrokeSending), when System Events
+// may still carry it out.
+func (f *TabFailure) EmptyTabPossible() bool {
+	return f != nil && (f.KeystrokeSent || (f.Kind == TabFailureTimeout && f.Phase == TabPhaseKeystrokeSending))
 }
 
 // LaunchWithOptions is LaunchWithArgs with the autopilot's options. The
