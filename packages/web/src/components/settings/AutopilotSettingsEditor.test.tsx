@@ -687,4 +687,48 @@ describe('AutopilotSettingsEditor load failure and project switch', () => {
     expect(maxTicketsInput()).not.toBeDisabled();
     expect(maxTicketsInput().value).toBe('46');
   });
+
+  it('shows a project busy again when switched back to while its own save still runs', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(editor('proj-A'));
+    await loadWith('proj-A', 20);
+    await typeMaxTickets(user, '30');
+    await user.click(saveButton());
+
+    rerender(editor('proj-B'));
+    await loadWith('proj-B', 44);
+    await typeMaxTickets(user, '46');
+    await user.click(saveButton());
+    expectBusy(true);
+
+    rerender(editor('proj-A'));
+    await loadWith('proj-A', 20);
+
+    // A's first save is still running, so A is busy and no second save of
+    // A can start (its answer would be overwritten by the first one's).
+    expectBusy(true);
+    expect(maxTicketsInput()).toBeDisabled();
+    expect(pending.map(p => `${p.method} ${p.url}`).sort()).toEqual([`PUT ${urlOf('proj-A')}`, `PUT ${urlOf('proj-B')}`]);
+
+    // B's save answering changes nothing in A.
+    await act(async () => {
+      settle(urlOf('proj-B'), 'PUT').resolve(
+        jsonResponse(forProject('proj-B', { maxTickets: { value: 46, local: 46, source: 'local' } }))
+      );
+    });
+    expectBusy(true);
+    expect(maxTicketsInput()).toBeDisabled();
+    expect(maxTicketsInput().value).toBe('20');
+
+    // A's own save answering releases A with the saved value.
+    await act(async () => {
+      settle(urlOf('proj-A'), 'PUT').resolve(
+        jsonResponse(forProject('proj-A', { maxTickets: { value: 30, local: 30, source: 'local' } }))
+      );
+    });
+    expectBusy(false);
+    expect(maxTicketsInput()).not.toBeDisabled();
+    expect(maxTicketsInput().value).toBe('30');
+    expect(pending).toHaveLength(0);
+  });
 });
