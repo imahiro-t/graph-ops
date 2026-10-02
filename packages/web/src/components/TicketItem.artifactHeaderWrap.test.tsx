@@ -5,7 +5,9 @@
 // past the card's right edge, where the node card (overflow-hidden) clipped
 // them. Under 80rem the row, the name group and the right group now wrap, and
 // the name, the Download link and its label, and the badge may shrink to the
-// row and break a word only when it is wider than the row.
+// row and break a word only when it is wider than the row. (Since DFLT-00345
+// the name group and the name shrink and wrap at every width, so their
+// min-w-0 / wrap-break-word carry no variant.)
 //
 // jsdom does no layout and ignores media queries, so the geometry (nothing
 // sticking out, nothing clipped, names not squeezed, one line at 1280px) is
@@ -13,6 +15,19 @@
 // tests pin down the classes and structure that produce it: the below-80rem
 // wrapping classes are there, the classes used from 80rem up are kept, and no
 // truncating class hides the text instead.
+//
+// DFLT-00345: from 80rem up (1280px, 100% font) a name of ~90 characters with
+// no break opportunity used to keep the name group at its full width, so the
+// row ran past the card and the right group shrank instead, squeezing
+// 「ダウンロード」 and the badge to one character a line. The name group and
+// the name now shrink (min-w-0) and the name breaks (wrap-break-word) at every
+// width -- under 80rem they already did, so these classes carry no variant --
+// while from 80rem up the right group does not shrink (shrink-0) and the
+// Download label and the badge stay on one line (whitespace-nowrap). Only the
+// right side's classes differ across 80rem. The
+// Download link also gets the blue focus-visible ring the other controls use.
+// As above, the geometry is measured in a real browser; these tests pin the
+// classes.
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
@@ -29,6 +44,9 @@ const art = (id: string, name: string, type: ArtifactType, content: string | nul
   created_at: '2026-01-01T00:00:00Z'
 });
 
+const LONG_TEXT_NAME = 'implementationnotesforartifactheaderrowwrappingatwidescreenwithaverylongunbrokenname0123456';
+const LONG_HTML_NAME = 'testreportcmp1280x100nodedetailandartifactstabheaderrowoverflowmeasurementresults20261002';
+
 const ARTIFACTS: Artifact[] = [
   art('a-plan', '実行計画（成果物見出し行の折り返し）', 'text', '# 計画\n'),
   art('a-gherkin', 'Gherkin 仕様（見出し行の折り返し）', 'gherkin', 'Feature: 仕様\n'),
@@ -38,8 +56,12 @@ const ARTIFACTS: Artifact[] = [
   // bytes (no Download link, so its right group holds only the badge).
   art('a-image', 'screenshot-320-200-node-detail', 'image', 'iVBORw0KGgo='),
   art('a-json', '計測結果（JSON）', 'json', '{"clip":0}'),
-  art('a-empty', '内容のない成果物', 'text', null)
+  art('a-empty', '内容のない成果物', 'text', null),
+  // DFLT-00345: ~90 characters with no break opportunity.
+  art('a-long-text', LONG_TEXT_NAME, 'text', '# long\n'),
+  art('a-long-html', LONG_HTML_NAME, 'html', '<p>long</p>')
 ];
+const LONG_NAMES = [LONG_TEXT_NAME, LONG_HTML_NAME];
 const WITH_CONTENT = ARTIFACTS.filter(a => a.content);
 // The types the node detail header shows an icon for.
 const TYPES_WITH_NODE_ICON: ArtifactType[] = ['gherkin', 'html', 'text'];
@@ -148,10 +170,10 @@ describe('DFLT-00334 node artifact header rows wrap under 80rem', () => {
 
     for (const a of ARTIFACTS) {
       const p = headerParts(a.name, nodePanel());
-      expectClasses(p.row, ['flex', 'items-center', 'justify-between', 'below-80rem:flex-wrap', 'below-80rem:gap-x-2', 'below-80rem:gap-y-1']);
-      expectClasses(p.nameGroup, ['flex', 'items-center', 'gap-1.5', 'below-80rem:flex-wrap', 'below-80rem:min-w-0', 'below-80rem:max-w-full']);
+      expectClasses(p.row, ['flex', 'items-center', 'justify-between', 'gap-x-2', 'below-80rem:flex-wrap', 'below-80rem:gap-y-1']);
+      expectClasses(p.nameGroup, ['flex', 'items-center', 'gap-1.5', 'min-w-0', 'below-80rem:flex-wrap', 'below-80rem:max-w-full']);
       expect(p.nameEl).not.toBe(p.nameGroup);
-      expectClasses(p.nameEl, ['below-80rem:min-w-0', 'below-80rem:wrap-break-word']);
+      expectClasses(p.nameEl, ['min-w-0', 'wrap-break-word']);
       expectNoClasses(p.nameEl, ['wrap-anywhere']);
       expectNoClasses(p.nameGroup, ['basis-0']);
       expectClasses(p.rightGroup, ['flex', 'items-center', 'gap-2', 'below-80rem:flex-wrap', 'below-80rem:ml-auto', 'below-80rem:min-w-0', 'below-80rem:max-w-full']);
@@ -201,10 +223,10 @@ describe('DFLT-00334 Artifacts tab header rows wrap under 80rem', () => {
     for (const a of ARTIFACTS) {
       const p = headerParts(a.name, panel);
       expectClasses(p.card, ['p-3']);
-      expectClasses(p.row, ['flex', 'items-center', 'justify-between', 'below-80rem:flex-wrap', 'below-80rem:gap-x-2', 'below-80rem:gap-y-1']);
-      expectClasses(p.nameGroup, ['flex', 'items-center', 'gap-2', 'below-80rem:flex-wrap', 'below-80rem:min-w-0', 'below-80rem:max-w-full']);
+      expectClasses(p.row, ['flex', 'items-center', 'justify-between', 'gap-x-2', 'below-80rem:flex-wrap', 'below-80rem:gap-y-1']);
+      expectClasses(p.nameGroup, ['flex', 'items-center', 'gap-2', 'min-w-0', 'below-80rem:flex-wrap', 'below-80rem:max-w-full']);
       expectClasses(p.icon!, ['shrink-0']);
-      expectClasses(p.nameEl, ['below-80rem:min-w-0', 'below-80rem:wrap-break-word']);
+      expectClasses(p.nameEl, ['min-w-0', 'wrap-break-word']);
       expectNoClasses(p.nameEl, ['wrap-anywhere']);
       expectNoClasses(p.nameGroup, ['basis-0']);
       expectClasses(p.rightGroup, ['below-80rem:flex-wrap', 'below-80rem:ml-auto', 'below-80rem:min-w-0', 'below-80rem:max-w-full']);
@@ -251,5 +273,99 @@ describe('DFLT-00334 the Download link may shrink to its row', () => {
     } finally {
       await i18n.changeLanguage(previous);
     }
+  });
+});
+
+describe('DFLT-00345 from 80rem up only the name side shrinks and wraps', () => {
+  // The name side: shrinks and wraps at every width, so no variant.
+  const ROW_ALL_WIDTHS = ['gap-x-2'];
+  const NAME_GROUP_ALL_WIDTHS = ['min-w-0'];
+  const NAME_ALL_WIDTHS = ['min-w-0', 'wrap-break-word'];
+  // The right side: what actually differs across 80rem.
+  const FROM_80_RIGHT_GROUP = ['from-80rem:shrink-0'];
+  const FROM_80_LABEL = ['from-80rem:whitespace-nowrap'];
+  const BELOW_80_RIGHT_GROUP = ['below-80rem:flex-wrap', 'below-80rem:ml-auto', 'below-80rem:min-w-0', 'below-80rem:max-w-full'];
+  const BELOW_80_LABEL = ['below-80rem:min-w-0', 'below-80rem:wrap-break-word'];
+  // Classes that would change the right side under 80rem (DFLT-00334: there
+  // it must shrink and wrap), so they may only appear with from-80rem:.
+  const RIGHT_SIDE_UNCONDITIONAL = ['shrink-0', 'whitespace-nowrap', 'min-w-0', 'wrap-break-word'];
+  // The same utility under both below-80rem: and from-80rem: is just the
+  // unconditional utility spelled twice; the name side uses the plain form.
+  const SPLIT = (utilities: string[]) => utilities.flatMap(u => [`below-80rem:${u}`, `from-80rem:${u}`]);
+
+  const checkRow = (p: ReturnType<typeof headerParts>, a: Artifact) => {
+    // The one-line layout of the row (name left, right group right) is kept.
+    expectClasses(p.row, ['flex', 'items-center', 'justify-between', ...ROW_ALL_WIDTHS]);
+    expectClasses(p.nameGroup, ['flex', 'items-center', ...NAME_GROUP_ALL_WIDTHS]);
+    expectClasses(p.nameEl, NAME_ALL_WIDTHS);
+    expectNoClasses(p.row, SPLIT(ROW_ALL_WIDTHS));
+    expectNoClasses(p.nameGroup, SPLIT(NAME_GROUP_ALL_WIDTHS));
+    expectNoClasses(p.nameEl, SPLIT(NAME_ALL_WIDTHS));
+    // The right side: one line from 80rem up, wraps under 80rem.
+    expectClasses(p.rightGroup, ['flex', 'items-center', ...FROM_80_RIGHT_GROUP, ...BELOW_80_RIGHT_GROUP]);
+    expectClasses(p.badge, [...FROM_80_LABEL, ...BELOW_80_LABEL]);
+    expect(p.badge).toHaveTextContent(a.type);
+    const label = p.link ? within(p.link).getByText(i18n.t('ticketItem.download')) : null;
+    if (label) expectClasses(label, [...FROM_80_LABEL, ...BELOW_80_LABEL]);
+    for (const el of [p.rightGroup, p.badge, ...(label ? [label] : [])]) expectNoClasses(el, [...RIGHT_SIDE_UNCONDITIONAL, ...TRUNCATING]);
+    // The name never gets a class that hides it or lets it collapse to one
+    // character a line, and nowrap / shrink-0 are only on the right side.
+    expectNoClasses(p.nameEl, ['truncate', 'wrap-anywhere', 'from-80rem:wrap-anywhere', 'basis-0', 'from-80rem:basis-0', 'from-80rem:whitespace-nowrap', 'from-80rem:truncate']);
+    expectNoClasses(p.nameGroup, ['basis-0', 'from-80rem:basis-0', 'shrink-0', 'from-80rem:shrink-0', 'from-80rem:whitespace-nowrap']);
+    for (const el of [p.row, p.nameGroup, p.nameEl]) expectNoClasses(el, TRUNCATING);
+    // The rest of the DFLT-00334 below-80rem classes are still there.
+    expectClasses(p.row, ['below-80rem:flex-wrap', 'below-80rem:gap-y-1']);
+    expectClasses(p.nameGroup, ['below-80rem:flex-wrap', 'below-80rem:max-w-full']);
+  };
+
+  it('uses the long unbroken names the bug was found with', () => {
+    for (const name of LONG_NAMES) {
+      expect(name.length).toBeGreaterThanOrEqual(85);
+      expect(name).toMatch(/^[a-z0-9]+$/);
+    }
+  });
+
+  it('in the node detail, for long and short names alike', () => {
+    renderTicket();
+    openNodeDetail();
+    for (const a of ARTIFACTS) checkRow(headerParts(a.name, nodePanel()), a);
+  });
+
+  it('in the Artifacts tab, for long and short names alike', () => {
+    renderTicket();
+    openArtifactsTab();
+    const panel = artifactsPanel();
+    for (const a of ARTIFACTS) checkRow(headerParts(a.name, panel), a);
+  });
+});
+
+describe('DFLT-00345 the Download link shows the blue focus ring', () => {
+  const FOCUS_RING = ['rounded-sm', 'focus:outline-hidden', 'focus-visible:ring-2', 'focus-visible:ring-blue-500', 'dark:focus-visible:ring-blue-400'];
+
+  const checkFocus = (p: ReturnType<typeof headerParts>, id: string) => {
+    const link = p.link!;
+    expect(link, id).not.toBeNull();
+    expectClasses(link, FOCUS_RING);
+    // The ring appears on keyboard focus only, not as a permanent ring.
+    expectNoClasses(link, ['ring-2', 'focus:ring-2', 'outline', 'focus:outline']);
+    // Still a real link, so it stays in the Tab order and can take focus.
+    expect(link.tagName).toBe('A');
+    expect(link).toHaveAttribute('href', `/api/artifacts/${id}/content?download=1`);
+    expect(link).not.toHaveAttribute('tabindex');
+    link.focus();
+    expect(document.activeElement).toBe(link);
+  };
+
+  it('in the node detail', () => {
+    renderTicket();
+    openNodeDetail();
+    for (const a of WITH_CONTENT) checkFocus(headerParts(a.name, nodePanel()), a.id);
+  });
+
+  it('in the Artifacts tab', () => {
+    renderTicket();
+    openArtifactsTab();
+    const panel = artifactsPanel();
+    for (const a of WITH_CONTENT) checkFocus(headerParts(a.name, panel), a.id);
   });
 });
