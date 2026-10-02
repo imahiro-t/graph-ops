@@ -131,13 +131,31 @@ type ArtifactTab = (typeof ARTIFACT_TABS)[number];
 // which would let it shrink to one character again). The right group moves to
 // the next line, stays right-aligned (safe, so it never runs out on the left)
 // and wraps within itself; the badge may break a word only when it is wider
-// than the row. From 80rem up the row is unchanged: only shrink-0 on the icons
-// is added without the variant.
-const ARTIFACT_HEADER_ROW_WRAP = 'below-80rem:flex-wrap below-80rem:gap-x-2 below-80rem:gap-y-1';
-const ARTIFACT_HEADER_NAME_GROUP_WRAP = 'below-80rem:flex-wrap below-80rem:min-w-0 below-80rem:max-w-full';
+// than the row. Only shrink-0 on the icons is added without a variant.
+//
+// DFLT-00345: from 80rem up the row stays on one line (name on the left,
+// Download and the badge on the right), but a long name with no break
+// opportunity used to keep the name group at the name's full width, so the
+// row ran 15-24px past the card at 1280px while the right group shrank
+// instead and squeezed 「ダウンロード」 to one character a line. From 80rem
+// up the name group and the name now take min-w-0 (overflow-wrap: break-word
+// does not lower min-content, so both levels need it) and the name breaks
+// with wrap-break-word; the right group is shrink-0 and its labels are
+// whitespace-nowrap, so only the name side shrinks and wraps. gap-x-2 keeps
+// the two sides apart when they meet; with a short name justify-between
+// leaves more room than that, so short rows look exactly as before. All of
+// these only take effect once the row has to shrink.
+const ARTIFACT_HEADER_ROW_WRAP = 'below-80rem:flex-wrap below-80rem:gap-x-2 below-80rem:gap-y-1 from-80rem:gap-x-2';
+const ARTIFACT_HEADER_NAME_GROUP_WRAP =
+  'below-80rem:flex-wrap below-80rem:min-w-0 below-80rem:max-w-full from-80rem:min-w-0';
 const ARTIFACT_HEADER_TEXT_WRAP = 'below-80rem:min-w-0 below-80rem:wrap-break-word';
+// The artifact name: wraps under 80rem (above) and, from 80rem up, shrinks
+// and breaks inside the name group instead of pushing the row out.
+const ARTIFACT_HEADER_NAME_TEXT = `${ARTIFACT_HEADER_TEXT_WRAP} from-80rem:min-w-0 from-80rem:wrap-break-word`;
+// The Download label and the type badge: one line from 80rem up.
+const ARTIFACT_HEADER_LABEL_TEXT = `${ARTIFACT_HEADER_TEXT_WRAP} from-80rem:whitespace-nowrap`;
 const ARTIFACT_HEADER_RIGHT_GROUP_WRAP =
-  'below-80rem:flex-wrap below-80rem:ml-auto below-80rem:min-w-0 below-80rem:max-w-full below-80rem:justify-end-safe';
+  'below-80rem:flex-wrap below-80rem:ml-auto below-80rem:min-w-0 below-80rem:max-w-full below-80rem:justify-end-safe from-80rem:shrink-0';
 
 // How long the ID copy button shows its "copied"/"failed" state before going
 // back to idle (DFLT-00143).
@@ -1212,14 +1230,16 @@ export const TicketItem: React.FC<Props> = ({
     // "Download" that is longer than an 80px header row (320px, 200% font)
     // still sticks out past the row's left edge. The label wraps between
     // words while it fits and mid-word only when one word is wider than the
-    // row; the icon keeps its size.
+    // row; the icon keeps its size. DFLT-00345: from 80rem up the label
+    // stays on one line, and keyboard focus shows the same blue ring as the
+    // other controls instead of the browser's default outline.
     return (
       <a
         href={`/api/artifacts/${artifact.id}/content?download=1`}
-        className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1 text-[0.6875rem] below-80rem:min-w-0 below-80rem:max-w-full"
+        className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1 text-[0.6875rem] below-80rem:min-w-0 below-80rem:max-w-full rounded-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
       >
         <Download aria-hidden="true" className="w-3 h-3 shrink-0" />
-        <span className={ARTIFACT_HEADER_TEXT_WRAP}>{t('ticketItem.download')}</span>
+        <span className={ARTIFACT_HEADER_LABEL_TEXT}>{t('ticketItem.download')}</span>
       </a>
     );
   };
@@ -2860,11 +2880,11 @@ export const TicketItem: React.FC<Props> = ({
                                         {art.type === 'gherkin' && <FileCode aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-amber-500" />}
                                         {art.type === 'html' && <Globe aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-cyan-500" />}
                                         {art.type === 'text' && <FileText aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-500" />}
-                                        <span className={ARTIFACT_HEADER_TEXT_WRAP}>{art.name}</span>
+                                        <span className={ARTIFACT_HEADER_NAME_TEXT}>{art.name}</span>
                                       </span>
                                       <span className={`flex items-center gap-2 ${ARTIFACT_HEADER_RIGHT_GROUP_WRAP}`}>
                                         {downloadLink(art)}
-                                        <span className={`text-[0.625rem] uppercase font-mono px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-sm ${ARTIFACT_HEADER_TEXT_WRAP}`}>
+                                        <span className={`text-[0.625rem] uppercase font-mono px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-sm ${ARTIFACT_HEADER_LABEL_TEXT}`}>
                                           {art.type}
                                         </span>
                                       </span>
@@ -2990,11 +3010,11 @@ export const TicketItem: React.FC<Props> = ({
                           <div className={`flex items-center justify-between font-semibold text-slate-800 dark:text-slate-200 mb-1 ${ARTIFACT_HEADER_ROW_WRAP}`}>
                             <span className={`flex items-center gap-2 ${ARTIFACT_HEADER_NAME_GROUP_WRAP}`}>
                               <FileText aria-hidden="true" className="w-4 h-4 shrink-0 text-indigo-500" />
-                              <span className={ARTIFACT_HEADER_TEXT_WRAP}>{a.name}</span>
+                              <span className={ARTIFACT_HEADER_NAME_TEXT}>{a.name}</span>
                             </span>
                             <span className={`flex items-center gap-2 ${ARTIFACT_HEADER_RIGHT_GROUP_WRAP}`}>
                               {downloadLink(a)}
-                              <span className={`text-[0.625rem] px-2 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 uppercase font-mono ${ARTIFACT_HEADER_TEXT_WRAP}`}>
+                              <span className={`text-[0.625rem] px-2 py-0.5 rounded-sm bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 uppercase font-mono ${ARTIFACT_HEADER_LABEL_TEXT}`}>
                                 {a.type}
                               </span>
                             </span>
