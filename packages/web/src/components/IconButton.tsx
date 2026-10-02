@@ -168,7 +168,9 @@ import React, { forwardRef, useCallback, useEffect, useId, useLayoutEffect, useR
 import { createPortal } from 'react-dom';
 import { submittingProps, useSubmittingLabel } from './Submitting';
 
-const CLOSE_DELAY_MS = 100;
+// How long hover keeps the tooltip open after the pointer leaves the button
+// or the tooltip, so the pointer can move from one onto the other.
+export const CLOSE_DELAY_MS = 100;
 // How long the pointer has to rest on the button before hover opens the
 // tooltip (DFLT-00322, see the header comment).
 export const OPEN_DELAY_MS = 300;
