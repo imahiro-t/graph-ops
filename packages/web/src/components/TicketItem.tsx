@@ -1187,7 +1187,9 @@ export const TicketItem: React.FC<Props> = ({
   // same-origin top-level document with no isolation (DFLT-00053); the
   // preview page instead embeds it in the same sandbox="allow-scripts"
   // <iframe> the inline preview below already uses, so a new tab never opens
-  // artifact HTML with the app's own origin.
+  // artifact HTML with the app's own origin. DFLT-00363: keyboard focus shows
+  // the same blue ring as downloadLink instead of the browser's default
+  // outline.
   const openInNewTabLink = (artifact: {
     id: string;
     type: string;
@@ -1203,7 +1205,7 @@ export const TicketItem: React.FC<Props> = ({
         href={href}
         target="_blank"
         rel="noreferrer"
-        className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 text-[0.6875rem]"
+        className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 text-[0.6875rem] rounded-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
       >
         <ExternalLink aria-hidden="true" className="w-3 h-3" />
         {t('ticketItem.openInNewTab')}
@@ -2527,10 +2529,12 @@ export const TicketItem: React.FC<Props> = ({
                   );
                 })}
               </div>
+              {/* DFLT-00363: keyboard focus shows the same blue ring as the
+                  other controls (rounded-lg is kept to follow the border). */}
               {ticket.artifacts.length > 0 && (
                 <a
                   href={`/api/tickets/${ticket.id}/artifacts/download`}
-                  className="ml-auto min-w-0 from-64rem:shrink-0 flex upto-15rem:flex-wrap items-center gap-1.5 px-3 upto-15rem:px-2 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:border-indigo-400 dark:hover:border-indigo-500 transition"
+                  className="ml-auto min-w-0 from-64rem:shrink-0 flex upto-15rem:flex-wrap items-center gap-1.5 px-3 upto-15rem:px-2 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:border-indigo-400 dark:hover:border-indigo-500 transition focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
                   title={t('ticketItem.downloadAllArtifacts')}
                 >
                   <Download aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />
@@ -3049,7 +3053,9 @@ export const TicketItem: React.FC<Props> = ({
                               />
                             ) : null
                           ) : a.type === 'html' ? (
-                            <div className="mt-2">{openInNewTabLink(a)}</div>
+                            // DFLT-00363: flex shrinks the link to its label, so its focus
+                            // ring does not stretch across the whole card.
+                            <div className="mt-2 flex">{openInNewTabLink(a)}</div>
                           ) : a.content ? (
                             <pre className="font-mono text-[0.6875rem] text-slate-700 dark:text-slate-300 max-h-32 overflow-y-auto whitespace-pre-wrap mt-2 p-2 bg-white dark:bg-slate-900 rounded-sm border border-slate-200 dark:border-slate-700">
                               {a.content}
