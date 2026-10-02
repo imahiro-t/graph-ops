@@ -4,7 +4,7 @@
 import { act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, onTestFinished, vi } from 'vitest';
-import { OPEN_DELAY_MS } from '../components/IconButton';
+import { CLOSE_DELAY_MS, OPEN_DELAY_MS } from '../components/IconButton';
 
 const TOOLTIP_SELECTOR = '[data-icon-button-tooltip]';
 
@@ -29,6 +29,27 @@ export async function waitForHoverOpenDelay(): Promise<void> {
     // The clock only moves forward after the hover, so advancing it by the
     // whole delay always fires an open scheduled by that hover.
     await vi.advanceTimersByTimeAsync(OPEN_DELAY_MS);
+  });
+}
+
+// Hover closes a tooltip only CLOSE_DELAY_MS after the pointer has left the
+// button or the tooltip. Call this after user.unhover() (or after moving onto
+// the tooltip, a pointerdown or Escape) before checking whether the tooltip
+// closed or stayed open, so the check is made once a pending close would
+// have fired.
+//
+// Like waitForHoverOpenDelay(), it moves the fake clock instead of waiting in
+// real time (DFLT-00348) and throws without fake timers. It advances a little
+// past the delay (the 150ms the tests used to wait in real time) so the close
+// fires with the same margin as before.
+export async function waitForHoverCloseDelay(): Promise<void> {
+  if (!vi.isFakeTimers()) {
+    throw new Error(
+      'waitForHoverCloseDelay() needs fake timers: call useHoverFakeTimers() in the describe or startHoverFakeTimers() at the top of the test, and create the user with setupHoverUser()'
+    );
+  }
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(CLOSE_DELAY_MS + 50);
   });
 }
 
