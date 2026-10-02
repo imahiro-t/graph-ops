@@ -18,7 +18,13 @@ import (
 // ttyOf makes the harness's orchestrator detect tty, counting the asks.
 func (h *harness) ttyOf(tty string) *int {
 	asks := 0
-	h.svc.TerminalTTY = func() string { asks++; return tty }
+	h.svc.TerminalTTY = func() (string, string) {
+		asks++
+		if tty == "" {
+			return "", terminal.TTYReasonTermProgram
+		}
+		return tty, ""
+	}
 	return &asks
 }
 

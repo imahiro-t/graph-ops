@@ -118,8 +118,8 @@ type LaunchOptions struct {
 }
 
 // LaunchOutcome says how LaunchWithOptions opened the session when it
-// returned no error. It is the zero value on every path other than the
-// Terminal.app tab path.
+// returned no error. On every path other than the Terminal.app tab path it
+// carries only NoTabReason.
 type LaunchOutcome struct {
 	// UsedTab: the session opened as a new tab of the AppleTerminalTTY
 	// window.
@@ -141,6 +141,15 @@ type LaunchOutcome struct {
 	// TabFailure details the failure when TabError is set (DFLT-00361), so
 	// the caller can record why each launch fell back to a new window.
 	TabFailure *TabFailure
+	// NoTabReason is why no tab was tried at all (one of the NoTab*
+	// values, DFLT-00362) when the session opened through
+	// buildLaunchArgvWithArgs; "" when a tab was tried.
+	NoTabReason string
+	// LateTab: the tab opened, but only in the script's last look after
+	// its usual wait for the new tab had run out (DFLT-00362). Before, such
+	// a tab was left empty and the session opened in a new window as well
+	// (9102).
+	LateTab bool
 }
 
 // Kinds of tab failure (TabFailure.Kind).
@@ -153,6 +162,10 @@ const (
 	// TabFailureLockBusy: other graph-ops processes kept the tab lock for
 	// all of tabLockWait, so the script never ran.
 	TabFailureLockBusy = "lock-busy"
+	// TabFailureScreenLocked: the screen was locked, so the script never
+	// ran (DFLT-00362): Terminal cannot come to the front then, and Cmd+T
+	// would reach the lock screen. A passing failure like lock-busy.
+	TabFailureScreenLocked = "screen-locked"
 )
 
 // TabFailure is why one launch's tab could not be opened.
@@ -170,6 +183,39 @@ type TabFailure struct {
 	// ErrorNumber is the number osascript reported with its error, 0 when
 	// there was none (a timeout, lock-busy, osascript not runnable).
 	ErrorNumber int
+	// Diagnostics is the state around the failure (DFLT-00362).
+	Diagnostics TabDiagnostics
+}
+
+// TabDiagnostics is what a failed tab launch saw, to tell its causes apart
+// afterwards (DFLT-00362). Every field is "" (false) when it was not read.
+// The values from the script (graph-ops-diag lines) are sanitized and cut
+// to displayname.MaxRunes runes: an app name is outside text.
+type TabDiagnostics struct {
+	// ScreenLock is the screen's lock state (ScreenLocked, ScreenUnlocked,
+	// ScreenLockUnknown) read before the script ran, ScreenLockAfter the
+	// one read again once it had failed.
+	ScreenLock      string
+	ScreenLockAfter string
+	// FrontmostApp is the frontmost app when the script gave up (System
+	// Events' view), FrontmostAppBefore the one just before Cmd+T.
+	FrontmostApp       string
+	FrontmostAppBefore string
+	// FrontWindowID and FrontWindowBounds are Terminal's front window when
+	// the script gave up; TargetWindowID and TargetWindowBounds the
+	// orchestrator's window.
+	FrontWindowID      string
+	FrontWindowBounds  string
+	TargetWindowID     string
+	TargetWindowBounds string
+	// TabsBefore is how many Terminal tabs had a tty before Cmd+T. There
+	// is no count after it: every failure after Cmd+T has just read the
+	// tabs itself (see appleTerminalTabScript), so a second count would
+	// only repeat it.
+	TabsBefore string
+	// LateTab: the new tab was found only in the last look after the wait
+	// (the failure came after that, from the window checks).
+	LateTab bool
 }
 
 // SlowTimeout reports whether f is a timeout after Terminal and System
@@ -197,15 +243,18 @@ func (f *TabFailure) EmptyTabPossible() bool {
 // tmux, with SkipAppleTerminalTab unset and AppleTerminalTTY a valid
 // /dev/ttysN; everything else goes through exactly the argv
 // buildLaunchArgvWithArgs builds, as LaunchWithArgs always has.
+//
+// When no tab is tried, the outcome's NoTabReason says why (DFLT-00362).
 func LaunchWithOptions(cfg Config, workDir, claudeBin string, extraArgs []string, prompt string, opts LaunchOptions) (LaunchOutcome, error) {
-	if useAppleTerminalTab(cfg, opts) {
+	reason := appleTerminalTabSkipReason(cfg, opts)
+	if reason == "" {
 		return launchAppleTerminalTab(workDir, claudeBin, extraArgs, prompt, opts.AppleTerminalTTY)
 	}
 	name, args, err := buildLaunchArgvWithArgs(cfg, workDir, claudeBin, extraArgs, prompt)
 	if err != nil {
 		return LaunchOutcome{}, err
 	}
-	return LaunchOutcome{}, runLauncher(name, args)
+	return LaunchOutcome{NoTabReason: reason}, runLauncher(name, args)
 }
 
 // runCommand runs a launcher command and returns its combined output. A

@@ -71,7 +71,7 @@ func autopilotCLISetup(t *testing.T) (store.GraphRepository, runtimeConfig, stri
 	newAutopilotService = func(repo store.GraphRepository, rc runtimeConfig) *runner.Service {
 		svc := orig(repo, rc)
 		// No real ps: the orchestrator's Terminal.app tty is faked.
-		svc.TerminalTTY = func() string { return "" }
+		svc.TerminalTTY = func() (string, string) { return "", "" }
 		svc.Launcher = runner.LauncherFunc(func(req runner.LaunchRequest) (terminal.LaunchOutcome, error) {
 			launches = append(launches, fakeLaunch{req.WorkDir, append([]string(nil), req.ExtraArgs...), req.Prompt})
 			return terminal.LaunchOutcome{}, nil
@@ -283,7 +283,7 @@ func TestAutopilotCLI_TabFallbackWarnsOnStderrOnly(t *testing.T) {
 	withFakes := newAutopilotService
 	newAutopilotService = func(repo store.GraphRepository, rc runtimeConfig) *runner.Service {
 		svc := withFakes(repo, rc)
-		svc.TerminalTTY = func() string { return "/dev/ttys003" }
+		svc.TerminalTTY = func() (string, string) { return "/dev/ttys003", "" }
 		svc.Launcher = runner.LauncherFunc(func(req runner.LaunchRequest) (terminal.LaunchOutcome, error) {
 			reqs = append(reqs, req)
 			return terminal.LaunchOutcome{TabError: "osascript: not authorized (-1743)", DisableTab: true}, nil

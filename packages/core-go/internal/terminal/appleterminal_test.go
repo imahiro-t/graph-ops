@@ -45,10 +45,12 @@ func onDarwin(t *testing.T) string {
 	t.Setenv("TMUX", "")
 	t.Setenv("TMPDIR", t.TempDir())
 	lockPath := filepath.Join(t.TempDir(), "autopilot", "terminal-tab.lock")
-	oldGoos, oldLockPath := goos, tabLockPath
+	oldGoos, oldLockPath, oldLock := goos, tabLockPath, screenLockState
 	goos = "darwin"
 	tabLockPath = func() (string, error) { return lockPath, nil }
-	t.Cleanup(func() { goos, tabLockPath = oldGoos, oldLockPath })
+	// No real ioreg: the screen is unlocked unless a test says otherwise.
+	screenLockState = func() string { return ScreenUnlocked }
+	t.Cleanup(func() { goos, tabLockPath, screenLockState = oldGoos, oldLockPath, oldLock })
 	return lockPath
 }
 
@@ -113,17 +115,19 @@ func TestLaunchWithOptions_TabRouteSelection(t *testing.T) {
 		// wantName is the one command that must run ("" for none).
 		wantName string
 		wantErr  bool
+		// wantReason is the outcome's NoTabReason (DFLT-00362).
+		wantReason string
 	}{
-		{name: "terminalCommand wins", cfg: Config{TerminalCommand: "true {cwd} {command}"}, goos: "darwin", opts: LaunchOptions{AppleTerminalTTY: testTTY}, wantName: "sh"},
-		{name: "tmux wins", tmux: "/tmp/tmux-1/default,1,0", goos: "darwin", opts: LaunchOptions{AppleTerminalTTY: testTTY}, wantName: "tmux"},
-		{name: "windows unchanged", goos: "windows", opts: LaunchOptions{AppleTerminalTTY: testTTY}, wantName: "cmd.exe"},
+		{name: "terminalCommand wins", cfg: Config{TerminalCommand: "true {cwd} {command}"}, goos: "darwin", opts: LaunchOptions{AppleTerminalTTY: testTTY}, wantName: "sh", wantReason: NoTabTerminalCommand},
+		{name: "tmux wins", tmux: "/tmp/tmux-1/default,1,0", goos: "darwin", opts: LaunchOptions{AppleTerminalTTY: testTTY}, wantName: "tmux", wantReason: NoTabTmux},
+		{name: "windows unchanged", goos: "windows", opts: LaunchOptions{AppleTerminalTTY: testTTY}, wantName: "cmd.exe", wantReason: NoTabNotDarwin},
 		{name: "linux still an error", goos: "linux", opts: LaunchOptions{AppleTerminalTTY: testTTY}, wantErr: true},
-		{name: "no tty", goos: "darwin", opts: LaunchOptions{}, wantName: "open"},
-		{name: "tab disabled for the run", goos: "darwin", opts: LaunchOptions{AppleTerminalTTY: testTTY, SkipAppleTerminalTab: true}, wantName: "open"},
-		{name: "tty with shell syntax", goos: "darwin", opts: LaunchOptions{AppleTerminalTTY: "/dev/ttys1; rm -rf ~"}, wantName: "open"},
-		{name: "tty without /dev/", goos: "darwin", opts: LaunchOptions{AppleTerminalTTY: "ttys003"}, wantName: "open"},
-		{name: "linux pts", goos: "darwin", opts: LaunchOptions{AppleTerminalTTY: "/dev/pts/1"}, wantName: "open"},
-		{name: "tty with a newline", goos: "darwin", opts: LaunchOptions{AppleTerminalTTY: "/dev/ttys003\n"}, wantName: "open"},
+		{name: "no tty", goos: "darwin", opts: LaunchOptions{}, wantName: "open", wantReason: NoTabNoTTY},
+		{name: "tab disabled for the run", goos: "darwin", opts: LaunchOptions{AppleTerminalTTY: testTTY, SkipAppleTerminalTab: true}, wantName: "open", wantReason: NoTabDisabled},
+		{name: "tty with shell syntax", goos: "darwin", opts: LaunchOptions{AppleTerminalTTY: "/dev/ttys1; rm -rf ~"}, wantName: "open", wantReason: NoTabInvalidTTY},
+		{name: "tty without /dev/", goos: "darwin", opts: LaunchOptions{AppleTerminalTTY: "ttys003"}, wantName: "open", wantReason: NoTabInvalidTTY},
+		{name: "linux pts", goos: "darwin", opts: LaunchOptions{AppleTerminalTTY: "/dev/pts/1"}, wantName: "open", wantReason: NoTabInvalidTTY},
+		{name: "tty with a newline", goos: "darwin", opts: LaunchOptions{AppleTerminalTTY: "/dev/ttys003\n"}, wantName: "open", wantReason: NoTabInvalidTTY},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -143,8 +147,8 @@ func TestLaunchWithOptions_TabRouteSelection(t *testing.T) {
 			} else if err != nil {
 				t.Fatal(err)
 			}
-			if out != (LaunchOutcome{}) {
-				t.Fatalf("outcome = %+v, want the zero value", out)
+			if out != (LaunchOutcome{NoTabReason: tc.wantReason}) {
+				t.Fatalf("outcome = %+v, want only NoTabReason %q", out, tc.wantReason)
 			}
 			var names []string
 			for _, c := range *calls {
@@ -315,7 +319,7 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 		"first tab of window id newID whose tty is newTTY",
 		"set targetBounds to bounds of window id targetID",
 		"my sameWindowBounds(targetBounds, newBounds)",
-		"if not sameWindow then error",
+		"if not sameWindow then",
 		"number 9101",
 		"number 9102",
 		"number 9103",
@@ -333,6 +337,10 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 	if strings.Contains(script, "selected tab") {
 		t.Error("the command must go to the new tab found by its tty, never to the selected tab")
 	}
+	// The fresh ttys are those not recorded before Cmd+T.
+	if !strings.Contains(scriptSectionOf(script, "on freshTTYsOf(", "end freshTTYsOf"), "knownTTYs does not contain v") {
+		t.Error("freshTTYsOf must keep the ttys that were not known before Cmd+T")
+	}
 	// Order: the ttys are recorded and the front checked (with its 9103)
 	// before the keystroke -- when the front loop never read Terminal's
 	// state (not pollOK), the last read error is rethrown with its own
@@ -348,11 +356,12 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 		"number lastErrNum",
 		"number 9103",
 		`keystroke "t"`,
-		"knownTTYs does not contain v",
+		"set freshTTYs to my freshTTYsOf(nowTTYs, knownTTYs)",
 		"number 9104",
+		"delay 2",
 		"number 9102",
 		"my sameWindowBounds(targetBounds, newBounds)",
-		"if not sameWindow then error",
+		"if not sameWindow then",
 		"do script",
 	}
 	last := -1
@@ -390,7 +399,7 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 	if tabWait := between("repeat 30 times", "number 9102"); !strings.Contains(tabWait, "delay 0.2") || strings.Contains(tabWait, "delay 0.1") {
 		t.Errorf("the new tab must be polled every 0.2 seconds, 30 times; the loop is %q", tabWait)
 	}
-	if bounds := between("set sameWindow to false", "if not sameWindow then error"); !strings.Contains(bounds, "repeat 20 times") || !strings.Contains(bounds, "delay 0.1") || strings.Contains(bounds, "delay 0.2") {
+	if bounds := between("set sameWindow to false", "if not sameWindow then"); !strings.Contains(bounds, "repeat 20 times") || !strings.Contains(bounds, "delay 0.1") || strings.Contains(bounds, "delay 0.2") {
 		t.Error("the bounds check must poll every 0.1 seconds for 20 rounds (about 2 seconds)")
 	}
 	lines := strings.Split(strings.TrimSpace(script), "\n")
@@ -414,6 +423,20 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// scriptSectionOf returns script from the first from to the next to ("" if
+// either is missing).
+func scriptSectionOf(script, from, to string) string {
+	i := strings.Index(script, from)
+	if i < 0 {
+		return ""
+	}
+	j := strings.Index(script[i:], to)
+	if j < 0 {
+		return ""
+	}
+	return script[i : i+j]
 }
 
 // TestClassifyTabFailure_FrontmostLoopRethrow covers what the script raises
@@ -601,8 +624,8 @@ func TestLaunchWithOptions_TabWithoutALockFile(t *testing.T) {
 	}
 }
 
-// useAppleTerminalTab reads TMUX through the package's getenv.
-func TestUseAppleTerminalTab_ReadsTMUXThroughGetenv(t *testing.T) {
+// appleTerminalTabSkipReason reads TMUX through the package's getenv.
+func TestAppleTerminalTabSkipReason_ReadsTMUXThroughGetenv(t *testing.T) {
 	onDarwin(t)
 	old := getenv
 	getenv = func(k string) string {
@@ -612,8 +635,8 @@ func TestUseAppleTerminalTab_ReadsTMUXThroughGetenv(t *testing.T) {
 		return ""
 	}
 	defer func() { getenv = old }()
-	if useAppleTerminalTab(Config{}, LaunchOptions{AppleTerminalTTY: testTTY}) {
-		t.Fatal("the tab path was chosen inside tmux")
+	if got := appleTerminalTabSkipReason(Config{}, LaunchOptions{AppleTerminalTTY: testTTY}); got != NoTabTmux {
+		t.Fatalf("got %q inside tmux, want %q", got, NoTabTmux)
 	}
 }
 

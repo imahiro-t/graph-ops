@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/graph-ops/core-go/internal/displayname"
 )
 
 // This file is the Terminal.app tab path (DFLT-00154): the autopilot opens
@@ -47,54 +49,127 @@ func validAppleTerminalTTY(tty string) bool {
 	return appleTerminalTTYPattern.MatchString(tty)
 }
 
+// Why DetectAppleTerminalTTYWithReason found no tty (DFLT-00362), kept in
+// the run record as terminal_tty_reason so a run whose sessions all open in
+// new windows says why. None of them is an error: running outside
+// Terminal.app is an ordinary way to run.
+const (
+	// TTYReasonNotDarwin: not macOS.
+	TTYReasonNotDarwin = "not-darwin"
+	// TTYReasonTermProgram: TERM_PROGRAM is not Apple_Terminal (another
+	// terminal, or none).
+	TTYReasonTermProgram = "term-program"
+	// TTYReasonTmux: running inside tmux.
+	TTYReasonTmux = "tmux"
+	// TTYReasonPSFailed: ps could not be run (a sandbox refusing it, say).
+	TTYReasonPSFailed = "ps-failed"
+	// TTYReasonPSUnparsable: ps answered something other than "<tty> <ppid>".
+	TTYReasonPSUnparsable = "ps-unparsable"
+	// TTYReasonInvalidTTY: the first tty up the process tree is not a
+	// /dev/ttysN (validAppleTerminalTTY).
+	TTYReasonInvalidTTY = "invalid-tty"
+	// TTYReasonNotFound: no process up to pid 1, or within
+	// maxTTYParentHops steps, has a tty.
+	TTYReasonNotFound = "not-found"
+)
+
 // DetectAppleTerminalTTY returns the tty of the Terminal.app tab this
 // process runs in (e.g. "/dev/ttys003"), or "" when it is not running in
 // Terminal.app (another terminal, tmux, not macOS) or the tty cannot be
-// found. It needs no AppleScript and no permission: only ps.
+// found. It needs no AppleScript and no permission: only ps. See
+// DetectAppleTerminalTTYWithReason, which also says why there is none.
+func DetectAppleTerminalTTY() string {
+	tty, _ := DetectAppleTerminalTTYWithReason()
+	return tty
+}
+
+// DetectAppleTerminalTTYWithReason is DetectAppleTerminalTTY with the
+// reason (one of the TTYReason* values) there is no tty; the reason is ""
+// when a tty is returned.
 //
 // graph-engine run from Claude Code's Bash tool may have no controlling
 // terminal of its own, so the process tree is walked upwards (at most
 // maxTTYParentHops steps) until a process with a tty is found -- the claude
 // session, and above it the shell of the Terminal.app tab. Any failure of
 // ps (a sandbox that refuses it included) gives "".
-func DetectAppleTerminalTTY() string {
-	if goos != "darwin" || getenv("TERM_PROGRAM") != "Apple_Terminal" || getenv("TMUX") != "" {
-		return ""
+func DetectAppleTerminalTTYWithReason() (tty, reason string) {
+	switch {
+	case goos != "darwin":
+		return "", TTYReasonNotDarwin
+	case getenv("TERM_PROGRAM") != "Apple_Terminal":
+		return "", TTYReasonTermProgram
+	case getenv("TMUX") != "":
+		return "", TTYReasonTmux
 	}
 	pid := getpid()
 	for i := 0; i < maxTTYParentHops && pid > 1; i++ {
 		out, err := psOutput(pid)
 		if err != nil {
-			return ""
+			return "", TTYReasonPSFailed
 		}
 		fields := strings.Fields(out)
 		if len(fields) != 2 {
-			return ""
+			return "", TTYReasonPSUnparsable
 		}
 		if tty := fields[0]; tty != "??" && tty != "-" {
 			if candidate := "/dev/" + tty; validAppleTerminalTTY(candidate) {
-				return candidate
+				return candidate, ""
 			}
-			return ""
+			return "", TTYReasonInvalidTTY
 		}
 		ppid, err := strconv.Atoi(fields[1])
 		if err != nil {
-			return ""
+			return "", TTYReasonPSUnparsable
 		}
 		pid = ppid
 	}
-	return ""
+	return "", TTYReasonNotFound
 }
 
-// useAppleTerminalTab reports whether LaunchWithOptions takes the tab path:
-// the same place in buildLaunchArgvWithArgs's order as `open -a Terminal`
-// (no terminalCommand, not in tmux, darwin), and only when the caller gave a
-// valid tty and has not disabled the tab for its run.
-// TMUX is read through getenv like everywhere else in this file (outside
-// tests it is os.Getenv, what buildLaunchArgvWithArgs reads).
-func useAppleTerminalTab(cfg Config, opts LaunchOptions) bool {
-	return goos == "darwin" && cfg.TerminalCommand == "" && getenv("TMUX") == "" &&
-		!opts.SkipAppleTerminalTab && validAppleTerminalTTY(opts.AppleTerminalTTY)
+// Why LaunchWithOptions did not try a tab (LaunchOutcome.NoTabReason,
+// DFLT-00362), in the order appleTerminalTabSkipReason checks them. The
+// runner counts them per run (terminal_window_launches).
+const (
+	// NoTabNotDarwin: not macOS.
+	NoTabNotDarwin = "not-darwin"
+	// NoTabTerminalCommand: a terminalCommand is configured, which always
+	// takes precedence.
+	NoTabTerminalCommand = "terminal-command"
+	// NoTabTmux: the launching process runs inside tmux.
+	NoTabTmux = "tmux"
+	// NoTabDisabled: the run has disabled the tab path
+	// (LaunchOptions.SkipAppleTerminalTab).
+	NoTabDisabled = "tab-disabled"
+	// NoTabNoTTY: the run has no orchestrator tty (see the run's
+	// terminal_tty_reason for why).
+	NoTabNoTTY = "no-tty"
+	// NoTabInvalidTTY: the tty given is not a /dev/ttysN.
+	NoTabInvalidTTY = "invalid-tty"
+)
+
+// appleTerminalTabSkipReason returns "" when LaunchWithOptions takes the tab
+// path, or why it does not (a NoTab* value). The tab path is the same place
+// in buildLaunchArgvWithArgs's order as `open -a Terminal` (no
+// terminalCommand, not in tmux, darwin), and only when the caller gave a
+// valid tty and has not disabled the tab for its run. TMUX is read through
+// getenv like everywhere else in this file (outside tests it is os.Getenv,
+// what buildLaunchArgvWithArgs reads).
+func appleTerminalTabSkipReason(cfg Config, opts LaunchOptions) string {
+	switch {
+	case goos != "darwin":
+		return NoTabNotDarwin
+	case cfg.TerminalCommand != "":
+		return NoTabTerminalCommand
+	case getenv("TMUX") != "":
+		return NoTabTmux
+	case opts.SkipAppleTerminalTab:
+		return NoTabDisabled
+	case opts.AppleTerminalTTY == "":
+		return NoTabNoTTY
+	case !validAppleTerminalTTY(opts.AppleTerminalTTY):
+		return NoTabInvalidTTY
+	}
+	return ""
 }
 
 // Error numbers appleTerminalTabScript raises itself. They are the
@@ -161,12 +236,16 @@ const (
 //   - The command is never sent to "the selected tab", which the user (or
 //     another run's launch in the same window) can change at any moment.
 //     The ttys of every tab of every Terminal window are recorded before
-//     Cmd+T, and the command goes to the one tab whose tty is new. No new
-//     tab within about 6 seconds (polled every 0.2 seconds) is 9102; more
-//     than one (someone else opened a tab at the same time) is 9104, and
-//     the command is run in none of them. A poll whose read of the ttys
-//     fails is skipped rather than taken for "no tabs" (which could never
-//     show the new one), and the last such error is named in the 9102.
+//     Cmd+T, and the command goes to the one tab whose tty is new. When no
+//     new tab appears within about 6 seconds (polled every 0.2 seconds),
+//     the script looks once more 2 seconds later (DFLT-00362: a tab that
+//     opened late used to be left empty while the session opened in a new
+//     window as well) and takes the tab it finds then, logging
+//     "graph-ops-diag: late_tab=true"; none even then is 9102. More than one
+//     (someone else opened a tab at the same time) is 9104, and the command
+//     is run in none of them. A poll whose read of the ttys fails is skipped
+//     rather than taken for "no tabs" (which could never show the new one),
+//     and the last such error is named in the 9102.
 //
 // Terminal.app on current macOS reports every tab of a window to
 // AppleScript as a window of its own with a single tab (DFLT-00183: the
@@ -204,6 +283,21 @@ const (
 // script got: whether Terminal and System Events answered at all (a
 // timeout before that is a permission prompt nobody answers), and whether
 // Cmd+T was already sent or on its way (a new tab may then be left empty).
+//
+// Before each 9103 and 9102 the script logs what it sees as
+// "graph-ops-diag: <key>=<value>" lines (DFLT-00362, see the diagnose
+// handler and TabDiagnostics): the frontmost app and Terminal's front window
+// and the orchestrator's window (ids and bounds), four Apple events at most;
+// just before Cmd+T it logs the frontmost app (one more Apple event, on
+// every launch) and the number of tabs it had already read. Every read is
+// in a try and bounded to 1 second, so the diagnostics never replace the
+// error the script then raises. Line breaks in the app name are replaced
+// with spaces, so a process name cannot forge a graph-ops-phase or
+// graph-ops-diag line. The script
+// is not run at all while the screen is locked (screenLockState in
+// launchAppleTerminalTab): that is what every 9103 and one 9102 of a v0.11.1
+// run came from (Terminal cannot come to the front, and Cmd+T reached the
+// lock screen).
 //
 // `do script` is the last statement: every failure before it ends the
 // script with an error, so falling back to a new window never runs the
@@ -281,6 +375,50 @@ on sameWindowBounds(a, b)
 	return true
 end sameWindowBounds
 
+on frontmostAppName()
+	try
+		with timeout of 1 second
+			tell application "System Events" to set appName to name of first process whose frontmost is true
+		end timeout
+		set savedDelimiters to AppleScript's text item delimiters
+		set AppleScript's text item delimiters to {return, linefeed}
+		set nameParts to text items of appName
+		set AppleScript's text item delimiters to " "
+		set appName to nameParts as text
+		set AppleScript's text item delimiters to savedDelimiters
+		return appName
+	end try
+	return "?"
+end frontmostAppName
+
+on diagnose(targetID)
+	log "graph-ops-diag: frontmost_app=" & my frontmostAppName()
+	with timeout of 1 second
+		try
+			tell application "Terminal" to set frontID to id of front window
+			log "graph-ops-diag: front_window_id=" & (frontID as text)
+		end try
+		try
+			tell application "Terminal" to set frontBounds to bounds of front window
+			log "graph-ops-diag: front_window_bounds=" & my boundsText(frontBounds)
+		end try
+		log "graph-ops-diag: target_window_id=" & (targetID as text)
+		try
+			tell application "Terminal" to set targetBounds to bounds of window id targetID
+			log "graph-ops-diag: target_window_bounds=" & my boundsText(targetBounds)
+		end try
+	end timeout
+end diagnose
+
+on freshTTYsOf(nowTTYs, knownTTYs)
+	set freshTTYs to {}
+	repeat with x in nowTTYs
+		set v to contents of x
+		if knownTTYs does not contain v then set end of freshTTYs to v
+	end repeat
+	return freshTTYs
+end freshTTYsOf
+
 on run argv
 	set targetTTY to item 1 of argv
 	set shellCommand to item 2 of argv
@@ -315,10 +453,13 @@ on run argv
 	end repeat
 	if not inFront then
 		if not pollOK and lastErrNum is not missing value then error "graph-ops: Terminal's state could not be read while waiting for it to come to the front: " & lastErrMsg number lastErrNum
+		my diagnose(targetID)
 		error "graph-ops: Terminal did not come to the front with the window of " & targetTTY & ", so no key was sent" number 9103
 	end if
 	log "graph-ops-phase: frontmost"
 	delay 0.2
+	log "graph-ops-diag: frontmost_app_before=" & my frontmostAppName()
+	log "graph-ops-diag: tabs_before=" & ((count of knownTTYs) as text)
 	log "graph-ops-phase: keystroke-sending"
 	tell application "System Events" to tell process "Terminal" to keystroke "t" using command down
 	log "graph-ops-phase: keystroke-sent"
@@ -337,11 +478,7 @@ on run argv
 			set lastReadErr to errMsg & " [" & errNum & "]"
 		end try
 		if nowTTYs is not missing value then
-			set freshTTYs to {}
-			repeat with x in nowTTYs
-				set v to contents of x
-				if knownTTYs does not contain v then set end of freshTTYs to v
-			end repeat
+			set freshTTYs to my freshTTYsOf(nowTTYs, knownTTYs)
 			if (count of freshTTYs) > 1 then error "graph-ops: more than one new tab appeared in Terminal while opening a tab in the window of " & targetTTY number 9104
 			if (count of freshTTYs) is 1 then
 				set newTTY to item 1 of freshTTYs
@@ -351,6 +488,23 @@ on run argv
 		delay 0.2
 	end repeat
 	if newTTY is missing value then
+		delay 2
+		set lateTTYs to missing value
+		try
+			set lateTTYs to my freshTTYsOf(my terminalTTYs(), knownTTYs)
+		on error errMsg number errNum
+			set lastReadErr to errMsg & " [" & errNum & "]"
+		end try
+		if lateTTYs is not missing value then
+			if (count of lateTTYs) > 1 then error "graph-ops: more than one new tab appeared in Terminal while opening a tab in the window of " & targetTTY number 9104
+			if (count of lateTTYs) is 1 then
+				set newTTY to item 1 of lateTTYs
+				log "graph-ops-diag: late_tab=true"
+			end if
+		end if
+	end if
+	if newTTY is missing value then
+		my diagnose(targetID)
 		if lastReadErr is not "" then error "graph-ops: no new tab appeared in the Terminal window of " & targetTTY & "; the last failed read of Terminal's tabs: " & lastReadErr number 9102
 		error "graph-ops: no new tab appeared in the Terminal window of " & targetTTY number 9102
 	end if
@@ -361,7 +515,10 @@ on run argv
 			tell application "Terminal" to set newTab to first tab of window id newID whose tty is newTTY
 		end try
 	end if
-	if newTab is missing value then error "graph-ops: the new tab in the Terminal window of " & targetTTY & " closed" number 9102
+	if newTab is missing value then
+		my diagnose(targetID)
+		error "graph-ops: the new tab in the Terminal window of " & targetTTY & " closed" number 9102
+	end if
 	log "graph-ops-phase: tab-found"
 	set sameWindow to false
 	set boundsNote to "could not be read"
@@ -379,7 +536,10 @@ on run argv
 		end try
 		delay 0.1
 	end repeat
-	if not sameWindow then error "graph-ops: the new tab did not open in the Terminal window of " & targetTTY & " (bounds " & boundsNote & ")" number 9102
+	if not sameWindow then
+		my diagnose(targetID)
+		error "graph-ops: the new tab did not open in the Terminal window of " & targetTTY & " (bounds " & boundsNote & ")" number 9102
+	end if
 	log "graph-ops-phase: command-sending"
 	tell application "Terminal" to do script shellCommand in newTab
 end run`
@@ -387,14 +547,34 @@ end run`
 // defaultTabScriptTimeout is tabScriptTimeout's initial value (tests may
 // shorten the variable); tabLockWait is derived from it, so changing it here
 // moves both.
-const defaultTabScriptTimeout = 15 * time.Second
+const defaultTabScriptTimeout = 20 * time.Second
 
-// tabScriptTimeout bounds the osascript run. The script itself gives up
-// after about 2 seconds of waiting for Terminal to come to the front, 0.2
-// seconds before Cmd+T, about 6 seconds of waiting for the tab and about 2
-// seconds of checking that it opened in the target window -- about 10.2
-// seconds at worst. The 15 seconds add room for starting osascript and
-// reading Terminal's windows on top of that. What takes longer is a
+// tabScriptTimeout bounds the osascript run. The script's own waits add
+// up to about 12.2 seconds at worst: about 2 seconds of waiting for
+// Terminal to come to the front, 0.2 seconds before Cmd+T, about 6 seconds
+// of waiting for the tab, one more look 2 seconds later, and about 2
+// seconds of checking that it opened in the target window. On top of that
+// come the diagnostics' Apple events, each bounded to 1 second: the
+// frontmost app just before Cmd+T on every launch, and up to four more on a
+// 9103 or 9102 (see diagnose). So the script ends within about 17.2 seconds
+// (a late tab that then fails the window check: 2 + 0.2 + 1 + 6 + 2 + 2 +
+// 4) plus the time its other reads take -- starting osascript, finding the
+// windows, and the reads in the waiting loops, which have no bound of
+// their own.
+//
+// The 20 seconds (15 before DFLT-00362) are kept with that in mind. The
+// 17.2 seconds count every diagnostic read at its 1-second bound, which only
+// a Terminal or System Events that has all but stopped answering reaches,
+// and then the reads in the waiting loops (with no bound) are just as slow
+// and use up the time first, as before DFLT-00362. While they answer
+// normally, a read takes tens of milliseconds and the diagnostics well under
+// a second in all. Measured against how slowly Terminal answers, the room
+// is about what it was: the 20 seconds run out when each read takes about
+// 0.1 seconds, about where the 15 seconds ran out before (the waits were
+// 4 seconds shorter then, with about as many reads). A timeout there
+// counts toward runner.MaxSlowTabTimeouts like any other after
+// system-events-ok: Terminal answering that slowly is what that count is
+// for. What takes longer is a
 // permission prompt nobody answers when the script had not yet heard from
 // both Terminal and System Events, and Terminal answering slowly after
 // that (see classifyTabFailure). A variable so tests can shorten it.
@@ -413,7 +593,7 @@ func launchAppleTerminalTab(workDir, claudeBin string, extraArgs []string, promp
 		return LaunchOutcome{}, fmt.Errorf("preparing terminal launch script: %w", err)
 	}
 	var tabErr string
-	var disable bool
+	var disable, lateTab bool
 	var failure *TabFailure
 	if unlock, busy := lockTabLaunch(); busy != "" {
 		// Other graph-ops processes kept the tab lock busy: a quick,
@@ -421,11 +601,27 @@ func launchAppleTerminalTab(workDir, claudeBin string, extraArgs []string, promp
 		// script ran, so there is no phase, no error number and no Cmd+T.
 		tabErr, failure = busy, &TabFailure{Kind: TabFailureLockBusy}
 	} else {
-		tabErr, disable, failure = openAppleTerminalTab(tty, shellQuote(scriptPath))
-		unlock()
+		// Read under the lock, right before the script: the screen may
+		// have locked while this launch waited for the lock.
+		lock := screenLockState()
+		if lock == ScreenLocked {
+			// No script: neither activating Terminal nor Cmd+T would
+			// work, and Cmd+T would type into the lock screen (see
+			// ScreenLocked). A passing failure; the tab stays enabled.
+			tabErr = "the screen is locked, so no tab was tried (Terminal cannot come to the front while it is)"
+			failure = &TabFailure{Kind: TabFailureScreenLocked, Diagnostics: TabDiagnostics{ScreenLock: lock}}
+			unlock()
+		} else {
+			tabErr, disable, failure, lateTab = openAppleTerminalTab(tty, shellQuote(scriptPath))
+			unlock()
+			if failure != nil {
+				failure.Diagnostics.ScreenLock = lock
+				failure.Diagnostics.ScreenLockAfter = screenLockState()
+			}
+		}
 	}
 	if tabErr == "" {
-		return LaunchOutcome{UsedTab: true}, nil
+		return LaunchOutcome{UsedTab: true, LateTab: lateTab}, nil
 	}
 	out := LaunchOutcome{TabError: tabErr, DisableTab: disable, TabFailure: failure}
 	if err := runLauncher("open", []string{"-a", "Terminal", scriptPath}); err != nil {
@@ -447,7 +643,10 @@ var tabLockPath = func() (string, error) {
 }
 
 // tabLockMargin is how much longer than tabScriptTimeout lockTabLaunch
-// waits for the lock.
+// waits for the lock. It also covers the screen lock read the holder makes
+// under the lock before its script (screenLockTimeout, normally tens of
+// milliseconds); the one it makes again after a failure comes after it
+// releases the lock, so a holder keeps it for 22 seconds at most.
 const tabLockMargin = 5 * time.Second
 
 // tabLockWait bounds how long lockTabLaunch waits for another process's tab
@@ -473,7 +672,10 @@ const tabLockMargin = 5 * time.Second
 // is wrong with Terminal, and then the waiter's own tab would most likely
 // fail the same way; either way it still opens a new window. And a wait
 // that grew with the number of waiters would stretch a launch's worst case
-// (about 45 seconds) in proportion, where a bounded wait keeps it fixed. See
+// (about 59 seconds: 25 for the lock, 2 for reading the screen lock, 20 for
+// osascript, 2 for reading the screen lock again after a failure and 10 for
+// `open -a Terminal`; about 45 before DFLT-00362) in
+// proportion, where a bounded wait keeps it fixed. See
 // the lock in docs/autopilot.md.
 var tabLockWait = defaultTabScriptTimeout + tabLockMargin
 
@@ -584,14 +786,18 @@ func tabPhaseRank(phase string) int {
 	return 0
 }
 
-// splitTabScriptOutput separates the phase lines from the rest of
-// osascript's output: it returns the last phase logged ("" for none) and
-// the other lines, joined by spaces.
+// tabDiagPrefix starts every diagnostics line of the script's output
+// ("graph-ops-diag: <key>=<value>", DFLT-00362).
+const tabDiagPrefix = "graph-ops-diag: "
+
+// splitTabScriptOutput separates the phase and diagnostics lines from the
+// rest of osascript's output: it returns the last phase logged ("" for
+// none) and the other lines, joined by spaces.
 func splitTabScriptOutput(output string) (phase, rest string) {
 	var others []string
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" {
+		if line == "" || strings.HasPrefix(line, tabDiagPrefix) {
 			continue
 		}
 		if p, ok := strings.CutPrefix(line, tabPhasePrefix); ok {
@@ -603,6 +809,45 @@ func splitTabScriptOutput(output string) (phase, rest string) {
 		others = append(others, line)
 	}
 	return phase, strings.Join(others, " ")
+}
+
+// parseTabDiagnostics collects the script's diagnostics lines. Only the
+// known keys are kept, the last value of each wins, and every value is
+// sanitized (control and invisible characters dropped, cut to
+// displayname.MaxRunes runes): an app name or a window's bounds is text from
+// outside, and it ends up in the run record and on stderr.
+func parseTabDiagnostics(output string) TabDiagnostics {
+	var d TabDiagnostics
+	for _, line := range strings.Split(output, "\n") {
+		kv, ok := strings.CutPrefix(strings.TrimSpace(line), tabDiagPrefix)
+		if !ok {
+			continue
+		}
+		key, value, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		value = displayname.Sanitize(value)
+		switch key {
+		case "frontmost_app":
+			d.FrontmostApp = value
+		case "frontmost_app_before":
+			d.FrontmostAppBefore = value
+		case "front_window_id":
+			d.FrontWindowID = value
+		case "front_window_bounds":
+			d.FrontWindowBounds = value
+		case "target_window_id":
+			d.TargetWindowID = value
+		case "target_window_bounds":
+			d.TargetWindowBounds = value
+		case "tabs_before":
+			d.TabsBefore = value
+		case "late_tab":
+			d.LateTab = value == "true"
+		}
+	}
+	return d
 }
 
 // tabErrorNumber matches the error number osascript puts at the end of its
@@ -624,18 +869,20 @@ func parseTabErrorNumber(msg string) int {
 
 // openAppleTerminalTab runs appleTerminalTabScript and returns "" when the
 // tab opened, or why it did not, whether that should disable the tab for
-// the rest of the run, and the failure's details.
-func openAppleTerminalTab(tty, command string) (tabErr string, disable bool, failure *TabFailure) {
+// the rest of the run, and the failure's details; lateTab says a tab that
+// opened was found only in the script's last look (TabDiagnostics.LateTab).
+func openAppleTerminalTab(tty, command string) (tabErr string, disable bool, failure *TabFailure, lateTab bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), tabScriptTimeout)
 	defer cancel()
 
 	output, err := runCommand(ctx, "osascript", "-e", appleTerminalTabScript, tty, command)
+	diag := parseTabDiagnostics(string(output))
 	if err == nil {
-		return "", false, nil
+		return "", false, nil, diag.LateTab
 	}
 	timedOut := ctx.Err() != nil
 	phase, msg := splitTabScriptOutput(string(output))
-	failure = &TabFailure{Kind: TabFailureScriptError, Phase: phase, KeystrokeSent: tabPhaseRank(phase) >= tabPhaseRank(TabPhaseKeystrokeSent)}
+	failure = &TabFailure{Kind: TabFailureScriptError, Phase: phase, KeystrokeSent: tabPhaseRank(phase) >= tabPhaseRank(TabPhaseKeystrokeSent), Diagnostics: diag}
 	if timedOut {
 		failure.Kind = TabFailureTimeout
 		msg = tabTimeoutMessage(phase)
@@ -645,7 +892,7 @@ func openAppleTerminalTab(tty, command string) (tabErr string, disable bool, fai
 		}
 		failure.ErrorNumber = parseTabErrorNumber(msg)
 	}
-	return truncateRunes("osascript: "+msg, maxTabErrorLen), classifyTabFailure(timedOut, phase, msg), failure
+	return truncateRunes("osascript: "+msg, maxTabErrorLen), classifyTabFailure(timedOut, phase, msg), failure, false
 }
 
 // tabTimeoutMessage says what a timeout after reaching phase most likely
