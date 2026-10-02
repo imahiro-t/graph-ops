@@ -145,12 +145,15 @@ type Run struct {
 	// resets it; other failures leave it as it is. Cleared by the same
 	// starts that set TerminalTTY.
 	TerminalTabSlowTimeouts int `json:"terminal_tab_slow_timeouts,omitempty"`
-	// TerminalTabFailures keeps why each launch that tried a tab fell back
-	// to a new window, oldest first, at most MaxTabFailureRecords of them
-	// (DFLT-00361), and each launch that did not try it because the screen
-	// was locked (DFLT-00362; dropped first at the cap, see
-	// RecordTabFailure). Starts leave it as it is, so the history spans the
-	// run's orchestrators.
+	// TerminalTabFailures keeps one record per launch that opened a new
+	// window instead of a tab: each launch that tried a tab and fell back
+	// (DFLT-00361), and each launch that tried none because the screen was
+	// locked (Kind TabFailureKindScreenLocked, DFLT-00362). Oldest first, at
+	// most MaxTabFailureRecords of them; beyond that the oldest
+	// screen-locked record goes first (see RecordTabFailure). The other
+	// launches that try no tab are counted in TerminalWindowLaunches
+	// instead. Starts leave it as it is, so the history spans the run's
+	// orchestrators.
 	TerminalTabFailures []TabFailureRecord `json:"terminal_tab_failures,omitempty"`
 	// TerminalTTYReason is why the current orchestrator has no
 	// TerminalTTY (DFLT-00362): term-program (not Terminal.app), tmux,
