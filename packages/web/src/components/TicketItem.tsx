@@ -120,40 +120,39 @@ const artifactTabClass = (active: boolean) =>
 const ARTIFACT_TABS = ['nodes', 'gherkin', 'html', 'artifacts'] as const;
 type ArtifactTab = (typeof ARTIFACT_TABS)[number];
 
-// DFLT-00334: the below-80rem classes shared by the two artifact header rows
-// (a node's artifacts and the Artifacts tab). Under 80rem the header row wraps
-// instead of forcing name, Download and the type badge onto one line: at 320px
-// with a 200% font the row is ~80px in an expanded node (~122px in the
-// Artifacts tab), and the node card (overflow-hidden) clipped the right group
-// while the name was squeezed to one character a line. The name group wraps
-// too, so a long name moves under its icon and gets the full row; the name
-// keeps an auto basis and wrap-break-word (never wrap-anywhere or basis-0,
-// which would let it shrink to one character again). The right group moves to
-// the next line, stays right-aligned (safe, so it never runs out on the left)
-// and wraps within itself; the badge may break a word only when it is wider
-// than the row. Only shrink-0 on the icons is added without a variant.
+// DFLT-00334 / DFLT-00345: the classes shared by the two artifact header
+// rows (a node's artifacts and the Artifacts tab).
 //
-// DFLT-00345: from 80rem up the row stays on one line (name on the left,
-// Download and the badge on the right), but a long name with no break
-// opportunity used to keep the name group at the name's full width, so the
-// row ran 15-24px past the card at 1280px while the right group shrank
-// instead and squeezed 「ダウンロード」 to one character a line. From 80rem
-// up the name group and the name now take min-w-0 (overflow-wrap: break-word
-// does not lower min-content, so both levels need it) and the name breaks
-// with wrap-break-word; the right group is shrink-0 and its labels are
-// whitespace-nowrap, so only the name side shrinks and wraps. gap-x-2 keeps
-// the two sides apart when they meet; with a short name justify-between
-// leaves more room than that, so short rows look exactly as before. All of
-// these only take effect once the row has to shrink.
-const ARTIFACT_HEADER_ROW_WRAP = 'below-80rem:flex-wrap below-80rem:gap-x-2 below-80rem:gap-y-1 from-80rem:gap-x-2';
-const ARTIFACT_HEADER_NAME_GROUP_WRAP =
-  'below-80rem:flex-wrap below-80rem:min-w-0 below-80rem:max-w-full from-80rem:min-w-0';
-const ARTIFACT_HEADER_TEXT_WRAP = 'below-80rem:min-w-0 below-80rem:wrap-break-word';
-// The artifact name: wraps under 80rem (above) and, from 80rem up, shrinks
-// and breaks inside the name group instead of pushing the row out.
-const ARTIFACT_HEADER_NAME_TEXT = `${ARTIFACT_HEADER_TEXT_WRAP} from-80rem:min-w-0 from-80rem:wrap-break-word`;
-// The Download label and the type badge: one line from 80rem up.
-const ARTIFACT_HEADER_LABEL_TEXT = `${ARTIFACT_HEADER_TEXT_WRAP} from-80rem:whitespace-nowrap`;
+// The name side shrinks and wraps at every width: the name group and the
+// name take min-w-0 (overflow-wrap: break-word does not lower min-content, so
+// both levels need it) and the name breaks with wrap-break-word. It keeps an
+// auto basis and never gets wrap-anywhere, basis-0 or truncate, which would
+// let it shrink to one character a line or hide it. gap-x-2 keeps the name
+// and the right group apart when they meet; with a short name
+// justify-between leaves more room than that, so short rows look the same.
+// None of this changes anything until the row has to shrink.
+//
+// What differs across 80rem is the row and the right group (Download and the
+// type badge). Under 80rem (DFLT-00334) the row wraps instead of forcing
+// everything onto one line: at 320px with a 200% font the row is ~80px in an
+// expanded node (~122px in the Artifacts tab), and the node card
+// (overflow-hidden) clipped the right group while the name was squeezed to
+// one character a line. The name group wraps too, so a long name moves under
+// its icon and gets the full row. The right group moves to the next line,
+// stays right-aligned (safe, so it never runs out on the left) and wraps
+// within itself; the labels may break a word only when one is wider than the
+// row. From 80rem up (DFLT-00345) the row stays on one line, the right group
+// is shrink-0 and its labels are whitespace-nowrap, so only the name side
+// shrinks: before, a long name with no break opportunity ran the row 15-24px
+// past the card at 1280px while 「ダウンロード」 was squeezed to one
+// character a line.
+const ARTIFACT_HEADER_ROW_WRAP = 'gap-x-2 below-80rem:flex-wrap below-80rem:gap-y-1';
+const ARTIFACT_HEADER_NAME_GROUP_WRAP = 'min-w-0 below-80rem:flex-wrap below-80rem:max-w-full';
+// The artifact name.
+const ARTIFACT_HEADER_NAME_TEXT = 'min-w-0 wrap-break-word';
+// The Download label and the type badge: wrap under 80rem, one line from
+// 80rem up.
+const ARTIFACT_HEADER_LABEL_TEXT = 'below-80rem:min-w-0 below-80rem:wrap-break-word from-80rem:whitespace-nowrap';
 const ARTIFACT_HEADER_RIGHT_GROUP_WRAP =
   'below-80rem:flex-wrap below-80rem:ml-auto below-80rem:min-w-0 below-80rem:max-w-full below-80rem:justify-end-safe from-80rem:shrink-0';
 
