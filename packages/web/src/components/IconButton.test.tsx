@@ -1262,6 +1262,15 @@ describe('IconButton hover tooltip after touch and crossing pointers', () => {
         overFrom(button, outside);
       }
 
+      // Enters the button the ordinary way: the mouseout from where the
+      // pointer was (from which React makes the mouseenter), then the
+      // mouseover.
+      function enterOrdinarily(button: HTMLElement, outside: HTMLElement) {
+        pointerIn(button, 'mouse');
+        mouseOut(outside, button);
+        overFrom(button, outside);
+      }
+
       it('is a mouseover React makes no mouseenter out of (control for the tests below)', () => {
         const onMouseEnter = vi.fn();
         const onMouseOver = vi.fn();
@@ -1340,22 +1349,29 @@ describe('IconButton hover tooltip after touch and crossing pointers', () => {
         expect(openIconButtonTooltips()).toHaveLength(0);
       });
 
-      it('schedules one open for an ordinary entry, which brings both a mouseover and a mouseenter', () => {
-        const { button, outside } = renderButton();
-        pointerIn(button, 'mouse');
-        // The ordinary sequence: the mouseout from where the pointer was (from
-        // which React makes the mouseenter), then the mouseover.
-        act(() => {
-          outside.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, cancelable: true, relatedTarget: button }));
-        });
-        overFrom(button, outside);
-        advance(OPEN_DELAY_MS);
-        expect(openIconButtonTooltips()).toHaveLength(1);
+      // An ordinary entry brings both a mouseenter (React makes it from the
+      // mouseout of where the pointer was) and a mouseover, and both ask for
+      // an open. Only one open may be scheduled: leaving before the delay
+      // cancels it, so a second, orphaned timer would still open the tooltip
+      // at its time with the pointer outside.
+      it.each([
+        ['an enabled button', {}],
+        ['a natively disabled button', { disabled: true }]
+      ] as const)('schedules only one open for an ordinary entry of %s, so leaving before the delay leaves none behind', (_name, props) => {
+        const { button, outside } = renderButton(props);
+        enterOrdinarily(button, outside);
+        advance(OPEN_DELAY_MS - 100);
+        expect(allIconButtonTooltips()).toHaveLength(0);
         mouseOut(button, outside);
-        advance(100);
-        expect(openIconButtonTooltips()).toHaveLength(0);
         advance(OPEN_DELAY_MS + 200);
         expect(allIconButtonTooltips()).toHaveLength(0);
+
+        // Control: the same entry does schedule an open.
+        enterOrdinarily(button, outside);
+        advance(OPEN_DELAY_MS - 1);
+        expect(allIconButtonTooltips()).toHaveLength(0);
+        advance(1);
+        expect(openIconButtonTooltip()).toHaveTextContent('Language');
       });
 
       // Guards the DOM containment check: a mouseover on the tooltip bubbles
