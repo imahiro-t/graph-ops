@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -298,6 +299,13 @@ var mysqlDeadlockBackoff = func() time.Duration {
 	return time.Duration(10+rand.Intn(40)) * time.Millisecond
 }
 
+// mysqlDeadlockLogger is where retryMySQLDeadlock logs (DFLT-00347): the
+// slog default logger, which graph-engine never redirects, so it goes to
+// stderr (the server's log) and never to the JSON on stdout. A variable so
+// tests can capture the records without touching the process-wide default;
+// the store tests do not use t.Parallel, so swapping it is safe there.
+var mysqlDeadlockLogger = func() *slog.Logger { return slog.Default() }
+
 // retryMySQLDeadlock runs run -- one whole transaction, or one autocommit
 // statement -- and runs it again when MySQL rolled it back as a deadlock
 // victim (Error 1213), up to mysqlDeadlockAttempts runs in all (DFLT-00329).
@@ -308,19 +316,47 @@ var mysqlDeadlockBackoff = func() time.Duration {
 // was written, and the caller can simply make the same call again -- the
 // bare driver error never reaches it.
 //
+// So that operators can see how often deadlocks happen on a shared MySQL
+// (DFLT-00347), it logs one record through mysqlDeadlockLogger, tagged
+// with op (a fixed operation name), target (the ticket or artifact the
+// write is about) and the number of attempts:
+//   - Info, event=mysql_deadlock_retry_succeeded, when a run succeeded
+//     after at least one deadlock;
+//   - Warn, event=mysql_deadlock_retries_exhausted, when every run
+//     deadlocked, with the last driver error (the 1213 message only).
+//
+// Nothing is logged when the first run succeeds, nor when a run ends in an
+// error other than a deadlock (however many deadlocks came before it): that
+// error is returned to the caller as before. what only words the returned
+// error; it is not logged.
+//
 // SQLite has no counterpart: its transactions begin IMMEDIATE, taking the
 // write lock up front, so they wait rather than deadlock.
-func retryMySQLDeadlock(what string, run func() error) error {
+func retryMySQLDeadlock(op, what string, target slog.Attr, run func() error) error {
 	var err error
 	for attempt := 1; attempt <= mysqlDeadlockAttempts; attempt++ {
 		err = run()
 		if !isMySQLDeadlock(err) {
+			if err == nil && attempt > 1 {
+				mysqlDeadlockLogger().Info("MySQL deadlock resolved by retrying",
+					slog.String("event", "mysql_deadlock_retry_succeeded"),
+					slog.String("op", op),
+					target,
+					slog.Int("attempts", attempt),
+					slog.Int("max_attempts", mysqlDeadlockAttempts))
+			}
 			return err
 		}
 		if attempt < mysqlDeadlockAttempts {
 			time.Sleep(mysqlDeadlockBackoff())
 		}
 	}
+	mysqlDeadlockLogger().Warn("MySQL deadlock retries exhausted",
+		slog.String("event", "mysql_deadlock_retries_exhausted"),
+		slog.String("op", op),
+		target,
+		slog.Int("attempts", mysqlDeadlockAttempts),
+		slog.String("error", err.Error()))
 	return domain.NewAPIError(domain.ErrCodeConcurrentWriteConflict,
 		"%s kept colliding with other writes to the same ticket (MySQL deadlock, %d attempts); nothing was written, so the same call can simply be made again: %v",
 		what, mysqlDeadlockAttempts, err)
@@ -1105,7 +1141,7 @@ func (r *MySQLRepository) ClearEdgesByTicket(ticketID string) error {
 // so the artifact is never written twice (DFLT-00329).
 func (r *MySQLRepository) CreateArtifact(a domain.Artifact) (domain.Artifact, error) {
 	var now string
-	err := retryMySQLDeadlock("adding artifact "+a.ID, func() error {
+	err := retryMySQLDeadlock("create_artifact", "adding artifact "+a.ID, slog.String("artifact_id", a.ID), func() error {
 		now = time.Now().UTC().Format(time.RFC3339Nano)
 		_, err := r.db.Exec(
 			`INSERT INTO artifacts (id, ticket_id, node_id, name, type, content, file_path, metadata, created_at)
