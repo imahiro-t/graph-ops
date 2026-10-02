@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -100,9 +101,10 @@ type Service struct {
 	// advance a fake clock instead of sleeping.
 	Sleep func(time.Duration)
 	// TerminalTTY detects the Terminal.app tty of the orchestrator calling
-	// Start (terminal.DetectAppleTerminalTTY); nil means none. Only a start
-	// that is not a reservation asks it.
-	TerminalTTY func() string
+	// Start, or why it has none
+	// (terminal.DetectAppleTerminalTTYWithReason); nil means none. Only a
+	// start that is not a reservation asks it.
+	TerminalTTY func() (tty, reason string)
 	// Logf receives operational warnings (a Terminal.app tab that fell back
 	// to a new window); nil discards them. The CLI sends them to stderr, out
 	// of the one-line JSON on stdout.
@@ -157,7 +159,7 @@ func New(o Options) *Service {
 		HomeDir:      o.HomeDir,
 		Registry:     &autopilot.Registry{Root: RegistryRoot(o.HomeDir), Logf: o.Logf},
 		Launcher:     TerminalLauncher{Config: terminal.Config{TerminalCommand: o.TerminalCommand}, ClaudeBin: o.ClaudeBinary},
-		TerminalTTY:  terminal.DetectAppleTerminalTTY,
+		TerminalTTY:  terminal.DetectAppleTerminalTTYWithReason,
 		Logf:         o.Logf,
 		ResolveActor: IdentityActor(o.HomeDir),
 	}
@@ -458,9 +460,9 @@ func (s *Service) Start(ticketID, mode, runID string, reserve bool) (StartResult
 	// (DFLT-00154) is the one of the orchestrator starting, taking over or
 	// adopting the run -- this process's caller. A reservation is made by
 	// the Web UI's server, which is not the orchestrator, so it asks nothing.
-	tty := ""
+	tty, ttyReason := "", ""
 	if !reserve && s.TerminalTTY != nil {
-		tty = s.TerminalTTY()
+		tty, ttyReason = s.TerminalTTY()
 	}
 	// Who starts the run. Without it nothing is written to a shared data
 	// source: a run nobody can be told to own, or whose own machine could
@@ -473,7 +475,7 @@ func (s *Service) Start(ticketID, mode, runID string, reserve bool) (StartResult
 	res, err := s.registry().Begin(autopilot.BeginRequest{
 		RootID: root.ID, ProjectID: root.ProjectID, RootStatus: root.Status,
 		Mode: mode, RunID: runID, Reserve: reserve, Settings: settings, Descendants: descendants,
-		TerminalTTY: tty, Actor: actor,
+		TerminalTTY: tty, TerminalTTYReason: ttyReason, Actor: actor,
 	})
 	if err != nil {
 		return StartResult{}, err
@@ -849,6 +851,7 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 	// Outside the lock: git and the terminal can take seconds.
 	var outcome terminal.LaunchOutcome
 	var disabledRun bool
+	var disabledNote string
 	launchErr := func() error {
 		if repoErr != nil {
 			return repoErr
@@ -894,6 +897,15 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		// repeat disables the tab path for the rest of the run, and every
 		// tab failure is kept with its details (DFLT-00361).
 		disabledRun = recordTabOutcome(run, outcome, ticketID, role, s.now())
+		disabledNote = ""
+		if recordNoTabLaunch(run, outcome, ticketID, s.now()) == 1 && outcome.NoTabReason == terminal.NoTabDisabled {
+			// Once per run (per orchestrator): later launches of a run
+			// whose tab is disabled open new windows without a word.
+			disabledNote = run.TerminalTabDisabled
+			if disabledNote == "" {
+				disabledNote = "the tab was disabled"
+			}
+		}
 		sample.observe(st, s.now())
 		out = LaunchResult{Launched: ticketID, Role: role, Worktree: workDir, Next: fmt.Sprintf("graph-engine autopilot wait %s %s", runID, ticketID), UntrustedFolder: untrusted}
 		if role == autopilot.RoleWork {
@@ -907,6 +919,12 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		} else {
 			s.logf("the %s session of %s opened in a new Terminal window because a tab could not be opened (%s%s)", role, ticketID, outcome.TabError, describeTabFailure(outcome.TabFailure))
 		}
+	}
+	if disabledNote != "" {
+		s.logf("the %s session of %s opened in a new Terminal window without trying a tab: run %s disabled the tab earlier (%s); so do its later sessions", role, ticketID, runID, disabledNote)
+	}
+	if outcome.UsedTab && outcome.LateTab {
+		s.logf("the %s session of %s opened in a new Terminal tab that appeared only after the usual wait", role, ticketID)
 	}
 	return out, err
 }
@@ -930,6 +948,9 @@ const MaxSlowTabTimeouts = 2
 func recordTabOutcome(run *autopilot.Run, outcome terminal.LaunchOutcome, ticketID, role string, now time.Time) bool {
 	if outcome.UsedTab {
 		run.TerminalTabSlowTimeouts = 0
+		if outcome.LateTab {
+			run.RecordLateTab(ticketID, now)
+		}
 		return false
 	}
 	if outcome.TabError == "" {
@@ -949,13 +970,35 @@ func recordTabOutcome(run *autopilot.Run, outcome terminal.LaunchOutcome, ticket
 	rec := autopilot.TabFailureRecord{At: now, TicketID: ticketID, Role: role, Message: outcome.TabError, DisabledRun: disabledRun}
 	if f := outcome.TabFailure; f != nil {
 		rec.Kind, rec.ErrorNumber, rec.Phase, rec.KeystrokeSent = f.Kind, f.ErrorNumber, f.Phase, f.KeystrokeSent
+		if d := f.Diagnostics; d != (terminal.TabDiagnostics{}) {
+			rec.Diagnostics = &autopilot.TabDiagnosticsRecord{
+				ScreenLock: d.ScreenLock, ScreenLockAfter: d.ScreenLockAfter,
+				FrontmostApp: d.FrontmostApp, FrontmostAppBefore: d.FrontmostAppBefore,
+				FrontWindowID: d.FrontWindowID, FrontWindowBounds: d.FrontWindowBounds,
+				TargetWindowID: d.TargetWindowID, TargetWindowBounds: d.TargetWindowBounds,
+				TabsBefore: d.TabsBefore, TabsAfter: d.TabsAfter, LateTab: d.LateTab,
+			}
+		}
 	}
 	run.RecordTabFailure(rec)
 	return disabledRun
 }
 
+// recordNoTabLaunch counts, by reason, a launch that opened a new window
+// without trying a tab (DFLT-00362): outcome.NoTabReason set, no tab used
+// and no tab error. It returns the reason's count after this launch, 0 when
+// the launch tried a tab (or its launcher reports no reason).
+func recordNoTabLaunch(run *autopilot.Run, outcome terminal.LaunchOutcome, ticketID string, now time.Time) int {
+	if outcome.UsedTab || outcome.TabError != "" || outcome.NoTabReason == "" {
+		return 0
+	}
+	return run.RecordWindowLaunch(outcome.NoTabReason, ticketID, now)
+}
+
 // describeTabFailure is the details of a tab failure the warning adds after
-// its message ("" when there are none).
+// its message ("" when there are none): its kind and phase, whether an
+// empty tab may be left, and the frontmost app and screen lock it saw
+// (DFLT-00362).
 func describeTabFailure(f *terminal.TabFailure) string {
 	if f == nil || f.Kind == "" {
 		return ""
@@ -966,6 +1009,12 @@ func describeTabFailure(f *terminal.TabFailure) string {
 	}
 	if f.EmptyTabPossible() {
 		desc += ", an empty tab may be left"
+	}
+	if app := f.Diagnostics.FrontmostApp; app != "" {
+		desc += ", frontmost app " + strconv.Quote(app)
+	}
+	if f.Kind != terminal.TabFailureScreenLocked && f.Diagnostics.ScreenLockAfter == terminal.ScreenLocked {
+		desc += ", the screen was locked by then"
 	}
 	return desc
 }

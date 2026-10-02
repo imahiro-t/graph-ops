@@ -149,7 +149,17 @@ func TestAppleTerminalTabScript_Phases(t *testing.T) {
 	if lineOf(logLine(TabPhaseSystemEventsOK)) != se+1 {
 		t.Error("system-events-ok must directly follow the first Apple event to System Events")
 	}
-	if first := lineOf(`application "System Events"`); first != se {
+	// (The handlers above the run handler -- the diagnostics -- only run
+	// after it, so the run handler is what counts.)
+	runStart := lineOf("on run argv")
+	firstSE := -1
+	for i := runStart; i < len(lines); i++ {
+		if strings.Contains(lines[i], `application "System Events"`) {
+			firstSE = i
+			break
+		}
+	}
+	if first := firstSE; first != se {
 		t.Errorf("the first Apple event to System Events must be the frontmost one (line %d), found one on line %d", se, first)
 	}
 	// frontmost after the 9103, keystroke-sending right before the
@@ -167,7 +177,7 @@ func TestAppleTerminalTabScript_Phases(t *testing.T) {
 	// tab-found right after the new tab is taken (the 9102 for a closed
 	// tab) and before the bounds wait, so a timeout during that wait is
 	// told apart from one at command-sending.
-	if lineOf(logLine(TabPhaseTabFound)) != lineOf("if newTab is missing value then error")+1 {
+	if lineOf(logLine(TabPhaseTabFound)) != lineOf(`" closed" number 9102`)+2 || lineOf(`" closed" number 9102`) != lineOf("if newTab is missing value then")+2 {
 		t.Error("tab-found must directly follow finding the new tab")
 	}
 	if lineOf(logLine(TabPhaseTabFound)) > lineOf("set sameWindow to false") {
@@ -175,7 +185,7 @@ func TestAppleTerminalTabScript_Phases(t *testing.T) {
 	}
 	// command-sending right before do script, which stays the last
 	// statement, and after the bounds check.
-	if lineOf(logLine(TabPhaseCommandSending)) < lineOf("if not sameWindow then error") {
+	if lineOf(logLine(TabPhaseCommandSending)) < lineOf("if not sameWindow then") {
 		t.Error("command-sending must come after the window check")
 	}
 	if lineOf(logLine(TabPhaseCommandSending))+1 != lineOf("do script shellCommand in newTab") {
@@ -372,8 +382,15 @@ func TestLaunchWithOptions_TabFailureDetails(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if out.TabFailure == nil || *out.TabFailure != tc.want {
-				t.Fatalf("failure = %+v, want %+v", out.TabFailure, tc.want)
+			if out.TabFailure == nil {
+				t.Fatal("no failure")
+			}
+			// Both lock reads (before the script and after its failure)
+			// are recorded; the script logged no diagnostics here.
+			want := tc.want
+			want.Diagnostics = TabDiagnostics{ScreenLock: ScreenUnlocked, ScreenLockAfter: ScreenUnlocked}
+			if *out.TabFailure != want {
+				t.Fatalf("failure = %+v, want %+v", out.TabFailure, want)
 			}
 			if out.UsedTab || out.DisableTab != tc.wantDisable || !strings.Contains(out.TabError, tc.wantInError) {
 				t.Fatalf("outcome = %+v, want DisableTab=%v and %q in TabError", out, tc.wantDisable, tc.wantInError)

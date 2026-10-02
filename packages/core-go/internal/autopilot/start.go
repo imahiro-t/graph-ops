@@ -38,6 +38,9 @@ type BeginRequest struct {
 	// Run.TerminalTTY), "" when it has none. Ignored with Reserve: the
 	// process reserving the run is not the orchestrator.
 	TerminalTTY string
+	// TerminalTTYReason is why TerminalTTY is "" (see
+	// Run.TerminalTTYReason). Ignored with Reserve, like TerminalTTY.
+	TerminalTTYReason string
 	// Actor is who is starting (DFLT-00326): stamped on the run started,
 	// taken over or adopted, and its MachineID limits what is taken over to
 	// this machine's runs. nil stamps nothing and takes over any local run
@@ -327,8 +330,7 @@ func decideBegin(req BeginRequest, local, shared []*Run, now time.Time, res *Beg
 			cand.Heartbeat = now
 			// The adopting orchestrator is the run's first window now,
 			// whatever the reservation (or a run it took over) held.
-			cand.TerminalTTY, cand.TerminalTabDisabled = req.TerminalTTY, ""
-			cand.TerminalTabSlowTimeouts = 0
+			cand.resetTerminal(req.TerminalTTY, req.TerminalTTYReason)
 			res.Adopted = true
 			stamp(cand, req.Actor, now, sharedByID)
 			return cand, original, nil
@@ -405,13 +407,13 @@ func decideBegin(req BeginRequest, local, shared []*Run, now time.Time, res *Beg
 	// so a tty left by an earlier orchestrator (whose number the system
 	// may since have given to an unrelated tab) is never used, and a
 	// disabled tab path gets another chance (a permission may have been
-	// granted since), with its count of slow timeouts reset; the history
-	// of tab failures is kept. A reservation holds none until it is
-	// adopted.
-	cand.TerminalTTY, cand.TerminalTabDisabled = req.TerminalTTY, ""
-	cand.TerminalTabSlowTimeouts = 0
+	// granted since), with its count of slow timeouts reset, and its
+	// counts of window launches and late tabs start over (DFLT-00362); the
+	// history of tab failures is kept. A reservation holds none -- no tty
+	// and no reason for none -- until it is adopted.
+	cand.resetTerminal(req.TerminalTTY, req.TerminalTTYReason)
 	if req.Reserve {
-		cand.TerminalTTY = ""
+		cand.resetTerminal("", "")
 		cand.State = RunStarting
 	}
 	stamp(cand, req.Actor, now, sharedByID)

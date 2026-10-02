@@ -83,9 +83,13 @@ func putCraftedRecord(t *testing.T, repo store.GraphRepository, projectID, id, r
 		StopReason: evil, StopTicket: evil, StopDetail: evil,
 		Stops:       []autopilot.StopRecord{{At: began, Reason: evil, Ticket: evil, Detail: evil}},
 		Reservation: &autopilot.Reservation{Previous: []byte(evil)},
-		TerminalTTY: evil, TerminalTabDisabled: evil,
-		StartedBy: &autopilot.StartedBy{Name: evil, MachineID: "machine-crafted"},
-		BegunAt:   began,
+		TerminalTTY: evil, TerminalTabDisabled: evil, TerminalTTYReason: evil,
+		TerminalTabFailures: []autopilot.TabFailureRecord{{At: began, TicketID: evil, Role: evil, Kind: evil, Message: evil, Phase: evil,
+			Diagnostics: &autopilot.TabDiagnosticsRecord{FrontmostApp: evil, FrontmostAppBefore: evil, FrontWindowBounds: evil, TargetWindowBounds: evil}}},
+		TerminalWindowLaunches: map[string]autopilot.LaunchTally{evil: {Count: 1, LastTicketID: evil}},
+		TerminalLateTabs:       &autopilot.LaunchTally{Count: 1, LastTicketID: evil},
+		StartedBy:              &autopilot.StartedBy{Name: evil, MachineID: "machine-crafted"},
+		BegunAt:                began,
 	}
 	data, err := json.Marshal(snap)
 	if err != nil {
