@@ -1240,6 +1240,178 @@ describe('IconButton hover tooltip after touch and crossing pointers', () => {
       advance(OPEN_DELAY_MS + 200);
       expect(openIconButtonTooltips()).toHaveLength(0);
     });
+
+    // DFLT-00342: when the DOM under a resting pointer is replaced (switching
+    // the settings modal's tabs, say), the mouseout from the removed node never
+    // comes, and the browser sends a mouseover whose relatedTarget is a
+    // surviving React-managed node. React makes no mouseenter out of such a
+    // mouseover (it leaves enter / leave to the matching mouseout), so these
+    // tests dispatch exactly that: a mouseover with a React-managed
+    // relatedTarget (`outside`) and no mouseout before it.
+    describe('a mouseover whose relatedTarget is a React-managed node (DFLT-00342)', () => {
+      const overFrom = (el: Element, from: Element) =>
+        act(() => {
+          el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, relatedTarget: from }));
+        });
+      const escape = (el: Element) => fireEvent.keyDown(el, { key: 'Escape' });
+
+      // Enters the button the way the bug report's pointer does: no mouseout,
+      // and no React mouseenter.
+      function enterWithoutMouseEnter(button: HTMLElement, outside: HTMLElement) {
+        pointerIn(button, 'mouse');
+        overFrom(button, outside);
+      }
+
+      // Enters the button the ordinary way: the mouseout from where the
+      // pointer was (from which React makes the mouseenter), then the
+      // mouseover.
+      function enterOrdinarily(button: HTMLElement, outside: HTMLElement) {
+        pointerIn(button, 'mouse');
+        mouseOut(outside, button);
+        overFrom(button, outside);
+      }
+
+      it('is a mouseover React makes no mouseenter out of (control for the tests below)', () => {
+        const onMouseEnter = vi.fn();
+        const onMouseOver = vi.fn();
+        render(
+          <>
+            <span data-testid="probe" onMouseEnter={onMouseEnter} onMouseOver={onMouseOver} />
+            <button type="button">outside</button>
+          </>
+        );
+        overFrom(screen.getByTestId('probe'), screen.getByRole('button', { name: 'outside' }));
+        expect(onMouseEnter).not.toHaveBeenCalled();
+        expect(onMouseOver).toHaveBeenCalledTimes(1);
+      });
+
+      it.each([
+        ['an enabled button', {}, 'button'],
+        ['a natively disabled button', { disabled: true }, 'button'],
+        ['an enabled button, entered on its icon', {}, 'icon']
+      ] as const)('opens the tooltip after the delay on the first hover of %s', (_name, props, target) => {
+        const { button, outside } = renderButton(props);
+        pointerIn(button, 'mouse');
+        overFrom(target === 'icon' ? screen.getByTestId('icon') : button, outside);
+        advance(OPEN_DELAY_MS - 1);
+        expect(allIconButtonTooltips()).toHaveLength(0);
+        advance(1);
+        expect(openIconButtonTooltip()).toHaveTextContent('Language');
+      });
+
+      it('stays closed after Escape while the pointer moves within the wrapper, and opens again once it leaves and comes back', () => {
+        const { button, outside } = renderButton();
+        enterWithoutMouseEnter(button, outside);
+        advance(OPEN_DELAY_MS);
+        expect(openIconButtonTooltips()).toHaveLength(1);
+        escape(document.body);
+        expect(openIconButtonTooltips()).toHaveLength(0);
+
+        const icon = screen.getByTestId('icon');
+        overFrom(icon, button);
+        overFrom(button, icon);
+        advance(OPEN_DELAY_MS + 200);
+        expect(allIconButtonTooltips()).toHaveLength(0);
+
+        mouseOut(button, outside);
+        overFrom(button, outside);
+        advance(OPEN_DELAY_MS);
+        expect(openIconButtonTooltip()).toHaveTextContent('Language');
+      });
+
+      it('cancels the scheduled open when the pointer leaves before the delay', () => {
+        const { button, outside } = renderButton();
+        enterWithoutMouseEnter(button, outside);
+        advance(OPEN_DELAY_MS - 100);
+        mouseOut(button, outside);
+        advance(OPEN_DELAY_MS + 200);
+        expect(allIconButtonTooltips()).toHaveLength(0);
+      });
+
+      it('never opens for a pointer that crosses the button faster than the delay', () => {
+        const { button, outside } = renderButton();
+        enterWithoutMouseEnter(button, outside);
+        advance(50);
+        mouseOut(button, outside);
+        advance(OPEN_DELAY_MS + 200);
+        expect(allIconButtonTooltips()).toHaveLength(0);
+      });
+
+      it('closes shortly after the pointer leaves, as a tooltip opened by a mouseenter does', () => {
+        const { button, outside } = renderButton();
+        enterWithoutMouseEnter(button, outside);
+        advance(OPEN_DELAY_MS);
+        expect(openIconButtonTooltips()).toHaveLength(1);
+        mouseOut(button, outside);
+        advance(99);
+        expect(openIconButtonTooltips()).toHaveLength(1);
+        advance(1);
+        expect(openIconButtonTooltips()).toHaveLength(0);
+      });
+
+      // An ordinary entry brings both a mouseenter (React makes it from the
+      // mouseout of where the pointer was) and a mouseover, and both ask for
+      // an open. Only one open may be scheduled: leaving before the delay
+      // cancels it, so a second, orphaned timer would still open the tooltip
+      // at its time with the pointer outside.
+      it.each([
+        ['an enabled button', {}],
+        ['a natively disabled button', { disabled: true }]
+      ] as const)('schedules only one open for an ordinary entry of %s, so leaving before the delay leaves none behind', (_name, props) => {
+        const { button, outside } = renderButton(props);
+        enterOrdinarily(button, outside);
+        advance(OPEN_DELAY_MS - 100);
+        expect(allIconButtonTooltips()).toHaveLength(0);
+        mouseOut(button, outside);
+        advance(OPEN_DELAY_MS + 200);
+        expect(allIconButtonTooltips()).toHaveLength(0);
+
+        // Control: the same entry does schedule an open.
+        enterOrdinarily(button, outside);
+        advance(OPEN_DELAY_MS - 1);
+        expect(allIconButtonTooltips()).toHaveLength(0);
+        advance(1);
+        expect(openIconButtonTooltip()).toHaveTextContent('Language');
+      });
+
+      // Guards the DOM containment check: a mouseover on the tooltip bubbles
+      // to the wrapper through the React tree out of the portal, and must not
+      // count as entering the button. With the tooltip opened by keyboard
+      // focus, neither the entry flag nor `hovered` is set, so only that check
+      // keeps the tooltip from becoming hover-opened and staying open once
+      // focus leaves.
+      it('does not count a mouseover on the tooltip as entering the button', () => {
+        const { button, outside } = renderButton();
+        act(() => button.focus());
+        const tooltip = openIconButtonTooltip();
+        pointerIn(tooltip, 'mouse');
+        overFrom(tooltip, outside);
+        advance(OPEN_DELAY_MS + 200);
+        act(() => outside.focus());
+        expect(openIconButtonTooltips()).toHaveLength(0);
+        advance(OPEN_DELAY_MS + 200);
+        expect(openIconButtonTooltips()).toHaveLength(0);
+      });
+
+      it('opens no tooltip on such a mouseover right after a tap', () => {
+        const { button, outside } = renderButton();
+        for (const type of ['pointerover', 'pointerenter', 'pointerdown', 'pointerup', 'pointerout', 'pointerleave'] as const) {
+          firePointer(button, type, 'touch');
+        }
+        overFrom(button, outside);
+        advance(OPEN_DELAY_MS + 200);
+        expect(allIconButtonTooltips()).toHaveLength(0);
+      });
+
+      it('cancels the scheduled open on an Escape during the delay', () => {
+        const { button, outside } = renderButton();
+        enterWithoutMouseEnter(button, outside);
+        advance(OPEN_DELAY_MS - 100);
+        expect(escape(document.body)).toBe(true);
+        advance(OPEN_DELAY_MS + 200);
+        expect(allIconButtonTooltips()).toHaveLength(0);
+      });
+    });
   });
 
   // DFLT-00340: an Escape pressed during the open delay cancels the

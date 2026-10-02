@@ -39,6 +39,24 @@
 //   caller may still use the native disabled where no reason needs to be
 //   reachable by keyboard. Put classes that position the button within its parent's flex layout
 //   (ml-auto, shrink-0, negative margins, ...) on `wrapperClassName`.
+// - The wrapper detects the pointer entering it from mouseenter and, to make
+//   up for the mouseenter that sometimes never comes, from mouseover as well
+//   (DFLT-00342). React makes mouseenter / mouseleave out of mouseout and
+//   mouseover, and a mouseover whose relatedTarget is a React-managed node is
+//   left to the matching mouseout. When the DOM under a resting pointer is
+//   replaced (switching the settings modal's tabs, say), the node the
+//   pointer was over is gone, its mouseout never comes, and the browser
+//   sends a mouseover whose relatedTarget is a surviving React-managed
+//   ancestor -- so no mouseenter fires, and the first hover on the button
+//   opened nothing. The same native mouseover still bubbles to the wrapper's
+//   onMouseOver. A ref records that the pointer is inside, set by whichever
+//   of the two comes first and cleared on mouseleave, so an entry is handled
+//   once: a later mouseover inside the wrapper (from the button onto its
+//   icon, say) is no new entry, and an Escape-dismissed tooltip stays closed
+//   until the pointer leaves and comes back. A mouseover on the tooltip
+//   reaches onMouseOver as well, through the React tree out of the portal
+//   (see below), and is not counted: only one whose target is inside the
+//   wrapper's DOM is. The tooltip's own hover is its own mouseenter's.
 // - The tooltip is rendered into document.body through a portal with fixed
 //   positioning, so a scrolling list or an overflow-hidden card cannot clip
 //   it. Its position is measured after it is laid out invisibly
@@ -70,7 +88,8 @@
 //   browser sends compatibility mouseover / mouseenter events, and a finger
 //   never "leaves", so a tooltip opened by them would stay. The wrapper
 //   keeps the pointerType of the latest pointerover / pointermove /
-//   pointerdown, and a mouseenter while it is "touch" is ignored. Those
+//   pointerdown, and a mouseenter (or the wrapper mouseover that stands in
+//   for it, see above) while it is "touch" is ignored. Those
 //   events on the tooltip reach the wrapper's handlers too, through the
 //   React tree out of the portal (see above). The tooltip's own pointerdown
 //   is stopped there, but the pointerover that comes before it has already
@@ -244,6 +263,10 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
   // The pointerType of the latest pointerover / pointermove / pointerdown
   // over the button or the tooltip (see the header comment on touch).
   const lastPointerTypeRef = useRef<string | null>(null);
+  // Whether the pointer is inside the wrapper, set by its mouseenter or the
+  // mouseover that stands in for it and cleared by its mouseleave, so one
+  // entry is handled once (see the header comment, DFLT-00342).
+  const pointerInsideRef = useRef(false);
 
   const setButtonRef = useCallback(
     (node: HTMLButtonElement | null) => {
@@ -274,8 +297,9 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     setHovered(value);
   }, []);
 
-  // A mouseenter on the button (after OPEN_DELAY_MS) or on the tooltip
-  // (`immediate`: it is already on screen). Ignored right after touch.
+  // A mouseenter on the button, or the wrapper mouseover that stands in for
+  // it (after OPEN_DELAY_MS), or a mouseenter on the tooltip (`immediate`:
+  // it is already on screen). Ignored right after touch.
   const startHover = useCallback(
     (immediate: boolean) => {
       if (lastPointerTypeRef.current === 'touch') return;
@@ -327,6 +351,26 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     },
     [cancelClose, cancelOpen]
   );
+
+  const handleWrapperMouseEnter = () => {
+    pointerInsideRef.current = true;
+    startHover(false);
+  };
+
+  // Stands in for a mouseenter React did not make (see the header comment).
+  // A mouseover on the tooltip, which bubbles here out of the portal, is no
+  // entry into the button.
+  const handleWrapperMouseOver = (e: React.MouseEvent<HTMLSpanElement>) => {
+    if (pointerInsideRef.current) return;
+    if (!(e.target instanceof Node) || !wrapperRef.current?.contains(e.target)) return;
+    pointerInsideRef.current = true;
+    startHover(false);
+  };
+
+  const handleWrapperMouseLeave = () => {
+    pointerInsideRef.current = false;
+    scheduleHoverEnd();
+  };
 
   const recordPointer = (e: React.PointerEvent) => {
     lastPointerTypeRef.current = e.pointerType || null;
@@ -450,8 +494,9 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
     <span
       ref={wrapperRef}
       className={`inline-flex ${wrapperClassName ?? ''}`}
-      onMouseEnter={() => startHover(false)}
-      onMouseLeave={scheduleHoverEnd}
+      onMouseEnter={handleWrapperMouseEnter}
+      onMouseOver={handleWrapperMouseOver}
+      onMouseLeave={handleWrapperMouseLeave}
       onPointerOver={recordPointer}
       onPointerMove={recordPointer}
       onPointerDown={handleWrapperPointerDown}
