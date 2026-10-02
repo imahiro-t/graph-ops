@@ -41,7 +41,7 @@ const ARTIFACTS: Artifact[] = [
   art('a-gherkin-short', '短い仕様', 'gherkin', 'Feature: 短い\n'),
   art('a-html-long', LONG_HTML_NAME, 'html', '<p>report</p>'),
   art('a-html-short', 'レポート', 'html', '<p>short</p>'),
-  // No stored bytes: no "open in new tab" link, so the right group is empty.
+  // No stored bytes: no "open in new tab" link, so there is no right group.
   art('a-html-empty', '内容のないレポート', 'html', null)
 ];
 
@@ -180,11 +180,16 @@ describe('DFLT-00365 HTML tab header row keeps the link clear of the name', () =
     expectClasses(link, RING);
   });
 
-  it('leaves the right group empty for an artifact with no content', () => {
+  it('renders no right group for an artifact with no content', () => {
     renderTicket();
     openTab('html', 3);
-    const { right } = headerParts('内容のないレポート');
-    expect(right.children).toHaveLength(0);
+    // An empty span would still take gap-x-2 (and, once wrapped, gap-y-2),
+    // so the row holds only the name.
+    const nameEl = screen.getByText('内容のないレポート');
+    const row = nameEl.parentElement!;
+    expectClasses(row, ROW);
+    expect(row.children).toHaveLength(1);
+    expect(row.children[0]).toBe(nameEl);
     expect(newTabLinkFor('a-html-empty')).toBeUndefined();
   });
 });

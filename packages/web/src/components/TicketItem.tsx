@@ -121,9 +121,7 @@ const ARTIFACT_TABS = ['nodes', 'gherkin', 'html', 'artifacts'] as const;
 type ArtifactTab = (typeof ARTIFACT_TABS)[number];
 
 // DFLT-00334 / DFLT-00345: the classes shared by the artifact header rows (a
-// node's artifacts and the Artifacts tab; since DFLT-00365 also the Gherkin
-// and HTML tabs, where the row had no gap and the "open in new tab" focus
-// ring overlapped the end of the name by ~2px).
+// node's artifacts and the Artifacts tab).
 //
 // The name side shrinks and wraps at every width: the name group and the
 // name take min-w-0 (overflow-wrap: break-word does not lower min-content, so
@@ -158,12 +156,16 @@ const ARTIFACT_HEADER_LABEL_TEXT = 'below-80rem:min-w-0 below-80rem:wrap-break-w
 const ARTIFACT_HEADER_RIGHT_GROUP_WRAP =
   'below-80rem:flex-wrap below-80rem:ml-auto below-80rem:min-w-0 below-80rem:max-w-full below-80rem:justify-end-safe from-80rem:shrink-0';
 // DFLT-00365: the header row of the Gherkin and HTML tabs, whose right group
-// starts with "open in new tab". It is ARTIFACT_HEADER_ROW_WRAP with gap-y-2
-// instead of gap-y-1, so the name and the link keep 8px apart whichever way
-// they meet: side by side (gap-x-2) or, once the row wraps under 80rem, one
-// above the other. With gap-y-1 the link's text sat ~5px under the name, so
-// its ring (ring-2) came within ~3px of it. The name and the right group use
-// ARTIFACT_HEADER_NAME_TEXT and ARTIFACT_HEADER_RIGHT_GROUP_WRAP as they are.
+// starts with "open in new tab" (plus the date in the Gherkin tab). The row
+// used to be a plain justify-between with no gap, so the link's focus ring
+// (ring-2, 2px outside the link) overlapped the end of a long name by ~2px.
+// It is ARTIFACT_HEADER_ROW_WRAP with gap-y-2 instead of gap-y-1, so the name
+// and the link keep 8px apart whichever way they meet: side by side (gap-x-2)
+// or, once the row wraps under 80rem, one above the other (with gap-y-1 the
+// link's text sat ~5px under the name, ~3px outside the ring). The name and
+// the right group use ARTIFACT_HEADER_NAME_TEXT and
+// ARTIFACT_HEADER_RIGHT_GROUP_WRAP as they are, so a long name wraps in the
+// row instead of pushing the right group out of the card.
 const ARTIFACT_TAB_HEADER_ROW_WRAP = 'gap-x-2 below-80rem:flex-wrap below-80rem:gap-y-2';
 
 // How long the ID copy button shows its "copied"/"failed" state before going
@@ -2956,15 +2958,8 @@ export const TicketItem: React.FC<Props> = ({
                     ) : (
                       gherkinArtifacts.map(g => (
                         <div key={g.id} className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50/40 dark:bg-amber-950/20 p-4">
-                          {/* DFLT-00365: the row, name and right group
-                              classes of the artifact header rows above
-                              (ARTIFACT_TAB_HEADER_ROW_WRAP / ARTIFACT_HEADER_*),
-                              so the "open in new tab" ring (ring-2, 2px
-                              outside the link) keeps clear of the name -- the
-                              row leaves 8px either way -- and a long
-                              name wraps in the row instead of pushing the
-                              link and the date out of the card. The date
-                              wraps under the link below 80rem. */}
+                          {/* DFLT-00365: see ARTIFACT_TAB_HEADER_ROW_WRAP.
+                              Under 80rem the date may wrap under the link. */}
                           <div className={`font-bold text-amber-900 dark:text-amber-300 text-xs mb-2 flex items-center justify-between ${ARTIFACT_TAB_HEADER_ROW_WRAP}`}>
                             <span className={ARTIFACT_HEADER_NAME_TEXT}>{g.name}</span>
                             <span className={`flex items-center gap-3 below-80rem:gap-y-1 ${ARTIFACT_HEADER_RIGHT_GROUP_WRAP}`}>
@@ -2991,37 +2986,39 @@ export const TicketItem: React.FC<Props> = ({
                     {htmlArtifacts.length === 0 ? (
                       <div className="text-slate-500 dark:text-slate-400 text-center py-8 text-xs">{t('ticketItem.noHtmlYet')}</div>
                     ) : (
-                      htmlArtifacts.map(h => (
-                        <div key={h.id} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 bg-white dark:bg-slate-800">
-                          {/* DFLT-00365: as in the Gherkin tab, the row, the
-                              name and the right group take the artifact
-                              header classes (ARTIFACT_TAB_HEADER_ROW_WRAP /
-                              ARTIFACT_HEADER_*), so the link keeps 8px clear
-                              of the name and a
-                              long name wraps in the row. The link is wrapped
-                              in a flex span so it (and its ring) stays as
-                              wide as its label. */}
-                          <div className={`flex items-center justify-between mb-2 ${ARTIFACT_TAB_HEADER_ROW_WRAP}`}>
-                            <span className={`font-bold text-xs text-cyan-700 dark:text-cyan-400 ${ARTIFACT_HEADER_NAME_TEXT}`}>{h.name}</span>
-                            {/* Served from the DB via
-                                GET /api/artifacts/{id}/content, not a local
-                                file path, so this preview works the same
-                                from any machine (DFLT-00006). Uses the same
-                                sandboxed-preview-page link as every other tab
-                                (openInNewTabLink) rather than a duplicate
-                                inline implementation -- see DFLT-00053. */}
-                            <span className={`flex items-center ${ARTIFACT_HEADER_RIGHT_GROUP_WRAP}`}>
-                              {openInNewTabLink(h)}
-                            </span>
+                      htmlArtifacts.map(h => {
+                        const newTabLink = openInNewTabLink(h);
+                        return (
+                          <div key={h.id} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 bg-white dark:bg-slate-800">
+                            {/* DFLT-00365: see ARTIFACT_TAB_HEADER_ROW_WRAP.
+                                The link sits in a flex span so it (and its
+                                ring) stays as wide as its label; the span is
+                                left out when there is no link, so an empty
+                                item takes no gap. */}
+                            <div className={`flex items-center justify-between mb-2 ${ARTIFACT_TAB_HEADER_ROW_WRAP}`}>
+                              <span className={`font-bold text-xs text-cyan-700 dark:text-cyan-400 ${ARTIFACT_HEADER_NAME_TEXT}`}>{h.name}</span>
+                              {/* Served from the DB via
+                                  GET /api/artifacts/{id}/content, not a local
+                                  file path, so this preview works the same
+                                  from any machine (DFLT-00006). Uses the same
+                                  sandboxed-preview-page link as every other tab
+                                  (openInNewTabLink) rather than a duplicate
+                                  inline implementation -- see DFLT-00053. */}
+                              {newTabLink && (
+                                <span className={`flex items-center ${ARTIFACT_HEADER_RIGHT_GROUP_WRAP}`}>
+                                  {newTabLink}
+                                </span>
+                              )}
+                            </div>
+                            <iframe
+                              src={(h.content || h.file_path || h.has_content) ? `/api/artifacts/${h.id}/content` : undefined}
+                              title={h.name}
+                              sandbox="allow-scripts"
+                              className="w-full h-64 bg-white rounded-sm border border-slate-300 dark:border-slate-600"
+                            />
                           </div>
-                          <iframe
-                            src={(h.content || h.file_path || h.has_content) ? `/api/artifacts/${h.id}/content` : undefined}
-                            title={h.name}
-                            sandbox="allow-scripts"
-                            className="w-full h-64 bg-white rounded-sm border border-slate-300 dark:border-slate-600"
-                          />
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 )}
