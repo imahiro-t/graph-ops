@@ -130,45 +130,10 @@ func decodePlistValue(d *xml.Decoder, se xml.StartElement, depth int) (any, erro
 		return nil, errors.New("plist: nested too deeply")
 	}
 	switch se.Name.Local {
-	case "dict", "array":
-		m := map[string]any{}
-		var list []any
-		key, haveKey := "", false
-		for {
-			tok, err := d.Token()
-			if err != nil {
-				return nil, err
-			}
-			switch t := tok.(type) {
-			case xml.StartElement:
-				if se.Name.Local == "dict" && t.Name.Local == "key" {
-					var k string
-					if err := d.DecodeElement(&k, &t); err != nil {
-						return nil, err
-					}
-					key, haveKey = k, true
-					continue
-				}
-				v, err := decodePlistValue(d, t, depth+1)
-				if err != nil {
-					return nil, err
-				}
-				if se.Name.Local == "array" {
-					list = append(list, v)
-				} else if haveKey {
-					m[key] = v
-					haveKey = false
-				}
-			case xml.EndElement:
-				if se.Name.Local == "array" {
-					if list == nil {
-						list = []any{}
-					}
-					return list, nil
-				}
-				return m, nil
-			}
-		}
+	case "dict":
+		return decodePlistDict(d, depth)
+	case "array":
+		return decodePlistArray(d, depth)
 	case "true", "false":
 		if err := d.Skip(); err != nil {
 			return nil, err
@@ -185,4 +150,61 @@ func decodePlistValue(d *xml.Decoder, se xml.StartElement, depth int) (any, erro
 		}
 	}
 	return text, nil
+}
+
+// decodePlistDict decodes the members of a dict whose start element was
+// just read, up to its end element: each <key> names the value after it (a
+// value with no key before it is skipped).
+func decodePlistDict(d *xml.Decoder, depth int) (map[string]any, error) {
+	m := map[string]any{}
+	key, haveKey := "", false
+	for {
+		tok, err := d.Token()
+		if err != nil {
+			return nil, err
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Local == "key" {
+				if err := d.DecodeElement(&key, &t); err != nil {
+					return nil, err
+				}
+				haveKey = true
+				continue
+			}
+			v, err := decodePlistValue(d, t, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			if haveKey {
+				m[key] = v
+				haveKey = false
+			}
+		case xml.EndElement:
+			return m, nil
+		}
+	}
+}
+
+// decodePlistArray decodes the items of an array whose start element was
+// just read, up to its end element. An empty array is an empty, non-nil
+// slice.
+func decodePlistArray(d *xml.Decoder, depth int) ([]any, error) {
+	list := []any{}
+	for {
+		tok, err := d.Token()
+		if err != nil {
+			return nil, err
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			v, err := decodePlistValue(d, t, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			list = append(list, v)
+		case xml.EndElement:
+			return list, nil
+		}
+	}
 }

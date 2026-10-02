@@ -27,7 +27,7 @@ func TestRecordTabOutcome_Diagnostics(t *testing.T) {
 		TabError: "osascript: 0:1: execution error: graph-ops: Terminal did not come to the front with the window of /dev/ttys003, so no key was sent (9103)",
 		TabFailure: &terminal.TabFailure{Kind: terminal.TabFailureScriptError, Phase: terminal.TabPhaseSystemEventsOK, ErrorNumber: 9103,
 			Diagnostics: terminal.TabDiagnostics{ScreenLock: terminal.ScreenUnlocked, ScreenLockAfter: terminal.ScreenUnlocked, FrontmostApp: "Google Chrome",
-				FrontWindowID: "55704", FrontWindowBounds: "{1, 2, 3, 4}", TargetWindowID: "55701", TargetWindowBounds: "{1, 2, 3, 4}", TabsAfter: "12"}},
+				FrontWindowID: "55704", FrontWindowBounds: "{1, 2, 3, 4}", TargetWindowID: "55701", TargetWindowBounds: "{1, 2, 3, 4}", TabsBefore: "12"}},
 	}
 	if recordTabOutcome(run, notFront, "A", autopilot.RoleWork, now) || recordTabOutcome(run, screenLocked, "B", autopilot.RoleWork, now) {
 		t.Fatal("a passing failure disabled the tab")
@@ -38,7 +38,7 @@ func TestRecordTabOutcome_Diagnostics(t *testing.T) {
 		t.Fatalf("run = %+v", run)
 	}
 	want := autopilot.TabDiagnosticsRecord{ScreenLock: "unlocked", ScreenLockAfter: "unlocked", FrontmostApp: "Google Chrome",
-		FrontWindowID: "55704", FrontWindowBounds: "{1, 2, 3, 4}", TargetWindowID: "55701", TargetWindowBounds: "{1, 2, 3, 4}", TabsAfter: "12"}
+		FrontWindowID: "55704", FrontWindowBounds: "{1, 2, 3, 4}", TargetWindowID: "55701", TargetWindowBounds: "{1, 2, 3, 4}", TabsBefore: "12"}
 	if recs[0].Diagnostics == nil || *recs[0].Diagnostics != want {
 		t.Fatalf("diagnostics = %+v", recs[0].Diagnostics)
 	}
@@ -167,5 +167,12 @@ func TestDescribeTabFailure_Diagnostics(t *testing.T) {
 		if got := describeTabFailure(tc.f); got != tc.want {
 			t.Errorf("describeTabFailure(%+v) = %q, want %q", tc.f, got, tc.want)
 		}
+	}
+}
+
+// The run's kind for a screen-locked launch is the terminal package's.
+func TestTabFailureKindScreenLockedMatchesTerminal(t *testing.T) {
+	if autopilot.TabFailureKindScreenLocked != terminal.TabFailureScreenLocked {
+		t.Fatalf("%q != %q", autopilot.TabFailureKindScreenLocked, terminal.TabFailureScreenLocked)
 	}
 }

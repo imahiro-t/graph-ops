@@ -208,10 +208,11 @@ type TabDiagnostics struct {
 	FrontWindowBounds  string
 	TargetWindowID     string
 	TargetWindowBounds string
-	// TabsBefore is how many Terminal tabs had a tty before Cmd+T,
-	// TabsAfter how many when the script gave up.
+	// TabsBefore is how many Terminal tabs had a tty before Cmd+T. There
+	// is no count after it: every failure after Cmd+T has just read the
+	// tabs itself (see appleTerminalTabScript), so a second count would
+	// only repeat it.
 	TabsBefore string
-	TabsAfter  string
 	// LateTab: the new tab was found only in the last look after the wait
 	// (the failure came after that, from the window checks).
 	LateTab bool

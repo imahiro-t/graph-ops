@@ -624,8 +624,8 @@ func TestLaunchWithOptions_TabWithoutALockFile(t *testing.T) {
 	}
 }
 
-// useAppleTerminalTab reads TMUX through the package's getenv.
-func TestUseAppleTerminalTab_ReadsTMUXThroughGetenv(t *testing.T) {
+// appleTerminalTabSkipReason reads TMUX through the package's getenv.
+func TestAppleTerminalTabSkipReason_ReadsTMUXThroughGetenv(t *testing.T) {
 	onDarwin(t)
 	old := getenv
 	getenv = func(k string) string {
@@ -635,8 +635,8 @@ func TestUseAppleTerminalTab_ReadsTMUXThroughGetenv(t *testing.T) {
 		return ""
 	}
 	defer func() { getenv = old }()
-	if useAppleTerminalTab(Config{}, LaunchOptions{AppleTerminalTTY: testTTY}) {
-		t.Fatal("the tab path was chosen inside tmux")
+	if got := appleTerminalTabSkipReason(Config{}, LaunchOptions{AppleTerminalTTY: testTTY}); got != NoTabTmux {
+		t.Fatalf("got %q inside tmux, want %q", got, NoTabTmux)
 	}
 }
 

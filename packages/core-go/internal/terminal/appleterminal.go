@@ -172,12 +172,6 @@ func appleTerminalTabSkipReason(cfg Config, opts LaunchOptions) string {
 	return ""
 }
 
-// useAppleTerminalTab reports whether LaunchWithOptions takes the tab path
-// (appleTerminalTabSkipReason gives no reason not to).
-func useAppleTerminalTab(cfg Config, opts LaunchOptions) bool {
-	return appleTerminalTabSkipReason(cfg, opts) == ""
-}
-
 // Error numbers appleTerminalTabScript raises itself. They are the
 // failures that return quickly and may not happen on the next launch, so
 // they do not disable the tab for the run (see classifyTabFailure). Each of
@@ -292,11 +286,14 @@ const (
 //
 // Before each 9103 and 9102 the script logs what it sees as
 // "graph-ops-diag: <key>=<value>" lines (DFLT-00362, see the diagnose
-// handler and TabDiagnostics): the frontmost app, Terminal's front window
-// and the orchestrator's window (ids and bounds) and how many tabs there
-// are; just before Cmd+T it logs the frontmost app and the number of tabs
-// as well. Every read is in a try and bounded to 1 second, so the
-// diagnostics never replace the error the script then raises. The script
+// handler and TabDiagnostics): the frontmost app and Terminal's front window
+// and the orchestrator's window (ids and bounds), four Apple events at most;
+// just before Cmd+T it logs the frontmost app (one more Apple event, on
+// every launch) and the number of tabs it had already read. Every read is
+// in a try and bounded to 1 second, so the diagnostics never replace the
+// error the script then raises. Line breaks in the app name are replaced
+// with spaces, so a process name cannot forge a graph-ops-phase or
+// graph-ops-diag line. The script
 // is not run at all while the screen is locked (screenLockState in
 // launchAppleTerminalTab): that is what every 9103 and one 9102 of a v0.11.1
 // run came from (Terminal cannot come to the front, and Cmd+T reached the
@@ -381,8 +378,15 @@ end sameWindowBounds
 on frontmostAppName()
 	try
 		with timeout of 1 second
-			tell application "System Events" to return name of first process whose frontmost is true
+			tell application "System Events" to set appName to name of first process whose frontmost is true
 		end timeout
+		set savedDelimiters to AppleScript's text item delimiters
+		set AppleScript's text item delimiters to {return, linefeed}
+		set nameParts to text items of appName
+		set AppleScript's text item delimiters to " "
+		set appName to nameParts as text
+		set AppleScript's text item delimiters to savedDelimiters
+		return appName
 	end try
 	return "?"
 end frontmostAppName
@@ -402,9 +406,6 @@ on diagnose(targetID)
 		try
 			tell application "Terminal" to set targetBounds to bounds of window id targetID
 			log "graph-ops-diag: target_window_bounds=" & my boundsText(targetBounds)
-		end try
-		try
-			log "graph-ops-diag: tabs_after=" & ((count of my terminalTTYs()) as text)
 		end try
 	end timeout
 end diagnose
@@ -548,15 +549,32 @@ end run`
 // moves both.
 const defaultTabScriptTimeout = 20 * time.Second
 
-// tabScriptTimeout bounds the osascript run. The script itself gives up
-// after about 2 seconds of waiting for Terminal to come to the front, 0.2
-// seconds before Cmd+T, about 6 seconds of waiting for the tab, one more
-// look 2 seconds later, and about 2 seconds of checking that it opened in
-// the target window -- about 12.2 seconds at worst -- plus, on a failure,
-// the diagnostics it reads (each Apple event bounded to 1 second, normally
-// well under a second in all). The 20 seconds (15 before DFLT-00362) add
-// room for starting osascript and reading Terminal's windows on top of
-// that. What takes longer is a
+// tabScriptTimeout bounds the osascript run. The script's own waits add
+// up to about 12.2 seconds at worst: about 2 seconds of waiting for
+// Terminal to come to the front, 0.2 seconds before Cmd+T, about 6 seconds
+// of waiting for the tab, one more look 2 seconds later, and about 2
+// seconds of checking that it opened in the target window. On top of that
+// come the diagnostics' Apple events, each bounded to 1 second: the
+// frontmost app just before Cmd+T on every launch, and up to four more on a
+// 9103 or 9102 (see diagnose). So the script ends within about 17.2 seconds
+// (a late tab that then fails the window check: 2 + 0.2 + 1 + 6 + 2 + 2 +
+// 4) plus the time its other reads take -- starting osascript, finding the
+// windows, and the reads in the waiting loops, which have no bound of
+// their own.
+//
+// The 20 seconds (15 before DFLT-00362) are kept with that in mind. The
+// 17.2 seconds count every diagnostic read at its 1-second bound, which only
+// a Terminal or System Events that has all but stopped answering reaches,
+// and then the reads in the waiting loops (with no bound) are just as slow
+// and use up the time first, as before DFLT-00362. While they answer
+// normally, a read takes tens of milliseconds and the diagnostics well under
+// a second in all. Measured against how slowly Terminal answers, the room
+// is about what it was: the 20 seconds run out when each read takes about
+// 0.1 seconds, about where the 15 seconds ran out before (the waits were
+// 4 seconds shorter then, with about as many reads). A timeout there
+// counts toward runner.MaxSlowTabTimeouts like any other after
+// system-events-ok: Terminal answering that slowly is what that count is
+// for. What takes longer is a
 // permission prompt nobody answers when the script had not yet heard from
 // both Terminal and System Events, and Terminal answering slowly after
 // that (see classifyTabFailure). A variable so tests can shorten it.
@@ -627,7 +645,8 @@ var tabLockPath = func() (string, error) {
 // tabLockMargin is how much longer than tabScriptTimeout lockTabLaunch
 // waits for the lock. It also covers the screen lock read the holder makes
 // under the lock before its script (screenLockTimeout, normally tens of
-// milliseconds).
+// milliseconds); the one it makes again after a failure comes after it
+// releases the lock, so a holder keeps it for 22 seconds at most.
 const tabLockMargin = 5 * time.Second
 
 // tabLockWait bounds how long lockTabLaunch waits for another process's tab
@@ -653,8 +672,9 @@ const tabLockMargin = 5 * time.Second
 // is wrong with Terminal, and then the waiter's own tab would most likely
 // fail the same way; either way it still opens a new window. And a wait
 // that grew with the number of waiters would stretch a launch's worst case
-// (about 57 seconds: 25 for the lock, 2 for reading the screen lock, 20 for
-// osascript and 10 for `open -a Terminal`; about 45 before DFLT-00362) in
+// (about 59 seconds: 25 for the lock, 2 for reading the screen lock, 20 for
+// osascript, 2 for reading the screen lock again after a failure and 10 for
+// `open -a Terminal`; about 45 before DFLT-00362) in
 // proportion, where a bounded wait keeps it fixed. See
 // the lock in docs/autopilot.md.
 var tabLockWait = defaultTabScriptTimeout + tabLockMargin
@@ -823,8 +843,6 @@ func parseTabDiagnostics(output string) TabDiagnostics {
 			d.TargetWindowBounds = value
 		case "tabs_before":
 			d.TabsBefore = value
-		case "tabs_after":
-			d.TabsAfter = value
 		case "late_tab":
 			d.LateTab = value == "true"
 		}

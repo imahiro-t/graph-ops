@@ -976,7 +976,7 @@ func recordTabOutcome(run *autopilot.Run, outcome terminal.LaunchOutcome, ticket
 				FrontmostApp: d.FrontmostApp, FrontmostAppBefore: d.FrontmostAppBefore,
 				FrontWindowID: d.FrontWindowID, FrontWindowBounds: d.FrontWindowBounds,
 				TargetWindowID: d.TargetWindowID, TargetWindowBounds: d.TargetWindowBounds,
-				TabsBefore: d.TabsBefore, TabsAfter: d.TabsAfter, LateTab: d.LateTab,
+				TabsBefore: d.TabsBefore, LateTab: d.LateTab,
 			}
 		}
 	}

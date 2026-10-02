@@ -147,7 +147,9 @@ type Run struct {
 	TerminalTabSlowTimeouts int `json:"terminal_tab_slow_timeouts,omitempty"`
 	// TerminalTabFailures keeps why each launch that tried a tab fell back
 	// to a new window, oldest first, at most MaxTabFailureRecords of them
-	// (DFLT-00361). Starts leave it as it is, so the history spans the
+	// (DFLT-00361), and each launch that did not try it because the screen
+	// was locked (DFLT-00362; dropped first at the cap, see
+	// RecordTabFailure). Starts leave it as it is, so the history spans the
 	// run's orchestrators.
 	TerminalTabFailures []TabFailureRecord `json:"terminal_tab_failures,omitempty"`
 	// TerminalTTYReason is why the current orchestrator has no
@@ -160,7 +162,8 @@ type Run struct {
 	// without trying a tab, by reason (DFLT-00362): not-darwin,
 	// terminal-command, tmux, tab-disabled, no-tty or invalid-tty. A launch
 	// that tried a tab and fell back is in TerminalTabFailures instead, so
-	// these never push those out. Cleared by the same starts that set
+	// these never push those out; so is a screen-locked one (see
+	// RecordTabFailure for why). Cleared by the same starts that set
 	// TerminalTTY: it describes the current orchestrator's launches.
 	TerminalWindowLaunches map[string]LaunchTally `json:"terminal_window_launches,omitempty"`
 	// TerminalLateTabs counts the tabs that opened only in the tab
@@ -204,8 +207,8 @@ type TabFailureRecord struct {
 	At       time.Time `json:"at"`
 	TicketID string    `json:"ticket_id"`
 	Role     string    `json:"role"`
-	// Kind is script-error, timeout or lock-busy (the tab lock stayed busy,
-	// so no script ran).
+	// Kind is script-error, timeout, lock-busy (the tab lock stayed busy,
+	// so no script ran) or screen-locked (TabFailureKindScreenLocked).
 	Kind string `json:"kind,omitempty"`
 	// ErrorNumber is osascript's error number, when it reported one.
 	ErrorNumber int `json:"error_number,omitempty"`
@@ -242,10 +245,8 @@ type TabDiagnosticsRecord struct {
 	FrontWindowBounds  string `json:"front_window_bounds,omitempty"`
 	TargetWindowID     string `json:"target_window_id,omitempty"`
 	TargetWindowBounds string `json:"target_window_bounds,omitempty"`
-	// TabsBefore / TabsAfter: Terminal's tabs with a tty before Cmd+T and
-	// when the script gave up.
+	// TabsBefore: Terminal's tabs with a tty before Cmd+T.
 	TabsBefore string `json:"tabs_before,omitempty"`
-	TabsAfter  string `json:"tabs_after,omitempty"`
 	// LateTab: the new tab was found only in the last look.
 	LateTab bool `json:"late_tab,omitempty"`
 }
@@ -303,12 +304,34 @@ func (r *Run) resetTerminal(tty, ttyReason string) {
 // MaxTabFailureRecords bounds Run.TerminalTabFailures.
 const MaxTabFailureRecords = 50
 
-// RecordTabFailure appends rec to the run's tab failures, dropping the
-// oldest beyond MaxTabFailureRecords.
+// TabFailureKindScreenLocked is the TabFailureRecord.Kind of a launch that
+// did not try the tab because the screen was locked (DFLT-00362; it mirrors
+// terminal.TabFailureScreenLocked, which this package cannot import).
+const TabFailureKindScreenLocked = "screen-locked"
+
+// RecordTabFailure appends rec to the run's tab failures and keeps at most
+// MaxTabFailureRecords of them. Beyond that it drops the oldest
+// screen-locked record when there is one, and the oldest record otherwise.
+//
+// A screen-locked launch tries no tab, but it is recorded here, one record
+// per launch, rather than counted in TerminalWindowLaunches: its time is what
+// tells, against loginwindow's log, whether the screen lock was read right,
+// and the history here spans the run's orchestrators. Dropping those first
+// keeps a long screen lock in an overnight run from pushing out the
+// failures of tabs that were tried (9101-9104, timeouts): those are what the
+// records are for. It still drops at most one record of a tried tab in a row
+// of screen-locked launches, the one that makes room for the first of them.
 func (r *Run) RecordTabFailure(rec TabFailureRecord) {
 	r.TerminalTabFailures = append(r.TerminalTabFailures, rec)
-	if n := len(r.TerminalTabFailures) - MaxTabFailureRecords; n > 0 {
-		r.TerminalTabFailures = append([]TabFailureRecord(nil), r.TerminalTabFailures[n:]...)
+	for len(r.TerminalTabFailures) > MaxTabFailureRecords {
+		drop := 0
+		for i, f := range r.TerminalTabFailures {
+			if f.Kind == TabFailureKindScreenLocked {
+				drop = i
+				break
+			}
+		}
+		r.TerminalTabFailures = append(append([]TabFailureRecord(nil), r.TerminalTabFailures[:drop]...), r.TerminalTabFailures[drop+1:]...)
 	}
 }
 

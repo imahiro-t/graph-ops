@@ -2,6 +2,7 @@ package autopilot
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -158,5 +159,34 @@ func TestRun_RecordTabFailureKeepsTheLatest(t *testing.T) {
 	if len(run.TerminalTabFailures) != MaxTabFailureRecords || run.TerminalTabFailures[0].ErrorNumber != MaxTabFailureRecords+2 ||
 		run.TerminalTabFailures[MaxTabFailureRecords-1].ErrorNumber != MaxTabFailureRecords*2+1 {
 		t.Fatalf("kept %d, first %d", len(run.TerminalTabFailures), run.TerminalTabFailures[0].ErrorNumber)
+	}
+}
+
+// At the cap, screen-locked records go first, so a long screen lock does not
+// push out the failures of tabs that were tried (DFLT-00362).
+func TestRun_RecordTabFailureDropsScreenLockedFirst(t *testing.T) {
+	run := &Run{}
+	for i := 0; i < MaxTabFailureRecords-1; i++ {
+		run.RecordTabFailure(TabFailureRecord{ErrorNumber: 9102, TicketID: fmt.Sprintf("F%d", i)})
+	}
+	for i := 0; i < MaxTabFailureRecords*2; i++ {
+		run.RecordTabFailure(TabFailureRecord{Kind: TabFailureKindScreenLocked, TicketID: fmt.Sprintf("L%d", i)})
+	}
+	recs := run.TerminalTabFailures
+	if len(recs) != MaxTabFailureRecords || recs[0].TicketID != "F0" || recs[MaxTabFailureRecords-2].TicketID != "F48" ||
+		recs[MaxTabFailureRecords-1].TicketID != fmt.Sprintf("L%d", MaxTabFailureRecords*2-1) {
+		t.Fatalf("kept %d: first %s, last %s", len(recs), recs[0].TicketID, recs[len(recs)-1].TicketID)
+	}
+	// A failure of a tried tab then drops the screen-locked record, not the
+	// oldest failure.
+	run.RecordTabFailure(TabFailureRecord{ErrorNumber: 9103, TicketID: "N"})
+	recs = run.TerminalTabFailures
+	if len(recs) != MaxTabFailureRecords || recs[0].TicketID != "F0" || recs[MaxTabFailureRecords-1].TicketID != "N" {
+		t.Fatalf("kept %d: first %s, last %s", len(recs), recs[0].TicketID, recs[len(recs)-1].TicketID)
+	}
+	for _, r := range recs {
+		if r.Kind == TabFailureKindScreenLocked {
+			t.Fatalf("a screen-locked record outlived a tried tab's failure: %+v", r)
+		}
 	}
 }

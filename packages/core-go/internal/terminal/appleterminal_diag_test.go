@@ -87,9 +87,6 @@ func TestAppleTerminalTabSkipReason_Order(t *testing.T) {
 			if got := appleTerminalTabSkipReason(tc.cfg, tc.opts); got != tc.want {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
-			if useAppleTerminalTab(tc.cfg, tc.opts) != (tc.want == "") {
-				t.Fatal("useAppleTerminalTab disagrees")
-			}
 		})
 	}
 }
@@ -149,7 +146,7 @@ func TestLaunchWithOptions_FailureDiagnostics(t *testing.T) {
 			tabDiagPrefix+"front_window_bounds={249, 301, 969, 806}\n"+
 			tabDiagPrefix+"target_window_id=55701\n"+
 			tabDiagPrefix+"target_window_bounds={249, 301, 969, 806}\n"+
-			tabDiagPrefix+"tabs_after=12\n"+
+			tabDiagPrefix+"tabs_after=12\n"+ // no longer a key: ignored
 			tabDiagPrefix+"bogus_key=x\n"+
 			"54:97: execution error: graph-ops: no new tab appeared in the Terminal window of /dev/ttys003 (9102)\n")
 	fakeCommands(t, func(ctx context.Context, name string, args []string) ([]byte, error) {
@@ -167,7 +164,7 @@ func TestLaunchWithOptions_FailureDiagnostics(t *testing.T) {
 		FrontmostApp: "Google[31m Chrome", FrontmostAppBefore: "ターミナル",
 		FrontWindowID: "55704", FrontWindowBounds: "{249, 301, 969, 806}",
 		TargetWindowID: "55701", TargetWindowBounds: "{249, 301, 969, 806}",
-		TabsBefore: "12", TabsAfter: "12",
+		TabsBefore: "12",
 	}
 	if out.TabFailure == nil || out.TabFailure.Diagnostics != want || out.TabFailure.ErrorNumber != 9102 {
 		t.Fatalf("failure = %+v\nwant diagnostics %+v", out.TabFailure, want)
@@ -214,7 +211,7 @@ func TestParseTabDiagnostics(t *testing.T) {
 func TestAppleTerminalTabScript_Diagnostics(t *testing.T) {
 	script := appleTerminalTabScript
 	diag := scriptSection(t, "on diagnose(targetID)", "end diagnose")
-	for _, key := range []string{"frontmost_app", "front_window_id", "front_window_bounds", "target_window_id", "target_window_bounds", "tabs_after"} {
+	for _, key := range []string{"frontmost_app", "front_window_id", "front_window_bounds", "target_window_id", "target_window_bounds"} {
 		if !strings.Contains(diag, `log "`+tabDiagPrefix+key+`=" & `) {
 			t.Errorf("diagnose does not log %s", key)
 		}
@@ -222,7 +219,14 @@ func TestAppleTerminalTabScript_Diagnostics(t *testing.T) {
 	if !strings.Contains(diag, "with timeout of 1 second") || !strings.Contains(scriptSection(t, "on frontmostAppName()", "end frontmostAppName"), "with timeout of 1 second") {
 		t.Error("the diagnostics' Apple events must be bounded to 1 second")
 	}
-	if strings.Count(diag, "try") < 2*4 {
+	// The app name is outside text: a line break in it would start a line
+	// that could pass for a graph-ops-phase or graph-ops-diag line.
+	app := scriptSection(t, "on frontmostAppName()", "end frontmostAppName")
+	if !strings.Contains(app, "text item delimiters to {return, linefeed}") || !strings.Contains(app, `text item delimiters to " "`) ||
+		strings.Index(app, "{return, linefeed}") > strings.Index(app, "return appName") {
+		t.Errorf("frontmostAppName must replace line breaks in the name before returning it: %q", app)
+	}
+	if strings.Count(diag, "try") < 2*3 {
 		t.Error("every read of diagnose must be in a try")
 	}
 	// Before the 9103 (after the rethrow of a read error, which keeps its
