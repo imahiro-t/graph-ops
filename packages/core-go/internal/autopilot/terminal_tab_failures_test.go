@@ -190,3 +190,80 @@ func TestRun_RecordTabFailureDropsScreenLockedFirst(t *testing.T) {
 		}
 	}
 }
+
+// With the cap full of failures of tried tabs, a screen-locked launch is
+// still recorded: it drops the oldest failure, not itself. Further
+// screen-locked launches then drop each other, so a long screen lock costs
+// one failure at most (DFLT-00362).
+func TestRun_RecordTabFailureKeepsScreenLockedAfterFullFailures(t *testing.T) {
+	run := &Run{}
+	for i := 0; i < MaxTabFailureRecords; i++ {
+		run.RecordTabFailure(TabFailureRecord{ErrorNumber: 9102, TicketID: fmt.Sprintf("F%d", i)})
+	}
+	if len(run.TerminalTabFailures) != MaxTabFailureRecords || run.TerminalTabFailures[0].TicketID != "F0" {
+		t.Fatalf("at the cap: kept %d, first %s", len(run.TerminalTabFailures), run.TerminalTabFailures[0].TicketID)
+	}
+	run.RecordTabFailure(TabFailureRecord{Kind: TabFailureKindScreenLocked, TicketID: "L0"})
+	recs := run.TerminalTabFailures
+	if len(recs) != MaxTabFailureRecords || recs[0].TicketID != "F1" || recs[MaxTabFailureRecords-2].TicketID != "F49" ||
+		recs[MaxTabFailureRecords-1].TicketID != "L0" {
+		t.Fatalf("first screen-locked: kept %d, first %s, last %s", len(recs), recs[0].TicketID, recs[len(recs)-1].TicketID)
+	}
+	for i := 1; i <= 3; i++ {
+		id := fmt.Sprintf("L%d", i)
+		run.RecordTabFailure(TabFailureRecord{Kind: TabFailureKindScreenLocked, TicketID: id})
+		recs = run.TerminalTabFailures
+		if len(recs) != MaxTabFailureRecords || recs[0].TicketID != "F1" || recs[MaxTabFailureRecords-2].TicketID != "F49" ||
+			recs[MaxTabFailureRecords-1].TicketID != id {
+			t.Fatalf("screen-locked %s: kept %d, first %s, before last %s, last %s", id, len(recs),
+				recs[0].TicketID, recs[MaxTabFailureRecords-2].TicketID, recs[len(recs)-1].TicketID)
+		}
+	}
+	// A tried tab's failure then drops the screen-locked record.
+	run.RecordTabFailure(TabFailureRecord{ErrorNumber: 9103, TicketID: "N"})
+	recs = run.TerminalTabFailures
+	if len(recs) != MaxTabFailureRecords || recs[0].TicketID != "F1" || recs[MaxTabFailureRecords-2].TicketID != "F49" ||
+		recs[MaxTabFailureRecords-1].TicketID != "N" {
+		t.Fatalf("failure after screen-locked: kept %d, first %s, last %s", len(recs), recs[0].TicketID, recs[len(recs)-1].TicketID)
+	}
+}
+
+// Boundaries of the eviction rule: nothing is dropped up to the cap; one
+// below the cap plus a screen-locked launch keeps everything; at the cap the
+// oldest screen-locked record goes even when it is not the first record.
+func TestRun_RecordTabFailureEvictionBoundaries(t *testing.T) {
+	run := &Run{}
+	for i := 0; i < MaxTabFailureRecords-1; i++ {
+		run.RecordTabFailure(TabFailureRecord{ErrorNumber: 9101, TicketID: fmt.Sprintf("F%d", i)})
+	}
+	run.RecordTabFailure(TabFailureRecord{Kind: TabFailureKindScreenLocked, TicketID: "L0"})
+	recs := run.TerminalTabFailures
+	if len(recs) != MaxTabFailureRecords || recs[0].TicketID != "F0" || recs[MaxTabFailureRecords-1].TicketID != "L0" {
+		t.Fatalf("up to the cap: kept %d, first %s, last %s", len(recs), recs[0].TicketID, recs[len(recs)-1].TicketID)
+	}
+
+	// The oldest screen-locked record sits in the middle: it goes, and the
+	// records around it, failures and a later screen-locked one, stay.
+	run = &Run{}
+	for i := 0; i < MaxTabFailureRecords; i++ {
+		rec := TabFailureRecord{ErrorNumber: 9104, TicketID: fmt.Sprintf("F%d", i)}
+		if i == 10 || i == 20 {
+			rec = TabFailureRecord{Kind: TabFailureKindScreenLocked, TicketID: fmt.Sprintf("L%d", i)}
+		}
+		run.RecordTabFailure(rec)
+	}
+	run.RecordTabFailure(TabFailureRecord{ErrorNumber: 9102, TicketID: "N"})
+	recs = run.TerminalTabFailures
+	if len(recs) != MaxTabFailureRecords || recs[0].TicketID != "F0" || recs[MaxTabFailureRecords-1].TicketID != "N" {
+		t.Fatalf("middle: kept %d, first %s, last %s", len(recs), recs[0].TicketID, recs[len(recs)-1].TicketID)
+	}
+	var locked []string
+	for _, r := range recs {
+		if r.Kind == TabFailureKindScreenLocked {
+			locked = append(locked, r.TicketID)
+		}
+	}
+	if len(locked) != 1 || locked[0] != "L20" {
+		t.Fatalf("screen-locked records left: %v, want [L20]", locked)
+	}
+}

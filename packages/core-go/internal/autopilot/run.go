@@ -311,7 +311,9 @@ const TabFailureKindScreenLocked = "screen-locked"
 
 // RecordTabFailure appends rec to the run's tab failures and keeps at most
 // MaxTabFailureRecords of them. Beyond that it drops the oldest
-// screen-locked record when there is one, and the oldest record otherwise.
+// screen-locked record among those that were there before rec, and the
+// oldest record otherwise. rec itself is never dropped, so the latest launch
+// is always recorded, a screen-locked one included.
 //
 // A screen-locked launch tries no tab, but it is recorded here, one record
 // per launch, rather than counted in TerminalWindowLaunches: its time is what
@@ -325,7 +327,8 @@ func (r *Run) RecordTabFailure(rec TabFailureRecord) {
 	r.TerminalTabFailures = append(r.TerminalTabFailures, rec)
 	for len(r.TerminalTabFailures) > MaxTabFailureRecords {
 		drop := 0
-		for i, f := range r.TerminalTabFailures {
+		// Search only the records before rec: rec is the last one.
+		for i, f := range r.TerminalTabFailures[:len(r.TerminalTabFailures)-1] {
 			if f.Kind == TabFailureKindScreenLocked {
 				drop = i
 				break
