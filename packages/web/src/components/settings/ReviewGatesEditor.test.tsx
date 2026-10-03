@@ -16,6 +16,7 @@ import { ReviewGatesEditor } from './ReviewGatesEditor';
 import { REANNOUNCE_GAP_MS, TRANSIENT_ANNOUNCEMENT_DURATION_MS } from '../../hooks/useTransientAnnouncement';
 import { SETTINGS_CATALOG_WARNINGS, SettingsCatalogResponse, SettingsCatalogWarning } from '../../types';
 import { openIconButtonTooltip, setupHoverUser, startHoverFakeTimers, waitForHoverOpenDelay } from '../../test/iconButtonTooltip';
+import { expectSecondSaveReannounced } from '../../test/savedReannouncement';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -1745,6 +1746,10 @@ describe('ReviewGatesEditor load failure', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     await waitFor(() => expect(document.activeElement).toHaveAttribute('tabindex', '-1'));
     expect(document.activeElement?.contains(screen.getByDisplayValue('Code Review'))).toBe(true);
+    // ...which is a named group, so a screen reader says what appeared.
+    expect(document.activeElement).toHaveAccessibleName(i18n.t('settings.tabs.reviewGates'));
+    expect(document.activeElement).toBe(screen.getByRole('group', { name: i18n.t('settings.tabs.reviewGates') }));
+    expect(document.activeElement).toHaveClass('focus:outline-hidden');
   });
 
   it('keeps the error and the retry button when the retry fails again', async () => {
@@ -1815,6 +1820,23 @@ describe('ReviewGatesEditor saving, then re-fetching the rows', () => {
     expect(await screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' })).toBeInTheDocument();
     expect(screen.getByText(i18n.t('settings.common.saveSuccess'), { selector: '[aria-hidden="true"]' })).toHaveClass('text-emerald-700', 'dark:text-emerald-400');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  // DFLT-00359: a second save while the confirmation is still shown is
+  // announced again (the live region is emptied and refilled).
+  it('announces a second save made while the confirmation is still shown', async () => {
+    const user = userEvent.setup();
+    render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+    await screen.findByDisplayValue('Code Review');
+
+    await user.type(criteriaFields()[0], ' extra');
+    await user.click(saveButton());
+
+    await expectSecondSaveReannounced(async () => {
+      await user.type(criteriaFields()[0], ' more');
+      await user.click(saveButton());
+    });
+    expect(mockedSaveCatalog).toHaveBeenCalledTimes(2);
   });
 
   it('treats the rows as saved and says so, and reports the re-fetch failure apart, when only the re-fetch fails', async () => {

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { SkillsEditor } from './SkillsEditor';
 import { Deferred, deferred } from '../../test/deferred';
+import { expectSecondSaveReannounced } from '../../test/savedReannouncement';
 import { SettingsSkillInfo } from '../../types';
 
 vi.mock('../../lib/settingsApi', async () => {
@@ -432,6 +433,10 @@ describe('SkillsEditor load failures and switching', () => {
     const textarea = await screen.findByDisplayValue('create-ticket-tier-text');
     await waitFor(() => expect(document.activeElement).toHaveAttribute('tabindex', '-1'));
     expect(document.activeElement?.contains(textarea)).toBe(true);
+    // ...which is a named group, so a screen reader says what appeared.
+    expect(document.activeElement).toHaveAccessibleName(i18n.t('settings.tabs.skills'));
+    expect(document.activeElement).toBe(screen.getByRole('group', { name: i18n.t('settings.tabs.skills') }));
+    expect(document.activeElement).toHaveClass('focus:outline-hidden');
   });
 
   it('keeps the error and the retry button when the list retry fails again', async () => {
@@ -479,6 +484,26 @@ describe('SkillsEditor load failures and switching', () => {
     // flash is aria-hidden so it is not read twice.
     expect(await screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' })).toBeInTheDocument();
     expect(screen.getByText(i18n.t('settings.common.saveSuccess'), { selector: '[aria-hidden="true"]' })).toHaveClass('text-emerald-700', 'dark:text-emerald-400');
+  });
+
+  // DFLT-00359: a second save while the confirmation is still shown is
+  // announced again (the live region is emptied and refilled).
+  it('announces a second save made while the confirmation is still shown', async () => {
+    const user = userEvent.setup();
+    mockedSaveSkill.mockResolvedValue({ name: 'create-ticket', tier_text: 'edited', merged_text: 'edited' });
+    render(<SkillsEditor onDirtyChange={vi.fn()} />);
+    const textarea = await screen.findByDisplayValue('create-ticket-tier-text');
+    const save = () => screen.getByRole('button', { name: i18n.t('settings.common.save') });
+
+    await user.clear(textarea);
+    await user.type(textarea, 'edited');
+    await user.click(save());
+
+    await expectSecondSaveReannounced(async () => {
+      await user.type(textarea, ' again');
+      await user.click(save());
+    });
+    expect(mockedSaveSkill).toHaveBeenCalledTimes(2);
   });
 
   // DFLT-00357: a list that turns up empty on a later fetch clears the

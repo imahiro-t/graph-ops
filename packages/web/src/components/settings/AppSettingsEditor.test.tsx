@@ -10,6 +10,7 @@ import { AppSettingsEditor } from './AppSettingsEditor';
 import { REDACTED_SECRET_PLACEHOLDER, AppSettingsResponse, Project } from '../../types';
 import { openIconButtonTooltip } from '../../test/iconButtonTooltip';
 import { submittingName } from '../../test/submittingName';
+import { expectSecondSaveReannounced } from '../../test/savedReannouncement';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -328,6 +329,27 @@ describe('AppSettingsEditor', () => {
 
     await user.click(saveButton);
     expect(mockedSaveAppSettings).not.toHaveBeenCalled();
+  });
+
+  // DFLT-00359: a second save while the confirmation is still shown is
+  // announced again (the live region is emptied and refilled).
+  it('announces a second save made while the confirmation is still shown', async () => {
+    const user = userEvent.setup();
+    mockedFetchAppSettings.mockResolvedValueOnce(makeResponse({ dbPath: '' }));
+    renderEditor();
+    const dbPathInput = await screen.findByPlaceholderText('/tmp/graph.db');
+    const save = () => screen.getByRole('button', { name: i18n.t('settings.common.save') });
+
+    await user.type(dbPathInput, 'custom.db');
+    mockedSaveAppSettings.mockResolvedValueOnce(makeResponse({ dbPath: 'custom.db' }));
+    await user.click(save());
+
+    await expectSecondSaveReannounced(async () => {
+      await user.type(dbPathInput, '2');
+      mockedSaveAppSettings.mockResolvedValueOnce(makeResponse({ dbPath: 'custom.db2' }));
+      await user.click(save());
+    });
+    expect(mockedSaveAppSettings).toHaveBeenCalledTimes(2);
   });
 
   it('A-4: focus stays on the save button after a successful save', async () => {

@@ -121,7 +121,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
   const saving = (savesRunning[projectId] ?? 0) > 0;
   // A failed save, shown above the form.
   const [error, setError] = useState('');
-  const { savedFlash, showSavedFlash } = useSavedFlash();
+  const { savedFlash, savedAnnounced, showSavedFlash } = useSavedFlash();
 
   const items = useMemo(() => {
     const byKey = new Map((data?.items ?? []).map(it => [it.key, it]));
@@ -339,10 +339,17 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
           )}
 
           {/* tabIndex -1 and the ref: where focus goes after a successful
-              retry. No outline: it is not a control. */}
+              retry. No outline: it is not a control. Named so that focus
+              landing here says what appeared -- an unnamed container
+              announces nothing (DFLT-00349, DFLT-00358). role="group"
+              because a div without a role cannot be named (ARIA 1.2). The
+              name is the settings tab's own label, so the two never
+              disagree. */}
           <div
             ref={rowsRef}
             tabIndex={-1}
+            role="group"
+            aria-label={t('settings.tabs.autopilot')}
             className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg focus:outline-hidden"
           >
             {items.map(it => {
@@ -414,7 +421,7 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
             {/* The flash disappears after 2 seconds; the always-mounted live
                 region is what announces it (SC 4.1.3), like
                 AppSettingsEditor's. */}
-            <StatusLiveRegion message={savedFlash ? t('settings.common.saveSuccess') : ''} />
+            <StatusLiveRegion message={savedAnnounced ? t('settings.common.saveSuccess') : ''} />
             {savedFlash && (
               <span aria-hidden="true" className="text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-1">
                 <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}

@@ -223,7 +223,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
     // gates is what mounts and unmounts the targets; it is listed so the
     // effect runs once the removed row is gone.
   }, [pendingFocus, gates]);
-  const { savedFlash, showSavedFlash } = useSavedFlash();
+  const { savedFlash, savedAnnounced, showSavedFlash } = useSavedFlash();
   // Announces a removed row (DFLT-00204) through the always-mounted
   // StatusLiveRegion at the end of the editor, like NodeTypesEditor's and
   // LabelsEditor's deletes. Removing a row only changes the list here -- it
@@ -467,8 +467,17 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
 
   return (
     // tabIndex -1: where focus goes after a successful retry. No outline: it
-    // is not a control.
-    <div ref={containerRef} tabIndex={-1} className="flex flex-col gap-3 h-full min-h-0 narrow:h-auto focus:outline-hidden">
+    // is not a control. Named so that focus landing here says what appeared
+    // -- an unnamed container announces nothing (DFLT-00349, DFLT-00358).
+    // role="group" because a div without a role cannot be named (ARIA 1.2).
+    // The name is the settings tab's own label, so the two never disagree.
+    <div
+      ref={containerRef}
+      tabIndex={-1}
+      role="group"
+      aria-label={t('settings.tabs.reviewGates')}
+      className="flex flex-col gap-3 h-full min-h-0 narrow:h-auto focus:outline-hidden"
+    >
       <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400">{t('settings.reviewGates.intro')}</p>
       {error && <ErrorBox id={errorId} role="alert" className="p-2.5 text-[0.6875rem] whitespace-pre-wrap">{error}</ErrorBox>}
 
@@ -722,7 +731,7 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           {/* The flash disappears after 2 seconds; the always-mounted live
               region is what announces it (SC 4.1.3), like
               AutopilotSettingsEditor's. The visible flash is aria-hidden. */}
-          <StatusLiveRegion message={savedFlash ? t('settings.common.saveSuccess') : ''} />
+          <StatusLiveRegion message={savedAnnounced ? t('settings.common.saveSuccess') : ''} />
           {savedFlash && (
             <span aria-hidden="true" className="text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-1">
               <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}

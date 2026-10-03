@@ -207,12 +207,55 @@ func TestManualDecision_ConcurrentApproveAndReject(t *testing.T) {
 	}
 }
 
+// firstReadRepo records the first GetNode of nodeID -- for a completion,
+// the read its whole decision (and the conditions of its write) is made on.
+// It forwards ApplyNodeTransition, so the engine keeps the atomic path.
+type firstReadRepo struct {
+	store.GraphRepository
+	applier store.NodeTransitionApplier
+	nodeID  string
+	mu      sync.Mutex
+	read    *domain.GraphNode
+}
+
+func newFirstReadRepo(repo store.GraphRepository, nodeID string) *firstReadRepo {
+	return &firstReadRepo{GraphRepository: repo, applier: repo.(store.NodeTransitionApplier), nodeID: nodeID}
+}
+
+func (r *firstReadRepo) GetNode(id string) (*domain.GraphNode, error) {
+	n, err := r.GraphRepository.GetNode(id)
+	if id == r.nodeID && n != nil {
+		r.mu.Lock()
+		if r.read == nil {
+			cp := *n
+			r.read = &cp
+		}
+		r.mu.Unlock()
+	}
+	return n, err
+}
+
+func (r *firstReadRepo) ApplyNodeTransition(ticketID string, t store.NodeTransition) (store.NodeTransitionResult, error) {
+	return r.applier.ApplyNodeTransition(ticketID, t)
+}
+
 // TestLoopBack_ConcurrentWithRewindAndReclaim (completion criterion 4,
 // raced): a review is completed without --claim while a loop-back rewinds
 // it and get-executable hands it out again. Whenever the completion is
-// refused it wrote nothing; whenever it got through, it did so before the
-// rewind (so its artifact is there and the node was then rewound and
-// reclaimed on top of it).
+// refused it wrote nothing. Whenever it got through, its artifact is there
+// and the state agrees with the claim it read:
+//
+//   - it read the first claim (t1): it landed before the rewind, and the
+//     node was then rewound and reclaimed on top of it (IN PROGRESS t2);
+//   - it read the second claim (t2): the rewind and the reclaim had both
+//     happened before it even read, and a completion without --claim
+//     cannot tell that claim from its own, so it legitimately completes
+//     it (DONE, the token cleared). Only --claim refuses this one; that is
+//     why the CLI warns about a completion without it (DFLT-00367).
+//
+// A completion that read t1 and still ends DONE would be the ABA this
+// test exists to catch: its write went through although the node had been
+// rewound and reclaimed between its read and its write.
 func TestLoopBack_ConcurrentWithRewindAndReclaim(t *testing.T) {
 	for _, b := range transitionBackends() {
 		t.Run(b.name, func(t *testing.T) {
@@ -230,6 +273,7 @@ func TestLoopBack_ConcurrentWithRewindAndReclaim(t *testing.T) {
 					}
 				}
 				claim("t1")
+				completer := newFirstReadRepo(repo, gate.ID)
 				start := make(chan struct{})
 				var wg sync.WaitGroup
 				var completeErr error
@@ -247,26 +291,44 @@ func TestLoopBack_ConcurrentWithRewindAndReclaim(t *testing.T) {
 					defer wg.Done()
 					verdict := "stale?"
 					<-start
-					_, completeErr = engine.New(repo).CompleteNodeWith(gate.ID, true, []domain.Artifact{{Name: "review", Type: domain.ArtifactText, Content: &verdict}}, engine.CompleteNodeOptions{})
+					_, completeErr = engine.New(completer).CompleteNodeWith(gate.ID, true, []domain.Artifact{{Name: "review", Type: domain.ArtifactText, Content: &verdict}}, engine.CompleteNodeOptions{})
 				}()
 				close(start)
 				wg.Wait()
 				arts, _ := repo.ListArtifactsByNode(gate.ID)
 				n, _ := repo.GetNode(gate.ID)
+				if completer.read == nil {
+					t.Fatalf("round %d: the completion never read the gate", round)
+				}
+				read := fmt.Sprintf("%s %s", completer.read.Status, deref(completer.read.ClaimToken))
+				got := fmt.Sprintf("%s %s", n.Status, deref(n.ClaimToken))
+				// The rewind and the reclaim always complete, whichever
+				// came first (the reclaim excludes only IN PROGRESS / IN
+				// REVIEW), so every outcome but one ends IN PROGRESS t2.
+				want := "IN PROGRESS t2"
 				if completeErr != nil {
 					if errCode(completeErr) != domain.ErrCodeInvalidNodeState {
 						t.Fatalf("round %d: %v, want INVALID_NODE_STATE", round, completeErr)
 					}
 					if len(arts) != 0 {
-						t.Fatalf("round %d: a refused completion left %d artifacts", round, len(arts))
+						t.Fatalf("round %d: a refused completion (read %s) left %d artifacts", round, read, len(arts))
 					}
-				} else if len(arts) != 1 {
-					t.Fatalf("round %d: a completion that got through has %d artifacts", round, len(arts))
+				} else {
+					if len(arts) != 1 {
+						t.Fatalf("round %d: a completion that got through (read %s) has %d artifacts", round, read, len(arts))
+					}
+					switch read {
+					case "IN PROGRESS t1":
+						// Landed before the rewind; rewound and reclaimed on top.
+					case "IN PROGRESS t2":
+						// Read after the reclaim: completes the new claim.
+						want = "DONE "
+					default:
+						t.Fatalf("round %d: a completion that read %s got through", round, read)
+					}
 				}
-				// The rewind and reclaim always complete, whichever came first
-				// (the reclaim excludes only IN PROGRESS / IN REVIEW).
-				if n.Status != domain.NodeInProgress || deref(n.ClaimToken) != "t2" {
-					t.Fatalf("round %d: gate %s token %q, want IN PROGRESS t2", round, n.Status, deref(n.ClaimToken))
+				if got != want {
+					t.Fatalf("round %d: completion read %s, err %v; gate %s token %q, want %q", round, read, completeErr, n.Status, deref(n.ClaimToken), want)
 				}
 			}
 		})

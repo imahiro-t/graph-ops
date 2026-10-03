@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { NodeTypesEditor } from './NodeTypesEditor';
 import { Deferred, deferred } from '../../test/deferred';
+import { expectSecondSaveReannounced } from '../../test/savedReannouncement';
 import { SettingsNodeTypeInfo } from '../../types';
 import { openIconButtonTooltip, setupHoverUser, startHoverFakeTimers, waitForHoverOpenDelay } from '../../test/iconButtonTooltip';
 
@@ -115,6 +116,27 @@ describe('NodeTypesEditor', () => {
     // flash is aria-hidden so it is not read twice.
     expect(await screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' })).toBeInTheDocument();
     expect(screen.getByText(i18n.t('settings.common.saveSuccess'), { selector: '[aria-hidden="true"]' })).toHaveClass('text-emerald-700', 'dark:text-emerald-400');
+  });
+
+  // DFLT-00359: a second save while the confirmation is still shown is
+  // announced again (the live region is emptied and refilled).
+  it('announces a second save made while the confirmation is still shown', async () => {
+    const user = userEvent.setup();
+    mockedSaveType.mockReset();
+    mockedSaveType.mockResolvedValue({ type: 'implementation', tier_text: 'edited', merged_text: 'edited' });
+    render(<NodeTypesEditor onDirtyChange={vi.fn()} />);
+    const textarea = await screen.findByDisplayValue('implementation-tier-text');
+    const save = () => screen.getByRole('button', { name: i18n.t('settings.common.save') });
+
+    await user.clear(textarea);
+    await user.type(textarea, 'edited');
+    await user.click(save());
+
+    await expectSecondSaveReannounced(async () => {
+      await user.type(textarea, ' again');
+      await user.click(save());
+    });
+    expect(mockedSaveType).toHaveBeenCalledTimes(2);
   });
 
   it('selects the first type on initial mount and fetches its detail', async () => {
@@ -1207,6 +1229,10 @@ describe('NodeTypesEditor load failures and switching', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     await waitFor(() => expect(document.activeElement).toHaveAttribute('tabindex', '-1'));
     expect(document.activeElement?.contains(textarea)).toBe(true);
+    // ...which is a named group, so a screen reader says what appeared.
+    expect(document.activeElement).toHaveAccessibleName(i18n.t('settings.tabs.nodeTypes'));
+    expect(document.activeElement).toBe(screen.getByRole('group', { name: i18n.t('settings.tabs.nodeTypes') }));
+    expect(document.activeElement).toHaveClass('focus:outline-hidden');
   });
 
   it('keeps the error and the retry button when the list retry fails again', async () => {

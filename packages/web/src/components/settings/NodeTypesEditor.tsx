@@ -58,7 +58,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // A failed save, add or delete, and a failed list re-fetch once the list
   // has been loaded: shown above the editor without hiding it.
   const [error, setError] = useState('');
-  const { savedFlash, showSavedFlash } = useSavedFlash();
+  const { savedFlash, savedAnnounced, showSavedFlash } = useSavedFlash();
   // Announces a successful delete (DFLT-00194): focus moves to a neighbor
   // afterwards, and this says why -- which override is gone.
   const { message: deleteNotice, announce: announceDelete } = useTransientAnnouncement();
@@ -291,7 +291,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           button row because that row is only rendered while a type is
           selected; the visible flash there is aria-hidden so it is not read
           twice, like AutopilotSettingsEditor's. */}
-      <StatusLiveRegion message={savedFlash ? t('settings.common.saveSuccess') : ''} />
+      <StatusLiveRegion message={savedAnnounced ? t('settings.common.saveSuccess') : ''} />
       {/* Left: type list. See listPane.ts for why the heading is sticky
           and the list has scroll padding. */}
       <div ref={listRef} className={`${LIST_PANE_CLASS} flex flex-col`}>
@@ -476,8 +476,18 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       </div>
 
       {/* Right: editor. tabIndex -1 and the ref: where focus goes after a
-          successful list retry. No outline: it is not a control. */}
-      <div ref={editorPaneRef} tabIndex={-1} className="flex-1 min-w-0 flex flex-col gap-3 focus:outline-hidden">
+          successful list retry. No outline: it is not a control. Named so
+          that focus landing here says what appeared -- an unnamed container
+          announces nothing (DFLT-00349, DFLT-00358). role="group" because a
+          div without a role cannot be named (ARIA 1.2). The name is the
+          settings tab's own label, so the two never disagree. */}
+      <div
+        ref={editorPaneRef}
+        tabIndex={-1}
+        role="group"
+        aria-label={t('settings.tabs.nodeTypes')}
+        className="flex-1 min-w-0 flex flex-col gap-3 focus:outline-hidden"
+      >
         {/* DFLT-00287: the selected type's full name, which the list may cut
             off with an ellipsis. It wraps (between words where it can, else
             anywhere) instead of overflowing, and stays up while the type's

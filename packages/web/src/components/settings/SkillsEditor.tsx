@@ -58,7 +58,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // A failed save, and a failed list re-fetch once the list has been
   // loaded: shown above the editor without hiding it.
   const [error, setError] = useState('');
-  const { savedFlash, showSavedFlash } = useSavedFlash();
+  const { savedFlash, savedAnnounced, showSavedFlash } = useSavedFlash();
 
   const editorPaneRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -139,7 +139,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
           button row because that row is only rendered while a skill is
           selected; the visible flash there is aria-hidden so it is not read
           twice, like AutopilotSettingsEditor's. */}
-      <StatusLiveRegion message={savedFlash ? t('settings.common.saveSuccess') : ''} />
+      <StatusLiveRegion message={savedAnnounced ? t('settings.common.saveSuccess') : ''} />
       {/* Left: skill list. See listPane.ts for why the heading is sticky
           and the list has scroll padding. */}
       <div className={LIST_PANE_CLASS}>
@@ -177,8 +177,18 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
       </div>
 
       {/* Right: editor. tabIndex -1 and the ref: where focus goes after a
-          successful list retry. No outline: it is not a control. */}
-      <div ref={editorPaneRef} tabIndex={-1} className="flex-1 min-w-0 flex flex-col gap-3 focus:outline-hidden">
+          successful list retry. No outline: it is not a control. Named so
+          that focus landing here says what appeared -- an unnamed container
+          announces nothing (DFLT-00349, DFLT-00358). role="group" because a
+          div without a role cannot be named (ARIA 1.2). The name is the
+          settings tab's own label, so the two never disagree. */}
+      <div
+        ref={editorPaneRef}
+        tabIndex={-1}
+        role="group"
+        aria-label={t('settings.tabs.skills')}
+        className="flex-1 min-w-0 flex flex-col gap-3 focus:outline-hidden"
+      >
         {error && <ErrorBox className="p-2.5 text-[0.6875rem]">{error}</ErrorBox>}
         {/* The same order as NodeTypesEditor's (see LoadFailure): a failure
             before loading, then -- once the list is loaded and empty -- a
