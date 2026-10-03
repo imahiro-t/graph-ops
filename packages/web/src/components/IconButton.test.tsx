@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IconButton, OPEN_DELAY_MS } from './IconButton';
 import i18n from '../i18n';
 import { submittingName } from '../test/submittingName';
-import { allIconButtonTooltips, openIconButtonTooltip, openIconButtonTooltips, setupHoverUser, startHoverFakeTimers, useHoverFakeTimers, waitForHoverOpenDelay } from '../test/iconButtonTooltip';
+import { allIconButtonTooltips, openIconButtonTooltip, openIconButtonTooltips, setupHoverUser, startHoverFakeTimers, useHoverFakeTimers, waitForHoverCloseDelay, waitForHoverOpenDelay } from '../test/iconButtonTooltip';
 
 const Icon = () => <svg aria-hidden="true" data-testid="icon" />;
 
@@ -85,7 +85,7 @@ describe('IconButton', () => {
     expect(openIconButtonTooltip()).toBeVisible();
     await user.unhover(button);
     // The close is delayed so the pointer can move onto the tooltip.
-    await new Promise(r => setTimeout(r, 150));
+    await waitForHoverCloseDelay();
     expect(openIconButtonTooltips()).toHaveLength(0);
   });
 
@@ -101,10 +101,10 @@ describe('IconButton', () => {
     await waitForHoverOpenDelay();
     const tooltip = openIconButtonTooltip();
     await user.hover(tooltip);
-    await new Promise(r => setTimeout(r, 150));
+    await waitForHoverCloseDelay();
     expect(openIconButtonTooltip()).toBe(tooltip);
     await user.unhover(tooltip);
-    await new Promise(r => setTimeout(r, 150));
+    await waitForHoverCloseDelay();
     expect(openIconButtonTooltips()).toHaveLength(0);
   });
 
@@ -416,7 +416,7 @@ describe('IconButton', () => {
       await user.hover(button);
       await waitForHoverOpenDelay();
       await user.unhover(button);
-      await new Promise(r => setTimeout(r, 150));
+      await waitForHoverCloseDelay();
       expect(button).toHaveFocus();
       expect(openIconButtonTooltip()).toBeVisible();
     });
@@ -440,7 +440,7 @@ describe('IconButton', () => {
       expect(openIconButtonTooltip()).toHaveTextContent('Settings');
 
       await user.unhover(button);
-      await new Promise(r => setTimeout(r, 150));
+      await waitForHoverCloseDelay();
       expect(openIconButtonTooltips()).toHaveLength(0);
     });
 
@@ -457,7 +457,7 @@ describe('IconButton', () => {
       await waitForHoverOpenDelay();
       await user.keyboard('{Escape}');
       expect(openIconButtonTooltips()).toHaveLength(0);
-      await new Promise(r => setTimeout(r, 150));
+      await waitForHoverCloseDelay();
       expect(openIconButtonTooltips()).toHaveLength(0);
       expect(button).toHaveFocus();
     });
@@ -549,7 +549,7 @@ describe('IconButton', () => {
         const registered = add.mock.calls.filter(([type, , capture]) => type === 'keydown' && capture === true);
         expect(registered).toHaveLength(1);
         await user.unhover(button);
-        await new Promise(r => setTimeout(r, 150));
+        await waitForHoverCloseDelay();
         expect(remove).toHaveBeenCalledWith('keydown', registered[0][1], true);
       } finally {
         add.mockRestore();
@@ -1608,12 +1608,13 @@ describe('IconButton hover tooltip after touch and crossing pointers', () => {
     });
 
     it('keeps a focus-opened tooltip open on a pointerdown on it', async () => {
-      const user = userEvent.setup();
+      startHoverFakeTimers();
+      const user = setupHoverUser();
       renderButton();
       await user.tab();
       const tooltip = openIconButtonTooltip();
       firePointer(tooltip, 'pointerdown', 'mouse');
-      await new Promise(r => setTimeout(r, 150));
+      await waitForHoverCloseDelay();
       expect(openIconButtonTooltip()).toBe(tooltip);
     });
   });

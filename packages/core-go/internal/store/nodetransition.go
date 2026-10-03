@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"sort"
@@ -473,7 +474,7 @@ func (r *SQLiteRepository) ApplyNodeTransition(ticketID string, t NodeTransition
 // (retryMySQLDeadlock).
 func (r *MySQLRepository) ApplyNodeTransition(ticketID string, t NodeTransition) (NodeTransitionResult, error) {
 	var out NodeTransitionResult
-	err := retryMySQLDeadlock("the node transition of ticket "+ticketID, func() error {
+	err := retryMySQLDeadlock("node_transition", "the node transition of ticket "+ticketID, slog.String("ticket_id", ticketID), func() error {
 		var err error
 		out, err = applyNodeTransitionSQL(r.db, mysqlDialect, ticketID, t)
 		return err
