@@ -58,7 +58,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // A failed save, add or delete, and a failed list re-fetch once the list
   // has been loaded: shown above the editor without hiding it.
   const [error, setError] = useState('');
-  const { savedFlash, showSavedFlash } = useSavedFlash();
+  const { savedFlash, savedAnnounced, showSavedFlash } = useSavedFlash();
   // Announces a successful delete (DFLT-00194): focus moves to a neighbor
   // afterwards, and this says why -- which override is gone.
   const { message: deleteNotice, announce: announceDelete } = useTransientAnnouncement();
@@ -291,7 +291,7 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
           button row because that row is only rendered while a type is
           selected; the visible flash there is aria-hidden so it is not read
           twice, like AutopilotSettingsEditor's. */}
-      <StatusLiveRegion message={savedFlash ? t('settings.common.saveSuccess') : ''} />
+      <StatusLiveRegion message={savedAnnounced ? t('settings.common.saveSuccess') : ''} />
       {/* Left: type list. See listPane.ts for why the heading is sticky
           and the list has scroll padding. */}
       <div ref={listRef} className={`${LIST_PANE_CLASS} flex flex-col`}>

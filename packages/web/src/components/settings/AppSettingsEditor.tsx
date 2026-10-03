@@ -208,7 +208,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
   // the form's container, a group named after the tab (see useFocusAfterRetry).
   const formContainerRef = useRef<HTMLDivElement>(null);
   const focusFormAfterRetry = useFocusAfterRetry(() => formContainerRef.current);
-  const { savedFlash, showSavedFlash } = useSavedFlash();
+  const { savedFlash, savedAnnounced, showSavedFlash } = useSavedFlash();
   // Announces a successful project delete (DFLT-00194): focus moves to a
   // neighbor afterwards, and this says why -- which project is gone.
   const { message: projectDeleteNotice, announce: announceProjectDelete } = useTransientAnnouncement();
@@ -1049,7 +1049,7 @@ export const AppSettingsEditor: React.FC<Props> = ({
       <div className="flex justify-end items-center gap-2 narrow:flex-wrap">
         {/* 保存成功は2秒で消える。読み上げは常時マウントの live region が
             担当する（SC 4.1.3）。 */}
-        <StatusLiveRegion message={savedFlash ? t('settings.common.saveSuccess') : ''} />
+        <StatusLiveRegion message={savedAnnounced ? t('settings.common.saveSuccess') : ''} />
         {savedFlash && (
           <span aria-hidden="true" className="text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-1">
             <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}
