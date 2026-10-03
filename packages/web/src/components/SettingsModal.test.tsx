@@ -91,7 +91,11 @@ describe('SettingsModal', () => {
 
     await user.click(screen.getByRole('tab', { name: 'テンプレート' }));
 
-    const plan = screen.getByRole('button', { name: '実行計画' });
+    // Even with nothing unsaved, changeTab calls setTab after `await
+    // confirmDiscardIfDirty()`, outside the click's act(), so the new tab can
+    // render after the click resolves when the machine is busy (DFLT-00369).
+    // Wait for its contents before checking them.
+    const plan = await screen.findByRole('button', { name: '実行計画' });
     expect(plan).toHaveAttribute('aria-current', 'true');
     expect(screen.getByRole('button', { name: 'レビュー' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'レポート' })).toBeInTheDocument();
@@ -109,7 +113,9 @@ describe('SettingsModal', () => {
     expect(screen.queryByRole('tab', { name: 'Report Template' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('tab', { name: 'Templates' }));
 
-    expect(screen.getByRole('button', { name: 'Execution Plan' })).toBeInTheDocument();
+    // The tab renders after the click resolves under load -- see 'opens the
+    // template list with the plan template selected' above (DFLT-00369).
+    expect(await screen.findByRole('button', { name: 'Execution Plan' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Review' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Report' })).toBeInTheDocument();
     await screen.findByDisplayValue('plan-tier');
@@ -122,7 +128,9 @@ describe('SettingsModal', () => {
     renderModal();
 
     await user.click(screen.getByRole('tab', { name: 'テンプレート' }));
-    await user.click(screen.getByRole('button', { name: 'レビュー' }));
+    // Wait for the Templates tab to render (see 'opens the template list with
+    // the plan template selected' above, DFLT-00369).
+    await user.click(await screen.findByRole('button', { name: 'レビュー' }));
     const textarea = await screen.findByDisplayValue('review-tier');
     await user.clear(textarea);
     await user.type(textarea, '# 編集途中');
@@ -563,8 +571,14 @@ describe('SettingsModal', () => {
       />
     );
     const projectSelect = () => screen.getByLabelText(i18n.t('settings.labels.projectLabel'));
-    const openLabelsTab = (user: ReturnType<typeof userEvent.setup>) =>
-      user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.labels') }));
+    // The switch to the tab lands after the click resolves under load (see
+    // 'opens the template list with the plan template selected', DFLT-00369),
+    // so wait for it before reading the tab's project selector.
+    const openLabelsTab = async (user: ReturnType<typeof userEvent.setup>) => {
+      const labelsTab = screen.getByRole('tab', { name: i18n.t('settings.tabs.labels') });
+      await user.click(labelsTab);
+      await waitFor(() => expect(labelsTab).toHaveAttribute('aria-selected', 'true'));
+    };
 
     beforeEach(() => {
       vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([]), { status: 200 })));
@@ -740,8 +754,12 @@ describe('SettingsModal narrow reflow (DFLT-00261)', () => {
     // Arrow-key tab changes go through the same path.
     panel.scrollTop = 500;
     screen.getByRole('tab', { name: i18n.t('settings.tabs.skills') }).focus();
+    // The key goes through changeTab, whose setTab runs after an `await`
+    // outside the key press's act(), so the switch (and the scroll reset in
+    // its layout effect, which runs in the same commit) can land after the
+    // key press resolves under load (DFLT-00369). Wait for the switch.
     await user.keyboard('{ArrowRight}');
-    expect(screen.getByRole('tab', { selected: true })).not.toHaveAccessibleName(i18n.t('settings.tabs.skills'));
+    await waitFor(() => expect(screen.getByRole('tab', { selected: true })).toHaveAccessibleName(i18n.t('settings.tabs.templates')));
     expect(panel.scrollTop).toBe(0);
   });
 
