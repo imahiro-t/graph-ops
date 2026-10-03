@@ -168,6 +168,23 @@ const ARTIFACT_HEADER_RIGHT_GROUP_WRAP =
 // row instead of pushing the right group out of the card.
 const ARTIFACT_TAB_HEADER_ROW_WRAP = 'gap-x-2 below-80rem:flex-wrap below-80rem:gap-y-2';
 
+// The "open in new tab" link (openInNewTabLink), as every tab renders it.
+const OPEN_IN_NEW_TAB_LINK_CLASS =
+  'text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 text-[0.6875rem] rounded-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400';
+// DFLT-00368: added to that link in the node tab's inline artifacts only
+// (openInNewTabLink's wrapIconWhenNarrow). There the link's row
+// (flex justify-end) is about 64px wide at 320px with a 200% default font,
+// while the link, which never wrapped (icon + gap + "Open"), needed about
+// 80px, so it ran ~20px past the row's left edge. Under 15rem the link may
+// now put its icon on a line of its own -- the same pattern as the tab row
+// and Download all -- so its min-content width is the wider of the icon
+// and the longest word, and the label stays right-aligned under the icon.
+// min-w-0 on the link or shrink-0 on the icon are deliberately not used:
+// either squeezed the Japanese label down to one character a line
+// (DFLT-00366). Above 15rem nothing changes, and the other tabs' links keep
+// exactly the classes they had.
+const NODE_TAB_OPEN_IN_NEW_TAB_NARROW_WRAP = 'upto-15rem:flex-wrap upto-15rem:justify-end';
+
 // How long the ID copy button shows its "copied"/"failed" state before going
 // back to idle (DFLT-00143).
 const COPY_FEEDBACK_MS = 1500;
@@ -520,7 +537,9 @@ export const TicketItem: React.FC<Props> = ({
   // behavior) is what makes this a one-way match: stretch would also let an
   // unusually long *node list* balloon the graph panel's height even though
   // the graph itself doesn't need it, which is exactly the mismatch this is
-  // meant to avoid.
+  // meant to avoid. DFLT-00368: the match applies from lg up only (two
+  // columns side by side); below lg the panel's height is auto -- see the
+  // panel's comment below.
   const graphPanelRef = useRef<HTMLDivElement>(null);
   const [nodeListCardHeight, setNodeListCardHeight] = useState<number | null>(null);
 
@@ -1201,15 +1220,19 @@ export const TicketItem: React.FC<Props> = ({
   // <iframe> the inline preview below already uses, so a new tab never opens
   // artifact HTML with the app's own origin. DFLT-00363: keyboard focus shows
   // the same blue ring as downloadLink instead of the browser's default
-  // outline.
-  const openInNewTabLink = (artifact: {
-    id: string;
-    type: string;
-    name: string;
-    content?: string | null;
-    file_path?: string | null;
-    has_content?: boolean;
-  }) => {
+  // outline. options.wrapIconWhenNarrow: see
+  // NODE_TAB_OPEN_IN_NEW_TAB_NARROW_WRAP (DFLT-00368).
+  const openInNewTabLink = (
+    artifact: {
+      id: string;
+      type: string;
+      name: string;
+      content?: string | null;
+      file_path?: string | null;
+      has_content?: boolean;
+    },
+    options?: { wrapIconWhenNarrow?: boolean },
+  ) => {
     if (!(artifact.content || artifact.file_path || artifact.has_content)) return null;
     const href = `/artifacts/${artifact.id}/preview?type=${artifact.type}&name=${encodeURIComponent(artifact.name)}`;
     return (
@@ -1217,7 +1240,11 @@ export const TicketItem: React.FC<Props> = ({
         href={href}
         target="_blank"
         rel="noreferrer"
-        className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 text-[0.6875rem] rounded-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400"
+        className={
+          options?.wrapIconWhenNarrow
+            ? `${OPEN_IN_NEW_TAB_LINK_CLASS} ${NODE_TAB_OPEN_IN_NEW_TAB_NARROW_WRAP}`
+            : OPEN_IN_NEW_TAB_LINK_CLASS
+        }
       >
         <ExternalLink aria-hidden="true" className="w-3 h-3" />
         {t('ticketItem.openInNewTab')}
@@ -2238,7 +2265,9 @@ export const TicketItem: React.FC<Props> = ({
               heights are synced explicitly via nodeListCardHeight/
               graphPanelRef above, not by letting grid stretch the shorter
               one to match the row's auto-computed height (which would also
-              let an unusually long node list balloon the graph panel). */}
+              let an unusually long node list balloon the graph panel).
+              DFLT-00368: that sync is lg-only; in one column (below lg) the
+              node/artifact panel takes its own height. */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left Graph Diagram (SVG) - Return edges routed on the LEFT.
                 min-h-128 is a floor (the default height reserved when
@@ -2447,10 +2476,25 @@ export const TicketItem: React.FC<Props> = ({
                 default floor of min-h-128 unless the graph itself is
                 taller -- this panel's content can still scroll internally
                 within that height (flex-1 min-h-0 overflow-y-auto below);
-                only the graph on the left must never scroll. */}
+                only the graph on the left must never scroll.
+                DFLT-00368: the pin applies from lg up only. The measured
+                height is handed over as --node-list-card-height and used by
+                lg:h-(--node-list-card-height); below lg (one column, the
+                graph above this panel) there is nothing beside it to match,
+                so the card's height is auto, above the same min-h-128
+                floor. Pinned there too, at 320px with a 200% default font
+                the stacked tab row took most of the graph's height and left
+                the scroll area (role="tabpanel") about 64px -- less than
+                one artifact's header row. Before the first measurement the
+                variable is not set at all, so the height stays auto at
+                every width, as before. */}
             <div
-              className="lg:col-span-8 flex flex-col bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden lg:sticky lg:top-20 min-h-128"
-              style={nodeListCardHeight ? { height: nodeListCardHeight } : undefined}
+              className="lg:col-span-8 flex flex-col bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden lg:sticky lg:top-20 min-h-128 lg:h-(--node-list-card-height)"
+              style={
+                nodeListCardHeight
+                  ? ({ '--node-list-card-height': `${nodeListCardHeight}px` } as React.CSSProperties)
+                  : undefined
+              }
             >
               {/* Tab Navigation.
                   DFLT-00238: below lg the row, and the tab group inside it,
@@ -2908,7 +2952,7 @@ export const TicketItem: React.FC<Props> = ({
                                     {/* Inline display based on type */}
                                     {art.type === 'gherkin' && art.content && (
                                       <div className="space-y-1">
-                                        <div className="flex justify-end">{openInNewTabLink(art)}</div>
+                                        <div className="flex justify-end">{openInNewTabLink(art, { wrapIconWhenNarrow: true })}</div>
                                         <GherkinViewer
                                           content={art.content}
                                           scrollable
@@ -2919,7 +2963,7 @@ export const TicketItem: React.FC<Props> = ({
 
                                     {art.type === 'html' && (
                                       <div className="space-y-1">
-                                        <div className="flex justify-end">{openInNewTabLink(art)}</div>
+                                        <div className="flex justify-end">{openInNewTabLink(art, { wrapIconWhenNarrow: true })}</div>
                                         <iframe
                                           src={(art.content || art.file_path || art.has_content) ? `/api/artifacts/${art.id}/content` : undefined}
                                           title={art.name}
@@ -2931,7 +2975,7 @@ export const TicketItem: React.FC<Props> = ({
 
                                     {art.type === 'text' && art.content && (
                                       <div className="space-y-1">
-                                        <div className="flex justify-end">{openInNewTabLink(art)}</div>
+                                        <div className="flex justify-end">{openInNewTabLink(art, { wrapIconWhenNarrow: true })}</div>
                                         <MarkdownViewer
                                           content={art.content}
                                           scrollable
