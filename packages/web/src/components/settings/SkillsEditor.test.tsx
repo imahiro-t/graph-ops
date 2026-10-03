@@ -433,6 +433,10 @@ describe('SkillsEditor load failures and switching', () => {
     const textarea = await screen.findByDisplayValue('create-ticket-tier-text');
     await waitFor(() => expect(document.activeElement).toHaveAttribute('tabindex', '-1'));
     expect(document.activeElement?.contains(textarea)).toBe(true);
+    // ...which is a named group, so a screen reader says what appeared.
+    expect(document.activeElement).toHaveAccessibleName(i18n.t('settings.tabs.skills'));
+    expect(document.activeElement).toBe(screen.getByRole('group', { name: i18n.t('settings.tabs.skills') }));
+    expect(document.activeElement).toHaveClass('focus:outline-hidden');
   });
 
   it('keeps the error and the retry button when the list retry fails again', async () => {

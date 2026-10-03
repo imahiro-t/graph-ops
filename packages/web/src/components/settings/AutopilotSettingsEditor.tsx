@@ -339,10 +339,17 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
           )}
 
           {/* tabIndex -1 and the ref: where focus goes after a successful
-              retry. No outline: it is not a control. */}
+              retry. No outline: it is not a control. Named so that focus
+              landing here says what appeared -- an unnamed container
+              announces nothing (DFLT-00349, DFLT-00358). role="group"
+              because a div without a role cannot be named (ARIA 1.2). The
+              name is the settings tab's own label, so the two never
+              disagree. */}
           <div
             ref={rowsRef}
             tabIndex={-1}
+            role="group"
+            aria-label={t('settings.tabs.autopilot')}
             className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-lg focus:outline-hidden"
           >
             {items.map(it => {
