@@ -69,7 +69,11 @@ describe('ClaudeRunnerModal', () => {
     expect(body.prompt).toBe('- 手順1\n- 手順2\n- 手順3');
     expect(body.project_id).toBe('proj-x');
     // No defaultPrompt/ticketId was given, so the default prompt is empty.
-    expect(textarea.value).toBe('');
+    // handleLaunch resets the input after `await launch(...)`, outside the
+    // key press's act(), in the same step that calls onClose: onClose having
+    // been called does not mean the reset has rendered yet, so wait for it
+    // (DFLT-00370).
+    await waitFor(() => expect(textarea.value).toBe(''));
   });
 
   it('launches on Cmd(Meta)+Enter as well', async () => {

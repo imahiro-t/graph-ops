@@ -69,7 +69,11 @@ describe('SettingsModal labels tab', () => {
 
     await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.labels') }));
 
-    const select = screen.getByLabelText(i18n.t('settings.labels.projectLabel'));
+    // Even with nothing unsaved, SettingsModal's changeTab calls setTab after
+    // `await confirmDiscardIfDirty()`, outside the click's act(), so the
+    // labels tab can render after the click resolves when the machine is
+    // busy (DFLT-00369, DFLT-00370). Wait for its project selector.
+    const select = await screen.findByLabelText(i18n.t('settings.labels.projectLabel'));
     expect(select).toHaveValue(alpha.id);
     expect(screen.queryByText(i18n.t('settings.labels.selectProject'))).not.toBeInTheDocument();
     expect(await screen.findByTestId('label-row-label-bug')).toBeInTheDocument();

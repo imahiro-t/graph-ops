@@ -89,7 +89,10 @@ async function toggleLabelInFilter(user: ReturnType<typeof userEvent.setup>, nam
 async function openLabelsSettings(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: i18n.t('header.settings') }));
   await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.labels') }));
-  const projectSelect = screen.getByLabelText(i18n.t('settings.labels.projectLabel'));
+  // The settings modal switches tabs after an `await` (changeTab), outside
+  // the click's act(), so the tab can render after the click resolves under
+  // load (DFLT-00369, DFLT-00370). Wait for the tab's project selector.
+  const projectSelect = await screen.findByLabelText(i18n.t('settings.labels.projectLabel'));
   await within(projectSelect).findByRole('option', { name: alpha.name });
   await user.selectOptions(projectSelect, alpha.id);
 }
@@ -208,6 +211,13 @@ describe('App label filter', () => {
 
     await waitFor(() => expect(labelFilterButton()).toHaveTextContent(i18n.t('toolbar.labelSelected', { count: 1 })));
     await user.click(screen.getByRole('button', { name: i18n.t('common.closeDialog') }));
+    // The settings modal closes after `await confirmDiscardIfDirty()` (its
+    // handleClose), outside the click's act(), and hands focus back to the
+    // settings button in an effect cleanup that may run later still. Wait for
+    // both, so the focus return cannot land after the label filter is opened
+    // below (DFLT-00369, DFLT-00370).
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: i18n.t('settings.modalTitle') })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: i18n.t('header.settings') })).toHaveFocus());
     await user.click(labelFilterButton());
     const panel = screen.getByRole('group', { name: i18n.t('toolbar.labelGroupLabel') });
     expect(within(panel).getByRole('checkbox', { name: 'バグ' })).toBeChecked();
