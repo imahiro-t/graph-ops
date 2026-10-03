@@ -152,8 +152,13 @@ describe('SettingsModal', () => {
     await user.click(screen.getByRole('tab', { name: i18n.t('settings.tabs.skills') }));
     await user.click(screen.getByTestId('settings-discard-confirm-confirm'));
 
+    // The confirmation closes inside the click's act(), so it is gone at
+    // once. The tab switch is not: changeTab calls setTab after `await
+    // confirm(...)`, in a microtask that runs outside act(), so React
+    // renders it from a scheduler task that can land after the click
+    // resolves when the machine is busy (DFLT-00369). Wait for it.
     expect(screen.queryByTestId('settings-discard-confirm')).not.toBeInTheDocument();
-    expect(screen.queryByDisplayValue('plan-tier edited')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByDisplayValue('plan-tier edited')).not.toBeInTheDocument());
     await waitFor(() => expect(fetchSettingsSkills).toHaveBeenCalled());
     expect(screen.getByRole('dialog', { name: i18n.t('settings.modalTitle') })).toBeInTheDocument();
   });
@@ -375,9 +380,16 @@ describe('SettingsModal', () => {
       expect(closeButton()).toHaveFocus();
       await waitFor(() => expect(fetchSettingsNodeTypes).toHaveBeenCalled());
 
+      // handleClose calls onClose after `await confirmDiscardIfDirty()` --
+      // even with nothing unsaved -- in a microtask that runs outside the
+      // key press's act(). React then renders the close from a scheduler
+      // task, and gives focus back in useModalDialog's effect cleanup, a
+      // passive effect React may run in a later task still. Under load
+      // either can land after the key press resolves (DFLT-00369), so wait
+      // for both; the final focus is still asserted.
       await user.keyboard('{Escape}');
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'open-settings' })).toHaveFocus();
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.getByRole('button', { name: 'open-settings' })).toHaveFocus());
     });
 
     // DFLT-00148: a ConfirmDialog opened on top of this modal (a nested
@@ -505,9 +517,13 @@ describe('SettingsModal', () => {
         expect(discardDialog()).toBeInTheDocument();
         await user.click(screen.getByTestId('settings-discard-confirm-confirm'));
 
+        // The confirmation closes inside the click's act(); the settings
+        // modal closes and returns focus after `await confirm(...)`, outside
+        // it -- see 'returns focus to the button that opened it when
+        // closed' above for why that needs waiting for (DFLT-00369).
         expect(discardDialog()).not.toBeInTheDocument();
-        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'open-settings' })).toHaveFocus();
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+        await waitFor(() => expect(screen.getByRole('button', { name: 'open-settings' })).toHaveFocus());
       });
 
       it('returns focus to the close button when the discard from it is cancelled', async () => {
