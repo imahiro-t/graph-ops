@@ -58,7 +58,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
   // A failed save, and a failed list re-fetch once the list has been
   // loaded: shown above the editor without hiding it.
   const [error, setError] = useState('');
-  const { savedFlash, showSavedFlash } = useSavedFlash();
+  const { savedFlash, savedAnnounced, showSavedFlash } = useSavedFlash();
 
   const editorPaneRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -139,7 +139,7 @@ export const SkillsEditor: React.FC<Props> = ({ onDirtyChange }) => {
           button row because that row is only rendered while a skill is
           selected; the visible flash there is aria-hidden so it is not read
           twice, like AutopilotSettingsEditor's. */}
-      <StatusLiveRegion message={savedFlash ? t('settings.common.saveSuccess') : ''} />
+      <StatusLiveRegion message={savedAnnounced ? t('settings.common.saveSuccess') : ''} />
       {/* Left: skill list. See listPane.ts for why the heading is sticky
           and the list has scroll padding. */}
       <div className={LIST_PANE_CLASS}>

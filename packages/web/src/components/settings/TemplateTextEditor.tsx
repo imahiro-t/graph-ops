@@ -21,6 +21,7 @@ import { ErrorBox } from './ErrorBox';
 import { LoadFailure, useFocusAfterRetry } from './LoadFailure';
 import { LoadingLine } from './LoadingLine';
 import { Spinner } from '../Spinner';
+import { StatusLiveRegion } from '../StatusLiveRegion';
 
 export type TemplateFetcher = (
   t: TFunction
@@ -72,7 +73,7 @@ export const TemplateTextEditor: React.FC<Props> = ({
   // templates remounts this editor (TemplatesEditor's key={selected}).
   const [loadError, setLoadError] = useState('');
   const [loadFailures, setLoadFailures] = useState(0);
-  const { savedFlash, showSavedFlash } = useSavedFlash();
+  const { savedFlash, savedAnnounced, showSavedFlash } = useSavedFlash();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -191,8 +192,11 @@ export const TemplateTextEditor: React.FC<Props> = ({
             <p id={hintId} className="text-[0.625rem] text-slate-500 dark:text-slate-400 mt-1">{t(`${i18nPrefix}.emptyOverrideHint`)}</p>
           </div>
           <div className="flex justify-end items-center gap-2 narrow:flex-wrap">
+            {/* Visual only: the confirmation disappears after 2s, and the
+                always-mounted live region at the end of this editor is what
+                announces it (SC 4.1.3). */}
             {savedFlash && (
-              <span role="status" className="text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-1">
+              <span aria-hidden="true" className="text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-1">
                 <CheckCircle2 aria-hidden="true" className="w-3.5 h-3.5" /> {t('settings.common.saveSuccess')}
               </span>
             )}
@@ -210,6 +214,10 @@ export const TemplateTextEditor: React.FC<Props> = ({
           </div>
         </>
       )}
+      {/* Always mounted, outside the load failure / loading / editor switch,
+          so the region exists before its text changes and survives a reload
+          (see StatusLiveRegion). Last child: sr-only takes no flex gap. */}
+      <StatusLiveRegion message={savedAnnounced ? t('settings.common.saveSuccess') : ''} />
     </div>
   );
 };

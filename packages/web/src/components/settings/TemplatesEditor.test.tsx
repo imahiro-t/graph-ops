@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
 import { TemplatesEditor } from './TemplatesEditor';
 import { deferred } from '../../test/deferred';
+import { SAVED_FLASH_DURATION_MS } from '../../hooks/useSavedFlash';
+import { REANNOUNCE_GAP_MS } from '../../hooks/useTransientAnnouncement';
 
 vi.mock('../../lib/settingsApi', async () => {
   const actual = await vi.importActual<typeof import('../../lib/settingsApi')>('../../lib/settingsApi');
@@ -56,6 +58,21 @@ const saveButton = () => screen.getByRole('button', { name: i18n.t('settings.com
 // DFLT-00350) by its text.
 const savedStatus = () =>
   screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: '[role="status"]' });
+
+// The always-mounted, sr-only live region that announces the save
+// (DFLT-00359). It is the only status region that is sr-only.
+const savedLiveRegion = () => {
+  const regions = screen.getAllByRole('status').filter(el => el.classList.contains('sr-only'));
+  expect(regions).toHaveLength(1);
+  return regions[0];
+};
+
+// The visible "saved" notice next to the save button (aria-hidden).
+const savedVisual = () =>
+  screen.findByText(i18n.t('settings.common.saveSuccess'), { selector: 'span[aria-hidden="true"]' });
+
+// Status regions that currently hold some text.
+const nonEmptyStatuses = () => screen.queryAllByRole('status').filter(el => el.textContent !== '');
 
 const retryButton = () => screen.getByRole('button', { name: i18n.t('settings.common.retry') });
 
@@ -154,7 +171,7 @@ describe('TemplatesEditor', () => {
     await user.click(saveButton());
 
     expect(savePlan).toHaveBeenCalledWith(expect.anything(), '# 目的\n本文');
-    expect(await screen.findByText(i18n.t('settings.common.saveSuccess'))).toBeInTheDocument();
+    expect(await savedStatus()).toBeInTheDocument();
     expect(await previewOf('settings.planTemplate')).toHaveTextContent('# 目的 本文');
     expect(saveButton()).toBeDisabled();
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
@@ -243,7 +260,9 @@ describe('TemplatesEditor', () => {
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: i18n.t('settings.planTemplate.mergedPreviewLabel') })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    // No loading line: only the (empty) always-mounted save live region.
+    expect(nonEmptyStatuses()).toHaveLength(0);
+    expect(savedLiveRegion()).toBeEmptyDOMElement();
   });
 
   it('loads the template on retry and moves focus to the textarea', async () => {
@@ -315,7 +334,9 @@ describe('TemplatesEditor', () => {
     fetchPlan.mockReturnValue(new Promise(() => {}));
     render(<TemplatesEditor onDirtyChange={vi.fn()} />);
 
-    expect(screen.getByRole('status')).toHaveTextContent(i18n.t('settings.common.loading'));
+    const loadingLine = screen.getByText(i18n.t('settings.common.loading')).closest('[role="status"]');
+    expect(loadingLine).toBeInTheDocument();
+    expect(nonEmptyStatuses()).toEqual([loadingLine]);
   });
 
   it('keeps the input unsaved when saving a review override fails', async () => {
@@ -354,6 +375,94 @@ describe('TemplatesEditor', () => {
     expect(saveButton()).toBeEnabled();
   });
 
+  // DFLT-00359: the saved notice is announced by an always-mounted live
+  // region (not a role="status" mounted together with its text), the visible
+  // notice is aria-hidden so it is not read twice, and a second save within
+  // the display time empties the region and refills it so it is announced.
+  describe('saved announcement (DFLT-00359)', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('keeps the live region mounted while loading and after a load failure', async () => {
+      const pending = deferred<{ tier_text: string; merged_text: string }>();
+      fetchPlan.mockReturnValueOnce(pending.promise);
+      const user = userEvent.setup();
+      render(<TemplatesEditor onDirtyChange={vi.fn()} />);
+
+      const region = savedLiveRegion();
+      expect(region).toBeEmptyDOMElement();
+      expect(region).toHaveAttribute('aria-live', 'polite');
+
+      await act(async () => {
+        pending.resolve({ tier_text: 'plan-tier', merged_text: 'plan-merged' });
+      });
+      await textareaOf('settings.planTemplate');
+      expect(savedLiveRegion()).toBe(region);
+
+      // Switching templates remounts the editor, so a fresh region appears
+      // with it and stays through the failed load.
+      fetchReview.mockRejectedValueOnce(new Error('load failed'));
+      await user.click(listButton('review'));
+      expect(await screen.findByRole('alert')).toHaveTextContent('load failed');
+      expect(savedLiveRegion()).toBeEmptyDOMElement();
+    });
+
+    it('announces a save once, through the live region, with an aria-hidden visible notice', async () => {
+      const user = userEvent.setup();
+      savePlan.mockResolvedValue({ tier_text: 'plan-tier edited', merged_text: 'plan-tier edited' });
+      render(<TemplatesEditor onDirtyChange={vi.fn()} />);
+
+      const region = savedLiveRegion();
+      await user.type(await textareaOf('settings.planTemplate'), ' edited');
+      await user.click(saveButton());
+
+      await waitFor(() => expect(region).toHaveTextContent(i18n.t('settings.common.saveSuccess')));
+      expect(await savedVisual()).toBeInTheDocument();
+      const announcing = screen
+        .getAllByRole('status')
+        .filter(el => el.textContent?.includes(i18n.t('settings.common.saveSuccess')));
+      expect(announcing).toEqual([region]);
+    });
+
+    it('re-announces a second save made while the notice is still shown', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      savePlan.mockResolvedValueOnce({ tier_text: 'plan-tier a', merged_text: 'plan-tier a' });
+      const second = deferred<{ tier_text: string; merged_text: string }>();
+      savePlan.mockReturnValueOnce(second.promise);
+      render(<TemplatesEditor onDirtyChange={vi.fn()} />);
+
+      const region = savedLiveRegion();
+      const textarea = await textareaOf('settings.planTemplate');
+      await user.type(textarea, ' a');
+      await user.click(saveButton());
+      await waitFor(() => expect(region).toHaveTextContent(i18n.t('settings.common.saveSuccess')));
+
+      await user.type(textarea, 'b');
+      await user.click(saveButton());
+      await act(async () => {
+        second.resolve({ tier_text: 'plan-tier ab', merged_text: 'plan-tier ab' });
+      });
+
+      // Emptied first, while the visible notice stays up...
+      expect(region).toBeEmptyDOMElement();
+      expect(await savedVisual()).toBeInTheDocument();
+      // ...and refilled after the gap, so the change is announced.
+      act(() => {
+        vi.advanceTimersByTime(REANNOUNCE_GAP_MS);
+      });
+      expect(region).toHaveTextContent(i18n.t('settings.common.saveSuccess'));
+
+      // Both clear SAVED_FLASH_DURATION_MS after the second save.
+      act(() => {
+        vi.advanceTimersByTime(SAVED_FLASH_DURATION_MS);
+      });
+      expect(region).toBeEmptyDOMElement();
+      expect(screen.queryByText(i18n.t('settings.common.saveSuccess'))).not.toBeInTheDocument();
+    });
+  });
+
   describe('accessibility review (a11y F-1 / F-2)', () => {
     // Class pairs chosen for WCAG 1.4.3 (>= 4.5:1): slate-500 on white 4.76:1,
     // slate-400 on slate-900 6.96:1, emerald-700 on white 5.48:1,
@@ -383,10 +492,10 @@ describe('TemplatesEditor', () => {
       await user.type(textarea, 'x');
       await user.click(saveButton());
 
-      const status = await savedStatus();
-      expect(status).toHaveTextContent(i18n.t('settings.common.saveSuccess'));
-      expect(status).toHaveClass('text-emerald-700', 'dark:text-emerald-400');
-      expect(status).not.toHaveClass('text-emerald-600');
+      const notice = await savedVisual();
+      expect(notice).toHaveTextContent(i18n.t('settings.common.saveSuccess'));
+      expect(notice).toHaveClass('text-emerald-700', 'dark:text-emerald-400');
+      expect(notice).not.toHaveClass('text-emerald-600');
     });
 
     it('F-2: saving with the keyboard moves focus to the textarea instead of losing it', async () => {

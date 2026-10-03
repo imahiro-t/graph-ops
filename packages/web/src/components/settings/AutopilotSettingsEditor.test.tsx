@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import i18n from '../../i18n';
 import { AutopilotSettingsEditor } from './AutopilotSettingsEditor';
 import { AutopilotSettingItem, AutopilotSettingsResponse, AutopilotSettingKey } from '../../types';
+import { expectSecondSaveReannounced } from '../../test/savedReannouncement';
 
 const DEFAULTS: Record<AutopilotSettingKey, string | number | boolean> = {
   mainReflection: 'branch',
@@ -111,6 +112,27 @@ describe('AutopilotSettingsEditor', () => {
     expect(html).toContain(i18n.t('settings.autopilot.noProject'));
     expect(html).not.toContain(i18n.t('settings.common.loading'));
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  // DFLT-00359: a second save while the confirmation is still shown is
+  // announced again (the live region is emptied and refilled).
+  it('announces a second save made while the confirmation is still shown', async () => {
+    const user = userEvent.setup();
+    stubServer(response());
+    renderEditor();
+    const input = (await screen.findByLabelText(label('maxTickets'))) as HTMLInputElement;
+    const save = () => screen.getByRole('button', { name: i18n.t('settings.common.save') });
+
+    await user.clear(input);
+    await user.type(input, '30');
+    await user.click(save());
+
+    await expectSecondSaveReannounced(async () => {
+      await user.clear(input);
+      await user.type(input, '25');
+      await user.click(save());
+    });
+    expect(putBodies).toEqual([{ maxTickets: 30 }, { maxTickets: 25 }]);
   });
 
   it('edits a value and saves only that key, then shows the saved value', async () => {
