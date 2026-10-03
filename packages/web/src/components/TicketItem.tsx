@@ -150,8 +150,8 @@ const ARTIFACT_HEADER_ROW_WRAP = 'gap-x-2 below-80rem:flex-wrap below-80rem:gap-
 const ARTIFACT_HEADER_NAME_GROUP_WRAP = 'min-w-0 below-80rem:flex-wrap below-80rem:max-w-full';
 // The artifact name.
 const ARTIFACT_HEADER_NAME_TEXT = 'min-w-0 wrap-break-word';
-// The Download label and the type badge: wrap under 80rem, one line from
-// 80rem up.
+// The Download label and the type badge (and, since DFLT-00366, the date in
+// the Gherkin tab's header): wrap under 80rem, one line from 80rem up.
 const ARTIFACT_HEADER_LABEL_TEXT = 'below-80rem:min-w-0 below-80rem:wrap-break-word from-80rem:whitespace-nowrap';
 const ARTIFACT_HEADER_RIGHT_GROUP_WRAP =
   'below-80rem:flex-wrap below-80rem:ml-auto below-80rem:min-w-0 below-80rem:max-w-full below-80rem:justify-end-safe from-80rem:shrink-0';
@@ -2959,12 +2959,22 @@ export const TicketItem: React.FC<Props> = ({
                       gherkinArtifacts.map(g => (
                         <div key={g.id} className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50/40 dark:bg-amber-950/20 p-4">
                           {/* DFLT-00365: see ARTIFACT_TAB_HEADER_ROW_WRAP.
-                              Under 80rem the date may wrap under the link. */}
+                              Under 80rem the date may wrap under the link.
+                              DFLT-00366: the date uses ARTIFACT_HEADER_LABEL_TEXT
+                              like the type badge. At 320px with a 200% font the
+                              right group is ~90px wide and "2026/10/3" alone is
+                              ~98px, so with no min-w-0 the date ran 7-13px
+                              (ja/en) past the right group into the card's
+                              padding. The link itself is left as it is: its
+                              icon already shrinks there, and giving the icon
+                              shrink-0 (as downloadLink does) would leave the
+                              Japanese label one character a line in the node
+                              tab's narrower row. */}
                           <div className={`font-bold text-amber-900 dark:text-amber-300 text-xs mb-2 flex items-center justify-between ${ARTIFACT_TAB_HEADER_ROW_WRAP}`}>
                             <span className={ARTIFACT_HEADER_NAME_TEXT}>{g.name}</span>
                             <span className={`flex items-center gap-3 below-80rem:gap-y-1 ${ARTIFACT_HEADER_RIGHT_GROUP_WRAP}`}>
                               {openInNewTabLink(g)}
-                              <span className="text-[0.625rem] text-slate-500 dark:text-slate-400">{formatDateTime(g.created_at, i18n.language)}</span>
+                              <span className={`text-[0.625rem] text-slate-500 dark:text-slate-400 ${ARTIFACT_HEADER_LABEL_TEXT}`}>{formatDateTime(g.created_at, i18n.language)}</span>
                             </span>
                           </div>
                           {g.content && (
