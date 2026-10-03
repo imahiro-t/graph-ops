@@ -476,8 +476,18 @@ export const NodeTypesEditor: React.FC<Props> = ({ onDirtyChange }) => {
       </div>
 
       {/* Right: editor. tabIndex -1 and the ref: where focus goes after a
-          successful list retry. No outline: it is not a control. */}
-      <div ref={editorPaneRef} tabIndex={-1} className="flex-1 min-w-0 flex flex-col gap-3 focus:outline-hidden">
+          successful list retry. No outline: it is not a control. Named so
+          that focus landing here says what appeared -- an unnamed container
+          announces nothing (DFLT-00349, DFLT-00358). role="group" because a
+          div without a role cannot be named (ARIA 1.2). The name is the
+          settings tab's own label, so the two never disagree. */}
+      <div
+        ref={editorPaneRef}
+        tabIndex={-1}
+        role="group"
+        aria-label={t('settings.tabs.nodeTypes')}
+        className="flex-1 min-w-0 flex flex-col gap-3 focus:outline-hidden"
+      >
         {/* DFLT-00287: the selected type's full name, which the list may cut
             off with an ellipsis. It wraps (between words where it can, else
             anywhere) instead of overflowing, and stays up while the type's
