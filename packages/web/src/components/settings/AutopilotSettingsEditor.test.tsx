@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import i18n from '../../i18n';
 import { AutopilotSettingsEditor } from './AutopilotSettingsEditor';
-import { AutopilotSettingItem, AutopilotSettingsResponse, AutopilotSettingKey } from '../../types';
+import { AutopilotSettingItem, AutopilotSettingsResponse, AutopilotSettingKey, Project } from '../../types';
 import { expectSecondSaveReannounced } from '../../test/savedReannouncement';
 
 const DEFAULTS: Record<AutopilotSettingKey, string | number | boolean> = {
@@ -35,6 +35,11 @@ function response(overrides: Partial<Record<AutopilotSettingKey, Partial<Autopil
   const settings = Object.fromEntries(items.map(it => [it.key, it.value])) as unknown as AutopilotSettingsResponse['settings'];
   return { project_id: 'proj-A', settings, items, warnings, team_file: '' };
 }
+
+const project = (id: string, name: string): Project => ({ id, name, prefix: '', local_path: '', created_at: '', updated_at: '' });
+// What the tab's own project selector offers (DFLT-00374).
+const PROJECTS: Project[] = [project('proj-A', 'Project A'), project('proj-B', 'Project B'), project('proj-C', 'Project C')];
+const projectSelect = () => screen.getByLabelText(i18n.t('settings.autopilot.projectLabel')) as HTMLSelectElement;
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -72,7 +77,7 @@ function stubServer(initial: AutopilotSettingsResponse, onPut?: (body: Record<st
 }
 
 function renderEditor(onDirtyChange = vi.fn()) {
-  return render(<AutopilotSettingsEditor projectId="proj-A" projectName="Project A" onDirtyChange={onDirtyChange} />);
+  return render(<AutopilotSettingsEditor projects={PROJECTS} initialProjectId="proj-A" onDirtyChange={onDirtyChange} />);
 }
 
 const label = (key: AutopilotSettingKey) => i18n.t(`settings.autopilot.keys.${key}.label`);
@@ -95,12 +100,13 @@ describe('AutopilotSettingsEditor', () => {
   it('shows the loading line, not the default settings, before they have loaded', () => {
     fetchSpy.mockReturnValue(new Promise(() => {}));
     const html = renderToStaticMarkup(
-      <AutopilotSettingsEditor projectId="proj-A" projectName="Project A" onDirtyChange={vi.fn()} />
+      <AutopilotSettingsEditor projects={PROJECTS} initialProjectId="proj-A" onDirtyChange={vi.fn()} />
     );
     expect(html).toContain(i18n.t('settings.common.loading'));
     expect(html).not.toContain(label('maxTickets'));
     expect(html).not.toContain('<input');
-    expect(html).not.toContain('<select');
+    // Only the project selector, none of the settings' selects.
+    expect(html.split('<select').length - 1).toBe(1);
     // The button's own text, not the word inside the intro paragraph.
     expect(html).not.toContain(`${i18n.t('settings.common.save')}</button>`);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -108,8 +114,8 @@ describe('AutopilotSettingsEditor', () => {
 
   it('keeps showing the no-project message, not the loading line, on the first frame with no project', () => {
     fetchSpy.mockReturnValue(new Promise(() => {}));
-    const html = renderToStaticMarkup(<AutopilotSettingsEditor projectId="" onDirtyChange={vi.fn()} />);
-    expect(html).toContain(i18n.t('settings.autopilot.noProject'));
+    const html = renderToStaticMarkup(<AutopilotSettingsEditor projects={[]} initialProjectId="" onDirtyChange={vi.fn()} />);
+    expect(html).toContain(i18n.t('settings.autopilot.noProjects'));
     expect(html).not.toContain(i18n.t('settings.common.loading'));
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -294,11 +300,46 @@ describe('AutopilotSettingsEditor', () => {
     expect(flash.className).toContain('dark:text-emerald-400');
   });
 
-  it('asks for a project when none is selected', () => {
+  // DFLT-00374 completion criterion 3: with no project at all, the selector
+  // is disabled and nothing can be edited -- as on the labels tab.
+  it('disables the project selector and shows no form when there are no projects', () => {
     fetchSpy.mockImplementation(async () => jsonResponse({}));
-    render(<AutopilotSettingsEditor projectId="" onDirtyChange={vi.fn()} />);
-    expect(screen.getByText(i18n.t('settings.autopilot.noProject'))).toBeInTheDocument();
+    render(<AutopilotSettingsEditor projects={[]} initialProjectId="" onDirtyChange={vi.fn()} />);
+    expect(projectSelect()).toBeDisabled();
+    expect(projectSelect().value).toBe('');
+    expect(screen.getByRole('status')).toHaveTextContent(i18n.t('settings.autopilot.noProjects'));
+    expect(screen.queryByText(i18n.t('settings.autopilot.selectProject'))).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(label('maxTickets'))).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  // DFLT-00374 completion criterion 2: with no project open in the app, the
+  // tab starts on the first one rather than on an empty selection.
+  it('starts on the first project and loads its settings when the app has none open', async () => {
+    stubServer(response({ maxTickets: { value: 33, source: 'local', local: 33 } }));
+    render(<AutopilotSettingsEditor projects={PROJECTS} initialProjectId="" onDirtyChange={vi.fn()} />);
+    expect(projectSelect().value).toBe('proj-A');
+    expect(await screen.findByDisplayValue('33')).toBeInTheDocument();
+    expect(fetchSpy).toHaveBeenCalledWith('/api/projects/proj-A/autopilot-settings', expect.anything());
+    expect(screen.queryByText(i18n.t('settings.autopilot.selectProject'))).not.toBeInTheDocument();
+  });
+
+  it('shows a heading without the project name, then the project selector with every project', async () => {
+    stubServer(response());
+    renderEditor();
+    await screen.findByLabelText(label('maxTickets'));
+    expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent(i18n.t('settings.autopilot.title'));
+    expect(screen.getByRole('heading', { level: 3 })).not.toHaveTextContent('Project A');
+    const select = projectSelect();
+    expect(select).toBeEnabled();
+    expect(select.value).toBe('proj-A');
+    expect(Array.from(select.options).map(o => [o.value, o.textContent])).toEqual([
+      ['', i18n.t('settings.autopilot.projectPlaceholder')],
+      ['proj-A', 'Project A'],
+      ['proj-B', 'Project B'],
+      ['proj-C', 'Project C']
+    ]);
   });
 });
 
@@ -458,12 +499,24 @@ describe('AutopilotSettingsEditor load failure and project switch', () => {
     expect(i).toBeGreaterThanOrEqual(0);
     return pending.splice(i, 1)[0];
   };
-  // Pass the same onDirtyChange to render and rerender to follow its calls
-  // across a project switch.
-  const editor = (projectId: string, onDirtyChange: (dirty: boolean) => void = vi.fn()) => (
-    <AutopilotSettingsEditor projectId={projectId} projectName={projectId} onDirtyChange={onDirtyChange} />
+  // The editor starting on initialProjectId. Projects are switched from its
+  // own selector (DFLT-00374), not by re-rendering with another project.
+  const editor = (initialProjectId: string, onDirtyChange: (dirty: boolean) => void = vi.fn()) => (
+    <AutopilotSettingsEditor projects={PROJECTS} initialProjectId={initialProjectId} onDirtyChange={onDirtyChange} />
   );
   const urlOf = (id: string) => `/api/projects/${id}/autopilot-settings`;
+  const confirmDialog = () => screen.queryByTestId('autopilot-project-discard-confirm');
+  // Picks a project from the selector. discard: there are unsaved edits, so
+  // the confirmation must come up -- and is answered with "discard".
+  const switchTo = async (user: ReturnType<typeof userEvent.setup>, id: string, { discard = false } = {}) => {
+    await user.selectOptions(projectSelect(), id);
+    if (discard) {
+      expect(confirmDialog()).toBeInTheDocument();
+      await user.click(screen.getByTestId('autopilot-project-discard-confirm-confirm'));
+    }
+    expect(confirmDialog()).not.toBeInTheDocument();
+    expect(projectSelect().value).toBe(id);
+  };
 
   beforeEach(async () => {
     await i18n.changeLanguage('ja');
@@ -534,8 +587,9 @@ describe('AutopilotSettingsEditor load failure and project switch', () => {
     expect(screen.queryByLabelText(label('maxTickets'))).not.toBeInTheDocument();
   });
 
-  it('shows the loading line, not the previous project\'s settings, right after projectId changes', async () => {
-    const { rerender } = render(editor('proj-A'));
+  it('shows the loading line, not the previous project\'s settings, right after the project changes', async () => {
+    const user = userEvent.setup();
+    render(editor('proj-A'));
     await act(async () => {
       settle(urlOf('proj-A')).resolve(
         jsonResponse({ ...forProject('proj-A', { maxTickets: { value: 77, local: 77, source: 'local' } }), team_file: '/team/a.json' })
@@ -543,7 +597,7 @@ describe('AutopilotSettingsEditor load failure and project switch', () => {
     });
     expect(await screen.findByDisplayValue('77')).toBeInTheDocument();
 
-    rerender(editor('proj-B'));
+    await switchTo(user, 'proj-B');
 
     expect(loadingLine()).toBeInTheDocument();
     expect(screen.queryByDisplayValue('77')).not.toBeInTheDocument();
@@ -551,12 +605,13 @@ describe('AutopilotSettingsEditor load failure and project switch', () => {
     expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
   });
 
-  it('does not show the previous project\'s load error after projectId changes', async () => {
-    const { rerender } = render(editor('proj-A'));
+  it('does not show the previous project\'s load error after the project changes', async () => {
+    const user = userEvent.setup();
+    render(editor('proj-A'));
     await act(async () => { settle(urlOf('proj-A')).resolve(errorBody('A failed')); });
     await screen.findByRole('alert');
 
-    rerender(editor('proj-B'));
+    await switchTo(user, 'proj-B');
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(loadingLine()).toBeInTheDocument();
@@ -566,8 +621,9 @@ describe('AutopilotSettingsEditor load failure and project switch', () => {
     ['succeeds', (p: Pending) => p.resolve(jsonResponse(forProject('proj-A', { maxTickets: { value: 55, local: 55, source: 'local' } })))],
     ['fails', (p: Pending) => p.resolve(errorBody('late A failure'))]
   ])('ignores a late answer for the previous project (it %s)', async (_how, finish) => {
-    const { rerender } = render(editor('proj-A'));
-    rerender(editor('proj-B'));
+    const user = userEvent.setup();
+    render(editor('proj-A'));
+    await switchTo(user, 'proj-B');
     await act(async () => {
       settle(urlOf('proj-B')).resolve(jsonResponse(forProject('proj-B', { maxTickets: { value: 44, local: 44, source: 'local' } })));
     });
@@ -648,14 +704,15 @@ describe('AutopilotSettingsEditor load failure and project switch', () => {
   ])('does not show the previous project\'s save as busy, and ignores its late answer (it %s)', async (_how, finish) => {
     const user = userEvent.setup();
     const onDirty = vi.fn();
-    const { rerender } = render(editor('proj-A', onDirty));
+    render(editor('proj-A', onDirty));
     await loadWith('proj-A', 20);
     await typeMaxTickets(user, '30');
     await user.click(saveButton());
     expectBusy(true);
     expect(maxTicketsInput()).toBeDisabled();
 
-    rerender(editor('proj-B', onDirty));
+    // The edit is still unsaved until the answer is in, so leaving asks.
+    await switchTo(user, 'proj-B', { discard: true });
     await loadWith('proj-B', 44);
 
     // B is not busy while A's save is still running.
@@ -683,12 +740,12 @@ describe('AutopilotSettingsEditor load failure and project switch', () => {
 
   it('keeps the new project\'s own save busy when the previous project\'s save answers first', async () => {
     const user = userEvent.setup();
-    const { rerender } = render(editor('proj-A'));
+    render(editor('proj-A'));
     await loadWith('proj-A', 20);
     await typeMaxTickets(user, '30');
     await user.click(saveButton());
 
-    rerender(editor('proj-B'));
+    await switchTo(user, 'proj-B', { discard: true });
     await loadWith('proj-B', 44);
     await typeMaxTickets(user, '46');
     await user.click(saveButton());
@@ -716,18 +773,18 @@ describe('AutopilotSettingsEditor load failure and project switch', () => {
 
   it('shows a project busy again when switched back to while its own save still runs', async () => {
     const user = userEvent.setup();
-    const { rerender } = render(editor('proj-A'));
+    render(editor('proj-A'));
     await loadWith('proj-A', 20);
     await typeMaxTickets(user, '30');
     await user.click(saveButton());
 
-    rerender(editor('proj-B'));
+    await switchTo(user, 'proj-B', { discard: true });
     await loadWith('proj-B', 44);
     await typeMaxTickets(user, '46');
     await user.click(saveButton());
     expectBusy(true);
 
-    rerender(editor('proj-A'));
+    await switchTo(user, 'proj-A', { discard: true });
     await loadWith('proj-A', 20);
 
     // A's first save is still running, so A is busy and no second save of
@@ -756,5 +813,131 @@ describe('AutopilotSettingsEditor load failure and project switch', () => {
     expect(maxTicketsInput()).not.toBeDisabled();
     expect(maxTicketsInput().value).toBe('30');
     expect(pending).toHaveLength(0);
+  });
+
+  // DFLT-00374: the tab's own project selector. Switching loads the picked
+  // project's settings (showing the loading line, never the previous
+  // project's values, until they are in) and saves go to it; unsaved edits
+  // are only dropped once the user agrees to.
+  const pendingUrls = () => pending.map(p => `${p.method} ${p.url}`);
+
+  it('loads the picked project, shows the loading line until it is in, and saves to it', async () => {
+    const user = userEvent.setup();
+    render(editor('proj-A'));
+    await loadWith('proj-A', 20);
+
+    await switchTo(user, 'proj-B');
+    expect(pendingUrls()).toEqual([`GET ${urlOf('proj-B')}`]);
+    expect(loadingLine()).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('20')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(label('maxTickets'))).not.toBeInTheDocument();
+
+    await loadWith('proj-B', 44);
+    expect(loadingLine()).not.toBeInTheDocument();
+
+    await typeMaxTickets(user, '46');
+    await user.click(saveButton());
+    expect(pendingUrls()).toEqual([`PUT ${urlOf('proj-B')}`]);
+    await act(async () => {
+      settle(urlOf('proj-B'), 'PUT').resolve(
+        jsonResponse(forProject('proj-B', { maxTickets: { value: 46, local: 46, source: 'local' } }))
+      );
+    });
+    expect(maxTicketsInput().value).toBe('46');
+    expect(fetchSpy.mock.calls.map(([url, init]) => `${init?.method ?? 'GET'} ${String(url)}`)).toEqual([
+      `GET ${urlOf('proj-A')}`,
+      `GET ${urlOf('proj-B')}`,
+      `PUT ${urlOf('proj-B')}`
+    ]);
+  });
+
+  it('asks before switching away from unsaved edits, and switches on discard', async () => {
+    const user = userEvent.setup();
+    const onDirty = vi.fn();
+    render(editor('proj-A', onDirty));
+    await loadWith('proj-A', 20);
+    await typeMaxTickets(user, '30');
+    expect(onDirty).toHaveBeenLastCalledWith(true);
+
+    await user.selectOptions(projectSelect(), 'proj-B');
+    const dialog = screen.getByTestId('autopilot-project-discard-confirm');
+    // The same wording as the settings modal's tab change.
+    expect(dialog).toHaveTextContent(i18n.t('settings.unsavedChanges.confirmTitle'));
+    expect(dialog).toHaveTextContent(i18n.t('settings.unsavedChanges.confirmMessage'));
+    expect(screen.getByTestId('autopilot-project-discard-confirm-confirm')).toHaveTextContent(
+      i18n.t('settings.unsavedChanges.discardButton')
+    );
+    // Nothing is loaded before the answer.
+    expect(pending).toHaveLength(0);
+
+    await user.click(screen.getByTestId('autopilot-project-discard-confirm-confirm'));
+
+    expect(projectSelect().value).toBe('proj-B');
+    expect(pendingUrls()).toEqual([`GET ${urlOf('proj-B')}`]);
+    // Still loading B, and already no longer dirty: the modal must not ask
+    // again on its next tab change or close.
+    expect(loadingLine()).toBeInTheDocument();
+    expect(onDirty).toHaveBeenLastCalledWith(false);
+
+    await loadWith('proj-B', 44);
+    expect(maxTicketsInput().value).toBe('44');
+    expect(onDirty).toHaveBeenLastCalledWith(false);
+  });
+
+  it('stays on the project with the edits kept when the confirmation is cancelled', async () => {
+    const user = userEvent.setup();
+    const onDirty = vi.fn();
+    render(editor('proj-A', onDirty));
+    await loadWith('proj-A', 20);
+    await typeMaxTickets(user, '30');
+
+    await user.selectOptions(projectSelect(), 'proj-B');
+    expect(confirmDialog()).toBeInTheDocument();
+    await user.click(screen.getByTestId('autopilot-project-discard-confirm-cancel'));
+
+    expect(confirmDialog()).not.toBeInTheDocument();
+    expect(projectSelect().value).toBe('proj-A');
+    expect(maxTicketsInput().value).toBe('30');
+    expect(saveButton()).toBeEnabled();
+    expect(onDirty).toHaveBeenLastCalledWith(true);
+    expect(pending).toHaveLength(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('switches without asking when nothing is unsaved', async () => {
+    const user = userEvent.setup();
+    render(editor('proj-A'));
+    await loadWith('proj-A', 20);
+
+    await user.selectOptions(projectSelect(), 'proj-C');
+
+    expect(confirmDialog()).not.toBeInTheDocument();
+    expect(projectSelect().value).toBe('proj-C');
+    expect(pendingUrls()).toEqual([`GET ${urlOf('proj-C')}`]);
+  });
+
+  it('drops the discarded edits when the placeholder is picked, and asks nothing when coming back', async () => {
+    const user = userEvent.setup();
+    const onDirty = vi.fn();
+    render(editor('proj-A', onDirty));
+    await loadWith('proj-A', 20);
+    await typeMaxTickets(user, '30');
+
+    await switchTo(user, '', { discard: true });
+
+    expect(screen.getByText(i18n.t('settings.autopilot.selectProject'))).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('settings.autopilot.noProjects'))).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(label('maxTickets'))).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: i18n.t('settings.common.save') })).not.toBeInTheDocument();
+    expect(projectSelect()).toBeEnabled();
+    expect(onDirty).toHaveBeenLastCalledWith(false);
+    expect(pending).toHaveLength(0);
+
+    await user.selectOptions(projectSelect(), 'proj-A');
+    expect(confirmDialog()).not.toBeInTheDocument();
+    expect(projectSelect().value).toBe('proj-A');
+    expect(pendingUrls()).toEqual([`GET ${urlOf('proj-A')}`]);
+    await loadWith('proj-A', 20);
+    expect(onDirty).toHaveBeenLastCalledWith(false);
   });
 });

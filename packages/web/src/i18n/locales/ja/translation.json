@@ -628,10 +628,13 @@
       "rowError": "ラベル「{{name}}」: {{message}}"
     },
     "autopilot": {
-      "title": "オートパイロット設定（{{project}}）",
-      "description": "このプロジェクトでオートパイロット（autopilot-ticket / autopilot-tree）を実行するときの設定です。ここで保存した値はこの環境のローカル設定（~/.graph-ops/config.json）に保存されます。チーム設定（チーム拡張ディレクトリの autopilot.yaml）で指定された項目はそちらが優先され、ここでは変更できません。",
+      "title": "オートパイロット設定",
+      "description": "選んだプロジェクトでオートパイロット（autopilot-ticket / autopilot-tree）を実行するときの設定です。ここで保存した値はこの環境のローカル設定（~/.graph-ops/config.json）に保存されます。チーム設定（チーム拡張ディレクトリの autopilot.yaml）で指定された項目はそちらが優先され、ここでは変更できません。",
       "teamFile": "チーム設定ファイル: {{path}}",
-      "noProject": "プロジェクトが選択されていません。オートパイロット設定はプロジェクトごとに保存されるため、先にプロジェクトを選択してください。",
+      "projectLabel": "プロジェクト",
+      "projectPlaceholder": "プロジェクトを選択",
+      "selectProject": "オートパイロット設定を編集するプロジェクトを選択してください。オートパイロット設定はプロジェクトごとに保存されます。",
+      "noProjects": "プロジェクトがまだありません。先にプロジェクトを作成してください。",
       "clearLocal": "ローカル値を削除して既定値に戻す",
       "clearLocalFor": "{{key}}のローカル値を削除",
       "lockedWithLocal": "{{source}}（ローカル値: {{value}}）",

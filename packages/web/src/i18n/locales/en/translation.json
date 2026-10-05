@@ -629,10 +629,13 @@
       "rowError": "Label \"{{name}}\": {{message}}"
     },
     "autopilot": {
-      "title": "Autopilot settings ({{project}})",
-      "description": "Settings used when autopilot (autopilot-ticket / autopilot-tree) runs in this project. Values saved here go to this environment's local settings (~/.graph-ops/config.json). Keys set by the team settings (autopilot.yaml in the team extensions directory) take precedence and cannot be changed here.",
+      "title": "Autopilot settings",
+      "description": "Settings used when autopilot (autopilot-ticket / autopilot-tree) runs in the selected project. Values saved here go to this environment's local settings (~/.graph-ops/config.json). Keys set by the team settings (autopilot.yaml in the team extensions directory) take precedence and cannot be changed here.",
       "teamFile": "Team settings file: {{path}}",
-      "noProject": "No project is selected. Autopilot settings are saved per project, so select a project first.",
+      "projectLabel": "Project",
+      "projectPlaceholder": "Select a project",
+      "selectProject": "Select a project to edit its autopilot settings. Autopilot settings are saved per project.",
+      "noProjects": "There are no projects yet. Create one before editing autopilot settings.",
       "clearLocal": "Remove the local value and use the inherited one",
       "clearLocalFor": "Remove the local value of {{key}}",
       "lockedWithLocal": "{{source}} (local value: {{value}})",
