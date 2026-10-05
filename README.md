@@ -101,7 +101,7 @@ Click a ticket to expand it. The left side shows the execution graph: nodes on t
 ![Formatted preview of a plan artifact](docs/images/artifact-preview.png)
 
 - Click a node to preview its artifacts: Markdown, Gherkin, and HTML are shown formatted.
-- Each artifact can be opened in a new tab or downloaded. "Download all artifacts" downloads every artifact of the ticket at once.
+- Each artifact can be opened in a new tab or downloaded. "Download all artifacts" downloads every artifact of the ticket at once as a zip: the ticket's description as `00_チケット説明.md`, then one folder per node numbered in execution order (`01_<node name>`, `02_<node name>`, ...).
 - Besides "Nodes & Artifacts" (the node list above), the "Gherkin Spec", "HTML Artifacts", and "All Artifacts" tabs collect artifacts of each kind across the ticket.
 - A ticket derived from another one shows a "Parent ticket" link, and a ticket with derived tickets shows a "Child tickets (n)" list with each child's status. Click one to open that ticket (the list filters are cleared if they hide it). A parent is set when the ticket is created (`graph-engine create-ticket --parent <ticketId>`, or by the autopilot) and cannot be changed later.
 - A ticket processed by the autopilot also shows an "Automatic decisions (n)" section listing every decision made on your behalf (refinement, approval gates, iteration limits, release, follow-up tickets, and the tree summary), each of which opens in a new tab.
@@ -366,7 +366,7 @@ claude plugin update graph-ops@graph-ops
 ![計画の成果物の整形プレビュー](docs/images/artifact-preview.png)
 
 - ノードをクリックすると成果物をプレビューできます。Markdown・Gherkin・HTML は整形して表示されます。
-- 成果物ごとに「別タブで開く」「ダウンロード」ができます。「成果物を一括ダウンロード」で、チケットのすべての成果物をまとめてダウンロードできます。
+- 成果物ごとに「別タブで開く」「ダウンロード」ができます。「成果物を一括ダウンロード」で、チケットのすべての成果物を zip でまとめてダウンロードできます。zip にはチケットの説明（`00_チケット説明.md`）と、実行順に番号を付けたノードごとのフォルダ（`01_<ノード名>`、`02_<ノード名>`…）が入ります。
 - 「ノード一覧・成果物展開」（上記のノード一覧）のほか、「Gherkin 仕様」「HTML成果物」「全成果物」タブには、チケット全体の成果物が種類ごとにまとまっています。
 - 別のチケットから派生したチケットには「親チケット」へのリンクが、派生したチケットを持つチケットには「子チケット（n件）」の一覧が、各チケットのステータス付きで表示されます。クリックするとそのチケットを開きます（一覧の絞り込みで隠れている場合は絞り込みを解除します）。親はチケットの作成時に決まり（`graph-engine create-ticket --parent <ticketId>`、またはオートパイロットによる作成）、後から変えることはできません。
 - オートパイロットで処理したチケットには「自動判断（n件）」の欄も表示されます。人の代わりに行った判断（リファイン、承認ゲート、反復上限、リリース、申し送りのチケット化、ツリーのサマリ）が並び、それぞれ別タブで開けます。
