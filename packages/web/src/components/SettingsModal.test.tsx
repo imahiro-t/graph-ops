@@ -4,8 +4,8 @@
 // confirmation.
 //
 // There is no scope switcher to protect any more (DFLT-00124): every tab
-// edits the one user tier, and the labels tab -- the only per-project one
-// left -- carries its own project selector.
+// edits the one user tier, and the per-project tabs -- labels and, since
+// DFLT-00374, autopilot -- carry their own project selectors.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { useState } from 'react';
@@ -639,6 +639,69 @@ describe('SettingsModal', () => {
       await openLabelsTab(user);
 
       expect(projectSelect()).toHaveValue(alpha.id);
+    });
+  });
+
+  // DFLT-00374 completion criterion 6: the autopilot tab carries its own
+  // project selector too, and like the labels tab it starts again from the
+  // app's current project after the user leaves the tab and comes back.
+  describe('the autopilot tab picks its own project', () => {
+    const alpha: Project = { id: 'p-alpha', name: 'Alpha', prefix: 'ALPHA', local_path: '/work/alpha', created_at: '', updated_at: '' };
+    const beta: Project = { id: 'p-beta', name: 'Beta', prefix: 'BETA', local_path: '/work/beta', created_at: '', updated_at: '' };
+    const autopilotUrl = (id: string) => `/api/projects/${id}/autopilot-settings`;
+    let fetchMock: ReturnType<typeof vi.fn>;
+    const autopilotGets = () =>
+      fetchMock.mock.calls.map(([url]) => String(url)).filter(url => url.endsWith('/autopilot-settings'));
+    const projectSelect = () => screen.getByLabelText(i18n.t('settings.autopilot.projectLabel'));
+    const openTab = async (user: ReturnType<typeof userEvent.setup>, key: string) => {
+      const tab = screen.getByRole('tab', { name: i18n.t(`settings.tabs.${key}`) });
+      await user.click(tab);
+      await waitFor(() => expect(tab).toHaveAttribute('aria-selected', 'true'));
+    };
+
+    beforeEach(() => {
+      fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        const id = url.match(/^\/api\/projects\/([^/]+)\/autopilot-settings$/)?.[1];
+        const body = id ? { project_id: id, settings: {}, items: [], warnings: [], team_file: '' } : [];
+        return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('starts on the app\'s current project again after another one was picked and the tab was left', async () => {
+      const user = userEvent.setup();
+      render(
+        <SettingsModal
+          isOpen
+          onClose={vi.fn()}
+          projects={[alpha, beta]}
+          currentProject={alpha}
+          onProjectsChanged={vi.fn()}
+          onPaginationPageSizeChanged={vi.fn()}
+          onMyNameChanged={vi.fn()}
+        />
+      );
+
+      await openTab(user, 'autopilot');
+      expect(projectSelect()).toHaveValue(alpha.id);
+      await waitFor(() => expect(autopilotGets()).toEqual([autopilotUrl(alpha.id)]));
+
+      await user.selectOptions(projectSelect(), beta.id);
+      expect(projectSelect()).toHaveValue(beta.id);
+      await waitFor(() => expect(autopilotGets()).toEqual([autopilotUrl(alpha.id), autopilotUrl(beta.id)]));
+
+      await openTab(user, 'nodeTypes');
+      await openTab(user, 'autopilot');
+
+      expect(projectSelect()).toHaveValue(alpha.id);
+      await waitFor(() =>
+        expect(autopilotGets()).toEqual([autopilotUrl(alpha.id), autopilotUrl(beta.id), autopilotUrl(alpha.id)])
+      );
     });
   });
 });

@@ -11,9 +11,10 @@
 // removed in DFLT-00124, and a team shares settings by pointing
 // teamExtensionsDir at a shared directory. The app settings tab can name that
 // directory (DFLT-00153), but no tab here edits or previews its contents,
-// since it is shared state curated outside the app. Labels are the
-// exception, and the reason the modal still takes the project list: they are
-// per-project DB rows, so that tab carries a project selector of its own.
+// since it is shared state curated outside the app. Labels and autopilot
+// settings are the exceptions, and the reason the modal still takes the
+// project list: both are kept per project, so each of those tabs carries a
+// project selector of its own (DFLT-00374 gave autopilot one).
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Settings, X } from 'lucide-react';
@@ -326,12 +327,14 @@ export const SettingsModal: React.FC<Props> = ({
           )}
           {/* Autopilot settings (DFLT-00142) are per project too, but are
               local to this environment (the home config's
-              autopilotSettings.<projectId>); the tab edits the project the
-              app has selected. */}
+              autopilotSettings.<projectId>). Like labels, the tab picks its
+              own project (DFLT-00374), starting from the one the app has
+              selected -- and again from that one each time the tab is
+              opened, since leaving it unmounts it. */}
           {tab === 'autopilot' && (
             <AutopilotSettingsEditor
-              projectId={currentProject?.id ?? ''}
-              projectName={currentProject?.name}
+              projects={projects}
+              initialProjectId={currentProject?.id ?? ''}
               onDirtyChange={setDirty}
             />
           )}

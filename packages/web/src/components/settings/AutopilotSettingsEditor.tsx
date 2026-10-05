@@ -1,5 +1,5 @@
-// "オートパイロット" tab (DFLT-00142): the current project's autopilot
-// settings, via GET/PUT /api/projects/{id}/autopilot-settings. See
+// "オートパイロット" tab (DFLT-00142): a project's autopilot settings, via
+// GET/PUT /api/projects/{id}/autopilot-settings. See
 // packages/core-go/internal/autopilot/settings.go for how a value is
 // resolved -- per key, team projects.<id> > team defaults > local > built-in
 // default.
@@ -10,6 +10,11 @@
 // (AUTOPILOT_SETTING_LOCKED), so sending it would fail every save. Values are
 // not validated here -- the server's single validation is the one that
 // counts, and its 400 is shown translated.
+//
+// Like the labels tab, it carries its own project selector (DFLT-00374): the
+// settings modal is not tied to a project, so the tab starts on the one the
+// app has open and any other can be picked here. Switching away from unsaved
+// edits asks first, with the same question as the modal's tab change.
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, CheckCircle2, Lock, RotateCcw, Save } from 'lucide-react';
@@ -21,7 +26,8 @@ import {
   AutopilotSettingKey,
   AutopilotSettingsPatch,
   AutopilotSettingsResponse,
-  AutopilotSettingValue
+  AutopilotSettingValue,
+  Project
 } from '../../types';
 import { fetchAutopilotSettings, saveAutopilotSettings } from '../../lib/settingsApi';
 import { errorMessage } from '../../lib/apiError';
@@ -32,11 +38,17 @@ import { ErrorBox } from './ErrorBox';
 import { LoadFailure, useFocusAfterRetry } from './LoadFailure';
 import { LoadingLine } from './LoadingLine';
 import { Spinner } from '../Spinner';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
+import { unsavedChangesConfirmOptions } from './unsavedChangesConfirm';
 
 interface Props {
-  // The project whose settings are edited ('' when none is selected).
-  projectId: string;
-  projectName?: string;
+  // Every project that can be picked. An empty list disables the selector:
+  // there is no project to keep settings for.
+  projects: Project[];
+  // Which project to start on -- the one the app has open ('' when none is,
+  // and then the first project). The user can switch to any other from the
+  // selector.
+  initialProjectId: string;
   onDirtyChange: (dirty: boolean) => void;
 }
 
@@ -87,10 +99,15 @@ function toPatchValue(key: AutopilotSettingKey, v: string | boolean | null): Aut
   return v;
 }
 
-export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectName, onDirtyChange }) => {
+export const AutopilotSettingsEditor: React.FC<Props> = ({ projects, initialProjectId, onDirtyChange }) => {
   const { t } = useTranslation();
   const tRef = useLatest(t);
   const idPrefix = useId();
+  const projectSelectId = useId();
+  const { confirm, confirmDialog } = useConfirmDialog();
+  // The project whose settings are edited ('' when none is selected). Starts
+  // on the app's current project, else the first one, like LabelsEditor.
+  const [projectId, setProjectId] = useState<string>(() => initialProjectId || projects[0]?.id || '');
   const [data, setData] = useState<AutopilotSettingsResponse | null>(null);
   const [draft, setDraft] = useState<Draft>({});
   // The project whose settings are in `data`, '' while none is. Set only by
@@ -208,9 +225,25 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
     }
   };
 
-  if (!projectId) {
-    return <p className="text-xs text-slate-500 dark:text-slate-400">{t('settings.autopilot.noProject')}</p>;
-  }
+  // The selector's change. With unsaved edits it asks first (the same
+  // question as the modal's tab change, unsavedChangesConfirmOptions); a
+  // cancel changes nothing, and the controlled select shows the old project
+  // again. A switch that goes ahead -- to the placeholder ('') too -- drops
+  // the previous project's settings and edits right here, not in load():
+  // load() does nothing for '', and until the next project's settings are in
+  // the old draft would keep isDirty true and tell the modal so. Defined per
+  // render so it reads the current isDirty.
+  const handleProjectChange = async (next: string) => {
+    if (next === projectId) return;
+    if (isDirty && !(await confirm(unsavedChangesConfirmOptions(t, 'autopilot-project-discard-confirm')))) return;
+    setData(null);
+    setDraft({});
+    setError('');
+    // load() clears the previous failure for a project, but does nothing
+    // for '': clear it here so nothing carries over.
+    if (!next) setLoadError(null);
+    setProjectId(next);
+  };
 
   const valueLabel = (key: AutopilotSettingKey, v: AutopilotSettingValue | string | boolean | null): string => {
     if (v === null) return '';
@@ -293,27 +326,48 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
     return it.locked ? it.value : (draft.permissionMode ?? it.default);
   })();
 
-  // In this order (see LoadFailure): the current project's load failure,
-  // then loading, then the form. A failed load never sets loadedProjectId,
-  // so the loading test would otherwise hide the failure for good.
+  // A failed load never sets loadedProjectId, so the loading test would
+  // otherwise hide the failure for good.
   const failed = loadError !== null && loadError.projectId === projectId;
   const loaded = !failed && loadedProjectId === projectId;
 
   return (
     <div className="h-full min-h-0 overflow-y-auto flex flex-col gap-3 narrow:h-auto narrow:overflow-visible">
+      {confirmDialog}
       <div>
-        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-          {t('settings.autopilot.title', { project: projectName || projectId })}
-        </h3>
+        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{t('settings.autopilot.title')}</h3>
         <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400 mt-1">{t('settings.autopilot.description')}</p>
-        {loaded && data?.team_file && (
-          <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400 mt-1 wrap-anywhere">
-            {t('settings.autopilot.teamFile', { path: data.team_file })}
-          </p>
-        )}
       </div>
 
-      {failed ? (
+      {/* The same selector as LabelsEditor's (DFLT-00374). */}
+      <div className="flex items-center gap-2 text-xs narrow:flex-wrap">
+        <label htmlFor={projectSelectId} className="font-semibold text-slate-600 dark:text-slate-400">
+          {t('settings.autopilot.projectLabel')}
+        </label>
+        <select
+          id={projectSelectId}
+          value={projectId}
+          onChange={e => void handleProjectChange(e.target.value)}
+          disabled={projects.length === 0}
+          className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 disabled:opacity-50 narrow:min-w-0 narrow:max-w-full"
+        >
+          <option value="">{t('settings.autopilot.projectPlaceholder')}</option>
+          {projects.map(p => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* In this order (see LoadFailure): no project, the current
+          project's load failure, then loading, then the form. */}
+      {!projectId ? (
+        <div
+          role="status"
+          className="p-2.5 text-xs bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 rounded-lg border border-amber-200 dark:border-amber-800"
+        >
+          {t(projects.length === 0 ? 'settings.autopilot.noProjects' : 'settings.autopilot.selectProject')}
+        </div>
+      ) : failed ? (
         <LoadFailure
           message={t('settings.common.loadFailed', { message: loadError.message })}
           retrying={retryingFor === projectId}
@@ -324,6 +378,12 @@ export const AutopilotSettingsEditor: React.FC<Props> = ({ projectId, projectNam
         <LoadingLine />
       ) : (
         <>
+          {data?.team_file && (
+            <p className="text-[0.6875rem] text-slate-500 dark:text-slate-400 wrap-anywhere">
+              {t('settings.autopilot.teamFile', { path: data.team_file })}
+            </p>
+          )}
+
           {error && (
             <ErrorBox role="alert" className="p-2.5 text-[0.6875rem]">
               {error}
