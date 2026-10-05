@@ -1239,24 +1239,62 @@ func artifactDownloadFilename(a *domain.Artifact, meta artifactcontent.Metadata,
 	return name + ext
 }
 
+// ticketDescriptionDownloadName is the base name (after the numeric prefix)
+// of the zip entry handleDownloadTicketArtifacts writes the ticket's
+// description into. It is fixed rather than localized: the ticket's
+// completion criteria (DFLT-00373) name the file `00_チケット説明.md`.
+const ticketDescriptionDownloadName = "チケット説明.md"
+
+// downloadGroup is one directory of handleDownloadTicketArtifacts' zip: a
+// node (or, defensively, an unknown node ID) and its artifacts in
+// detail.Artifacts order.
+type downloadGroup struct {
+	name      string
+	artifacts []domain.Artifact
+}
+
 // handleDownloadTicketArtifacts serves every artifact currently attached to
 // a ticket as a single zip -- the "download all" counterpart to
 // handleGetArtifactContent's ?download=1 (one artifact at a time), so a
 // user reviewing a ticket's deliverables doesn't have to click "Download"
 // once per artifact.
 //
+// The archive is laid out so that, unpacked and sorted by name in a file
+// manager, it reads from the ticket's background through its deliverables in
+// execution order:
+//
+//   - `00_チケット説明.md` at the root holds the ticket's description verbatim,
+//     written only when the description has a non-blank character.
+//   - Each node with at least one writable artifact gets one directory named
+//     `NN_<node name>`, where NN numbers those nodes 01, 02, ... in the order
+//     orderNodesForDownload gives (the graph's topological order, ties in
+//     the Web UI's node-list order). A node with no artifact -- or only
+//     artifacts that turn out empty, unreadable or undecodable -- gets
+//     neither a directory nor a number, so the numbers never have a gap that
+//     would suggest a missing node.
+//   - Every prefix is zero-padded to max(2, digits of the highest number),
+//     the description's `00` included, so that with 100 or more numbered
+//     nodes the description still sorts first (`000_` before `001_`) and the
+//     directories still sort in order.
+//
+// Because the width and the numbering depend on which artifacts can actually
+// be written, every artifact is fetched and decoded once to count the
+// writable ones before anything is written, then fetched again while the
+// archive is streamed -- trading a second GetArtifact per artifact for not
+// holding every payload in memory at once.
+//
 // detail.Artifacts (ListArtifactsByTicket) omits `content` for html/image
 // rows to keep that response small (see artifactSummaryCols), so each entry
 // is re-fetched in full via GetArtifact before being written into the
 // archive -- the same thing handleGetArtifactContent does for a single
-// artifact. Entries are grouped one directory per node (by node name) so
-// artifacts from different nodes -- or different loop-back passes reusing
-// the same artifact name -- can't collide; a name collision within the same
-// directory gets a numeric suffix rather than silently overwriting the
-// earlier entry in the zip. An artifact whose bytes can't be produced (a
-// decode error) is skipped rather than failing the whole download --
-// headers are already committed by the time entries are streamed, so there
-// is no way to report a per-entry failure except omitting it.
+// artifact. Grouping one directory per node keeps artifacts from different
+// nodes -- or different loop-back passes reusing the same artifact name --
+// from colliding; a name collision within the same directory gets a numeric
+// suffix rather than silently overwriting the earlier entry in the zip. An
+// artifact whose bytes can't be produced (a decode error) is skipped rather
+// than failing the whole download -- headers are already committed by the
+// time entries are streamed, so there is no way to report a per-entry
+// failure except omitting it.
 func (s *Server) handleDownloadTicketArtifacts(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	detail, err := s.repo.GetTicketDetail(id)
@@ -1269,9 +1307,21 @@ func (s *Server) handleDownloadTicketArtifacts(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	nodeNameByID := make(map[string]string, len(detail.Nodes))
-	for _, n := range detail.Nodes {
-		nodeNameByID[n.ID] = n.Name
+	groups := downloadGroups(detail)
+
+	// First pass: find the groups that will actually produce an entry, so
+	// only they are numbered and the width is known before the first name.
+	numbered := make([]downloadGroup, 0, len(groups))
+	for _, g := range groups {
+		writable := 0
+		s.eachDownloadableArtifact(g.artifacts, func(string, []byte) { writable++ })
+		if writable > 0 {
+			numbered = append(numbered, g)
+		}
+	}
+	width := len(fmt.Sprint(len(numbered)))
+	if width < 2 {
+		width = 2
 	}
 
 	zipName := sanitizeFilenameComponent(detail.ID+"-"+detail.Title) + ".zip"
@@ -1282,36 +1332,137 @@ func (s *Server) handleDownloadTicketArtifacts(w http.ResponseWriter, r *http.Re
 	zw := zip.NewWriter(w)
 	defer zw.Close()
 
-	entryCount := make(map[string]int)
-	for _, summary := range detail.Artifacts {
+	if strings.TrimSpace(detail.Description) != "" {
+		if entry, err := zw.Create(fmt.Sprintf("%0*d_%s", width, 0, ticketDescriptionDownloadName)); err == nil {
+			_, _ = entry.Write([]byte(detail.Description))
+		}
+	}
+
+	for i, g := range numbered {
+		dir := fmt.Sprintf("%0*d_%s", width, i+1, sanitizeFilenameComponent(g.name))
+		entryCount := make(map[string]int)
+		s.eachDownloadableArtifact(g.artifacts, func(filename string, data []byte) {
+			n := entryCount[filename]
+			entryCount[filename] = n + 1
+			if n > 0 {
+				ext := filepath.Ext(filename)
+				filename = fmt.Sprintf("%s-%d%s", strings.TrimSuffix(filename, ext), n+1, ext)
+			}
+			entry, err := zw.Create(dir + "/" + filename)
+			if err != nil {
+				return
+			}
+			_, _ = entry.Write(data)
+		})
+	}
+}
+
+// downloadGroups splits detail.Artifacts into one group per node, in
+// orderNodesForDownload's order, keeping detail.Artifacts' order within a
+// node. Nodes without any artifact are left out. An artifact whose node ID
+// is not among detail.Nodes (not expected to happen) is still kept: such
+// IDs form groups after the graph's nodes, in the order they first appear,
+// named after an empty node name like before numbering existed.
+func downloadGroups(detail *domain.TicketDetail) []downloadGroup {
+	byNode := make(map[string][]domain.Artifact)
+	var unknownOrder []string
+	known := make(map[string]bool, len(detail.Nodes))
+	for _, n := range detail.Nodes {
+		known[n.ID] = true
+	}
+	for _, a := range detail.Artifacts {
+		if _, seen := byNode[a.NodeID]; !seen && !known[a.NodeID] {
+			unknownOrder = append(unknownOrder, a.NodeID)
+		}
+		byNode[a.NodeID] = append(byNode[a.NodeID], a)
+	}
+
+	var groups []downloadGroup
+	for _, n := range orderNodesForDownload(detail.Nodes, detail.Edges) {
+		if arts := byNode[n.ID]; len(arts) > 0 {
+			groups = append(groups, downloadGroup{name: n.Name, artifacts: arts})
+		}
+	}
+	for _, nodeID := range unknownOrder {
+		groups = append(groups, downloadGroup{name: "", artifacts: byNode[nodeID]})
+	}
+	return groups
+}
+
+// eachDownloadableArtifact fetches each artifact in full and calls emit with
+// the filename it is offered as (artifactDownloadFilename, before any
+// collision suffix) and its decoded bytes, skipping an artifact that can't be
+// read, has no content, or fails to decode.
+func (s *Server) eachDownloadableArtifact(artifacts []domain.Artifact, emit func(filename string, data []byte)) {
+	for _, summary := range artifacts {
 		full, err := s.repo.GetArtifact(summary.ID)
 		if err != nil || full == nil {
 			continue
 		}
-		meta := artifactcontent.DecodeMetadata(full.Metadata)
-
 		if full.Content == nil || *full.Content == "" {
 			continue
 		}
+		meta := artifactcontent.DecodeMetadata(full.Metadata)
 		data, contentType, err := artifactcontent.Payload(full.Type, *full.Content, meta)
 		if err != nil {
 			continue
 		}
+		emit(artifactDownloadFilename(full, meta, contentType), data)
+	}
+}
 
-		dir := sanitizeFilenameComponent(nodeNameByID[full.NodeID])
-		filename := artifactDownloadFilename(full, meta, contentType)
-		key := dir + "/" + filename
-		n := entryCount[key]
-		entryCount[key] = n + 1
-		if n > 0 {
-			ext := filepath.Ext(filename)
-			filename = fmt.Sprintf("%s-%d%s", strings.TrimSuffix(filename, ext), n+1, ext)
-		}
-
-		entry, err := zw.Create(dir + "/" + filename)
-		if err != nil {
+// orderNodesForDownload returns nodes in the execution graph's topological
+// order, the order the Web UI's node list shows them in: only forward edges
+// count (an iteration_loop edge points back at an earlier node and is
+// ignored), and among the nodes ready at the same point the one earlier in
+// nodes -- the store's created_at order, which is the list order -- comes
+// first, so when nodes is already topological it is returned unchanged.
+// Edges touching a node outside nodes are ignored, and nodes caught in a
+// forward cycle (which the engine never creates) are appended at the end in
+// their original order instead of being dropped.
+func orderNodesForDownload(nodes []domain.GraphNode, edges []domain.GraphEdge) []domain.GraphNode {
+	index := make(map[string]int, len(nodes))
+	for i, n := range nodes {
+		index[n.ID] = i
+	}
+	indegree := make([]int, len(nodes))
+	next := make([][]int, len(nodes))
+	for _, e := range edges {
+		if e.Condition == domain.EdgeLoop {
 			continue
 		}
-		_, _ = entry.Write(data)
+		from, okFrom := index[e.FromNodeID]
+		to, okTo := index[e.ToNodeID]
+		if !okFrom || !okTo {
+			continue
+		}
+		next[from] = append(next[from], to)
+		indegree[to]++
 	}
+
+	out := make([]domain.GraphNode, 0, len(nodes))
+	done := make([]bool, len(nodes))
+	for {
+		pick := -1
+		for i := range nodes {
+			if !done[i] && indegree[i] == 0 {
+				pick = i
+				break
+			}
+		}
+		if pick < 0 {
+			break
+		}
+		done[pick] = true
+		out = append(out, nodes[pick])
+		for _, to := range next[pick] {
+			indegree[to]--
+		}
+	}
+	for i, n := range nodes {
+		if !done[i] {
+			out = append(out, n)
+		}
+	}
+	return out
 }
