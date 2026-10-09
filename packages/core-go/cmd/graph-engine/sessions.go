@@ -95,6 +95,11 @@ func touchSession(eng *engine.GraphEngine, sessionID string) {
 type claimedNodeView struct {
 	domain.GraphNode
 	ClaimToken string `json:"claim_token,omitempty"`
+	// Model is the model to start this node's subagent on (DFLT-00375):
+	// haiku, sonnet, opus, or "" for "pass no model, inherit the session's
+	// own". Always present, so a caller can tell "" from an older engine
+	// that does not resolve models at all.
+	Model string `json:"model"`
 }
 
 func claimedNodeViews(nodes []domain.GraphNode) []claimedNodeView {

@@ -435,10 +435,15 @@ export const ReviewGatesEditor: React.FC<Props> = ({ onDirtyChange }) => {
   const maxIterationsInvalid = maxIterations !== null && !MAX_ITERATIONS_CHOICES.includes(maxIterations);
   const warningItemId = (i: number) => `${idPrefix}-warning-${i}`;
   const outOfRangeWarningIndex = warnings.findIndex(w => w.code === SETTINGS_CATALOG_WARNINGS.maxIterationsOutOfRange);
-  const warningText = (w: SettingsCatalogWarning) =>
-    w.code === SETTINGS_CATALOG_WARNINGS.legacyGateMaxIterations
-      ? t('settings.reviewGates.warningLegacyGateMaxIterations', { id: w.gate_id ?? '' })
-      : t('settings.reviewGates.warningMaxIterationsOutOfRange', { value: w.value ?? '' });
+  const warningText = (w: SettingsCatalogWarning) => {
+    if (w.code === SETTINGS_CATALOG_WARNINGS.legacyGateMaxIterations) {
+      return t('settings.reviewGates.warningLegacyGateMaxIterations', { id: w.gate_id ?? '' });
+    }
+    if (w.code === SETTINGS_CATALOG_WARNINGS.nodeModelInvalid) {
+      return t('settings.reviewGates.warningNodeModelInvalid', { type: w.node_type ?? '', value: w.node_model ?? '' });
+    }
+    return t('settings.reviewGates.warningMaxIterationsOutOfRange', { value: w.value ?? '' });
+  };
   const maxIterationsDescribedBy = [
     `${idPrefix}-workflow-max-help`,
     maxIterationsInvalid && outOfRangeWarningIndex >= 0 ? warningItemId(outOfRangeWarningIndex) : null

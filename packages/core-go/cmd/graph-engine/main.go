@@ -25,6 +25,7 @@ import (
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/httpserver"
 	"github.com/graph-ops/core-go/internal/identity"
+	"github.com/graph-ops/core-go/internal/modelcap"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
 )
@@ -388,13 +389,22 @@ Commands:
                                            then)
   list-tickets
   get-executable <ticketId> [--language <code>] [--session <sessionId>]
+                 [--model-cap <haiku|sonnet|opus>] [--session-model <model>]
                                           (claims the nodes it prints in your name and --session's
                                            session, each with its own "claim_token" -- pass it back with
                                            complete-node --claim. Auto-seeds the graph's plan/plan_review
                                            nodes on first call;
                                            --language, only meaningful on that first/seeding call, is this
                                            one call's explicit language choice -- see get-language-settings --
-                                           and outranks the persistent (user-tier) language setting)
+                                           and outranks the persistent (user-tier) language setting.
+                                           Each node also carries "model": what to pass as the Agent tool's
+                                           model when starting its subagent, "" meaning pass none (inherit
+                                           the session's own model). It is min(the node type's node_models
+                                           assignment, the cap): the cap is --model-cap (haiku|sonnet|opus,
+                                           anything else is VALIDATION_ERROR and nothing is claimed), else
+                                           the family of --session-model (the caller's own model ID; one
+                                           that cannot be classified counts as unknown, never an error).
+                                           A result equal to the session's own family is "")
   expand-graph <ticketId> [--patch <file|->] [--language <code>]
                                           (call once the seed passes; no patch = default full template;
                                            --language is this one call's explicit language choice, same
@@ -569,7 +579,9 @@ Commands:
                                            release node as autopilot-tree-summary)
   autopilot status [--project <id>]      (the project's runs, newest first)
   get-workflow-catalog [--language <code>]
-                                          (plugin default -> user -> team workflow.yaml/config.yaml merge;
+                                          (plugin default -> user -> team workflow.yaml/config.yaml merge,
+                                           node_models included: each node type's model assignment --
+                                           haiku|sonnet|opus|inherit, a type not listed being inherit;
                                            --language previews the merge as if it resolved to that code,
                                            same precedence note as get-executable's)
   get-skill-context <skill-name>         (merged user/team extension text for a plugin skill)
@@ -1428,11 +1440,30 @@ func cmdListTickets(repo store.GraphRepository) error {
 }
 
 func cmdGetExecutable(eng *engine.GraphEngine, repo store.GraphRepository, rc runtimeConfig, args []string) error {
-	const usage = `usage: graph-engine get-executable <ticketId> [--language <code>] [--session <sessionId>]`
+	const usage = `usage: graph-engine get-executable <ticketId> [--language <code>] [--session <sessionId>] [--model-cap <haiku|sonnet|opus>] [--session-model <model>]`
 	session, args, err := takeSessionFlag(args, usage)
 	if err != nil {
 		return err
 	}
+	// DFLT-00375: --model-cap is the cap chosen at launch, --session-model
+	// the caller's own model ID. A bad cap is refused before anything is
+	// claimed; an unrecognizable session model is just "unknown" (see
+	// modelcap.Family) -- it must never stop the run.
+	capArg, args, err := takeFlagValue(args, "--model-cap", usage)
+	if err != nil {
+		return err
+	}
+	var modelCap modelcap.Model
+	if capArg != "" {
+		if modelCap, err = modelcap.Parse(capArg); err != nil {
+			return domain.NewAPIError(domain.ErrCodeValidation, "--model-cap: %v", err)
+		}
+	}
+	sessionModelArg, args, err := takeFlagValue(args, "--session-model", usage)
+	if err != nil {
+		return err
+	}
+	sessionModel := modelcap.Family(sessionModelArg)
 	if len(args) < 1 {
 		return fmt.Errorf(usage)
 	}
@@ -1460,7 +1491,11 @@ func cmdGetExecutable(eng *engine.GraphEngine, repo store.GraphRepository, rc ru
 	if err != nil {
 		return err
 	}
-	return printJSON(claimedNodeViews(nodes))
+	views := claimedNodeViews(nodes)
+	for i := range views {
+		views[i].Model = string(modelcap.Resolve(catalog.ModelFor(string(views[i].Type)), modelCap, sessionModel))
+	}
+	return printJSON(views)
 }
 
 // cmdExpandGraph builds the rest of a ticket's graph once the seed
@@ -1982,6 +2017,7 @@ func cmdGetWorkflowCatalog(rc runtimeConfig, args []string) error {
 		"nodes":          catalog.EnabledNodes(),
 		"language":       respLanguage,
 		"max_iterations": catalog.MaxIterations,
+		"node_models":    catalog.NodeModels,
 	})
 }
 

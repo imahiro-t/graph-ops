@@ -72,10 +72,17 @@ func mergeReviewGates(base, overlay map[string]ReviewGateDef) map[string]ReviewG
 // it. The retired per-gate ReviewGateDef.LegacyMaxIterations is not merged
 // at all: each layer's gate that still sets it only adds an entry to
 // Catalog.Warnings, and the value itself is ignored.
+//
+// NodeModels (DFLT-00375) merges per key like ReviewGates, later wins:
+// every layer -- the plugin default included -- may assign any node type,
+// and a type no layer assigns stays absent (Catalog.ModelFor reads it as
+// inherit). Values are not validated here; LoadWithRoots refuses an invalid
+// one before merging.
 func Merge(docs ...Document) Catalog {
 	var gates map[string]ReviewGateDef
 	var language string
 	maxIterations := DefaultMaxIterations
+	nodeModels := map[string]string{}
 	var warnings []Warning
 	for _, d := range docs {
 		gates = mergeReviewGates(gates, d.ReviewGates)
@@ -85,6 +92,9 @@ func Merge(docs ...Document) Catalog {
 		if d.MaxIterations != nil {
 			maxIterations = *d.MaxIterations
 		}
+		for t, m := range d.NodeModels {
+			nodeModels[t] = m
+		}
 		warnings = append(warnings, LegacyMaxIterationsWarnings(d)...)
 	}
 	var nodes []NodeDef
@@ -93,7 +103,7 @@ func Merge(docs ...Document) Catalog {
 		nodes = docs[0].Workflow.Nodes
 		seed = docs[0].Workflow.Seed
 	}
-	return Catalog{ReviewGates: gates, Nodes: nodes, Seed: seed, Language: language, MaxIterations: maxIterations, Warnings: warnings}
+	return Catalog{ReviewGates: gates, Nodes: nodes, Seed: seed, Language: language, MaxIterations: maxIterations, NodeModels: nodeModels, Warnings: warnings}
 }
 
 // LegacyMaxIterationsWarnings returns one WarnLegacyGateMaxIterations warning
