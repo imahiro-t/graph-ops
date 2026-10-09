@@ -32,6 +32,7 @@ import (
 	"github.com/graph-ops/core-go/internal/displayname"
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
+	"github.com/graph-ops/core-go/internal/modelcap"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
 	"github.com/graph-ops/core-go/internal/terminal"
@@ -430,6 +431,11 @@ type StartResult struct {
 	// settings snapshot -- what the Web UI's launch opens the orchestrator
 	// with. Not printed: the CLI's orchestrator is already running.
 	PermissionMode string `json:"-"`
+	// ModelCap is the model cap the run records after this start
+	// (DFLT-00375), "" for none -- printed so the orchestrator sees which
+	// cap its sessions get, and what the Web UI's launch opens the
+	// orchestrator with (--model).
+	ModelCap string `json:"model_cap"`
 }
 
 // Start starts a run from ticketID (autopilot start), or with reserve, only
@@ -437,6 +443,33 @@ type StartResult struct {
 // phase 5). The decision itself is autopilot.Registry.Begin's, the single
 // place the CLI and the API share.
 func (s *Service) Start(ticketID, mode, runID string, reserve bool) (StartResult, error) {
+	return s.StartWithModel(ticketID, mode, runID, reserve, nil)
+}
+
+// ParseModelCap reads a start's --model (or the launch API's model) for
+// StartWithModel (DFLT-00375): "" (not given) is nil -- keep what the run
+// recorded --, inherit is "" -- record no cap --, and haiku, sonnet or opus
+// (any case) is that model. Anything else is VALIDATION_ERROR.
+func ParseModelCap(v string) (*string, error) {
+	if v == "" {
+		return nil, nil
+	}
+	if v == modelcap.Inherit {
+		none := ""
+		return &none, nil
+	}
+	m, err := modelcap.Parse(v)
+	if err != nil {
+		return nil, domain.NewAPIError(domain.ErrCodeValidation, "VALIDATION_ERROR: model must be haiku, sonnet, opus or inherit, got %q", v)
+	}
+	cap := string(m)
+	return &cap, nil
+}
+
+// StartWithModel is Start with a model cap (see ParseModelCap and
+// autopilot.BeginRequest.ModelCap): nil keeps an adopted or taken-over
+// run's cap and gives a new run none.
+func (s *Service) StartWithModel(ticketID, mode, runID string, reserve bool, modelCap *string) (StartResult, error) {
 	root, err := s.ticket(ticketID)
 	if err != nil {
 		return StartResult{}, err
@@ -475,7 +508,7 @@ func (s *Service) Start(ticketID, mode, runID string, reserve bool) (StartResult
 	res, err := s.registry().Begin(autopilot.BeginRequest{
 		RootID: root.ID, ProjectID: root.ProjectID, RootStatus: root.Status,
 		Mode: mode, RunID: runID, Reserve: reserve, Settings: settings, Descendants: descendants,
-		TerminalTTY: tty, TerminalTTYReason: ttyReason, Actor: actor,
+		TerminalTTY: tty, TerminalTTYReason: ttyReason, Actor: actor, ModelCap: modelCap,
 	})
 	if err != nil {
 		return StartResult{}, err
@@ -492,6 +525,7 @@ func (s *Service) Start(ticketID, mode, runID string, reserve bool) (StartResult
 		Next:            "graph-engine autopilot next " + res.Run.ID,
 		UntrustedFolder: untrusted,
 		PermissionMode:  res.Run.Settings.PermissionMode,
+		ModelCap:        res.Run.ValidModelCap(),
 	}, nil
 }
 
@@ -746,6 +780,7 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		prevTicket                        autopilot.TicketState
 		workDir, base, gitTicket, gitBase string
 		permissionMode                    string
+		modelCap                          string
 		terminalTTY                       string
 		skipTab                           bool
 		untrusted                         string
@@ -837,6 +872,7 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		autopilot.RecordActivity(st, autopilot.ActivityLaunch, now)
 		run.Heartbeat = now
 		permissionMode = run.Settings.PermissionMode
+		modelCap = run.ValidModelCap()
 		terminalTTY, skipTab = run.TerminalTTY, run.TerminalTabDisabled != ""
 		return nil
 	})
@@ -868,7 +904,7 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 			return errors.New("no terminal launcher configured")
 		}
 		outcome, err = s.Launcher.Launch(LaunchRequest{
-			WorkDir: workDir, ExtraArgs: []string{"--permission-mode", permissionMode}, Prompt: WorkerPrompt(runID, ticketID, role),
+			WorkDir: workDir, ExtraArgs: sessionArgs(permissionMode, modelCap), Prompt: WorkerPrompt(runID, ticketID, role),
 			TerminalTTY: terminalTTY, SkipTab: skipTab,
 		})
 		return err
@@ -1351,6 +1387,11 @@ type WorkerContext struct {
 	Ticket   string `json:"ticket"`
 	Mode     string `json:"mode"`
 	RunState string `json:"run_state"`
+	// ModelCap is the run's model cap (DFLT-00375): haiku, sonnet or opus,
+	// "" for none. The session itself already runs on it (it was launched
+	// with --model); the worker passes it to get-executable as --model-cap
+	// so its nodes run on min(their assignment, the cap).
+	ModelCap string `json:"model_cap"`
 	// RootTicket is the ticket the run started from; its purpose decides
 	// which handoff items stay in the tree.
 	RootTicket string `json:"root_ticket"`
@@ -1392,7 +1433,7 @@ func (s *Service) WorkerContext(runID, ticketID string) (WorkerContext, error) {
 			role = st.LastRole
 		}
 		out = WorkerContext{
-			RunID: run.ID, Ticket: st.ID, RootTicket: run.RootTicketID, Mode: run.Mode, RunState: run.State, Role: role,
+			RunID: run.ID, Ticket: st.ID, RootTicket: run.RootTicketID, Mode: run.Mode, RunState: run.State, ModelCap: run.ValidModelCap(), Role: role,
 			Branch: st.Branch, Worktree: st.Worktree, BaseBranch: st.BaseBranch,
 			Settings: run.Settings, PendingDecisions: []string{},
 		}
@@ -1642,11 +1683,13 @@ type RunStatus struct {
 	Heartbeat time.Time `json:"heartbeat"`
 	// Current is the ticket whose session is running, with its role and
 	// whether it is waiting for a person.
-	Current       string            `json:"current,omitempty"`
-	CurrentRole   string            `json:"current_role,omitempty"`
-	AwaitingHuman string            `json:"awaiting_human,omitempty"`
-	StopReason    string            `json:"stop_reason,omitempty"`
-	Tickets       map[string]string `json:"tickets"`
+	Current       string `json:"current,omitempty"`
+	CurrentRole   string `json:"current_role,omitempty"`
+	AwaitingHuman string `json:"awaiting_human,omitempty"`
+	StopReason    string `json:"stop_reason,omitempty"`
+	// ModelCap is the run's model cap (DFLT-00375), left out when none.
+	ModelCap string            `json:"model_cap,omitempty"`
+	Tickets  map[string]string `json:"tickets"`
 }
 
 // Status lists a project's runs, newest first.
@@ -1677,7 +1720,7 @@ func (s *Service) Status(projectID string) ([]RunStatus, error) {
 func runStatus(r *autopilot.Run, now time.Time) RunStatus {
 	rs := RunStatus{RunID: displayname.OptionalID(r.ID), ProjectID: displayname.OptionalID(r.ProjectID),
 		Mode: displayname.Sanitize(r.Mode), Root: displayname.OptionalID(r.RootTicketID), State: displayname.Sanitize(r.State),
-		Active: r.IsActive(now), Heartbeat: r.Heartbeat, StopReason: displayname.Sanitize(r.StopReason), Tickets: map[string]string{}}
+		Active: r.IsActive(now), Heartbeat: r.Heartbeat, StopReason: displayname.Sanitize(r.StopReason), ModelCap: r.ValidModelCap(), Tickets: map[string]string{}}
 	for id, st := range r.Tickets {
 		rs.Tickets[displayname.ID(id)] = displayname.Sanitize(st.Status)
 	}
@@ -1687,4 +1730,15 @@ func runStatus(r *autopilot.Run, now time.Time) RunStatus {
 		rs.Current, rs.CurrentRole, rs.AwaitingHuman = displayname.ID(st.ID), displayname.Sanitize(st.Role), displayname.Text(st.AwaitingHuman)
 	}
 	return rs
+}
+
+// sessionArgs is the claude arguments a run's session is launched with: the
+// permission mode, and the run's model cap when it has one (DFLT-00375) --
+// the session then runs on the cap, and hands it down to its nodes.
+func sessionArgs(permissionMode, modelCap string) []string {
+	args := []string{"--permission-mode", permissionMode}
+	if modelCap != "" {
+		args = append(args, "--model", modelCap)
+	}
+	return args
 }

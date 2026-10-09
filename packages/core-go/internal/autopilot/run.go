@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/graph-ops/core-go/internal/modelcap"
 )
 
 // This file is the autopilot run record (plan decision D4): what one
@@ -102,6 +104,13 @@ type Run struct {
 	// Settings is the snapshot the run acts on, refreshed each time a start
 	// takes the run (over), so a setting changed to get past a stop applies.
 	Settings Settings `json:"settings"`
+	// ModelCap is the model cap chosen at launch (DFLT-00375): haiku, sonnet
+	// or opus, "" for none. Every session the run launches -- work, merge-up
+	// and finalize, for every ticket of the tree -- is started with
+	// `--model <cap>`, so the cap reaches each session's process-ticket and
+	// subagents. A run file from before the field reads as "" (no cap). A
+	// start keeps it unless it is given a --model (see BeginRequest.ModelCap).
+	ModelCap string `json:"model_cap,omitempty"`
 	// Generation counts the starts that have taken this run: 1 on creation,
 	// +1 for every takeover. A failed/blocked ticket is re-launched once per
 	// generation (S6).
@@ -574,4 +583,21 @@ func TruncateSummary(s string) string {
 		s = string(r[:SummaryMaxChars-1]) + "…"
 	}
 	return s
+}
+
+// ValidModelCap is r.ModelCap when it is one of the models a cap may be
+// (haiku, sonnet, opus), and "" otherwise. Every use of the cap -- the
+// `--model` a session is launched with, worker-context, the runs API and
+// the summary -- goes through it: a run record may be another member's,
+// read from the data source, or a hand-edited file, so its value is never
+// passed on unchecked.
+func (r *Run) ValidModelCap() string {
+	if r == nil || r.ModelCap == "" {
+		return ""
+	}
+	m, err := modelcap.Parse(r.ModelCap)
+	if err != nil {
+		return ""
+	}
+	return string(m)
 }

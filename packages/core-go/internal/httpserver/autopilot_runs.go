@@ -52,6 +52,8 @@ type autopilotStartResponse struct {
 	// workspace trust dialog. Left out when trusted or not judged. The
 	// handler never judges it itself.
 	UntrustedFolder string `json:"untrusted_folder,omitempty"`
+	// ModelCap is the model cap the run records (DFLT-00375), "" for none.
+	ModelCap string `json:"model_cap"`
 }
 
 // handleStartAutopilot answers POST /api/tickets/{id}/autopilot (DFLT-00142,
@@ -82,6 +84,11 @@ func (s *Server) handleStartAutopilot(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body struct {
 		Mode *string `json:"mode"`
+		// Model is the run's model cap (DFLT-00375): haiku, sonnet, opus,
+		// or inherit for none (the Web UI sends inherit for "not
+		// specified", so resuming a run can clear the cap it recorded).
+		// Left out, a new run gets no cap and a resumed one keeps its own.
+		Model *string `json:"model"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		var tooLarge *http.MaxBytesError
@@ -102,6 +109,18 @@ func (s *Server) handleStartAutopilot(w http.ResponseWriter, r *http.Request) {
 			"mode must be %q or %q, got %q", autopilot.ModeTicket, autopilot.ModeTree, mode))
 		return
 	}
+	var modelCap *string
+	if body.Model != nil {
+		if *body.Model == "" {
+			writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation, "model must be haiku, sonnet, opus or inherit, got \"\""))
+			return
+		}
+		var err error
+		if modelCap, err = runner.ParseModelCap(*body.Model); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+	}
 	ticket, err := s.repo.GetTicket(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -119,7 +138,7 @@ func (s *Server) handleStartAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	svc := s.autopilotService()
-	res, err := svc.Start(ticket.ID, mode, "", true)
+	res, err := svc.StartWithModel(ticket.ID, mode, "", true, modelCap)
 	if err != nil {
 		writeError(w, statusForError(err, http.StatusInternalServerError), err)
 		return
@@ -129,9 +148,15 @@ func (s *Server) handleStartAutopilot(w http.ResponseWriter, r *http.Request) {
 	// with.
 	// No TerminalTTY: the orchestrator itself always opens in a new window
 	// (DFLT-00154 applies to the child sessions it launches).
+	// The orchestrator itself runs on the run's model cap too (DFLT-00375),
+	// and its prompt carries it for the skill to pass on.
+	extraArgs := []string{"--permission-mode", res.PermissionMode}
+	if res.ModelCap != "" {
+		extraArgs = append(extraArgs, "--model", res.ModelCap)
+	}
 	_, launchErr := svc.Launcher.Launch(runner.LaunchRequest{
-		WorkDir: localPath, ExtraArgs: []string{"--permission-mode", res.PermissionMode},
-		Prompt: runner.OrchestratorPrompt(mode, ticket.ID, res.RunID),
+		WorkDir: localPath, ExtraArgs: extraArgs,
+		Prompt: runner.OrchestratorPrompt(mode, ticket.ID, res.RunID, res.ModelCap),
 	})
 	if launchErr != nil {
 		s.logger.Warn("the autopilot terminal failed to open; cancelling the reservation",
@@ -157,10 +182,12 @@ func (s *Server) handleStartAutopilot(w http.ResponseWriter, r *http.Request) {
 		slog.Bool("created", res.Created),
 		slog.Bool("resumed", res.Resumed),
 		slog.Bool("untrusted_folder", res.UntrustedFolder != ""),
-		slog.String("permission_mode", res.PermissionMode))
+		slog.String("permission_mode", res.PermissionMode),
+		slog.String("model_cap", res.ModelCap))
 	writeJSON(w, http.StatusOK, autopilotStartResponse{
 		RunID: res.RunID, Mode: res.Mode, Root: res.Root, State: res.State,
 		Created: res.Created, Resumed: res.Resumed, UntrustedFolder: res.UntrustedFolder,
+		ModelCap: res.ModelCap,
 	})
 }
 

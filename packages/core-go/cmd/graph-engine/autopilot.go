@@ -20,7 +20,7 @@ const (
 	autopilotUsageLine = "usage: graph-engine autopilot <start|next|launch|wait|merge-up|worker-context|record-decision|" +
 		"attach-decisions|touch|report|merge-into-parent|summary|status|settings> ..."
 	autopilotSettingsUsageLine = "usage: graph-engine autopilot settings [--project <id>]"
-	autopilotStartUsage        = "usage: graph-engine autopilot start <ticketId> --mode ticket|tree [--run <runId>]"
+	autopilotStartUsage        = "usage: graph-engine autopilot start <ticketId> --mode ticket|tree [--run <runId>] [--model haiku|sonnet|opus|inherit]"
 	autopilotNextUsage         = "usage: graph-engine autopilot next <runId>"
 	autopilotLaunchUsage       = "usage: graph-engine autopilot launch <runId> <ticketId> [--role work|merge-up|finalize]"
 	autopilotWaitUsage         = "usage: graph-engine autopilot wait <runId> <ticketId> [--timeout <duration>]"
@@ -233,7 +233,7 @@ func autopilotTextArg(arg string) (string, error) {
 }
 
 func cmdAutopilotStart(svc *runner.Service, args []string) error {
-	pos, vals, err := autopilotFlags(args, autopilotStartUsage, "--mode", "--run")
+	pos, vals, err := autopilotFlags(args, autopilotStartUsage, "--mode", "--run", "--model")
 	if err != nil {
 		return err
 	}
@@ -247,7 +247,14 @@ func cmdAutopilotStart(svc *runner.Service, args []string) error {
 	if mode != autopilot.ModeTicket && mode != autopilot.ModeTree {
 		return fmt.Errorf("%s: --mode must be ticket or tree, got %q", autopilotStartUsage, mode)
 	}
-	res, err := svc.Start(pos[0], mode, vals["--run"], false)
+	if v, ok := vals["--model"]; ok && v == "" {
+		return domain.NewAPIError(domain.ErrCodeValidation, "%s: --model needs haiku, sonnet, opus or inherit", autopilotStartUsage)
+	}
+	modelCap, err := runner.ParseModelCap(vals["--model"])
+	if err != nil {
+		return err
+	}
+	res, err := svc.StartWithModel(pos[0], mode, vals["--run"], false, modelCap)
 	if err != nil {
 		return err
 	}

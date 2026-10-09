@@ -548,20 +548,23 @@ Commands:
                                            Local values are edited in the Web UI's settings (PUT
                                            /api/projects/{id}/autopilot-settings); there is no CLI to write
                                            them. The project is resolved like list-labels')
-  autopilot start <ticketId> --mode ticket|tree [--run <runId>]
+  autopilot start <ticketId> --mode ticket|tree [--run <runId>] [--model haiku|sonnet|opus|inherit]
                                           (starts an autopilot run from the ticket, or takes over the latest
                                            interrupted/stopped run with the same root and mode; --run adopts a
                                            run the Web UI reserved. Refuses AUTOPILOT_ALREADY_RUNNING when an
                                            active run overlaps the tree, AUTOPILOT_ROOT_FINISHED for a new run
-                                           from a DONE/CLOSED ticket. Runs are kept in
-                                           $HOME/.graph-ops/autopilot/<projectId>/runs/)
+                                           from a DONE/CLOSED ticket. --model records the run's model cap:
+                                           every session it launches gets --model <cap>, and worker-context
+                                           prints it as model_cap. Without --model a new run has no cap and a
+                                           taken-over or adopted run keeps the one it recorded; inherit clears
+                                           it. Runs are kept in $HOME/.graph-ops/autopilot/<projectId>/runs/)
   autopilot next <runId>                 (the one next action as JSON: launch / wait / merge-up / done /
                                            stopped, with the command that carries it out)
   autopilot launch <runId> <ticketId> [--role work|merge-up|finalize]
                                           (creates or reuses <localPath>/.claude/worktrees/<ticketId> on branch
                                            worktree-<ticketId> and opens a child claude session there with the
-                                           project's --permission-mode; PROJECT_LOCAL_PATH_NOT_SET without a
-                                           local path)
+                                           project's --permission-mode, plus --model <cap> when the run has a
+                                           model cap; PROJECT_LOCAL_PATH_NOT_SET without a local path)
   autopilot wait <runId> <ticketId> [--timeout <duration>]
                                           (blocks until the session reports; exits 0 with its result, or 2 on
                                            timeout (default 10m) with {"state":"waiting"|"awaiting_human",...};
@@ -570,7 +573,8 @@ Commands:
   autopilot merge-up <runId> <ticketId>  (fast-forwards a done ticket's branch into its merge target's;
                                            {"result":"needs_merge_session"} when that is not possible)
   autopilot worker-context|record-decision|attach-decisions|touch|report|merge-into-parent ...
-                                          (used by the autopilot-worker child session: its context, automatic
+                                          (used by the autopilot-worker child session: its context (with the
+                                           run's model_cap, "" for none), automatic
                                            decisions, activity (touch [--awaiting-human <what>], which marks the
                                            session as waiting for a person), its result (report --result
                                            done|failed|blocked [--reason <code>] --summary <text|->), and the
