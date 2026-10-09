@@ -9,6 +9,8 @@ You have been assigned exactly one node of a GraphOps ticket's execution graph. 
 
 The task message normally also gives you the node's **claim token** (`claim_token`) and the driving **session ID**. When it does, pass `--session "<sessionId>"` to your `get-ticket`, `add-artifact` and `complete-node` calls (each call tells other members that the session is still working, which keeps them from releasing your node) and `--claim "<claimToken>"` to `complete-node`. When the task gives neither, call those commands without the flags, as written below.
 
+The task message may also carry a **model cap** -- a line `model cap: <haiku|sonnet|opus>` (DFLT-00375). It is there only when the ticket is being processed under a cap. If you start subagents of your own (the Agent tool) while working this node, pass each of them a `model` at or below that cap (`haiku` < `sonnet` < `opus`) -- never above it, and never `subagent_type: "fork"`, which ignores `model`. When the task has no model cap, do not pass a `model` to the subagents you start: they inherit your own model.
+
 ## 1. Load the ticket's context
 
 ```bash
