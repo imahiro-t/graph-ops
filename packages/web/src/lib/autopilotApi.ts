@@ -3,9 +3,8 @@
 // logic that turns the runs list into what one ticket shows: its badges, and
 // whether (and why) its autopilot buttons are disabled.
 import { TFunction } from 'i18next';
-import { AutopilotMode, AutopilotRun, AutopilotStarter, AutopilotStartResponse } from '../types';
+import { AutopilotMode, AutopilotRun, AutopilotStarter, AutopilotStartResponse, ModelCap } from '../types';
 import { apiFetch } from './apiFetch';
-import type { ModelCap } from '../components/ModelCapSelect';
 import { memberLabel } from './memberName';
 import { localizedApiErrorMessage, parseApiError, translateErrorCode } from './apiError';
 

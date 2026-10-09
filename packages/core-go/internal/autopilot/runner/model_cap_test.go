@@ -48,15 +48,23 @@ func hasModelArg(args []string, cap string) bool {
 }
 
 func TestParseModelCap(t *testing.T) {
-	for in, want := range map[string]*string{"": nil, "inherit": strp(""), "haiku": strp("haiku"), "Sonnet": strp("sonnet"), "OPUS": strp("opus")} {
-		got, err := ParseModelCap(in)
-		if err != nil || (got == nil) != (want == nil) || (got != nil && *got != *want) {
-			t.Errorf("ParseModelCap(%q) = %v, %v", in, got, err)
+	// Not given at all keeps what the run recorded.
+	if got, err := ParseModelCap(nil); got != nil || err != nil {
+		t.Errorf("ParseModelCap(nil) = %v, %v, want nil, nil", got, err)
+	}
+	for in, want := range map[string]string{"inherit": "", "haiku": "haiku", "Sonnet": "sonnet", "OPUS": "opus"} {
+		got, err := ParseModelCap(strp(in))
+		if err != nil || got == nil || *got != want {
+			t.Errorf("ParseModelCap(%q) = %v, %v, want %q", in, got, err, want)
 		}
 	}
-	for _, in := range []string{"fable", "gpt-4", "Inherit", "opus; rm -rf /"} {
-		_, err := ParseModelCap(in)
+	// Given but empty is rejected here, for the CLI and the API alike.
+	for _, in := range []string{"", "fable", "gpt-4", "Inherit", "opus; rm -rf /"} {
+		_, err := ParseModelCap(strp(in))
 		assertAPICode(t, err, domain.ErrCodeValidation)
+		if err != nil && !strings.Contains(err.Error(), "model must be haiku, sonnet, opus or inherit") {
+			t.Errorf("ParseModelCap(%q) error = %v", in, err)
+		}
 	}
 }
 

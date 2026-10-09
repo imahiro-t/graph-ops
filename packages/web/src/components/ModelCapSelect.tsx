@@ -1,9 +1,6 @@
 import React, { useId } from 'react';
 import { useTranslation } from 'react-i18next';
-
-// The model cap chosen at launch (DFLT-00375): '' is "not specified" -- the
-// launching session's own model stays the cap, as before.
-export type ModelCap = '' | 'opus' | 'sonnet' | 'haiku';
+import type { ModelCap } from '../types';
 
 // Highest first, the order the list shows them in.
 export const MODEL_CAPS: readonly Exclude<ModelCap, ''>[] = ['opus', 'sonnet', 'haiku'];

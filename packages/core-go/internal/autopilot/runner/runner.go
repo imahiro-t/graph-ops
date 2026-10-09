@@ -447,20 +447,23 @@ func (s *Service) Start(ticketID, mode, runID string, reserve bool) (StartResult
 }
 
 // ParseModelCap reads a start's --model (or the launch API's model) for
-// StartWithModel (DFLT-00375): "" (not given) is nil -- keep what the run
-// recorded --, inherit is "" -- record no cap --, and haiku, sonnet or opus
-// (any case) is that model. Anything else is VALIDATION_ERROR.
-func ParseModelCap(v string) (*string, error) {
-	if v == "" {
+// StartWithModel (DFLT-00375). v is nil when the model was not given at all
+// -- keep what the run recorded -- and then the result is nil too; inherit
+// is "" -- record no cap --, and haiku, sonnet or opus (any case) is that
+// model. Anything else, an empty value included, is VALIDATION_ERROR: the
+// CLI and the API both pass "given but empty" through here, so the two
+// reject it in the same place and with the same message.
+func ParseModelCap(v *string) (*string, error) {
+	if v == nil {
 		return nil, nil
 	}
-	if v == modelcap.Inherit {
+	if *v == modelcap.Inherit {
 		none := ""
 		return &none, nil
 	}
-	m, err := modelcap.Parse(v)
+	m, err := modelcap.Parse(*v)
 	if err != nil {
-		return nil, domain.NewAPIError(domain.ErrCodeValidation, "VALIDATION_ERROR: model must be haiku, sonnet, opus or inherit, got %q", v)
+		return nil, domain.NewAPIError(domain.ErrCodeValidation, "model must be haiku, sonnet, opus or inherit, got %q", *v)
 	}
 	cap := string(m)
 	return &cap, nil
@@ -904,7 +907,7 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 			return errors.New("no terminal launcher configured")
 		}
 		outcome, err = s.Launcher.Launch(LaunchRequest{
-			WorkDir: workDir, ExtraArgs: sessionArgs(permissionMode, modelCap), Prompt: WorkerPrompt(runID, ticketID, role),
+			WorkDir: workDir, ExtraArgs: SessionArgs(permissionMode, modelCap), Prompt: WorkerPrompt(runID, ticketID, role),
 			TerminalTTY: terminalTTY, SkipTab: skipTab,
 		})
 		return err
@@ -1732,10 +1735,12 @@ func runStatus(r *autopilot.Run, now time.Time) RunStatus {
 	return rs
 }
 
-// sessionArgs is the claude arguments a run's session is launched with: the
+// SessionArgs is the claude arguments a run's session is launched with: the
 // permission mode, and the run's model cap when it has one (DFLT-00375) --
-// the session then runs on the cap, and hands it down to its nodes.
-func sessionArgs(permissionMode, modelCap string) []string {
+// the session then runs on the cap, and hands it down to its nodes. Both the
+// child sessions and the orchestrator the Web UI opens use it, so their
+// launch arguments follow one rule.
+func SessionArgs(permissionMode, modelCap string) []string {
 	args := []string{"--permission-mode", permissionMode}
 	if modelCap != "" {
 		args = append(args, "--model", modelCap)

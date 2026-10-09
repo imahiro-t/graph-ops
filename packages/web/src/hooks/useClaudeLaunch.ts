@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { errorMessage, localizedApiErrorMessage } from '../lib/apiError';
 import { apiFetch } from '../lib/apiFetch';
-import type { ModelCap } from '../components/ModelCapSelect';
+import type { ModelCap } from '../types';
 
 // How long a launch result (success/failure) stays visible before it clears
 // itself -- it's a one-off send confirmation, not a persistent log entry, so

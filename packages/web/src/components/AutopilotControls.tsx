@@ -1,9 +1,9 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Bot } from 'lucide-react';
-import { AutopilotMode, TicketStatus } from '../types';
+import { AutopilotMode, ModelCap, TicketStatus } from '../types';
 import { startAutopilot, starterLabel, TicketAutopilotView } from '../lib/autopilotApi';
-import { ModelCap, ModelCapSelect } from './ModelCapSelect';
+import { ModelCapSelect } from './ModelCapSelect';
 import { errorMessage } from '../lib/apiError';
 import { StatusLiveRegion } from './StatusLiveRegion';
 import { ConfirmDialog } from './ConfirmDialog';

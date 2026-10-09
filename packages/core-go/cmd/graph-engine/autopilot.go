@@ -247,10 +247,11 @@ func cmdAutopilotStart(svc *runner.Service, args []string) error {
 	if mode != autopilot.ModeTicket && mode != autopilot.ModeTree {
 		return fmt.Errorf("%s: --mode must be ticket or tree, got %q", autopilotStartUsage, mode)
 	}
-	if v, ok := vals["--model"]; ok && v == "" {
-		return domain.NewAPIError(domain.ErrCodeValidation, "%s: --model needs haiku, sonnet, opus or inherit", autopilotStartUsage)
+	var model *string
+	if v, ok := vals["--model"]; ok {
+		model = &v
 	}
-	modelCap, err := runner.ParseModelCap(vals["--model"])
+	modelCap, err := runner.ParseModelCap(model)
 	if err != nil {
 		return err
 	}

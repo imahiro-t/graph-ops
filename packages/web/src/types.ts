@@ -665,6 +665,11 @@ export type AutopilotSettingsPatch = Partial<Record<AutopilotSettingKey, Autopil
 // DFLT-00142 phase 5: the autopilot runs the Web UI starts and shows.
 export type AutopilotMode = 'ticket' | 'tree';
 
+// The model cap chosen when process-ticket or autopilot is launched from the
+// Web UI (DFLT-00375): '' is "not specified" -- the launching session's own
+// model stays the cap, as before.
+export type ModelCap = '' | 'opus' | 'sonnet' | 'haiku';
+
 // One run in GET /api/autopilot/runs?project_id=<id> (newest first: the
 // active runs plus a few recent inactive ones).
 export interface AutopilotRun {

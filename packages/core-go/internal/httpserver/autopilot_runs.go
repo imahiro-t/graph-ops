@@ -109,17 +109,10 @@ func (s *Server) handleStartAutopilot(w http.ResponseWriter, r *http.Request) {
 			"mode must be %q or %q, got %q", autopilot.ModeTicket, autopilot.ModeTree, mode))
 		return
 	}
-	var modelCap *string
-	if body.Model != nil {
-		if *body.Model == "" {
-			writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation, "model must be haiku, sonnet, opus or inherit, got \"\""))
-			return
-		}
-		var err error
-		if modelCap, err = runner.ParseModelCap(*body.Model); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
+	modelCap, err := runner.ParseModelCap(body.Model)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 	ticket, err := s.repo.GetTicket(id)
 	if err != nil {
@@ -150,12 +143,8 @@ func (s *Server) handleStartAutopilot(w http.ResponseWriter, r *http.Request) {
 	// (DFLT-00154 applies to the child sessions it launches).
 	// The orchestrator itself runs on the run's model cap too (DFLT-00375),
 	// and its prompt carries it for the skill to pass on.
-	extraArgs := []string{"--permission-mode", res.PermissionMode}
-	if res.ModelCap != "" {
-		extraArgs = append(extraArgs, "--model", res.ModelCap)
-	}
 	_, launchErr := svc.Launcher.Launch(runner.LaunchRequest{
-		WorkDir: localPath, ExtraArgs: extraArgs,
+		WorkDir: localPath, ExtraArgs: runner.SessionArgs(res.PermissionMode, res.ModelCap),
 		Prompt: runner.OrchestratorPrompt(mode, ticket.ID, res.RunID, res.ModelCap),
 	})
 	if launchErr != nil {
