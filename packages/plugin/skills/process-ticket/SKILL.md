@@ -49,7 +49,7 @@ It prints `{"session_id", "lease_minutes", "sessions_supported", "others", "same
 Calling `get-executable` for the first time auto-generates the 2 seed nodes: "Plan Creation" (`plan`) and "Plan Review" (`plan_review`). Like any other node, drive these 2 nodes through the steps in "3. Execution loop" below (launching subagents). Per step 0 above, include `--language <code>` here if (and only if) `get-language-settings` reported `source: "none"`.
 
 ```bash
-graph-engine get-executable "<ticketId>" --session "<sessionId>" --session-model "<your model ID>" [--model-cap <m>] [--language <code>]
+graph-engine get-executable "<ticketId>" --session "<sessionId>" --session-model "<your model ID>" [--model-cap "<m>"] [--language <code>]
 ```
 
 (`--session-model` always; `--model-cap` only when this skill was given `--model <m>` -- see "Model cap" above. The same two flags go on every later `get-executable` call too.)

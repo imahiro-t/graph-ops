@@ -20,7 +20,7 @@ If the returned `content` is non-empty, follow it as additional rules on top of 
 Call `autopilot start` first, passing `--run <runId>` and `--model <m>` exactly when this invocation's arguments contain them (pass the `--model` value through as is):
 
 ```bash
-graph-engine autopilot start "<ticketId>" --mode tree [--run "<runId>"] [--model <m>]
+graph-engine autopilot start "<ticketId>" --mode tree [--run "<runId>"] [--model "<m>"]
 ```
 
 `--model` is the run's **model cap** (`haiku`, `sonnet` or `opus`; `inherit` removes a cap the run recorded). The engine records it on the run and starts every child session with `--model <cap>`, so the cap reaches each child's process-ticket and the subagents it starts, where every node runs on `min(its node type's assignment, the cap)`. Without `--model`, a new run has no cap -- the child sessions start on claude's default model, as before -- and a run that is taken over or adopted keeps the cap it recorded; to remove that cap, pass `--model inherit` explicitly. The start's line shows the cap in effect as `model_cap` (`""` for none).
