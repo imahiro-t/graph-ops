@@ -344,6 +344,11 @@ export interface SettingsDocument {
   review_gates?: Record<string, ReviewGateDef>;
   workflow?: WorkflowDef;
   max_iterations?: number | null;
+  // node_models assigns each node type the model its subagent runs on
+  // (haiku, sonnet, opus or inherit -- DFLT-00375). This screen has no editor
+  // for it; the PUT sends the loaded tier_document back as it is, so a value
+  // written by hand survives saving.
+  node_models?: Record<string, string>;
 }
 
 // A merged, ready-to-use catalog: the plugin default plus the user tier
@@ -358,6 +363,7 @@ export interface SettingsCatalog {
   nodes: NodeDef[];
   seed?: string[];
   max_iterations?: number | null;
+  node_models?: Record<string, string>;
 }
 
 // The warning codes GET /api/settings/catalog can put in `warnings`. Both are
@@ -372,7 +378,12 @@ export const SETTINGS_CATALOG_WARNINGS = {
   // The user tier's own top-level max_iterations (value) is not 3, 4 or 5 --
   // a hand edit. Agents refuse to load such a file; choosing a valid value
   // (or inherit) and saving fixes it.
-  maxIterationsOutOfRange: 'MAX_ITERATIONS_OUT_OF_RANGE'
+  maxIterationsOutOfRange: 'MAX_ITERATIONS_OUT_OF_RANGE',
+  // The user tier's node_models assigns node_type a value (node_model) other
+  // than haiku, sonnet, opus or inherit -- a hand edit. Agents refuse to load
+  // such a file, and there is no editor for it on this screen: the file has
+  // to be fixed by hand (DFLT-00375).
+  nodeModelInvalid: 'NODE_MODEL_INVALID'
 } as const;
 
 // One problem found in the user tier: a code plus the details its message
@@ -381,6 +392,8 @@ export interface SettingsCatalogWarning {
   code: string;
   gate_id?: string;
   value?: number;
+  node_type?: string;
+  node_model?: string;
 }
 
 // warnings lists what is wrong with the user tier -- see
@@ -652,6 +665,11 @@ export type AutopilotSettingsPatch = Partial<Record<AutopilotSettingKey, Autopil
 // DFLT-00142 phase 5: the autopilot runs the Web UI starts and shows.
 export type AutopilotMode = 'ticket' | 'tree';
 
+// The model cap chosen when process-ticket or autopilot is launched from the
+// Web UI (DFLT-00375): '' is "not specified" -- the launching session's own
+// model stays the cap, as before.
+export type ModelCap = '' | 'opus' | 'sonnet' | 'haiku';
+
 // One run in GET /api/autopilot/runs?project_id=<id> (newest first: the
 // active runs plus a few recent inactive ones).
 export interface AutopilotRun {
@@ -672,6 +690,8 @@ export interface AutopilotRun {
   current_role?: string;
   awaiting_human?: string;
   stop_reason?: string;
+  // DFLT-00375: the run's model cap; absent when it has none.
+  model_cap?: string;
   // Every ticket the run has reached so far, with its state in the run
   // (queued / launched / done / failed / blocked / skipped).
   tickets: Record<string, string>;
@@ -713,4 +733,6 @@ export interface AutopilotStartResponse {
   // workspace trust prompt. Absent when trusted or when the server could not
   // tell (a best-effort check of Claude Code's own ~/.claude.json).
   untrusted_folder?: string;
+  // DFLT-00375: the model cap the run records ('' for none).
+  model_cap?: string;
 }

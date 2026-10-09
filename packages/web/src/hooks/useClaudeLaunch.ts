@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { errorMessage, localizedApiErrorMessage } from '../lib/apiError';
 import { apiFetch } from '../lib/apiFetch';
+import type { ModelCap } from '../types';
 
 // How long a launch result (success/failure) stays visible before it clears
 // itself -- it's a one-off send confirmation, not a persistent log entry, so
@@ -13,6 +14,10 @@ const AUTO_CLEAR_DELAY_MS = 5000;
 // stream to read (that's the point: a human drives that session themselves).
 // onDone is called once the launch request settles, success or failure, so
 // callers can e.g. refresh a ticket list.
+//
+// model (DFLT-00375) starts the session itself on that model (`claude
+// --model <m>`); only the process-ticket button passes it, together with a
+// `--model <m>` in its prompt. Left out, nothing about the launch changes.
 export function useClaudeLaunch(onDone?: () => void) {
   const { t } = useTranslation();
   const [isLaunching, setIsLaunching] = useState(false);
@@ -40,7 +45,7 @@ export function useClaudeLaunch(onDone?: () => void) {
   }, [cancelPendingClear]);
 
   const launch = useCallback(
-    async (prompt: string, ticketId?: string, projectId?: string) => {
+    async (prompt: string, ticketId?: string, projectId?: string, model?: ModelCap) => {
       cancelPendingClear();
       setIsLaunching(true);
       setLastMessage('');
@@ -49,7 +54,9 @@ export function useClaudeLaunch(onDone?: () => void) {
         const response = await apiFetch('/api/claude/launch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, ticketId, project_id: projectId })
+          body: JSON.stringify(
+            model ? { prompt, ticketId, project_id: projectId, model } : { prompt, ticketId, project_id: projectId }
+          )
         });
         if (!response.ok) {
           throw new Error(await localizedApiErrorMessage(t, response));

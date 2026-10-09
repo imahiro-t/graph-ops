@@ -13,6 +13,41 @@ version: 1
 # so changing it later does not affect tickets already in progress.
 max_iterations: 3
 
+# Model each node type's subagent runs on (DFLT-00375): haiku, sonnet, opus or
+# inherit. inherit is the top tier: the node runs on the cap chosen at launch
+# (process-ticket / autopilot-ticket / autopilot-tree --model), or, when none
+# was chosen, on the launching session's own model. Every node runs on
+# min(its assignment, the cap). A node type not listed here -- a custom type,
+# for instance -- is inherit. The user tier (~/.graph-ops/config.yaml) and the
+# team tier (workflow.yaml) can override any key, team winning; setting
+# `report: inherit` there, for example, puts reports back on the top tier.
+#
+# A node type is assigned below the top tier only when it is deterministic
+# enough that it can hardly go wrong, i.e. it meets all three of:
+#   1. Its input is fixed by earlier nodes' artifacts or a fixed template, and
+#      the node itself decides no design, direction or pass/fail (earlier
+#      reviews and gates already did).
+#   2. Its procedure is fixed: running given commands, transcribing results,
+#      filling in a template.
+#   3. A mistake it makes is caught later (a following review, or
+#      add-artifact's structural check): it is never the last line of quality
+#      judgment.
+# Of those, a node that only transcribes into a template gets haiku; one whose
+# fixed procedure still involves reading execution results or acting on
+# external systems (telling why a test failed, git/PR operations) gets sonnet.
+node_models:
+  report: haiku          # transcribes test results into the fixed HTML template
+  gherkin_test: sonnet   # runs and records settled scenarios; reads failures
+  release: sonnet        # applies approved changes; handles git/PR failures
+  plan: inherit
+  investigation: inherit
+  gherkin_spec: inherit
+  implementation: inherit
+  review: inherit
+  review_gate: inherit
+  documentation: inherit
+  deliverable: inherit
+
 review_gates:
   code_review:
     name: "Code Review"

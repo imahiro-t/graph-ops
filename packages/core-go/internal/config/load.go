@@ -234,6 +234,12 @@ func LoadWithRoots(userDirOverride, teamDirOverride, languageOverride string) (C
 	if err := validateDocumentMaxIterations(teamPath, teamDoc); err != nil {
 		return Catalog{}, err
 	}
+	if err := validateDocumentNodeModels(userPath, userDoc); err != nil {
+		return Catalog{}, err
+	}
+	if err := validateDocumentNodeModels(teamPath, teamDoc); err != nil {
+		return Catalog{}, err
+	}
 
 	// The working language is personal: the team tier's value is reported
 	// and then dropped, both from the resolution and from Merge (which would
@@ -262,6 +268,17 @@ func validateDocumentMaxIterations(path string, doc Document) error {
 	}
 	if err := ValidateMaxIterations(*doc.MaxIterations); err != nil {
 		return fmt.Errorf("%s: %w", path, err)
+	}
+	return nil
+}
+
+// validateDocumentNodeModels rejects a tier file whose node_models assigns a
+// value other than haiku, sonnet, opus or inherit (the first offender, by
+// node type, is named). Like max_iterations, a typo is reported rather than
+// silently treated as inherit.
+func validateDocumentNodeModels(path string, doc Document) error {
+	if ws := NodeModelWarnings(doc); len(ws) > 0 {
+		return fmt.Errorf("%s: %s", path, ws[0].Message())
 	}
 	return nil
 }

@@ -1,8 +1,9 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Bot } from 'lucide-react';
-import { AutopilotMode, TicketStatus } from '../types';
+import { AutopilotMode, ModelCap, TicketStatus } from '../types';
 import { startAutopilot, starterLabel, TicketAutopilotView } from '../lib/autopilotApi';
+import { ModelCapSelect } from './ModelCapSelect';
 import { errorMessage } from '../lib/apiError';
 import { StatusLiveRegion } from './StatusLiveRegion';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -195,6 +196,10 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
   // The open confirmation, with `resumable` as it was when it opened.
   const [pending, setPending] = useState<{ resumable: Record<AutopilotMode, boolean> } | null>(null);
   const [selectedMode, setSelectedMode] = useState<AutopilotMode>('tree');
+  // DFLT-00375: the run's model cap, chosen in the dialog under the scope
+  // ('' = not specified, sent as inherit -- see startAutopilot).
+  const [selectedModel, setSelectedModel] = useState<ModelCap>('');
+  const modelHelpId = useId();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reasonIdBase = useId();
   const radioName = useId();
@@ -273,15 +278,16 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
   const handleClick = () => {
     if (pending !== null || starting !== null) return;
     setSelectedMode(reasons.tree ? 'ticket' : 'tree');
+    setSelectedModel('');
     setPending({ resumable: { ...view.resumable } });
   };
 
-  const runStart = async (mode: AutopilotMode) => {
+  const runStart = async (mode: AutopilotMode, model: ModelCap) => {
     lastStarted.current = true;
     setStarting(mode);
     setUntrustedFolder('');
     try {
-      const res = await startAutopilot(t, ticketId, mode);
+      const res = await startAutopilot(t, ticketId, mode, model);
       show(t(res.resumed ? 'autopilot.resumed' : 'autopilot.started', { runId: res.run_id }), false);
       if (typeof res.untrusted_folder === 'string' && res.untrusted_folder !== '') setUntrustedFolder(res.untrusted_folder);
     } catch (e) {
@@ -305,7 +311,7 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
     // Closed in the same render that disables the button: the dialog's
     // focus return then finds the button disabled and uses fallbackRef.
     setPending(null);
-    void runStart(mode);
+    void runStart(mode, selectedModel);
   };
 
   // The dialog's text, for the chosen mode; resume or fresh start from
@@ -495,6 +501,17 @@ export const AutopilotControls: React.FC<Props> = ({ ticketId, status, view, onS
                   })}
                 </div>
               </fieldset>
+              <div data-testid="autopilot-model" className="mb-4 flex flex-col gap-1 min-w-0">
+                <ModelCapSelect
+                  value={selectedModel}
+                  onChange={setSelectedModel}
+                  describedBy={modelHelpId}
+                  testId="autopilot-model-select"
+                />
+                <p id={modelHelpId} className="text-[0.6875rem] wrap-anywhere text-slate-600 dark:text-slate-400">
+                  {t('modelCap.help')}
+                </p>
+              </div>
             </ConfirmDialog>
           )}
         </div>

@@ -95,6 +95,9 @@ func RenderSummary(run *autopilot.Run, titles map[string]string) string {
 	fmt.Fprintf(&b, "- Run: `%s`\n- State: %s\n", run.ID, run.State)
 	fmt.Fprintf(&b, "- Settings: mainReflection=%s, onFailure=%s, maxTickets=%d, maxDepth=%d, stallTimeoutMinutes=%d\n",
 		run.Settings.MainReflection, run.Settings.OnFailure, run.Settings.MaxTickets, run.Settings.MaxDepth, run.Settings.StallTimeoutMinutes)
+	if cap := run.ValidModelCap(); cap != "" {
+		fmt.Fprintf(&b, "- Model cap: %s\n", cap)
+	}
 	if run.StopReason != "" {
 		fmt.Fprintf(&b, "- Stopped: %s", run.StopReason)
 		if run.StopDetail != "" {

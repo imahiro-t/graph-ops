@@ -41,6 +41,13 @@ type BeginRequest struct {
 	// TerminalTTYReason is why TerminalTTY is "" (see
 	// Run.TerminalTTYReason). Ignored with Reserve, like TerminalTTY.
 	TerminalTTYReason string
+	// ModelCap is the start's model cap (DFLT-00375): nil when the start
+	// was given none, which leaves an adopted or taken-over run's recorded
+	// cap as it is (so a cap chosen when the Web UI reserved the run
+	// survives the orchestrator's `start --run` without --model) and creates
+	// a run with no cap; otherwise the value to record -- haiku, sonnet,
+	// opus, or "" to clear the cap (--model inherit). Callers validate it.
+	ModelCap *string
 	// Actor is who is starting (DFLT-00326): stamped on the run started,
 	// taken over or adopted, and its MachineID limits what is taken over to
 	// this machine's runs. nil stamps nothing and takes over any local run
@@ -331,6 +338,9 @@ func decideBegin(req BeginRequest, local, shared []*Run, now time.Time, res *Beg
 			// The adopting orchestrator is the run's first window now,
 			// whatever the reservation (or a run it took over) held.
 			cand.resetTerminal(req.TerminalTTY, req.TerminalTTYReason)
+			if req.ModelCap != nil {
+				cand.ModelCap = *req.ModelCap
+			}
 			res.Adopted = true
 			stamp(cand, req.Actor, now, sharedByID)
 			return cand, original, nil
@@ -380,6 +390,9 @@ func decideBegin(req BeginRequest, local, shared []*Run, now time.Time, res *Beg
 			}
 		}
 		cand.TakeOver(now, req.Settings)
+		if req.ModelCap != nil {
+			cand.ModelCap = *req.ModelCap
+		}
 		res.TookOver = true
 		if req.Reserve {
 			cand.Reservation = &Reservation{Previous: previous}
@@ -396,6 +409,9 @@ func decideBegin(req BeginRequest, local, shared []*Run, now time.Time, res *Beg
 			Settings:     req.Settings,
 			Generation:   1,
 			Tickets:      map[string]*TicketState{},
+		}
+		if req.ModelCap != nil {
+			cand.ModelCap = *req.ModelCap
 		}
 		res.Created = true
 		if req.Reserve {

@@ -136,7 +136,12 @@ func (s *Server) handleGetSettingsCatalog(w http.ResponseWriter, r *http.Request
 	//     per-gate max_iterations. Saving from the screen drops those values
 	//     (config.SaveDocumentAt), which clears the warning.
 	// Always an array, so the UI never has to tell null from empty.
+	//   - NODE_MODEL_INVALID (DFLT-00375): the file's node_models assigns a
+	//     value other than haiku/sonnet/opus/inherit. The CLI refuses such a
+	//     file too; there is no editor for node_models on this screen, so the
+	//     warning tells the user to fix the file by hand.
 	warnings := append([]config.Warning{}, config.MaxIterationsWarnings(tierDoc)...)
+	warnings = append(warnings, config.NodeModelWarnings(tierDoc)...)
 	warnings = append(warnings, merged.Warnings...)
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -169,6 +174,13 @@ func (s *Server) handlePutSettingsCatalog(w http.ResponseWriter, r *http.Request
 	}
 	if err := validateNoWorkflowOverride(body.Document); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	// node_models has no editor on the settings screen, but the document
+	// the screen sends back carries it (so saving keeps it). A value the
+	// CLI would refuse is never written.
+	if ws := config.NodeModelWarnings(body.Document); len(ws) > 0 {
+		writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation, "%s", ws[0].Message()))
 		return
 	}
 

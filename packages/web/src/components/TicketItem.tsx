@@ -22,7 +22,7 @@ import {
   Archive,
   RotateCcw
 } from 'lucide-react';
-import { Label, TicketDetail, TicketPriority } from '../types';
+import { Label, ModelCap, TicketDetail, TicketPriority } from '../types';
 import { getStatusMeta, TODO_META } from '../statusMeta';
 import { GherkinViewer } from './GherkinViewer';
 import { MarkdownViewer } from './MarkdownViewer';
@@ -39,6 +39,7 @@ import { TicketFamily } from './TicketFamily';
 import { AutopilotBadges } from './AutopilotBadges';
 import { AutopilotControls } from './AutopilotControls';
 import { AutopilotDecisions } from './AutopilotDecisions';
+import { ModelCapSelect } from './ModelCapSelect';
 import { NO_AUTOPILOT, TicketAutopilotView } from '../lib/autopilotApi';
 import { useClaudeLaunch } from '../hooks/useClaudeLaunch';
 import { useConfirmDialog } from '../hooks/useConfirmDialog';
@@ -525,6 +526,19 @@ export const TicketItem: React.FC<Props> = ({
   // it with aria-controls. useId keeps it unique with several tickets open.
   const descriptionBodyId = useId();
   const { isLaunching: isRunning, lastMessage: statusMessage, launch: handleRunClaude } = useClaudeLaunch(onRefresh);
+  // DFLT-00375: the model cap process-ticket is started with ('' = none:
+  // the launching model). Only the process-ticket button uses it -- refine
+  // and the free prompt row never send a model.
+  const [processModel, setProcessModel] = useState<ModelCap>('');
+  const modelCapHelpId = useId();
+  const handleProcessTicket = () => {
+    const prompt = t('claudePrompts.processTicket', { ticketId: ticket.id });
+    if (processModel) {
+      void handleRunClaude(`${prompt} --model ${processModel}`, ticket.id, undefined, processModel);
+    } else {
+      void handleRunClaude(prompt, ticket.id);
+    }
+  };
 
   // The execution graph panel must never scroll -- it always renders in
   // full, growing past the default height when the graph has many nodes
@@ -3177,28 +3191,42 @@ export const TicketItem: React.FC<Props> = ({
                 view={autopilot}
                 onSettled={onAutopilotChanged}
                 actions={
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('ticketItem.actions.label')}</span>
-                    <button
-                      onClick={() => handleRunClaude(t('claudePrompts.refineTicket', { ticketId: ticket.id }), ticket.id)}
-                      disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
-                      {...submittingProps(isRunning)}
-                      className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
-                    >
-                      {isRunning ? <Spinner className="w-3.5 h-3.5 shrink-0" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-600" />}
-                      {t('ticketItem.actions.refine')}
-                      <SubmittingText busy={isRunning} />
-                    </button>
-                    <button
-                      onClick={() => handleRunClaude(t('claudePrompts.processTicket', { ticketId: ticket.id }), ticket.id)}
-                      disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
-                      {...submittingProps(isRunning)}
-                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition"
-                    >
-                      {isRunning ? <Spinner className="w-3.5 h-3.5 shrink-0" /> : <Play aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />}
-                      {t('ticketItem.actions.run')}
-                      <SubmittingText busy={isRunning} />
-                    </button>
+                  <div className="flex flex-col gap-1.5 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{t('ticketItem.actions.label')}</span>
+                      <button
+                        onClick={() => handleRunClaude(t('claudePrompts.refineTicket', { ticketId: ticket.id }), ticket.id)}
+                        disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
+                        {...submittingProps(isRunning)}
+                        className="px-3 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-800"
+                      >
+                        {isRunning ? <Spinner className="w-3.5 h-3.5 shrink-0" /> : <ClipboardEdit aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-indigo-600" />}
+                        {t('ticketItem.actions.refine')}
+                        <SubmittingText busy={isRunning} />
+                      </button>
+                      <button
+                        onClick={handleProcessTicket}
+                        disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
+                        {...submittingProps(isRunning)}
+                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-semibold flex max-sm:flex-wrap max-sm:wrap-anywhere items-center gap-1.5 transition"
+                      >
+                        {isRunning ? <Spinner className="w-3.5 h-3.5 shrink-0" /> : <Play aria-hidden="true" className="w-3.5 h-3.5 shrink-0" />}
+                        {t('ticketItem.actions.run')}
+                        <SubmittingText busy={isRunning} />
+                      </button>
+                      {/* DFLT-00375: the cap the run button starts
+                          process-ticket with, beside it in the same row. */}
+                      <ModelCapSelect
+                        value={processModel}
+                        onChange={setProcessModel}
+                        disabled={isRunning || ticket.status === 'DONE' || ticket.status === 'CLOSED'}
+                        describedBy={modelCapHelpId}
+                        testId="process-ticket-model"
+                      />
+                    </div>
+                    <p id={modelCapHelpId} className="text-[0.6875rem] text-slate-500 dark:text-slate-400 wrap-anywhere">
+                      {t('modelCap.help')}
+                    </p>
                   </div>
                 }
               />

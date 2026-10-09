@@ -340,7 +340,7 @@ describe('autopilot in the Web UI', () => {
     expect(startRequests()).toEqual([]);
     await confirmStart(user);
     expect(dialog()).not.toBeInTheDocument();
-    await waitFor(() => expect(startRequests()).toEqual([{ url: `/api/tickets/${X}/autopilot`, body: { mode } }]));
+    await waitFor(() => expect(startRequests()).toEqual([{ url: `/api/tickets/${X}/autopilot`, body: { mode, model: 'inherit' } }]));
     expect(await within(controls).findByTestId('autopilot-message')).toHaveTextContent(
       i18n.t('autopilot.started', { runId: 'run-1' })
     );
@@ -574,7 +574,7 @@ describe('autopilot in the Web UI', () => {
     expect(screen.getByTestId('autopilot-mode-ticket')).toBeChecked();
     expect(screen.getByRole('dialog', { name: modeTitle('ticket') })).toBeInTheDocument();
     await confirmStart(user);
-    await waitFor(() => expect(startRequests()).toEqual([{ url: `/api/tickets/${P}/autopilot`, body: { mode: 'ticket' } }]));
+    await waitFor(() => expect(startRequests()).toEqual([{ url: `/api/tickets/${P}/autopilot`, body: { mode: 'ticket', model: 'inherit' } }]));
   });
 
   it('shows running / processing / waiting badges in the list', async () => {
@@ -654,7 +654,7 @@ describe('autopilot in the Web UI', () => {
       i18n.t('autopilot.confirm.ticket', { id: P })
     );
     await confirmStart(user);
-    await waitFor(() => expect(startRequests()).toEqual([{ url: `/api/tickets/${P}/autopilot`, body: { mode: 'ticket' } }]));
+    await waitFor(() => expect(startRequests()).toEqual([{ url: `/api/tickets/${P}/autopilot`, body: { mode: 'ticket', model: 'inherit' } }]));
   });
 
   it('ignores inactive runs for badges and buttons', async () => {

@@ -169,8 +169,14 @@ func sameMachine(runs []*autopilot.Run, owner func(*autopilot.Run) string, machi
 }
 
 // OrchestratorPrompt is the prompt the Web UI's launch opens the
-// orchestrator's terminal with: the mode's skill, the root, and the run the
-// launch reserved for it to adopt.
-func OrchestratorPrompt(mode, ticketID, runID string) string {
-	return fmt.Sprintf("/graph-ops:autopilot-%s %s --run %s", mode, ticketID, runID)
+// orchestrator's terminal with: the mode's skill, the root, the run the
+// launch reserved for it to adopt, and the run's model cap when it has one
+// (DFLT-00375; "" leaves --model out, and the orchestrator's `start --run`
+// then keeps the cap the reservation recorded -- none).
+func OrchestratorPrompt(mode, ticketID, runID, modelCap string) string {
+	p := fmt.Sprintf("/graph-ops:autopilot-%s %s --run %s", mode, ticketID, runID)
+	if modelCap != "" {
+		p += " --model " + modelCap
+	}
+	return p
 }

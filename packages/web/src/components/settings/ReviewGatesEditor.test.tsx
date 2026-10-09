@@ -591,6 +591,28 @@ describe('ReviewGatesEditor', () => {
       }
     });
 
+    // DFLT-00375: an invalid node_models value in the user tier, which this
+    // screen has no field for -- the note names the type and the value.
+    it.each(['ja', 'en'])('shows the invalid node_models warning translated into %s', async lang => {
+      const previous = i18n.language;
+      await i18n.changeLanguage(lang);
+      try {
+        mockedFetchCatalog.mockResolvedValue({
+          ...CATALOG_RESPONSE,
+          warnings: [{ code: SETTINGS_CATALOG_WARNINGS.nodeModelInvalid, node_type: 'report', node_model: 'fable' }]
+        });
+        render(<ReviewGatesEditor onDirtyChange={vi.fn()} />);
+        await screen.findByDisplayValue('Code Review');
+        const note = screen.getByRole('note', { name: i18n.t('settings.reviewGates.warningsTitle') });
+        const expected = i18n.t('settings.reviewGates.warningNodeModelInvalid', { type: 'report', value: 'fable' });
+        expect(expected).toContain('report');
+        expect(expected).toContain('fable');
+        expect(within(note).getByRole('listitem')).toHaveTextContent(expected);
+      } finally {
+        await i18n.changeLanguage(previous);
+      }
+    });
+
     it('shows nothing for a warning code it has no message for', async () => {
       mockedFetchCatalog.mockResolvedValue({
         ...CATALOG_RESPONSE,

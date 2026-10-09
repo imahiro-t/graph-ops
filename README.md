@@ -67,10 +67,44 @@ The one thing the update cannot do for you is restart a UI server that is alread
 | `/graph-ops:onboarding` | First-time setup. Asks which language the plugin should work in and saves the choice. |
 | `/graph-ops:create-ticket` | Talks a request through with you, then creates a ticket. It also suggests fitting labels from the project's existing ones and, if none fit, proposes a new label that it registers only after you approve it. Does not build an execution graph. |
 | `/graph-ops:refine-ticket` | Pins down a ticket's completion criteria and "why", and rewrites its description (and, if needed, its priority and labels -- suggesting existing labels, and registering a new one only after you approve it). Does not build an execution graph. |
-| `/graph-ops:process-ticket` | Decides the shape of the ticket's execution graph, then runs it with subagents, saving artifacts and repeating reviews until they converge. |
-| `/graph-ops:autopilot-ticket <ticketId>` | Takes the ticket through refinement, its execution graph, release and follow-up tickets without human input, in a child session in another terminal. This session only relays and keeps the short result. See [Autopilot](#autopilot). |
-| `/graph-ops:autopilot-tree <ticketId>` | Does the same for the ticket and then, one at a time, every descendant ticket (including those created along the way), merging each child's branch into its parent's, and ends with a summary of the whole tree. |
+| `/graph-ops:process-ticket <ticketId> [--model <m>]` | Decides the shape of the ticket's execution graph, then runs it with subagents, saving artifacts and repeating reviews until they converge. Each node runs on its node type's model, capped by `--model` (see [Models per node type and the model cap](#models-per-node-type-and-the-model-cap)). |
+| `/graph-ops:autopilot-ticket <ticketId> [--model <m>]` | Takes the ticket through refinement, its execution graph, release and follow-up tickets without human input, in a child session in another terminal. This session only relays and keeps the short result. See [Autopilot](#autopilot). |
+| `/graph-ops:autopilot-tree <ticketId> [--model <m>]` | Does the same for the ticket and then, one at a time, every descendant ticket (including those created along the way), merging each child's branch into its parent's, and ends with a summary of the whole tree. |
 | `/graph-ops:ui` | Opens the local Web UI for the project whose local path is (or contains) the current directory, starting the UI server if needed. If none matches, lets you create a new project or choose an existing one for this directory. |
+
+### Models per node type and the model cap
+
+`process-ticket` starts one subagent per node, and not every node needs the strongest model. Each node type is assigned a model, and the model you choose at launch is a **cap** for the whole ticket.
+
+**Default assignments.** A node type runs on a lower model only when it meets all three of these criteria: its input is fixed by earlier nodes' artifacts or a fixed template, and it decides no design, approach or pass/fail itself (the reviews and gates before it already did); its procedure is fixed (run given commands, transcribe results, fill in a template); and a mistake it makes is caught afterwards by a review or by `add-artifact`'s structure check, so it is not the last line of quality. Nodes that only transcribe into a template get `haiku`; nodes whose procedure is fixed but that read results or act on the outside (working out why a test failed, git and pull-request operations) get `sonnet`.
+
+| Node type | Model | Why |
+| --- | --- | --- |
+| `report` | `haiku` | Transcribes the test results into the fixed HTML template; `add-artifact` checks its structure and `report_review` follows it. |
+| `gherkin_test` | `sonnet` | Runs and records settled scenarios, but has to prepare the environment and read failures; `test_review` follows it. |
+| `release` | `sonnet` | Applies approved changes step by step, and has to handle git / pull-request failures. |
+| `plan`, `investigation`, `gherkin_spec`, `implementation`, `review`, `review_gate`, `documentation`, `deliverable`, and custom node types | `inherit` (top tier) | They design, judge or decide pass/fail. |
+
+`approval_gate` is decided by a person (or by the autopilot's worker session itself) and starts no subagent, so it has no model.
+
+**Overriding the assignments.** Set `node_models` in your own `$HOME/.graph-ops/config.yaml` or in the team tier's `workflow.yaml` (see "Sharing settings with a team" under [Settings](#settings)). Values are `haiku`, `sonnet`, `opus` and `inherit` (lower case). Keys are merged one by one -- plugin default, then your own tier, then the team tier, the last one winning -- and a custom node type can be given a model too; a node type with no entry is `inherit`. An invalid value (for example `fable` or `gpt-4`) makes `graph-engine` refuse to load that file, and Settings reports it as `NODE_MODEL_INVALID` and refuses to save it. `graph-engine get-workflow-catalog` prints the merged `node_models`. For example, to put reports back on the top tier:
+
+```yaml
+node_models:
+  report: inherit
+```
+
+**Choosing a cap at launch.** Pass `--model haiku|sonnet|opus` to `/graph-ops:process-ticket <ticketId>`, `/graph-ops:autopilot-ticket <ticketId>` or `/graph-ops:autopilot-tree <ticketId>`, or pick a model in the "Model cap" selector next to "Run" or in the "Autopilot" confirmation in the Web UI.
+
+- **Every node runs on `min(its node type's assignment, the cap)`**, ordered `haiku` < `sonnet` < `opus`; an `inherit` node runs on the cap itself. With a `haiku` cap every node runs on Haiku; with a `sonnet` cap the top-tier nodes run on Sonnet and `report` on Haiku.
+- **The cap is passed down**: from the session to the subagents it starts (a node agent that starts subagents of its own keeps them at or below the cap), and in an autopilot run to every child and grandchild session, each of which is started with `claude --model <cap>`.
+- **From the Web UI, the launched session itself runs on the chosen model** (`claude --model <m>`), and so does the autopilot's orchestrator. From the CLI, a session that is already running cannot change its own model, so `--model` caps only the subagents it starts.
+- **It is a cap, not a ban**: `--model opus` from a Sonnet session runs the top-tier nodes on Opus subagents.
+- **No cap keeps today's behaviour.** Without `--model` (or with "Not specified" in the Web UI), the launching session's own model is the cap. Nodes that resolve to the session's own model family get no model at all and inherit the session as it is -- version and variants such as a 1M-context model included -- so only the nodes assigned below it (`report`, `gherkin_test`, `release` by default) are started on a lower model.
+- **If the session's model family cannot be recognised** from its model ID, it is treated as no cap: the top-tier nodes still inherit the session's model, and the lower-assigned nodes run on their assignment. Only in that case can a `sonnet` node run above a Haiku session.
+- **Autopilot runs record their cap** (`model_cap` in `graph-engine autopilot start`, `status`, `worker-context`, the runs API, and a `Model cap:` line in the summary when there is one). Resuming an interrupted or stopped run from the CLI without `--model` keeps the recorded cap; `--model inherit` removes it. **Resuming from the Web UI always sends the selector's value: "Not specified" is sent as `inherit` and clears a cap the run recorded**, so choose the model again in the confirmation if the resumed run should keep its cap. The selector starts on "Not specified" every time the confirmation opens.
+
+There is no automatic retry on a higher model when a node fails on a lower one; if a node type does not work well on its assigned model, set it to `inherit` in `node_models`.
 
 ### Using the Web UI
 
@@ -120,8 +154,8 @@ The following buttons open an external, interactive terminal running `claude`. Y
 
 - "Launch Claude" in the header opens a dialog where you can type any prompt and press "Launch".
 - "New Ticket" in the header opens a form with a single field where you describe the ticket you want. "Create" starts `claude`, which works out the title and description with the create-ticket skill and asks you to confirm them before creating the ticket.
-- "Refine" and "Run" on an expanded ticket start `claude` to refine or run that ticket.
-- "Autopilot", at the right end of an expanded ticket's action row (set apart from "Refine" and "Run"), starts the autopilot on that ticket after a confirmation, in which you choose "Tree (this ticket and its descendants)" (the initial choice) or "This ticket only" (see [Autopilot](#autopilot)). Unlike the other buttons, it runs on its own: the terminal is opened with the project's autopilot permission mode, and each ticket's work continues in further terminals. It needs the project's local path.
+- "Refine" and "Run" on an expanded ticket start `claude` to refine or run that ticket. The "Model cap" selector next to "Run" starts that session on the chosen model and passes it to process-ticket as `--model` (see [Models per node type and the model cap](#models-per-node-type-and-the-model-cap)); "Not specified" starts `claude` as before. "Refine" and the prompt box always launch without a model.
+- "Autopilot", at the right end of an expanded ticket's action row (set apart from "Refine" and "Run"), starts the autopilot on that ticket after a confirmation, in which you choose "Tree (this ticket and its descendants)" (the initial choice) or "This ticket only" (see [Autopilot](#autopilot)), and a "Model cap" for the run. Unlike the other buttons, it runs on its own: the terminal is opened with the project's autopilot permission mode, and each ticket's work continues in further terminals. It needs the project's local path.
 - The prompt box on an expanded ticket sends any instruction about that ticket with "Send".
 
 The prompt fields accept multiple lines: press Enter for a new line, and press "Launch"/"Send"/"Create" or Cmd+Enter (macOS) / Ctrl+Enter to submit. A prompt with only spaces or blank lines is not sent.
@@ -134,7 +168,7 @@ Open Settings with the gear button in the header.
 
 - **Where these settings live**: they are yours and apply on every project; apart from the Autopilot tab and project management, there is no per-project scope. What you edit here is written to your own settings directory, `$HOME/.graph-ops`. (`userExtensionsDir` in `config.json` and `GRAPH_USER_EXTENSIONS_DIR` still move it, but only by hand or through the environment: the Web UI does not edit it, and saving App Settings leaves a value already in `config.json` as it is.) They are plain files -- review gates and the language in `config.yaml`, instructions and templates under `extensions/` -- so they can also be edited by hand. This screen edits your own tier only; change a shared directory's files where they live.
 - **Sharing settings with a team (the team tier)**: set App Settings > "Team Settings Directory" to the absolute path of a shared directory (it is saved as `teamExtensionsDir` in `$HOME/.graph-ops/config.json`; the environment variable `GRAPH_TEAM_EXTENSIONS_DIR`, if set, takes precedence, and a change takes effect immediately for the `graph-engine` CLI -- and so for the agents, which read `config.json` on every command -- while an already-running UI server picks it up only after it restarts). The directory keeps the same layout as your own, except that a team tier's review gates go in `workflow.yaml` at its root rather than `config.yaml` (`extensions/...` sits beneath it exactly as in your own tier). The engine then reads it as a team tier that **takes precedence over your own settings**. When it is not set, or names your own directory, there is no team tier and only your own settings are used; there is no default, so nothing is read as a team tier unless you name it yourself. In particular, a `.graph-ops/` directory inside a repository you happen to be working in is never read.
-  - **What the team tier can set**: settings kept in local files that are not personal -- node-type instructions, workflow settings (review gates and the review iteration limit, in `workflow.yaml`), the plan / review / report templates, skill instructions, and autopilot settings (`autopilot.yaml`, see [Autopilot settings](#autopilot-settings)).
+  - **What the team tier can set**: settings kept in local files that are not personal -- node-type instructions, workflow settings (review gates, the review iteration limit and the models per node type (`node_models`), in `workflow.yaml`), the plan / review / report templates, skill instructions, and autopilot settings (`autopilot.yaml`, see [Autopilot settings](#autopilot-settings)).
   - **What it cannot set**: settings kept in the database (such as labels), and settings that belong to you or your machine -- the database connection, each project's local path, your name (`myName`), the current project, and the language. These are never read from the team tier.
   - **The language is a personal setting.** The working language (`language` in your own `config.yaml`, set by `/graph-ops:onboarding`) is resolved from your own tier and an explicit `--language` only. A `language` in the team tier's `workflow.yaml` is ignored, and when `graph-engine` finds one it prints a single line on stderr such as `graph-ops: warning: team workflow.yaml sets language "ja", which is ignored: the working language is a personal setting (...)`; the JSON output and exit codes do not change (`get-language-settings` reports `source` as `"user"` or `"none"`, never `"team"`). This covers the `language` setting and the language block `/graph-ops:onboarding` writes into the instruction files under your own `extensions/`; the engine does not restrict what the team tier's instruction files (such as `extensions/node-types/*.md`) say, so a language instruction written in one of them can still affect the language of the deliverables.
 - **Node Types / Review Gates / Skills / Templates**: add instructions for each node type (or add a custom node type), change or add review-gate criteria (and whether each gate is enabled), set the workflow-wide review iteration limit (3, 4 or 5 review rounds; 3 by default -- a review that still fails in the last round blocks the ticket, and the review criteria loosen by round: Normal, then Important, then Final), add instructions to each skill, and replace the execution-plan, review, and HTML report templates (the Templates tab's left-hand list switches between the three). Each screen also shows a merged preview of the plugin default plus your own additions; a shared team directory, if you have one configured, is not part of that preview -- check the merged result for a node type with `graph-engine get-node-type-context <nodeType>`.
@@ -332,10 +366,44 @@ claude plugin update graph-ops@graph-ops
 | `/graph-ops:onboarding` | 初回セットアップ。プラグインが使う言語を確認し、設定として保存します。 |
 | `/graph-ops:create-ticket` | 依頼内容を対話で詰めてから、チケットを作成します。プロジェクトの既存ラベルから合うものを提案し、合うものがなければ新しいラベルを提案して、承認を得てから登録します。実行グラフは作りません。 |
 | `/graph-ops:refine-ticket` | チケットの完了条件と「なぜやるか」を固め、説明を書き直します（必要なら優先度とラベルも変更します。ラベルは既存のものから提案し、新しいラベルは承認を得てから登録します）。実行グラフは作りません。 |
-| `/graph-ops:process-ticket` | チケットの実行グラフの形を決め、サブエージェントで実行します。成果物の保存と、レビューが収束するまでの繰り返しも行います。 |
-| `/graph-ops:autopilot-ticket <ticketId>` | チケットのリファイン、実行グラフの実行、リリース、申し送りのチケット化までを、人の入力なしで進めます。作業は別ターミナルの子セッションが行い、起動したセッションは中継と短い結果の保持だけを行います。「[オートパイロット](#オートパイロット)」を参照してください。 |
-| `/graph-ops:autopilot-tree <ticketId>` | 同じことを、そのチケットと、その子孫のチケット（途中で作られたものを含む）に 1 件ずつ行います。子のブランチは親のブランチへマージされ、最後にツリー全体のサマリを出力します。 |
+| `/graph-ops:process-ticket <ticketId> [--model <m>]` | チケットの実行グラフの形を決め、サブエージェントで実行します。成果物の保存と、レビューが収束するまでの繰り返しも行います。各ノードはノード種別のモデルで動き、`--model` がその上限になります（「[ノード種別ごとのモデルとモデル上限](#ノード種別ごとのモデルとモデル上限)」を参照）。 |
+| `/graph-ops:autopilot-ticket <ticketId> [--model <m>]` | チケットのリファイン、実行グラフの実行、リリース、申し送りのチケット化までを、人の入力なしで進めます。作業は別ターミナルの子セッションが行い、起動したセッションは中継と短い結果の保持だけを行います。「[オートパイロット](#オートパイロット)」を参照してください。 |
+| `/graph-ops:autopilot-tree <ticketId> [--model <m>]` | 同じことを、そのチケットと、その子孫のチケット（途中で作られたものを含む）に 1 件ずつ行います。子のブランチは親のブランチへマージされ、最後にツリー全体のサマリを出力します。 |
 | `/graph-ops:ui` | カレントディレクトリがローカルパス（またはその配下）にあたるプロジェクトのローカル Web UI を開きます。必要なら UI サーバーを起動します。該当がなければ、このディレクトリ用にプロジェクトを新規作成するか既存プロジェクトを選べます。 |
+
+### ノード種別ごとのモデルとモデル上限
+
+`process-ticket` はノードごとにサブエージェントを起動しますが、すべてのノードに最上位のモデルが要るわけではありません。ノード種別ごとにモデルを割り当て、起動時に選んだモデルをそのチケット全体の**上限**として扱います。
+
+**既定の割り当て。** 上位より下のモデルにするのは、次の 3 つをすべて満たすノード種別だけです。入力が前段ノードの成果物や固定テンプレートで決まっていて、設計・方針・合否をノード自身が判断しない（判断は前段のレビューやゲートで済んでいる）。手順が固定されている（決められたコマンドの実行、結果の転記、テンプレートの穴埋め）。失敗しても後段のレビューや `add-artifact` の構造検査で検出でき、品質判定の最後の砦ではない。このうち、テンプレートへの転記だけで済むものを `haiku`、手順は固定でも実行結果の読み取りや外部への操作（テスト失敗の原因の切り分け、git やプルリクエストの操作）を伴うものを `sonnet` にしています。
+
+| ノード種別 | モデル | 理由 |
+| --- | --- | --- |
+| `report` | `haiku` | テスト結果を固定の HTML テンプレートに転記するだけです。構造は `add-artifact` が検査し、後段に `report_review` があります。 |
+| `gherkin_test` | `sonnet` | 確定したシナリオを実行・記録する定型作業ですが、実行環境の準備や失敗の読み取りが要ります。後段に `test_review` があります。 |
+| `release` | `sonnet` | 承認済みの変更を手順どおりに反映します。git やプルリクエストの操作が失敗したときの対処が要ります。 |
+| `plan`・`investigation`・`gherkin_spec`・`implementation`・`review`・`review_gate`・`documentation`・`deliverable`・独自のノード種別 | `inherit`（上位） | 設計・判断・合否判定を担います。 |
+
+`approval_gate` は人（またはオートパイロットの worker セッション自身）が判断するノードで、サブエージェントを起動しないため、モデルはありません。
+
+**割り当ての上書き。** 自分の `$HOME/.graph-ops/config.yaml`、またはチーム層の `workflow.yaml`（「[設定](#設定)」の「チームでの設定の共有」を参照）に `node_models` を書きます。値は `haiku`・`sonnet`・`opus`・`inherit`（小文字）です。キーごとに、プラグインの既定 → 自分の層 → チーム層の順に後のものが勝ちます。独自のノード種別にも指定でき、指定のないノード種別は `inherit` です。不正な値（`fable` や `gpt-4` など）があると `graph-engine` はそのファイルを読み込まずにエラーにし、設定画面は `NODE_MODEL_INVALID` の警告を表示して保存を拒否します。合成後の `node_models` は `graph-engine get-workflow-catalog` で確認できます。たとえばレポートを上位に戻すには次のように書きます。
+
+```yaml
+node_models:
+  report: inherit
+```
+
+**起動時の上限の指定。** `/graph-ops:process-ticket <ticketId>`・`/graph-ops:autopilot-ticket <ticketId>`・`/graph-ops:autopilot-tree <ticketId>` に `--model haiku|sonnet|opus` を付けるか、Web UI の「実行する」の隣、または「オートパイロット」の確認ダイアログにある「モデル上限」で選びます。
+
+- **どのノードも `min(ノード種別の割り当て, 上限)` のモデルで動きます**（`haiku` < `sonnet` < `opus`）。`inherit` のノードは上限そのもので動きます。上限が `haiku` ならすべてのノードが Haiku、`sonnet` なら上位のノードが Sonnet で `report` が Haiku になります。
+- **上限は引き継がれます**。セッションから、それが起動するサブエージェントへ（ノードのエージェントがさらにサブエージェントを起動するときも上限以下にします）。オートパイロットでは、子・孫のすべてのセッションが `claude --model <上限>` で起動されます。
+- **Web UI から起動すると、起動されるセッション自体が選んだモデルで動きます**（`claude --model <m>`）。オートパイロットのオーケストレーターも同じです。CLI では、すでに動いているセッションは自分のモデルを変えられないため、`--model` の上限はそのセッションが起動するサブエージェントにだけ効きます。
+- **上限であって禁止ではありません**。Sonnet のセッションから `--model opus` を指定すると、上位のノードは Opus のサブエージェントで動きます。
+- **上限を指定しなければ今と同じ動きです**。`--model` を付けない場合（Web UI では「指定なし」）、起動元のセッション自身のモデルが上限になります。セッション自身と同じモデルファミリーになるノードにはモデルを一切指定せず、版や 1M コンテキスト版などの variant も含めて起動元のモデルをそのまま継承するので、それより低く割り当てられたノード（既定では `report`・`gherkin_test`・`release`）だけが低いモデルで起動されます。
+- **セッションのモデル ID からモデルファミリーを判別できない場合は、上限なしとして扱います**。上位のノードは起動元のモデルをそのまま継承し、低く割り当てられたノードは割り当てどおりのモデルで動きます。起動元が Haiku なのに判別できなかったときだけ、`sonnet` のノードが起動元より上位のモデルで動くことがあります。
+- **オートパイロットの run は上限を記録します**（`graph-engine autopilot start`・`status`・`worker-context` と run の API の `model_cap`、上限があるときはサマリの `Model cap:` 行）。中断・停止した run を CLI で `--model` なしで再開すると、記録した上限を保ちます。外すには `--model inherit` を指定します。**Web UI からの再開では常に選択欄の値を送り、「指定なし」は `inherit` として送られるため、run に記録された上限は外れます**。再開後も上限を保ちたいときは、確認ダイアログでモデルを選び直してください。選択欄は確認ダイアログを開くたびに「指定なし」に戻ります。
+
+低いモデルでノードが失敗したときに、上位のモデルで自動的にやり直すことはしません。割り当てたモデルでうまく動かないノード種別は、`node_models` で `inherit` にしてください。
 
 ### Web UI の使い方
 
@@ -385,8 +453,8 @@ claude plugin update graph-ops@graph-ops
 
 - ヘッダーの「Claude 起動」は、任意のプロンプトを入力して「起動」を押すダイアログを開きます。
 - ヘッダーの「新規チケット」は、作成したいチケットの内容を書く入力欄 1 つのフォームを開きます。「作成」を押すと `claude` が起動し、create-ticket スキルでタイトルと説明を考え、確認を取ってからチケットを登録します。
-- 展開したチケットの「リファイン」「実行する」は、そのチケットのリファインや実行のために `claude` を起動します。
-- 展開したチケットのアクション行の右端（「リファイン」「実行する」とは別枠）にある「オートパイロット」は、確認のあと、そのチケットでオートパイロットを起動します。確認ダイアログで「ツリー（このチケットと子孫）」（初期選択）か「このチケット単体」かを選びます（「[オートパイロット](#オートパイロット)」を参照）。ほかのボタンと違い、起動後は人の操作なしで進みます。ターミナルはプロジェクトのオートパイロット設定の権限モードで開かれ、チケットごとの作業はさらに別のターミナルで行われます。プロジェクトのローカルパスが必要です。
+- 展開したチケットの「リファイン」「実行する」は、そのチケットのリファインや実行のために `claude` を起動します。「実行する」の隣の「モデル上限」で選ぶと、そのモデルでセッションを起動し、process-ticket に `--model` として渡します（「[ノード種別ごとのモデルとモデル上限](#ノード種別ごとのモデルとモデル上限)」を参照）。「指定なし」なら従来どおり `claude` を起動します。「リファイン」とプロンプト欄は、モデルを指定せずに起動します。
+- 展開したチケットのアクション行の右端（「リファイン」「実行する」とは別枠）にある「オートパイロット」は、確認のあと、そのチケットでオートパイロットを起動します。確認ダイアログで「ツリー（このチケットと子孫）」（初期選択）か「このチケット単体」かと、run の「モデル上限」を選びます（「[オートパイロット](#オートパイロット)」を参照）。ほかのボタンと違い、起動後は人の操作なしで進みます。ターミナルはプロジェクトのオートパイロット設定の権限モードで開かれ、チケットごとの作業はさらに別のターミナルで行われます。プロジェクトのローカルパスが必要です。
 - 展開したチケットのプロンプト欄からは、そのチケットに関する任意の指示を「送信」で送れます。
 
 プロンプト欄は複数行に対応しています。Enter で改行し、「起動」／「送信」／「作成」ボタンか、Cmd+Enter（macOS）／Ctrl+Enter で送信します。空白や空行だけのプロンプトは送信されません。
@@ -399,7 +467,7 @@ claude plugin update graph-ops@graph-ops
 
 - **設定の置き場所**: ここでの設定は自分のもので、すべてのプロジェクトに適用されます。「オートパイロット」タブとプロジェクト管理を除き、プロジェクト単位のスコープはありません。この画面で編集した内容は自分の設定ディレクトリ `$HOME/.graph-ops` に書き込まれます（`config.json` の `userExtensionsDir` と環境変数 `GRAPH_USER_EXTENSIONS_DIR` で場所を変えることはできますが、手での編集か環境変数によるものだけです。Web UI では編集せず、アプリ設定を保存しても `config.json` にある値はそのまま残ります）。どれも普通のファイル（レビューゲートと言語は `config.yaml`、指示とテンプレートは `extensions/` の下）なので、手で編集することもできます。この画面が編集するのは自分の層だけです。共有ディレクトリの内容は、そのファイルがある場所で編集してください。
 - **チームでの設定の共有（チーム層）**: アプリ設定の「チーム設定ディレクトリ」に、共有ディレクトリを絶対パスで指定します（`$HOME/.graph-ops/config.json` の `teamExtensionsDir` として保存されます。環境変数 `GRAPH_TEAM_EXTENSIONS_DIR` が設定されている場合はそちらが優先され、変更は `graph-engine` の CLI には（したがって、コマンドのたびに `config.json` を読み直すエージェントにも）すぐに反映され、すでに起動している UI サーバーには再起動後に反映されます）。共有ディレクトリの構成は自分の設定ディレクトリと同じですが、チーム層のレビューゲートはルートの `config.yaml` ではなく `workflow.yaml` に書きます（`extensions/` 配下の構成は自分の層とまったく同じです）。指定すると、その内容が**自分の設定より優先される**チーム層として読まれます。未設定の場合や、自分の設定ディレクトリと同じ場所を指定した場合はチーム層はなく、自分の設定だけが使われます。既定値はないので、自分で指定しないかぎりチーム層は存在しません。とくに、作業中のリポジトリの中にある `.graph-ops/` ディレクトリが読まれることはありません。
-  - **チーム層で設定できるもの**: ローカルファイルで設定する項目のうち、個人のものではない項目です。ノード種別の指示、ワークフローの設定（`workflow.yaml` のレビューゲートとレビュー反復上限）、実行計画・レビュー・レポートのテンプレート、スキルへの指示、オートパイロット設定（`autopilot.yaml`。「[オートパイロットの設定](#オートパイロットの設定)」を参照）。
+  - **チーム層で設定できるもの**: ローカルファイルで設定する項目のうち、個人のものではない項目です。ノード種別の指示、ワークフローの設定（`workflow.yaml` のレビューゲート、レビュー反復上限、ノード種別ごとのモデル（`node_models`））、実行計画・レビュー・レポートのテンプレート、スキルへの指示、オートパイロット設定（`autopilot.yaml`。「[オートパイロットの設定](#オートパイロットの設定)」を参照）。
   - **チーム層で設定できないもの**: DB に保存する設定（ラベルなど）と、自分や自分の環境に固有の設定です。DB 接続、各プロジェクトのローカルパス、自分の名前（`myName`）、現在のプロジェクト、言語。これらはチーム層からは読まれません。
   - **言語は個人の設定です。** 作業言語（`/graph-ops:onboarding` が設定する、自分の `config.yaml` の `language`）は、自分の層と明示的な `--language` の指定だけで決まります。チーム層の `workflow.yaml` にある `language` は無視され、`graph-engine` は見つけると、stderr に `graph-ops: warning: team workflow.yaml sets language "ja", which is ignored: the working language is a personal setting (...)` のような 1 行の警告を出します。JSON 出力と終了コードは変わりません（`get-language-settings` の `source` は `"user"` か `"none"` で、`"team"` にはなりません）。ここでいう言語の設定は、`language` の項目と、`/graph-ops:onboarding` が自分の `extensions/` 配下の指示ファイルに書き込む言語のブロックのことです。チーム層の指示ファイル（`extensions/node-types/*.md` など）の内容をエンジンは制限しないので、そこに言語の指示を書けば、成果物の言語に影響することはあります。
 - **ノード種別／レビューゲート／スキル／テンプレート**: ノード種別ごとの指示の追加（独自のノード種別の追加も可）、レビューゲートの観点の変更・追加（有効・無効も含む）、ワークフロー全体のレビュー反復上限（3・4・5 巡のいずれか。既定は 3。最後の巡回でも不合格ならチケットをブロックします。収束基準は巡回に応じて「通常 → 重要 → 最終」と緩みます）の設定、スキルごとの指示の追加、実行計画・レビュー・HTML レポートのテンプレートの差し替え（「テンプレート」タブの左の一覧で 3 つを切り替えます）ができます。どの画面にも、プラグインの既定と自分の層を合成したプレビューがあります。共有ディレクトリ（チーム層）を設定している場合、その内容はこのプレビューには含まれません。合成後の内容は `graph-engine get-node-type-context <nodeType>` で確認できます。

@@ -316,6 +316,16 @@
     "failed": "ターミナルの起動に失敗しました: {{message}}",
     "unknownReason": "原因を特定できませんでした"
   },
+  "modelCap": {
+    "label": "モデル上限",
+    "options": {
+      "inherit": "指定なし（起動元のモデル）",
+      "opus": "Opus",
+      "sonnet": "Sonnet",
+      "haiku": "Haiku"
+    },
+    "help": "選んだモデルで処理を起動し、そのモデルをこのチケット処理とそこから起動されるサブエージェント・子セッションのモデルの上限にします。各ノードはノード種別の割り当てとこの上限の低い方で動きます。"
+  },
   "claudePrompts": {
     "executeIncompleteNodes": "チケット {{ticketId}} の未完了ノードを実行してください",
     "refineTicket": "/graph-ops:refine-ticket {{ticketId}} のスキルを使って、完了条件とWhy（背景・目的）を詰めてください",
@@ -457,6 +467,7 @@
       "warningsTitle": "設定に問題があります",
       "warningLegacyGateMaxIterations": "レビューゲート「{{id}}」の max_iterations は、ゲートごとには指定できなくなったため無視されています。代わりに「レビュー反復上限」で 3・4・5 のいずれかを選んでください。この画面から保存すると、ゲートの max_iterations は削除されます。",
       "warningMaxIterationsOutOfRange": "設定ファイルのレビュー反復上限が {{value}} になっています。使える値は 3・4・5 だけで、このままではエージェントが設定を読み込めません。「レビュー反復上限」で 3・4・5 か継承を選んで保存してください。",
+      "warningNodeModelInvalid": "設定ファイルの node_models で、ノード種別「{{type}}」のモデルが「{{value}}」になっています。使える値は haiku・sonnet・opus・inherit だけで、このままではエージェントが設定を読み込めません。この画面には編集欄がないため、設定ファイルを直接修正してください。",
       "workflowMaxIterationsInvalid": "{{value}}（無効な値）"
     },
     "skills": {

@@ -5,7 +5,7 @@ description: Runs one ticket from refinement through graph execution, release an
 
 # autopilot-ticket Skill
 
-Drives an autopilot run in `ticket` mode. `graph-engine autopilot` decides every step, a child session in another terminal (the `autopilot-worker` skill) does the ticket's work, and this session only relays commands and keeps the short results. It is invoked as `/graph-ops:autopilot-ticket <ticketId> [--run <runId>]`; the Web UI passes `--run` for a run it has already reserved.
+Drives an autopilot run in `ticket` mode. `graph-engine autopilot` decides every step, a child session in another terminal (the `autopilot-worker` skill) does the ticket's work, and this session only relays commands and keeps the short results. It is invoked as `/graph-ops:autopilot-ticket <ticketId> [--run <runId>] [--model <m>]`; the Web UI passes `--run` for a run it has already reserved, and `--model` when a model cap was chosen there.
 
 ## 0. Check for user/team customization of this skill
 
@@ -17,11 +17,13 @@ If the returned `content` is non-empty, follow it as additional rules on top of 
 
 ## 1. Start or resume the run
 
-Call `autopilot start` first, passing `--run <runId>` exactly when this invocation's arguments contain it:
+Call `autopilot start` first, passing `--run <runId>` and `--model <m>` exactly when this invocation's arguments contain them (pass the `--model` value through as is):
 
 ```bash
-graph-engine autopilot start "<ticketId>" --mode ticket [--run "<runId>"]
+graph-engine autopilot start "<ticketId>" --mode ticket [--run "<runId>"] [--model "<m>"]
 ```
+
+`--model` is the run's **model cap** (`haiku`, `sonnet` or `opus`; `inherit` removes a cap the run recorded). The engine records it on the run and starts every child session with `--model <cap>`, so the cap reaches each child's process-ticket and the subagents it starts, where every node runs on `min(its node type's assignment, the cap)`. Without `--model`, a new run has no cap -- the child sessions start on claude's default model, as before -- and a run that is taken over or adopted keeps the cap it recorded; to remove that cap, pass `--model inherit` explicitly. The start's line shows the cap in effect as `model_cap` (`""` for none).
 
 It prints one JSON line; keep its `run_id`. `resumed: true` means an interrupted or stopped run of the same ticket was taken over, which is how an interrupted autopilot continues. If the command fails (`AUTOPILOT_ALREADY_RUNNING`, `AUTOPILOT_ROOT_FINISHED`, `PROJECT_LOCAL_PATH_NOT_SET`, ...), show the error to the person as-is and stop.
 

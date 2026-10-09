@@ -25,6 +25,7 @@ import (
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/httpserver"
 	"github.com/graph-ops/core-go/internal/identity"
+	"github.com/graph-ops/core-go/internal/modelcap"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
 	"github.com/graph-ops/core-go/internal/store"
 )
@@ -388,13 +389,22 @@ Commands:
                                            then)
   list-tickets
   get-executable <ticketId> [--language <code>] [--session <sessionId>]
+                 [--model-cap <haiku|sonnet|opus>] [--session-model <model>]
                                           (claims the nodes it prints in your name and --session's
                                            session, each with its own "claim_token" -- pass it back with
                                            complete-node --claim. Auto-seeds the graph's plan/plan_review
                                            nodes on first call;
                                            --language, only meaningful on that first/seeding call, is this
                                            one call's explicit language choice -- see get-language-settings --
-                                           and outranks the persistent (user-tier) language setting)
+                                           and outranks the persistent (user-tier) language setting.
+                                           Each node also carries "model": what to pass as the Agent tool's
+                                           model when starting its subagent, "" meaning pass none (inherit
+                                           the session's own model). It is min(the node type's node_models
+                                           assignment, the cap): the cap is --model-cap (haiku|sonnet|opus,
+                                           anything else is VALIDATION_ERROR and nothing is claimed), else
+                                           the family of --session-model (the caller's own model ID; one
+                                           that cannot be classified counts as unknown, never an error).
+                                           A result equal to the session's own family is "")
   expand-graph <ticketId> [--patch <file|->] [--language <code>]
                                           (call once the seed passes; no patch = default full template;
                                            --language is this one call's explicit language choice, same
@@ -538,20 +548,23 @@ Commands:
                                            Local values are edited in the Web UI's settings (PUT
                                            /api/projects/{id}/autopilot-settings); there is no CLI to write
                                            them. The project is resolved like list-labels')
-  autopilot start <ticketId> --mode ticket|tree [--run <runId>]
+  autopilot start <ticketId> --mode ticket|tree [--run <runId>] [--model haiku|sonnet|opus|inherit]
                                           (starts an autopilot run from the ticket, or takes over the latest
                                            interrupted/stopped run with the same root and mode; --run adopts a
                                            run the Web UI reserved. Refuses AUTOPILOT_ALREADY_RUNNING when an
                                            active run overlaps the tree, AUTOPILOT_ROOT_FINISHED for a new run
-                                           from a DONE/CLOSED ticket. Runs are kept in
-                                           $HOME/.graph-ops/autopilot/<projectId>/runs/)
+                                           from a DONE/CLOSED ticket. --model records the run's model cap:
+                                           every session it launches gets --model <cap>, and worker-context
+                                           prints it as model_cap. Without --model a new run has no cap and a
+                                           taken-over or adopted run keeps the one it recorded; inherit clears
+                                           it. Runs are kept in $HOME/.graph-ops/autopilot/<projectId>/runs/)
   autopilot next <runId>                 (the one next action as JSON: launch / wait / merge-up / done /
                                            stopped, with the command that carries it out)
   autopilot launch <runId> <ticketId> [--role work|merge-up|finalize]
                                           (creates or reuses <localPath>/.claude/worktrees/<ticketId> on branch
                                            worktree-<ticketId> and opens a child claude session there with the
-                                           project's --permission-mode; PROJECT_LOCAL_PATH_NOT_SET without a
-                                           local path)
+                                           project's --permission-mode, plus --model <cap> when the run has a
+                                           model cap; PROJECT_LOCAL_PATH_NOT_SET without a local path)
   autopilot wait <runId> <ticketId> [--timeout <duration>]
                                           (blocks until the session reports; exits 0 with its result, or 2 on
                                            timeout (default 10m) with {"state":"waiting"|"awaiting_human",...};
@@ -560,7 +573,8 @@ Commands:
   autopilot merge-up <runId> <ticketId>  (fast-forwards a done ticket's branch into its merge target's;
                                            {"result":"needs_merge_session"} when that is not possible)
   autopilot worker-context|record-decision|attach-decisions|touch|report|merge-into-parent ...
-                                          (used by the autopilot-worker child session: its context, automatic
+                                          (used by the autopilot-worker child session: its context (with the
+                                           run's model_cap, "" for none), automatic
                                            decisions, activity (touch [--awaiting-human <what>], which marks the
                                            session as waiting for a person), its result (report --result
                                            done|failed|blocked [--reason <code>] --summary <text|->), and the
@@ -569,7 +583,9 @@ Commands:
                                            release node as autopilot-tree-summary)
   autopilot status [--project <id>]      (the project's runs, newest first)
   get-workflow-catalog [--language <code>]
-                                          (plugin default -> user -> team workflow.yaml/config.yaml merge;
+                                          (plugin default -> user -> team workflow.yaml/config.yaml merge,
+                                           node_models included: each node type's model assignment --
+                                           haiku|sonnet|opus|inherit, a type not listed being inherit;
                                            --language previews the merge as if it resolved to that code,
                                            same precedence note as get-executable's)
   get-skill-context <skill-name>         (merged user/team extension text for a plugin skill)
@@ -1428,11 +1444,30 @@ func cmdListTickets(repo store.GraphRepository) error {
 }
 
 func cmdGetExecutable(eng *engine.GraphEngine, repo store.GraphRepository, rc runtimeConfig, args []string) error {
-	const usage = `usage: graph-engine get-executable <ticketId> [--language <code>] [--session <sessionId>]`
+	const usage = `usage: graph-engine get-executable <ticketId> [--language <code>] [--session <sessionId>] [--model-cap <haiku|sonnet|opus>] [--session-model <model>]`
 	session, args, err := takeSessionFlag(args, usage)
 	if err != nil {
 		return err
 	}
+	// DFLT-00375: --model-cap is the cap chosen at launch, --session-model
+	// the caller's own model ID. A bad cap is refused before anything is
+	// claimed; an unrecognizable session model is just "unknown" (see
+	// modelcap.Family) -- it must never stop the run.
+	capArg, args, err := takeFlagValue(args, "--model-cap", usage)
+	if err != nil {
+		return err
+	}
+	var modelCap modelcap.Model
+	if capArg != "" {
+		if modelCap, err = modelcap.Parse(capArg); err != nil {
+			return domain.NewAPIError(domain.ErrCodeValidation, "--model-cap: %v", err)
+		}
+	}
+	sessionModelArg, args, err := takeFlagValue(args, "--session-model", usage)
+	if err != nil {
+		return err
+	}
+	sessionModel := modelcap.Family(sessionModelArg)
 	if len(args) < 1 {
 		return fmt.Errorf(usage)
 	}
@@ -1460,7 +1495,11 @@ func cmdGetExecutable(eng *engine.GraphEngine, repo store.GraphRepository, rc ru
 	if err != nil {
 		return err
 	}
-	return printJSON(claimedNodeViews(nodes))
+	views := claimedNodeViews(nodes)
+	for i := range views {
+		views[i].Model = string(modelcap.Resolve(catalog.ModelFor(string(views[i].Type)), modelCap, sessionModel))
+	}
+	return printJSON(views)
 }
 
 // cmdExpandGraph builds the rest of a ticket's graph once the seed
@@ -1982,6 +2021,7 @@ func cmdGetWorkflowCatalog(rc runtimeConfig, args []string) error {
 		"nodes":          catalog.EnabledNodes(),
 		"language":       respLanguage,
 		"max_iterations": catalog.MaxIterations,
+		"node_models":    catalog.NodeModels,
 	})
 }
 

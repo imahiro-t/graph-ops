@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/graph-ops/core-go/internal/domain"
+	"github.com/graph-ops/core-go/internal/modelcap"
 	"github.com/graph-ops/core-go/internal/terminal"
 )
 
@@ -30,23 +32,42 @@ import (
 // through to the next priority", not an error --
 // launching in a reasonable default directory is better than failing the
 // whole request over a project lookup that isn't this call's main point.
+//
+// model (DFLT-00375) is optional: haiku, sonnet or opus starts the session
+// itself on that model (`claude --model <m> "<prompt>"`) -- the Web UI's
+// process-ticket button sends it together with a `--model <m>` in the
+// prompt, so the chosen model is both the orchestrator's own and the cap it
+// hands down. Anything else (inherit included: here "no cap" is expressed by
+// leaving model out) is refused with 400 before a terminal opens. Omitted,
+// the launch is exactly what it was before (no extra arguments).
 func (s *Server) handleClaudeLaunch(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Prompt    string `json:"prompt"`
-		TicketID  string `json:"ticketId"`
-		ProjectID string `json:"project_id"`
+		Prompt    string  `json:"prompt"`
+		TicketID  string  `json:"ticketId"`
+		ProjectID string  `json:"project_id"`
+		Model     *string `json:"model"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	var extraArgs []string
+	if body.Model != nil && *body.Model != "" {
+		m, err := modelcap.Parse(*body.Model)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, domain.NewAPIError(domain.ErrCodeValidation, "model: %v", err))
+			return
+		}
+		extraArgs = []string{"--model", string(m)}
+	}
 
 	workDir := s.resolveLaunchWorkDir(body.ProjectID, body.TicketID)
 
-	err := terminal.Launch(
+	err := terminal.LaunchWithArgs(
 		terminal.Config{TerminalCommand: s.cfg.TerminalCommand},
 		workDir,
 		s.cfg.ClaudeBinary,
+		extraArgs,
 		withTicketContext(body.Prompt, body.TicketID),
 	)
 	if err != nil {

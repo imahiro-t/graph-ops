@@ -3,7 +3,12 @@
 // project (.graph-ops/workflow.yaml), project taking precedence.
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+
+	"github.com/graph-ops/core-go/internal/modelcap"
+)
 
 // ReviewGateDef describes one reusable review perspective. AdditionalCriteria
 // is appended to (not replacing) whatever Criteria was inherited from a
@@ -71,6 +76,15 @@ type Document struct {
 	// created is stored on that node, so changing it later does not affect
 	// tickets already in progress.
 	MaxIterations *int `yaml:"max_iterations,omitempty" json:"max_iterations,omitempty"`
+	// NodeModels assigns a model to node types (DFLT-00375): the key is a
+	// node type (built-in or custom), the value one of haiku, sonnet, opus
+	// or inherit (the top tier: the run's cap, else the session's own
+	// model). A type no tier mentions is inherit. Tiers merge per key, later
+	// wins (team beats user beats the plugin default), and a value outside
+	// those four makes LoadWithRoots refuse the file (the settings API
+	// reports WarnNodeModelInvalid instead). See internal/modelcap for how an
+	// assignment and the launch-time cap combine.
+	NodeModels map[string]string `yaml:"node_models,omitempty" json:"node_models,omitempty"`
 }
 
 // DefaultMaxIterations is the workflow-wide review iteration limit used when
@@ -103,6 +117,10 @@ type Catalog struct {
 	// (see Document.MaxIterations); DefaultMaxIterations when no tier sets
 	// one.
 	MaxIterations int `json:"max_iterations"`
+	// NodeModels is the merged node-type -> model assignment (see
+	// Document.NodeModels). Use ModelFor to read it: a type missing here is
+	// inherit.
+	NodeModels map[string]string `json:"node_models"`
 	// Warnings lists non-fatal problems found while merging, e.g. a review
 	// gate that still sets the retired per-gate max_iterations. It is not
 	// part of the catalog's JSON shape: the CLI prints each Message() to
@@ -129,6 +147,11 @@ const (
 	// personal setting (DFLT-00153). Only the CLI reports it: the settings
 	// API merges the user tier alone, so this code never reaches the Web UI.
 	WarnTeamLanguageIgnored = "TEAM_LANGUAGE_IGNORED"
+	// WarnNodeModelInvalid: a tier's node_models assigns node type NodeType
+	// a value (NodeModel) other than haiku, sonnet, opus or inherit.
+	// LoadWithRoots refuses such a file; the settings API reports it with
+	// this code instead.
+	WarnNodeModelInvalid = "NODE_MODEL_INVALID"
 )
 
 // Warning is one non-fatal configuration problem, as structured data so a
@@ -139,6 +162,10 @@ type Warning struct {
 	GateID   string `json:"gate_id,omitempty"`
 	Value    *int   `json:"value,omitempty"`
 	Language string `json:"language,omitempty"`
+	NodeType string `json:"node_type,omitempty"`
+	// NodeModel is the refused node_models value. A pointer so an empty
+	// string value is still sent (and shown) rather than omitted.
+	NodeModel *string `json:"node_model,omitempty"`
 }
 
 // Message is the English, developer-facing text for w -- what the CLI prints
@@ -154,6 +181,12 @@ func (w Warning) Message() string {
 		return "max_iterations must be 3, 4 or 5"
 	case WarnTeamLanguageIgnored:
 		return fmt.Sprintf("team workflow.yaml sets language %q, which is ignored: the working language is a personal setting (run the onboarding skill, or set language in your own config.yaml)", w.Language)
+	case WarnNodeModelInvalid:
+		v := ""
+		if w.NodeModel != nil {
+			v = *w.NodeModel
+		}
+		return fmt.Sprintf("node_models: node type %q must be haiku, sonnet, opus or inherit, got %q", w.NodeType, v)
 	default:
 		return w.Code
 	}
@@ -177,6 +210,35 @@ func MaxIterationsWarnings(doc Document) []Warning {
 	}
 	v := *doc.MaxIterations
 	return []Warning{{Code: WarnMaxIterationsOutOfRange, Value: &v}}
+}
+
+// NodeModelWarnings returns one WarnNodeModelInvalid warning per node type
+// in doc's node_models whose value is not haiku, sonnet, opus or inherit,
+// sorted by node type.
+func NodeModelWarnings(doc Document) []Warning {
+	types := make([]string, 0, len(doc.NodeModels))
+	for t, v := range doc.NodeModels {
+		if !modelcap.ValidAssignment(v) {
+			types = append(types, t)
+		}
+	}
+	sort.Strings(types)
+	out := make([]Warning, 0, len(types))
+	for _, t := range types {
+		v := doc.NodeModels[t]
+		out = append(out, Warning{Code: WarnNodeModelInvalid, NodeType: t, NodeModel: &v})
+	}
+	return out
+}
+
+// ModelFor returns nodeType's model assignment: haiku, sonnet, opus or
+// inherit. A type the catalog does not assign -- a custom type no tier
+// mentions, say -- is inherit.
+func (c Catalog) ModelFor(nodeType string) string {
+	if v, ok := c.NodeModels[nodeType]; ok && modelcap.ValidAssignment(v) {
+		return v
+	}
+	return modelcap.Inherit
 }
 
 // TeamLanguageIgnoredWarnings returns a WarnTeamLanguageIgnored warning when
