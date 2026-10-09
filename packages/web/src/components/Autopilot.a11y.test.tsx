@@ -243,11 +243,13 @@ describe('autopilot accessibility', () => {
     }
   });
 
-  it('wraps Tab through the scope choice and the two buttons, inside the dialog', async () => {
+  it('wraps Tab through the scope choice, the model cap and the two buttons, inside the dialog', async () => {
     const user = userEvent.setup();
     render(<AutopilotControls ticketId="T" status="TODO" view={NO_AUTOPILOT} />);
     await user.click(screen.getByTestId('autopilot-start'));
     const tree = screen.getByTestId('autopilot-mode-tree');
+    // DFLT-00375: the model cap select follows the scope choice.
+    const model = screen.getByTestId('autopilot-model-select');
     const cancel = screen.getByTestId('autopilot-confirm-cancel');
     const confirm = screen.getByTestId('autopilot-confirm-confirm');
     expect(cancel).toHaveFocus();
@@ -257,7 +259,11 @@ describe('autopilot accessibility', () => {
     // The radio group is one Tab stop, on its checked radio.
     expect(tree).toHaveFocus();
     await user.tab();
+    expect(model).toHaveFocus();
+    await user.tab();
     expect(cancel).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(model).toHaveFocus();
     await user.tab({ shift: true });
     expect(tree).toHaveFocus();
     await user.tab({ shift: true });

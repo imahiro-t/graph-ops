@@ -685,6 +685,8 @@ export interface AutopilotRun {
   current_role?: string;
   awaiting_human?: string;
   stop_reason?: string;
+  // DFLT-00375: the run's model cap; absent when it has none.
+  model_cap?: string;
   // Every ticket the run has reached so far, with its state in the run
   // (queued / launched / done / failed / blocked / skipped).
   tickets: Record<string, string>;
@@ -726,4 +728,6 @@ export interface AutopilotStartResponse {
   // workspace trust prompt. Absent when trusted or when the server could not
   // tell (a best-effort check of Claude Code's own ~/.claude.json).
   untrusted_folder?: string;
+  // DFLT-00375: the model cap the run records ('' for none).
+  model_cap?: string;
 }

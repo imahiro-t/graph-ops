@@ -317,6 +317,16 @@
     "failed": "Failed to launch the terminal: {{message}}",
     "unknownReason": "the reason could not be determined"
   },
+  "modelCap": {
+    "label": "Model cap",
+    "options": {
+      "inherit": "Not specified (the launching model)",
+      "opus": "Opus",
+      "sonnet": "Sonnet",
+      "haiku": "Haiku"
+    },
+    "help": "Starts the processing on the chosen model and makes it the cap for this ticket's processing and the subagents and child sessions it starts. Each node runs on the lower of its node type's assignment and this cap."
+  },
   "claudePrompts": {
     "executeIncompleteNodes": "Please execute the incomplete nodes of ticket {{ticketId}}.",
     "refineTicket": "/graph-ops:refine-ticket {{ticketId}} Pin down the completion criteria and the Why (background and purpose).",

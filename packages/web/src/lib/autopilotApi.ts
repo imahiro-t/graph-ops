@@ -5,6 +5,7 @@
 import { TFunction } from 'i18next';
 import { AutopilotMode, AutopilotRun, AutopilotStarter, AutopilotStartResponse } from '../types';
 import { apiFetch } from './apiFetch';
+import type { ModelCap } from '../components/ModelCapSelect';
 import { memberLabel } from './memberName';
 import { localizedApiErrorMessage, parseApiError, translateErrorCode } from './apiError';
 
@@ -18,15 +19,20 @@ export async function fetchAutopilotRuns(t: TFunction, projectId: string): Promi
 // opens the orchestrator's terminal. Throws an Error carrying the localized
 // message of the server's error code (AUTOPILOT_ALREADY_RUNNING,
 // AUTOPILOT_ROOT_FINISHED, PROJECT_LOCAL_PATH_NOT_SET, ...).
+//
+// model is the run's model cap (DFLT-00375). "Not specified" ('') is sent as
+// inherit: for a new run that is the same as no cap, and for a resumed run it
+// clears the cap the run recorded -- the dialog's choice always applies.
 export async function startAutopilot(
   t: TFunction,
   ticketId: string,
-  mode: AutopilotMode
+  mode: AutopilotMode,
+  model: ModelCap = ''
 ): Promise<AutopilotStartResponse> {
   const res = await apiFetch(`/api/tickets/${encodeURIComponent(ticketId)}/autopilot`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode })
+    body: JSON.stringify({ mode, model: model || 'inherit' })
   });
   if (!res.ok) {
     const payload = await parseApiError(res);
