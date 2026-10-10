@@ -73,9 +73,10 @@ func TestUnknownAPIRoute_Is404JSON(t *testing.T) {
 // property), and that it answers an explicit 404 rather than falling through
 // to the SPA catch-all with a 200 (the tombstone in Routes()).
 //
-// "/artifacts-static" with no trailing slash is a 301 to the subtree pattern,
-// which is ServeMux's own behaviour and still ends at the 404; it is listed
-// so that a redirect to something else would be noticed.
+// "/artifacts-static" with no trailing slash is a redirect to the subtree
+// pattern (307 since Go 1.26, 301 before), which is ServeMux's own behaviour
+// and still ends at the 404; it is listed so that a redirect to something
+// else would be noticed.
 func TestRemovedRoute_ArtifactsStaticServesNothing(t *testing.T) {
 	s, _, _ := newTestServer(t)
 
@@ -91,7 +92,7 @@ func TestRemovedRoute_ArtifactsStaticServesNothing(t *testing.T) {
 	}{
 		{"/artifacts-static/" + name, http.StatusNotFound},
 		{"/artifacts-static/", http.StatusNotFound},
-		{"/artifacts-static", http.StatusMovedPermanently},
+		{"/artifacts-static", http.StatusTemporaryRedirect},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			rec := doJSON(t, s, http.MethodGet, tc.path, nil)
@@ -104,6 +105,9 @@ func TestRemovedRoute_ArtifactsStaticServesNothing(t *testing.T) {
 				t.Fatalf("GET %s = %d, want %d: %s", tc.path, rec.Code, tc.wantStatus, rec.Body.String())
 			}
 			if tc.wantStatus != http.StatusNotFound {
+				if got := rec.Header().Get("Location"); got != "/artifacts-static/" {
+					t.Errorf("GET %s redirected to %q, want %q", tc.path, got, "/artifacts-static/")
+				}
 				return
 			}
 			if got := decodeError(t, rec).Code; got != domain.ErrCodeRouteNotFound {

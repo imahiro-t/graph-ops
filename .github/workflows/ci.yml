@@ -396,7 +396,8 @@ jobs:
       # Deliberately NOT `go-version-file: packages/core-go/go.mod` -- the
       # same trap release.yml's `vulncheck` job documents at length. setup-go
       # sets GOTOOLCHAIN=local, and govulncheck v1.8.0 needs go >= 1.26, so
-      # `go install` below fails outright under the pinned go1.25.14. This Go
+      # `go install` below fails outright under a pin older than that (as the
+      # go1.25.14 pin did). This Go
       # only runs the scanner; the toolchain that builds what users run is
       # pinned by the `test` job here and by release.yml's `build` job. Do
       # not "fix" this back to go-version-file.
