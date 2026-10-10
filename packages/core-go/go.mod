@@ -2,7 +2,7 @@ module github.com/graph-ops/core-go
 
 go 1.25.0
 
-toolchain go1.25.14
+toolchain go1.26.9
 
 require (
 	github.com/go-sql-driver/mysql v1.10.1

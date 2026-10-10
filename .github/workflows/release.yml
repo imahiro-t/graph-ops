@@ -241,9 +241,9 @@ jobs:
       # Deliberately NOT `go-version-file: packages/core-go/go.mod` here: this
       # Go only runs the scanner, and the binaries under test carry their own
       # build version, so the two need not match. govulncheck itself requires
-      # a newer Go than the pinned toolchain (x/vuln v1.8.0 needs go >= 1.26),
-      # and setup-go sets GOTOOLCHAIN=local, so building it with the pinned
-      # go1.25.14 fails at `go install`. Do not "fix" this back to
+      # a recent Go (x/vuln v1.8.0 needs go >= 1.26), and setup-go sets
+      # GOTOOLCHAIN=local, so building it with an older pin (such as the
+      # earlier go1.25.14) fails at `go install`. Do not "fix" this back to
       # go-version-file -- the `build` job above is the one that must follow
       # the go.mod pin, because it produces what users run.
       # `cache: false` on purpose (see the header comment).
