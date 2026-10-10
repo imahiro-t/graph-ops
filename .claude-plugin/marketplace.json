@@ -10,7 +10,7 @@
         "source": "git-subdir",
         "url": "https://github.com/imahiro-t/graph-ops.git",
         "path": "packages/plugin",
-        "ref": "v0.11.1"
+        "ref": "v0.11.2"
       }
     }
   ]
