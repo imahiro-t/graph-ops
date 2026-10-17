@@ -82,10 +82,12 @@ func craftedRecord(t *testing.T, id, root, mode, state string, heartbeat time.Ti
 		TerminalTabSlowTimeouts: 1,
 		TerminalTabFailures: []TabFailureRecord{{At: heartbeat, TicketID: evil, Role: evil, Kind: evil, Message: evil, Phase: evil,
 			Diagnostics: &TabDiagnosticsRecord{ScreenLock: evil, ScreenLockAfter: evil, FrontmostApp: evil, FrontmostAppBefore: evil,
-				FrontWindowID: evil, FrontWindowBounds: evil, TargetWindowID: evil, TargetWindowBounds: evil, TabsBefore: evil}}},
+				FrontWindowID: evil, FrontWindowBounds: evil, TargetWindowID: evil, TargetWindowBounds: evil, TabsBefore: evil,
+				FrontWindowIDBefore: evil, OpenMethod: evil, RetryFrontmostApp: evil, SecureInput: evil, HIDIdleMS: evil}}},
 		TerminalTTYReason:      evil,
 		TerminalWindowLaunches: map[string]LaunchTally{evil: {Count: 1, FirstAt: heartbeat, LastAt: heartbeat, LastTicketID: evil}},
 		TerminalLateTabs:       &LaunchTally{Count: 1, FirstAt: heartbeat, LastAt: heartbeat, LastTicketID: evil},
+		TerminalRetriedTabs:    &LaunchTally{Count: 1, FirstAt: heartbeat, LastAt: heartbeat, LastTicketID: evil},
 		StartedBy:              &StartedBy{Name: evil, MachineID: "machine-b"},
 	}
 	data, err := json.Marshal(snap)

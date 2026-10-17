@@ -99,7 +99,7 @@ func TestAppleTerminalTabScript_BoundsTolerance(t *testing.T) {
 }
 
 func TestAppleTerminalTabScript_NewTabPollKeepsReadErrors(t *testing.T) {
-	poll := scriptSection(t, "repeat 30 times", "set newID to")
+	poll := scriptSection(t, "repeat polls times", "set newID to")
 	if strings.Contains(poll, "set nowTTYs to {}") {
 		t.Error("a failed read of the ttys must not count as no tabs")
 	}
@@ -113,14 +113,27 @@ func TestAppleTerminalTabScript_NewTabPollKeepsReadErrors(t *testing.T) {
 func TestAppleTerminalTabScript_Phases(t *testing.T) {
 	script := appleTerminalTabScript
 	lines := strings.Split(script, "\n")
+	// Every marker is looked for in the run handler: the handlers above it
+	// (bringToFront repeats the frontmost statement) only run when it calls
+	// them.
+	runStart := -1
+	for i, l := range lines {
+		if strings.Contains(l, "on run argv") {
+			runStart = i
+			break
+		}
+	}
+	if runStart < 0 {
+		t.Fatal("the script has no run handler")
+	}
 	lineOf := func(marker string) int {
 		t.Helper()
-		for i, l := range lines {
-			if strings.Contains(l, marker) {
+		for i := runStart; i < len(lines); i++ {
+			if strings.Contains(lines[i], marker) {
 				return i
 			}
 		}
-		t.Fatalf("the script lacks %q", marker)
+		t.Fatalf("the run handler lacks %q", marker)
 		return -1
 	}
 	logLine := func(phase string) string { return `log "` + tabPhasePrefix + phase + `"` }
@@ -135,8 +148,20 @@ func TestAppleTerminalTabScript_Phases(t *testing.T) {
 		}
 		last = i
 	}
-	if strings.Count(script, tabPhasePrefix) != len(tabPhases) {
-		t.Error("every phase line must be one of tabPhases")
+	for alias := range tabPhaseAliases {
+		if strings.Count(script, logLine(alias)) != 1 {
+			t.Errorf("phase %s must be logged exactly once", alias)
+		}
+	}
+	if strings.Count(script, tabPhasePrefix) != len(tabPhases)+len(tabPhaseAliases) {
+		t.Error("every phase line must be one of tabPhases or tabPhaseAliases")
+	}
+	// The menu phases: menu-pressing right before the press, menu-pressed
+	// once it returned, both before the keystroke the script falls back to.
+	pressing, pressed := lineOf(logLine(TabPhaseMenuPressing)), lineOf(logLine(TabPhaseMenuPressed))
+	press := lineOf(`perform action "AXPress"`)
+	if !(lineOf(logLine(TabPhaseFrontmost)) < pressing && pressing < press && press < pressed && pressed < lineOf(logLine(TabPhaseKeystrokeSending))) {
+		t.Error("menu-pressing must precede the press and menu-pressed follow it, after frontmost and before the keystroke")
 	}
 	// window-found: right after the 9101 of the orchestrator's window, and
 	// before anything else is asked of Terminal.
@@ -149,9 +174,6 @@ func TestAppleTerminalTabScript_Phases(t *testing.T) {
 	if lineOf(logLine(TabPhaseSystemEventsOK)) != se+1 {
 		t.Error("system-events-ok must directly follow the first Apple event to System Events")
 	}
-	// (The handlers above the run handler -- the diagnostics -- only run
-	// after it, so the run handler is what counts.)
-	runStart := lineOf("on run argv")
 	firstSE := -1
 	for i := runStart; i < len(lines); i++ {
 		if strings.Contains(lines[i], `application "System Events"`) {

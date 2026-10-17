@@ -183,6 +183,10 @@ type Run struct {
 	// have been a 9102 before -- an empty tab plus a new window. Cleared
 	// by the same starts that set TerminalTTY.
 	TerminalLateTabs *LaunchTally `json:"terminal_late_tabs,omitempty"`
+	// TerminalRetriedTabs counts the tabs that opened only at the tab
+	// script's second attempt (DFLT-00377): each would have been a 9102
+	// before. Cleared by the same starts that set TerminalTTY.
+	TerminalRetriedTabs *LaunchTally `json:"terminal_retried_tabs,omitempty"`
 	// StartedBy is who started the run, or last took it over or adopted it
 	// (DFLT-00326): the name other members see, and the machine that alone
 	// may take the run over. nil in a run file written before DFLT-00326,
@@ -261,6 +265,25 @@ type TabDiagnosticsRecord struct {
 	TabsBefore string `json:"tabs_before,omitempty"`
 	// LateTab: the new tab was found only in the last look.
 	LateTab bool `json:"late_tab,omitempty"`
+	// FrontWindowIDBefore is Terminal's front window at the check right
+	// before the (last) attempt to open the tab (DFLT-00377).
+	FrontWindowIDBefore string `json:"front_window_id_before,omitempty"`
+	// OpenMethod is how the (last) attempt opened the tab: menu,
+	// keystroke-no-menu, keystroke-menu-failed or keystroke-retry
+	// (DFLT-00377).
+	OpenMethod string `json:"open_method,omitempty"`
+	// Retried: the script tried once more after no tab appeared;
+	// RetryFrontmostApp is the frontmost app at that moment (DFLT-00377).
+	Retried           bool   `json:"retried,omitempty"`
+	RetryFrontmostApp string `json:"retry_frontmost_app,omitempty"`
+	// Refocused: Terminal was brought to the front again right before an
+	// attempt (DFLT-00377).
+	Refocused bool `json:"refocused,omitempty"`
+	// SecureInput is the process holding secure keyboard entry after the
+	// failure, HIDIdleMS the milliseconds since the user's last input then
+	// (DFLT-00377).
+	SecureInput string `json:"secure_input,omitempty"`
+	HIDIdleMS   string `json:"hid_idle_ms,omitempty"`
 }
 
 // LaunchTally counts launches of one kind (Run.TerminalWindowLaunches,
@@ -303,14 +326,23 @@ func (r *Run) RecordLateTab(ticketID string, now time.Time) {
 	r.TerminalLateTabs.Add(ticketID, now)
 }
 
+// RecordRetriedTab counts a tab that opened only at the tab script's
+// second attempt (DFLT-00377).
+func (r *Run) RecordRetriedTab(ticketID string, now time.Time) {
+	if r.TerminalRetriedTabs == nil {
+		r.TerminalRetriedTabs = &LaunchTally{}
+	}
+	r.TerminalRetriedTabs.Add(ticketID, now)
+}
+
 // resetTerminal gives the run a new orchestrator's terminal state: its tty
 // (or why it has none), the tab enabled again with no slow timeouts, and
-// no counts of window launches or late tabs. The history of tab failures
-// is kept.
+// no counts of window launches, late tabs or retried tabs. The history of
+// tab failures is kept.
 func (r *Run) resetTerminal(tty, ttyReason string) {
 	r.TerminalTTY, r.TerminalTTYReason, r.TerminalTabDisabled = tty, ttyReason, ""
 	r.TerminalTabSlowTimeouts = 0
-	r.TerminalWindowLaunches, r.TerminalLateTabs = nil, nil
+	r.TerminalWindowLaunches, r.TerminalLateTabs, r.TerminalRetriedTabs = nil, nil, nil
 }
 
 // MaxTabFailureRecords bounds Run.TerminalTabFailures.

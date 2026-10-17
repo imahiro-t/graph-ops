@@ -230,13 +230,17 @@ func TestAppleTerminalTabScript_Diagnostics(t *testing.T) {
 		t.Error("every read of diagnose must be in a try")
 	}
 	// Before the 9103 (after the rethrow of a read error, which keeps its
-	// number) and before each 9102.
-	front := scriptSection(t, "if not inFront then", "end if\n\tlog \"graph-ops-phase: frontmost\"")
-	if strings.Index(front, "number lastErrNum") > strings.Index(front, "my diagnose(targetID)") || strings.Index(front, "my diagnose(targetID)") > strings.Index(front, "number 9103") {
+	// number), before the 9103s of the checks right before the tab is
+	// opened, and before each 9102.
+	front := scriptSection(t, "if not (item 1 of w) then", "end if\n\tlog \"graph-ops-phase: frontmost\"")
+	if strings.Index(front, "number (item 5 of w)") > strings.Index(front, "my diagnose(targetID)") || strings.Index(front, "my diagnose(targetID)") > strings.Index(front, "number 9103") {
 		t.Errorf("the 9103 must be preceded by diagnose, after the rethrow: %q", front)
 	}
-	if n := strings.Count(script, "my diagnose(targetID)"); n != 4 {
-		t.Errorf("diagnose is called %d times, want 4 (the 9103 and three 9102s)", n)
+	if n := strings.Count(script, "my diagnose(targetID)"); n != 6 {
+		t.Errorf("diagnose is called %d times, want 6 (three 9103s and three 9102s)", n)
+	}
+	if n := strings.Count(script, "my diagnose(targetID)\n\t\t\t\terror \"graph-ops: Terminal "); n != 2 {
+		t.Errorf("the two 9103s right before the tab is opened must be preceded by diagnose (found %d)", n)
 	}
 	for _, marker := range []string{
 		"my diagnose(targetID)\n\t\tif lastReadErr is not \"\" then error",
@@ -247,10 +251,30 @@ func TestAppleTerminalTabScript_Diagnostics(t *testing.T) {
 			t.Errorf("the script lacks %q", marker)
 		}
 	}
-	// Just before Cmd+T: the frontmost app and the number of tabs.
-	before := scriptSection(t, "delay 0.2", `keystroke "t"`)
-	if !strings.Contains(before, `log "`+tabDiagPrefix+`frontmost_app_before=" & my frontmostAppName()`) || !strings.Contains(before, `log "`+tabDiagPrefix+`tabs_before=`) {
-		t.Errorf("the frontmost app and the tabs must be logged before Cmd+T: %q", before)
+	// Once Terminal is in front, the number of tabs; just before each
+	// attempt, the frontmost app read before the check and the front window
+	// the check read (DFLT-00377).
+	if before := scriptSection(t, `log "graph-ops-phase: frontmost"`, `keystroke "t"`); !strings.Contains(before, `log "`+tabDiagPrefix+`tabs_before=`) {
+		t.Errorf("the tabs must be logged before the tab is opened: %q", before)
+	}
+	attempt := scriptSection(t, "repeat with attempt from 1 to 2", `perform action "AXPress"`)
+	for _, want := range []string{
+		"set appBefore to my frontmostAppName()",
+		"if my targetInFront(targetID) then exit repeat",
+		`log "` + tabDiagPrefix + `frontmost_app_before=" & appBefore`,
+		`log "` + tabDiagPrefix + `refocused=true"`,
+	} {
+		if !strings.Contains(attempt, want) {
+			t.Errorf("the check before an attempt lacks %q", want)
+		}
+	}
+	if check := scriptSection(t, "on targetInFront(targetID)", "end targetInFront"); !strings.Contains(check, `log "`+tabDiagPrefix+`front_window_id_before=" & (frontID as text)`) || !strings.Contains(check, "with timeout of 1 second") {
+		t.Errorf("targetInFront must log the front window it read, bounded to 1 second: %q", check)
+	}
+	for _, key := range []string{"open_method=menu", "open_method=keystroke-menu-failed", "open_method=keystroke-retry", "open_method=keystroke-no-menu", "retried=true", "retry_frontmost_app="} {
+		if !strings.Contains(script, `log "`+tabDiagPrefix+key) {
+			t.Errorf("the script does not log %s", key)
+		}
 	}
 }
 
@@ -270,8 +294,8 @@ func TestAppleTerminalTabScript_LateLook(t *testing.T) {
 			t.Errorf("the last look lacks %q", want)
 		}
 	}
-	if i, j := strings.Index(appleTerminalTabScript, "repeat 30 times"), strings.Index(appleTerminalTabScript, "delay 2"); i < 0 || j < i {
-		t.Error("the last look must come after the 6-second wait")
+	if i, j := strings.Index(appleTerminalTabScript, "repeat polls times"), strings.Index(appleTerminalTabScript, "delay 2"); i < 0 || j < i {
+		t.Error("the last look must come after the wait for the new tab")
 	}
 }
 

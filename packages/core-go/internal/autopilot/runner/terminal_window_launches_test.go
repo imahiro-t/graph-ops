@@ -176,3 +176,67 @@ func TestTabFailureKindScreenLockedMatchesTerminal(t *testing.T) {
 		t.Fatalf("%q != %q", autopilot.TabFailureKindScreenLocked, terminal.TabFailureScreenLocked)
 	}
 }
+
+// DFLT-00377: a tab that opened at the retry is counted and logged, and a
+// failure's new diagnostics reach its record and the warning.
+func TestRecordTabOutcome_RetriedTab(t *testing.T) {
+	run := &autopilot.Run{TerminalTabSlowTimeouts: 1}
+	now := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+	recordTabOutcome(run, terminal.LaunchOutcome{UsedTab: true, RetriedTab: true}, "A", autopilot.RoleWork, now)
+	recordTabOutcome(run, tabOpened, "B", autopilot.RoleWork, now)
+	if run.TerminalRetriedTabs == nil || run.TerminalRetriedTabs.Count != 1 || run.TerminalRetriedTabs.LastTicketID != "A" ||
+		run.TerminalLateTabs != nil || run.TerminalTabSlowTimeouts != 0 || run.TerminalTabFailures != nil {
+		t.Fatalf("run = %+v", run)
+	}
+}
+
+func TestRecordTabOutcome_DFLT00377Diagnostics(t *testing.T) {
+	run := &autopilot.Run{}
+	now := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+	lost := terminal.LaunchOutcome{
+		TabError: "osascript: 54:97: execution error: graph-ops: no new tab appeared in the Terminal window of /dev/ttys003 (9102)",
+		TabFailure: &terminal.TabFailure{Kind: terminal.TabFailureScriptError, Phase: terminal.TabPhaseKeystrokeSent, KeystrokeSent: true, ErrorNumber: 9102,
+			Diagnostics: terminal.TabDiagnostics{ScreenLock: terminal.ScreenUnlocked, FrontWindowIDBefore: "55701", OpenMethod: "keystroke-retry",
+				Retried: true, RetryFrontmostApp: "Terminal", Refocused: true, SecureInput: "412 loginwindow", HIDIdleMS: "250"}},
+	}
+	if recordTabOutcome(run, lost, "A", autopilot.RoleWork, now) {
+		t.Fatal("a 9102 disabled the tab")
+	}
+	want := autopilot.TabDiagnosticsRecord{ScreenLock: "unlocked", FrontWindowIDBefore: "55701", OpenMethod: "keystroke-retry",
+		Retried: true, RetryFrontmostApp: "Terminal", Refocused: true, SecureInput: "412 loginwindow", HIDIdleMS: "250"}
+	if d := run.TerminalTabFailures[0].Diagnostics; d == nil || *d != want {
+		t.Fatalf("diagnostics = %+v", d)
+	}
+	if got, wantDesc := describeTabFailure(lost.TabFailure), `; script-error, after keystroke-sent, an empty tab may be left, retried once, secure input held by "412 loginwindow"`; got != wantDesc {
+		t.Fatalf("describeTabFailure = %q, want %q", got, wantDesc)
+	}
+}
+
+// Through the service: a tab that opened at the retry is counted and
+// logged once.
+func TestLaunch_RetriedTabIsCountedAndLogged(t *testing.T) {
+	h := newHarness(t)
+	h.ttyOf("/dev/ttys003")
+	logs := h.captureLogs()
+	r := h.ticket("R", "")
+	h.launchOutcome = func(c launchCall) terminal.LaunchOutcome {
+		return terminal.LaunchOutcome{UsedTab: true, RetriedTab: true}
+	}
+	run := h.start(r, autopilot.ModeTicket)
+	if res := h.drive(run.RunID, nil); res.Action.Action != autopilot.ActionDone {
+		t.Fatalf("res = %+v", res)
+	}
+	got := h.run(run.RunID)
+	if got.TerminalRetriedTabs == nil || got.TerminalRetriedTabs.Count != len(h.launches) || got.TerminalTabFailures != nil {
+		t.Fatalf("retried %+v after %d launches, failures %+v", got.TerminalRetriedTabs, len(h.launches), got.TerminalTabFailures)
+	}
+	n := 0
+	for _, l := range *logs {
+		if strings.Contains(l, "at the second attempt") {
+			n++
+		}
+	}
+	if n != len(h.launches) || n == 0 {
+		t.Fatalf("logs = %q", *logs)
+	}
+}

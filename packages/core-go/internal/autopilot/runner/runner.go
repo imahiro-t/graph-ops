@@ -965,6 +965,9 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 	if outcome.UsedTab && outcome.LateTab {
 		s.logf("the %s session of %s opened in a new Terminal tab that appeared only after the usual wait", role, ticketID)
 	}
+	if outcome.UsedTab && outcome.RetriedTab {
+		s.logf("the %s session of %s opened in a new Terminal tab at the second attempt (nothing appeared after the first)", role, ticketID)
+	}
 	return out, err
 }
 
@@ -989,6 +992,9 @@ func recordTabOutcome(run *autopilot.Run, outcome terminal.LaunchOutcome, ticket
 		run.TerminalTabSlowTimeouts = 0
 		if outcome.LateTab {
 			run.RecordLateTab(ticketID, now)
+		}
+		if outcome.RetriedTab {
+			run.RecordRetriedTab(ticketID, now)
 		}
 		return false
 	}
@@ -1016,6 +1022,9 @@ func recordTabOutcome(run *autopilot.Run, outcome terminal.LaunchOutcome, ticket
 				FrontWindowID: d.FrontWindowID, FrontWindowBounds: d.FrontWindowBounds,
 				TargetWindowID: d.TargetWindowID, TargetWindowBounds: d.TargetWindowBounds,
 				TabsBefore: d.TabsBefore, LateTab: d.LateTab,
+				FrontWindowIDBefore: d.FrontWindowIDBefore, OpenMethod: d.OpenMethod,
+				Retried: d.Retried, RetryFrontmostApp: d.RetryFrontmostApp, Refocused: d.Refocused,
+				SecureInput: d.SecureInput, HIDIdleMS: d.HIDIdleMS,
 			}
 		}
 	}
@@ -1037,7 +1046,8 @@ func recordNoTabLaunch(run *autopilot.Run, outcome terminal.LaunchOutcome, ticke
 // describeTabFailure is the details of a tab failure the warning adds after
 // its message ("" when there are none): its kind and phase, whether an
 // empty tab may be left, and the frontmost app and screen lock it saw
-// (DFLT-00362).
+// (DFLT-00362), whether the script retried and who held secure keyboard
+// entry (DFLT-00377).
 func describeTabFailure(f *terminal.TabFailure) string {
 	if f == nil || f.Kind == "" {
 		return ""
@@ -1051,6 +1061,12 @@ func describeTabFailure(f *terminal.TabFailure) string {
 	}
 	if app := f.Diagnostics.FrontmostApp; app != "" {
 		desc += ", frontmost app " + strconv.Quote(app)
+	}
+	if f.Diagnostics.Retried {
+		desc += ", retried once"
+	}
+	if owner := f.Diagnostics.SecureInput; owner != "" {
+		desc += ", secure input held by " + strconv.Quote(owner)
 	}
 	if f.Kind != terminal.TabFailureScreenLocked && f.Diagnostics.ScreenLockAfter == terminal.ScreenLocked {
 		desc += ", the screen was locked by then"

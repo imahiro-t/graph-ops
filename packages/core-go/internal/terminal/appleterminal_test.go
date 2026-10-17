@@ -46,11 +46,18 @@ func onDarwin(t *testing.T) string {
 	t.Setenv("TMPDIR", t.TempDir())
 	lockPath := filepath.Join(t.TempDir(), "autopilot", "terminal-tab.lock")
 	oldGoos, oldLockPath, oldLock := goos, tabLockPath, screenLockState
+	oldSecure, oldIdle := secureInputOwner, hidIdleMS
 	goos = "darwin"
 	tabLockPath = func() (string, error) { return lockPath, nil }
-	// No real ioreg: the screen is unlocked unless a test says otherwise.
+	// No real ioreg: the screen is unlocked, and no secure input nor idle
+	// time is read, unless a test says otherwise.
 	screenLockState = func() string { return ScreenUnlocked }
-	t.Cleanup(func() { goos, tabLockPath, screenLockState = oldGoos, oldLockPath, oldLock })
+	secureInputOwner = func() string { return "" }
+	hidIdleMS = func() string { return "" }
+	t.Cleanup(func() {
+		goos, tabLockPath, screenLockState = oldGoos, oldLockPath, oldLock
+		secureInputOwner, hidIdleMS = oldSecure, oldIdle
+	})
 	return lockPath
 }
 
@@ -326,8 +333,8 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 		"number 9104",
 		"on error errMsg number errNum",
 		"set pollOK to true",
-		"not pollOK",
-		"number lastErrNum",
+		"not (item 3 of w)",
+		"number (item 5 of w)",
 		"do script shellCommand in newTab",
 	} {
 		if !strings.Contains(script, want) {
@@ -341,20 +348,30 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 	if !strings.Contains(scriptSectionOf(script, "on freshTTYsOf(", "end freshTTYsOf"), "knownTTYs does not contain v") {
 		t.Error("freshTTYsOf must keep the ttys that were not known before Cmd+T")
 	}
-	// Order: the ttys are recorded and the front checked (with its 9103)
-	// before the keystroke -- when the front loop never read Terminal's
-	// state (not pollOK), the last read error is rethrown with its own
-	// number (number lastErrNum) ahead of the 9103; the new tab is found
-	// (with its 9104 and 9102) and checked to be in the orchestrator's
-	// window after the keystroke and before do script.
+	// The front is polled in waitForFront, which reads Terminal's state and
+	// keeps the last read error.
+	wait := scriptSectionOf(script, "on waitForFront(targetID, maxPolls)", "end waitForFront")
+	for _, want := range []string{"set pollOK to true", "frontID is targetID", "on error errMsg number errNum", "delay 0.1"} {
+		if !strings.Contains(wait, want) {
+			t.Errorf("waitForFront lacks %q", want)
+		}
+	}
+	// Order in the run handler: the ttys are recorded and the front checked
+	// (with its 9103) before the tab is opened -- when the first wait never
+	// read Terminal's state (not (item 3 of w)), the last read error is
+	// rethrown with its own number (number (item 5 of w)) ahead of the
+	// 9103; the front is checked again right before the tab is opened
+	// (DFLT-00377); the new tab is found (with its 9104 and 9102) and
+	// checked to be in the orchestrator's window after that and before do
+	// script.
+	run := scriptSectionOf(script, "on run argv", "end run")
 	order := []string{
 		"set knownTTYs to",
-		"set pollOK to true",
-		"frontID is targetID",
-		"on error errMsg number errNum",
-		"not pollOK",
-		"number lastErrNum",
+		"set w to my waitForFront(targetID, frontPolls)",
+		"not (item 3 of w)",
+		"number (item 5 of w)",
 		"number 9103",
+		"my targetInFront(targetID)",
 		`keystroke "t"`,
 		"set freshTTYs to my freshTTYsOf(nowTTYs, knownTTYs)",
 		"number 9104",
@@ -366,19 +383,20 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 	}
 	last := -1
 	for _, marker := range order {
-		i := strings.Index(script, marker)
+		i := strings.Index(run, marker)
 		if i <= last {
-			t.Errorf("%q is out of order in the script (at %d, after %d)", marker, i, last)
+			t.Errorf("%q is out of order in the run handler (at %d, after %d)", marker, i, last)
 		}
 		last = i
 	}
-	if strings.Count(script, "keystroke \"t\"") != 1 || strings.Count(script, "keystroke") != 3 {
-		t.Error("the keystroke must be sent exactly once (the other mentions are the keystroke-sending and keystroke-sent phases)")
+	if strings.Count(script, "keystroke \"t\"") != 1 {
+		t.Error("the keystroke must appear exactly once")
 	}
-	// Timing (DFLT-00269): 0.2 seconds between the front check and Cmd+T,
-	// the new tab polled every 0.2 seconds for 30 rounds (about 6 seconds),
-	// while the front loop and the bounds check keep polling every 0.1
-	// seconds.
+	// Timing (DFLT-00269, DFLT-00377): 0.2 seconds between the front check
+	// and each check right before the tab is opened, the new tab polled
+	// every 0.2 seconds for 10 rounds after the first attempt and 20 after
+	// the retry, while the front loop (20 polls, 2 seconds, for the first
+	// attempt) and the bounds check keep polling every 0.1 seconds.
 	between := func(from, to string) string {
 		i := strings.Index(script, from)
 		if i < 0 {
@@ -390,14 +408,17 @@ func TestAppleTerminalTabScript_Structure(t *testing.T) {
 		}
 		return script[i : i+j]
 	}
-	if !strings.Contains(between("number 9103", `keystroke "t"`), "delay 0.2") {
-		t.Error("Cmd+T must be sent 0.2 seconds after Terminal is seen in front (delay 0.2 before the keystroke)")
+	if check := between("number 9103", "my targetInFront(targetID)"); !strings.Contains(check, "delay 0.2") {
+		t.Error("the front must be checked again 0.2 seconds after Terminal is seen in front (delay 0.2 before the check)")
 	}
-	if front := between("repeat 20 times", `keystroke "t"`); !strings.Contains(front, "delay 0.1") {
-		t.Error("the front loop must keep polling every 0.1 seconds")
+	if !strings.Contains(run, "set frontPolls to 20") {
+		t.Error("the first attempt must wait for the front for 20 polls")
 	}
-	if tabWait := between("repeat 30 times", "number 9102"); !strings.Contains(tabWait, "delay 0.2") || strings.Contains(tabWait, "delay 0.1") {
-		t.Errorf("the new tab must be polled every 0.2 seconds, 30 times; the loop is %q", tabWait)
+	if tabWait := between("repeat polls times", "number 9102"); !strings.Contains(tabWait, "delay 0.2") || strings.Contains(tabWait, "delay 0.1") {
+		t.Errorf("the new tab must be polled every 0.2 seconds; the loop is %q", tabWait)
+	}
+	if polls := between("if attempt is 1 then\n\t\t\tset polls to 10", "repeat polls times"); !strings.Contains(polls, "set polls to 20") {
+		t.Errorf("the new tab must be polled 10 times after the first attempt and 20 after the retry: %q", polls)
 	}
 	if bounds := between("set sameWindow to false", "if not sameWindow then"); !strings.Contains(bounds, "repeat 20 times") || !strings.Contains(bounds, "delay 0.1") || strings.Contains(bounds, "delay 0.2") {
 		t.Error("the bounds check must poll every 0.1 seconds for 20 rounds (about 2 seconds)")
