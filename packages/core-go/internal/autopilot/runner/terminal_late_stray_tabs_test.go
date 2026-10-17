@@ -2,7 +2,10 @@ package runner
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -554,5 +557,149 @@ func TestStrayTab_TwoTabsOfOneLaunchCountItOnce(t *testing.T) {
 	}
 	if len(warn) != 1 || !strings.Contains(warn[0], "(/dev/ttys015, /dev/ttys016)") {
 		t.Fatalf("warnings = %q", warn)
+	}
+}
+
+// A later look whose tabs cannot be written to the run file still names
+// them, after a line saying they are not recorded (DFLT-00382). The record
+// is made to fail inside the fake ps read, so the wait's own write has gone
+// through and only the record's withRunIn fails: either its save (the runs
+// directory made read-only, so the temporary file cannot be made) after the
+// tabs were counted in memory, or its load (the run file made unreadable)
+// before anything was counted.
+func TestStrayTab_FailedRecordStillWarnsAndRecordsNothing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file permissions do not stop reads and writes on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads and writes past file permissions")
+	}
+	cases := []struct {
+		name string
+		// target returns the path whose mode is set to mode.
+		target func(runsDir, runID string) string
+		mode   os.FileMode
+		// stillWorks reports whether path can still be used as the record
+		// needs it, which would mean the test no longer makes it fail.
+		stillWorks func(path string) bool
+	}{
+		{
+			name:   "save fails",
+			target: func(runsDir, _ string) string { return runsDir },
+			mode:   0o500,
+			stillWorks: func(dir string) bool {
+				f, err := os.CreateTemp(dir, ".probe-*")
+				if err != nil {
+					return false
+				}
+				f.Close()
+				_ = os.Remove(f.Name())
+				return true
+			},
+		},
+		{
+			name:   "load fails",
+			target: func(runsDir, runID string) string { return filepath.Join(runsDir, runID+".json") },
+			mode:   0o000,
+			stillWorks: func(file string) bool {
+				_, err := os.ReadFile(file)
+				return err == nil
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			logs := h.captureLogs()
+			lockPath, err := h.svc.Registry.LockPath(h.projectID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runsDir := filepath.Join(filepath.Dir(lockPath), "runs")
+
+			calls := h.fakeStrayFinder(finding("/dev/ttys015"))
+			read := h.svc.ReadStrayTabs
+			var runID, target string
+			var mode os.FileMode
+			var chmodErr error
+			stillWorks := false
+			h.svc.ReadStrayTabs = func() (StrayTabs, error) {
+				target = tc.target(runsDir, runID)
+				info, err := os.Stat(target)
+				if err != nil {
+					chmodErr = err
+					return read()
+				}
+				mode = info.Mode().Perm()
+				if chmodErr = os.Chmod(target, tc.mode); chmodErr == nil {
+					// Put back even when the test stops early, so the
+					// temporary directory can be removed.
+					t.Cleanup(func() { _ = os.Chmod(target, mode) })
+					stillWorks = tc.stillWorks(target)
+				}
+				return read()
+			}
+
+			var c string
+			runID, c = launchSilentWith(t, h, retriedTab("/dev/ttys011"))
+			h.clock.Advance(StrayTabGrace + autopilot.StraySettle)
+			h.waitOnce(runID, c)
+			if chmodErr != nil {
+				t.Fatalf("could not take the permission away: %v", chmodErr)
+			}
+			if target == "" {
+				t.Fatal("the later look never read ps")
+			}
+			if err := os.Chmod(target, mode); err != nil {
+				t.Fatal(err)
+			}
+			if stillWorks {
+				t.Fatalf("%s still works without the permission; this test can no longer make the record fail", target)
+			}
+			if calls.reads != 1 || len(calls.calls) != 1 {
+				t.Fatalf("reads %d, calls %+v", calls.reads, calls.calls)
+			}
+
+			prefix := "could not record the stray Terminal tabs found in run " + runID + ": "
+			failedAt, failed := -1, 0
+			for i, l := range *logs {
+				if strings.HasPrefix(l, prefix) {
+					failed++
+					failedAt = i
+					if strings.TrimSpace(strings.TrimPrefix(l, prefix)) == "" {
+						t.Fatalf("no error in %q", l)
+					}
+				}
+			}
+			if failed != 1 {
+				t.Fatalf("record failure lines = %d in %q", failed, *logs)
+			}
+			warn := lateStrayLogs(*logs)
+			if len(warn) != 1 || !strings.Contains(warn[0], "the work session of "+c) ||
+				!strings.Contains(warn[0], "opened in a new Terminal tab after a second attempt, and") ||
+				!strings.Contains(warn[0], "(/dev/ttys015)") || !strings.Contains(warn[0], "close it by hand") {
+				t.Fatalf("warnings = %q", warn)
+			}
+			if slices.Index(*logs, warn[0]) < failedAt {
+				t.Fatalf("the tab warning came before the record failure: %q", *logs)
+			}
+
+			run := h.run(runID)
+			if run.TerminalStrayTabs != nil || run.TerminalLateStrayTabs != nil {
+				t.Fatalf("recorded: stray %+v, late %+v", run.TerminalStrayTabs, run.TerminalLateStrayTabs)
+			}
+			var recent []string
+			for _, r := range run.TerminalRecentTabTTYs {
+				recent = append(recent, r.TTY)
+			}
+			if !reflect.DeepEqual(recent, []string{"/dev/ttys011"}) {
+				t.Fatalf("recent = %q", recent)
+			}
+			// Taken out by the wait's own write and dropped, as
+			// runStrayTabChecks says, not put back.
+			if run.TerminalStrayTabChecks != nil {
+				t.Fatalf("checks = %+v", run.TerminalStrayTabChecks)
+			}
+		})
 	}
 }
