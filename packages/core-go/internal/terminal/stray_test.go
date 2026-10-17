@@ -10,7 +10,7 @@ import (
 )
 
 // DFLT-00379: the stray tabs that appear after the tab script's 1 second are
-// looked for afterwards with ps (FindLateStrayTTYs): an empty Terminal.app
+// looked for afterwards with ps (ReadStraySnapshot, LateStrayTTYs): an empty Terminal.app
 // tab -- a tty whose oldest process is a login started by Terminal.app,
 // with nothing but login and shells on it -- that opened in the given span.
 
@@ -142,10 +142,11 @@ func TestParseStrayCandidates(t *testing.T) {
 			if output == "" {
 				output = strayPS
 			}
-			got, err := parseStrayCandidates(output, tc.from, tc.until, tc.exclude, strayNow)
+			sn, err := parseStraySnapshot(output)
 			if err != nil {
 				t.Fatal(err)
 			}
+			got := sn.LateStrayTTYs(tc.from, tc.until, tc.exclude, strayNow)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
@@ -153,10 +154,10 @@ func TestParseStrayCandidates(t *testing.T) {
 	}
 }
 
-func TestParseStrayCandidates_Unparsable(t *testing.T) {
+func TestParseStraySnapshot_Unparsable(t *testing.T) {
 	for _, output := range []string{"", "ps: illegal option\nusage: ps ...\n", "ttys003 x y 00:30 login\n"} {
-		if got, err := parseStrayCandidates(output, strayNow.Add(-time.Minute), strayNow, nil, strayNow); err == nil {
-			t.Errorf("%q: want an error, got %q", output, got)
+		if _, err := parseStraySnapshot(output); err == nil {
+			t.Errorf("%q: want an error", output)
 		}
 	}
 }
@@ -180,7 +181,9 @@ func TestParseEtime(t *testing.T) {
 	}
 }
 
-func TestFindLateStrayTTYs_RunsPSOnce(t *testing.T) {
+// One ps run answers every look of a poll: the snapshot is asked again and
+// again without running ps again.
+func TestReadStraySnapshot_RunsPSOnce(t *testing.T) {
 	var calls [][]string
 	fakeCommands(t, func(ctx context.Context, name string, args []string) ([]byte, error) {
 		if _, ok := ctx.Deadline(); !ok {
@@ -189,12 +192,15 @@ func TestFindLateStrayTTYs_RunsPSOnce(t *testing.T) {
 		calls = append(calls, append([]string{name}, args...))
 		return []byte(strayPS), nil
 	})
-	got, err := FindLateStrayTTYs(strayNow.Add(-40*time.Second), strayNow.Add(-20*time.Second), []string{"/dev/ttys000"}, strayNow)
+	sn, err := ReadStraySnapshot()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, []string{"/dev/ttys003"}) {
+	if got := sn.LateStrayTTYs(strayNow.Add(-40*time.Second), strayNow.Add(-20*time.Second), []string{"/dev/ttys000"}, strayNow); !reflect.DeepEqual(got, []string{"/dev/ttys003"}) {
 		t.Fatalf("got %q", got)
+	}
+	if got := sn.LateStrayTTYs(strayNow.Add(-8*time.Second), strayNow, nil, strayNow); !reflect.DeepEqual(got, []string{"/dev/ttys007"}) {
+		t.Fatalf("second look: got %q", got)
 	}
 	want := [][]string{{"ps", "-A", "-o", "tty=,pid=,ppid=,etime=,command="}}
 	if !reflect.DeepEqual(calls, want) {
@@ -202,12 +208,12 @@ func TestFindLateStrayTTYs_RunsPSOnce(t *testing.T) {
 	}
 }
 
-func TestFindLateStrayTTYs_PSFails(t *testing.T) {
+func TestReadStraySnapshot_PSFails(t *testing.T) {
 	fakeCommands(t, func(ctx context.Context, name string, args []string) ([]byte, error) {
 		return []byte("ps: operation not permitted"), errors.New("exit status 1")
 	})
-	if got, err := FindLateStrayTTYs(strayNow.Add(-time.Minute), strayNow, nil, strayNow); err == nil {
-		t.Fatalf("want an error, got %q", got)
+	if _, err := ReadStraySnapshot(); err == nil {
+		t.Fatal("want an error")
 	}
 }
 

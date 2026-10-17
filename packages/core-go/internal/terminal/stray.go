@@ -15,7 +15,8 @@ import (
 // tab appearing late, after the retry's tab was taken -- for only 1 second
 // before `do script`, so as not to make every retried launch wait longer.
 // A stray tab appearing after that second is looked for afterwards instead,
-// with one ps run and no Apple event to Terminal: FindLateStrayTTYs.
+// with one ps run and no Apple event to Terminal: ReadStraySnapshot and
+// StraySnapshot.LateStrayTTYs.
 //
 // What ps can tell, and what it cannot: when Terminal.app opens a tab, the
 // first process on the tab's tty is `login`, whose parent is Terminal.app
@@ -29,7 +30,7 @@ import (
 // window within the span and left empty is taken as well; see
 // docs/autopilot.md.
 
-// strayPSTimeout bounds the one ps run of FindLateStrayTTYs.
+// strayPSTimeout bounds the one ps run of ReadStraySnapshot.
 const strayPSTimeout = 2 * time.Second
 
 // strayEtimeSlack is the room left on both ends of the span for ps's etime,
@@ -53,21 +54,27 @@ var strayPSLine = regexp.MustCompile(`^\s*(\S+)\s+([0-9]+)\s+([0-9]+)\s+([0-9:-]
 // pseudo-terminal's name as ps prints it, without /dev/.
 var strayTTYPattern = regexp.MustCompile(`^ttys[0-9]+$`)
 
-// FindLateStrayTTYs returns the ttys (/dev/ttysN, sorted) of the empty
-// Terminal.app tabs that opened between from and until and are not in
-// exclude (DFLT-00379; see the comment above for what is taken). now is the
-// time the processes' elapsed times are counted back from: pass the same
-// clock from and until come from. An error means ps could not be run or
-// its output read; no Terminal.app process in it is no candidate, not an
-// error.
-func FindLateStrayTTYs(from, until time.Time, exclude []string, now time.Time) ([]string, error) {
+// StraySnapshot is what one ps run tells about the processes on the
+// pseudo-terminals (DFLT-00379), read once by ReadStraySnapshot and then
+// asked, look by look, for the stray tabs of a span (LateStrayTTYs) -- so a
+// poll with several looks due runs ps once.
+type StraySnapshot struct {
+	terminalPIDs map[int]bool
+	byTTY        map[string][]strayProc
+}
+
+// ReadStraySnapshot runs `ps -A -o tty=,pid=,ppid=,etime=,command=` once,
+// bounded to strayPSTimeout, and reads its output. An error means ps could
+// not be run or its output read. Take the time the elapsed times are
+// counted back from (LateStrayTTYs' now) right after it returns.
+func ReadStraySnapshot() (StraySnapshot, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), strayPSTimeout)
 	defer cancel()
 	output, err := runCommand(ctx, "ps", "-A", "-o", "tty=,pid=,ppid=,etime=,command=")
 	if err != nil {
-		return nil, fmt.Errorf("ps: %w", err)
+		return StraySnapshot{}, fmt.Errorf("ps: %w", err)
 	}
-	return parseStrayCandidates(string(output), from, until, exclude, now)
+	return parseStraySnapshot(string(output))
 }
 
 // strayProc is one process of a strayPSLine.
@@ -104,7 +111,7 @@ func parseEtime(s string) (time.Duration, bool) {
 	total := 0
 	for _, p := range parts {
 		n, err := strconv.Atoi(p)
-		if err != nil || n < 0 || p == "" {
+		if err != nil || n < 0 {
 			return 0, false
 		}
 		total = total*60 + n
@@ -112,13 +119,12 @@ func parseEtime(s string) (time.Duration, bool) {
 	return time.Duration(days*86400+total) * time.Second, true
 }
 
-// parseStrayCandidates is FindLateStrayTTYs on ps's output. Lines that are
-// not a process line (a warning ps wrote to stderr, which runCommand's
+// parseStraySnapshot reads ps's output into a StraySnapshot. Lines that
+// are not a process line (a warning ps wrote to stderr, which runCommand's
 // combined output carries) are skipped; output with no process line at all
 // is an error.
-func parseStrayCandidates(output string, from, until time.Time, exclude []string, now time.Time) ([]string, error) {
-	terminalPIDs := map[int]bool{}
-	byTTY := map[string][]strayProc{}
+func parseStraySnapshot(output string) (StraySnapshot, error) {
+	sn := StraySnapshot{terminalPIDs: map[int]bool{}, byTTY: map[string][]strayProc{}}
 	parsed := 0
 	for _, line := range strings.Split(output, "\n") {
 		m := strayPSLine.FindStringSubmatch(line)
@@ -134,25 +140,35 @@ func parseStrayCandidates(output string, from, until time.Time, exclude []string
 		parsed++
 		command := strings.TrimSpace(m[5])
 		if strings.HasSuffix(command, terminalAppSuffix) || strings.Contains(command, terminalAppSuffix+" ") {
-			terminalPIDs[pid] = true
+			sn.terminalPIDs[pid] = true
 		}
 		if !strayTTYPattern.MatchString(m[1]) {
 			continue
 		}
-		byTTY[m[1]] = append(byTTY[m[1]], strayProc{pid: pid, ppid: ppid, elapsed: elapsed, command: command})
+		sn.byTTY[m[1]] = append(sn.byTTY[m[1]], strayProc{pid: pid, ppid: ppid, elapsed: elapsed, command: command})
 	}
 	if parsed == 0 {
-		return nil, fmt.Errorf("ps: no process line in its output")
+		return StraySnapshot{}, fmt.Errorf("ps: no process line in its output")
 	}
-	if len(terminalPIDs) == 0 {
-		return nil, nil
+	return sn, nil
+}
+
+// LateStrayTTYs returns the ttys (/dev/ttysN, sorted) of the empty
+// Terminal.app tabs in the snapshot that opened between from and until and
+// are not in exclude (see the comment at the top of this file for what is
+// taken). now is the time the processes' elapsed times are counted back
+// from: the time ps ran, on the same clock from and until come from. No
+// Terminal.app process in the snapshot means no candidate.
+func (sn StraySnapshot) LateStrayTTYs(from, until time.Time, exclude []string, now time.Time) []string {
+	if len(sn.terminalPIDs) == 0 {
+		return nil
 	}
 	excluded := map[string]bool{}
 	for _, tty := range exclude {
 		excluded[tty] = true
 	}
 	var found []string
-	for tty, procs := range byTTY {
+	for tty, procs := range sn.byTTY {
 		dev := "/dev/" + tty
 		if excluded[dev] {
 			continue
@@ -174,7 +190,7 @@ func parseStrayCandidates(output string, from, until time.Time, exclude []string
 		// are common: login and its shell start within the same second).
 		terminalLogin := false
 		for _, p := range procs {
-			if p.elapsed == oldest && commandBase(p.command) == "login" && terminalPIDs[p.ppid] {
+			if p.elapsed == oldest && commandBase(p.command) == "login" && sn.terminalPIDs[p.ppid] {
 				terminalLogin = true
 			}
 		}
@@ -188,5 +204,5 @@ func parseStrayCandidates(output string, from, until time.Time, exclude []string
 		found = append(found, dev)
 	}
 	sort.Strings(found)
-	return found, nil
+	return found
 }

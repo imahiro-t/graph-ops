@@ -116,10 +116,10 @@ type Service struct {
 	// means nobody in particular: runs are not stamped, and every local run
 	// counts as this machine's.
 	ResolveActor func() (*autopilot.StartedBy, error)
-	// FindStrayTTYs looks for the empty Terminal.app tabs that opened
-	// between from and until, leaving out exclude (DFLT-00379); nil means
-	// terminal.FindLateStrayTTYs. Tests replace it.
-	FindStrayTTYs func(from, until time.Time, exclude []string, now time.Time) ([]string, error)
+	// ReadStrayTabs reads, with one ps run, what the later looks for a
+	// stray tab ask (DFLT-00379); nil means terminal.ReadStraySnapshot.
+	// Tests replace it.
+	ReadStrayTabs func() (StrayTabs, error)
 
 	actorOnce sync.Once
 	actorVal  *autopilot.StartedBy
@@ -944,7 +944,10 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		// repeat disables the tab path for the rest of the run, and every
 		// tab failure is kept with its details (DFLT-00361).
 		disabledRun = recordTabOutcome(run, outcome, ticketID, role, s.now())
-		due = scheduleStrayTabCheck(run, outcome, ticketID, role, launchStart, s.now())
+		// The launch's own tab first, so that the looks taken out next
+		// leave it out.
+		recordTabForStrayLooks(run, outcome, ticketID, role, launchStart, s.now())
+		due = takeDueStrayChecks(run, s.now())
 		disabledNote = ""
 		if recordNoTabLaunch(run, outcome, ticketID, s.now()) == 1 && outcome.NoTabReason == terminal.NoTabDisabled {
 			// Once per run (per orchestrator): later launches of a run
@@ -993,6 +996,13 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 // after that.
 const StrayTabGrace = 20 * time.Second
 
+// StrayTabs answers the later looks for a stray tab from one ps run
+// (terminal.StraySnapshot): the empty Terminal.app tabs that opened between
+// from and until, leaving out exclude, with now the time ps ran.
+type StrayTabs interface {
+	LateStrayTTYs(from, until time.Time, exclude []string, now time.Time) []string
+}
+
 // dueStrayChecks are the later looks for a stray tab taken out of a run
 // (autopilot.Run.TakeDueStrayTabChecks), with the ttys they must leave out
 // (autopilot.Run.StrayTabExclusions) copied while the run was locked.
@@ -1001,7 +1011,9 @@ type dueStrayChecks struct {
 	exclude []string
 }
 
-// takeDueStrayChecks takes the run's due looks for a stray tab out of it.
+// takeDueStrayChecks takes the run's due looks for a stray tab out of it:
+// they are removed from run and returned, to be made outside the lock
+// (Service.runStrayTabChecks).
 func takeDueStrayChecks(run *autopilot.Run, now time.Time) dueStrayChecks {
 	checks := run.TakeDueStrayTabChecks(now)
 	if len(checks) == 0 {
@@ -1010,65 +1022,112 @@ func takeDueStrayChecks(run *autopilot.Run, now time.Time) dueStrayChecks {
 	return dueStrayChecks{checks: checks, exclude: run.StrayTabExclusions()}
 }
 
-// scheduleStrayTabCheck keeps, on run, the tty of the tab the launch opened
-// in, and adds a later look for a stray tab when the tab opened at the
-// retry and the tab script saw no stray tab in its 1 second (DFLT-00379): a
-// launch with no retry leaves none, and one whose stray tab was seen is
-// counted already. It returns the looks whose time has come, taken out of
-// run, to be made outside the lock (Service.runStrayTabChecks).
-func scheduleStrayTabCheck(run *autopilot.Run, outcome terminal.LaunchOutcome, ticketID, role string, launchStart, now time.Time) dueStrayChecks {
+// recordTabForStrayLooks keeps, on run, the tty of the tab the launch
+// opened in, so that no later look takes it, and adds a later look for a
+// stray tab when the tab opened at the retry and the tab script saw no
+// stray tab in its 1 second (DFLT-00379): a launch with no retry leaves
+// none, and one whose stray tab was seen is counted already. The look
+// carries the launch's own tty too, which it leaves out however long it
+// waits to be made.
+func recordTabForStrayLooks(run *autopilot.Run, outcome terminal.LaunchOutcome, ticketID, role string, launchStart, now time.Time) {
 	if outcome.UsedTab && outcome.NewTTY != "" {
 		run.RecordRecentTabTTY(outcome.NewTTY, now)
 	}
 	if outcome.UsedTab && outcome.RetriedTab && !outcome.StrayTab && run.TerminalTTY != "" {
-		run.AddStrayTabCheck(autopilot.StrayTabCheck{TicketID: ticketID, Role: role, From: launchStart, Until: now.Add(StrayTabGrace)})
+		run.AddStrayTabCheck(autopilot.StrayTabCheck{TicketID: ticketID, Role: role, From: launchStart, Until: now.Add(StrayTabGrace), TTY: outcome.NewTTY})
 	}
-	return takeDueStrayChecks(run, now)
 }
 
 // runStrayTabChecks makes the later looks for a stray tab in due, outside
-// the run's lock (ps may take up to 2 seconds), and records what they find
-// -- in one more locked write, only when they find something -- warning
-// about each tab found. A look that fails is dropped: it was taken out of
-// the run already, so it is not made again.
+// the run's lock: one ps run (up to 2 seconds) for all of them, each look
+// judged against it with the same now, taken right after ps. What they
+// find is recorded in one more locked write, only when they find something:
+// each launch with a stray tab is counted once, and each tab found is kept
+// among the ttys no later look takes, so a look made at another poll does
+// not count it again. A failed ps or a failed write is reported on stderr;
+// the looks are dropped either way, since they were taken out of the run.
 func (s *Service) runStrayTabChecks(projectID, runID string, due dueStrayChecks) {
 	if len(due.checks) == 0 {
 		return
 	}
-	find := s.FindStrayTTYs
-	if find == nil {
-		find = terminal.FindLateStrayTTYs
+	read := s.ReadStrayTabs
+	if read == nil {
+		read = func() (StrayTabs, error) { return terminal.ReadStraySnapshot() }
 	}
-	type found struct {
-		check autopilot.StrayTabCheck
-		tty   string
-	}
-	var hits []found
-	exclude := append([]string(nil), due.exclude...)
+	tabs, err := read()
 	now := s.now()
+	if err != nil {
+		var sessions []string
+		for _, c := range due.checks {
+			sessions = append(sessions, fmt.Sprintf("the %s session of %s", c.Role, c.TicketID))
+		}
+		s.logf("could not look for a stray Terminal tab left by the second attempt of %s: %v", strings.Join(sessions, ", "), err)
+		return
+	}
+	type hit struct {
+		check autopilot.StrayTabCheck
+		ttys  []string
+	}
+	var hits []hit
+	exclude := append([]string(nil), due.exclude...)
 	for _, c := range due.checks {
-		ttys, err := find(c.From, c.Until, exclude, now)
-		if err != nil {
+		if c.TTY != "" {
+			exclude = append(exclude, c.TTY)
+		}
+	}
+	for _, c := range due.checks {
+		ttys := tabs.LateStrayTTYs(c.From, c.Until, exclude, now)
+		if len(ttys) == 0 {
 			continue
 		}
-		for _, tty := range ttys {
-			hits = append(hits, found{check: c, tty: tty})
-			// Counted once, even when two looks' spans overlap.
-			exclude = append(exclude, tty)
-		}
+		hits = append(hits, hit{check: c, ttys: ttys})
+		// Counted once, even when two looks' spans overlap.
+		exclude = append(exclude, ttys...)
 	}
 	if len(hits) == 0 {
 		return
 	}
-	_ = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+	var recorded []hit
+	err = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+		recorded = nil
+		// A look made at the same time by another process may have
+		// counted a tab already.
+		counted := map[string]bool{}
+		for _, tty := range run.StrayTabExclusions() {
+			counted[tty] = true
+		}
 		for _, h := range hits {
+			var fresh []string
+			for _, tty := range h.ttys {
+				if !counted[tty] {
+					fresh = append(fresh, tty)
+					counted[tty] = true
+				}
+			}
+			if len(fresh) == 0 {
+				continue
+			}
 			run.RecordStrayTab(h.check.TicketID, now)
 			run.RecordLateStrayTab(h.check.TicketID, now)
+			for _, tty := range fresh {
+				run.RecordRecentTabTTY(tty, now)
+			}
+			recorded = append(recorded, hit{check: h.check, ttys: fresh})
 		}
 		return nil
 	})
-	for _, h := range hits {
-		s.logf("the %s session of %s opened in a new Terminal tab after a second attempt, and a second new tab (%s) appeared later and is left empty (the first attempt's tab opening late, most likely); close it by hand", h.check.Role, h.check.TicketID, h.tty)
+	if err != nil {
+		// The tabs are there all the same: name them, and say they are
+		// not in the run file.
+		recorded = hits
+		s.logf("could not record the stray Terminal tabs found in run %s: %v", runID, err)
+	}
+	for _, h := range recorded {
+		what := fmt.Sprintf("a second new tab (%s) appeared later and is left empty", h.ttys[0])
+		if len(h.ttys) > 1 {
+			what = fmt.Sprintf("more new tabs (%s) appeared later and are left empty", strings.Join(h.ttys, ", "))
+		}
+		s.logf("the %s session of %s opened in a new Terminal tab after a second attempt, and %s (the first attempt's tab opening late, most likely); close it by hand", h.check.Role, h.check.TicketID, what)
 	}
 }
 

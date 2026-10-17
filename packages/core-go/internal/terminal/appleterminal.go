@@ -321,8 +321,8 @@ const (
 //     as well. A stray tab appearing after that second is not seen here:
 //     the script logs the tty of the tab it took ("graph-ops-diag:
 //     new_tty=", LaunchOutcome.NewTTY) right before `do script`, and the
-//     runner looks for such a tab later with ps (FindLateStrayTTYs,
-//     DFLT-00379), without making the launch wait. A poll whose read of the
+//     runner looks for such a tab later with ps (ReadStraySnapshot,
+//     DFLT-00379), without making the tab script wait. A poll whose read of the
 //     ttys fails is skipped rather than taken for "no tabs" (which could
 //     never show the new one), and the last such error is named in the 9102.
 //     A retry whose first Cmd+T did reach another app sends a second one

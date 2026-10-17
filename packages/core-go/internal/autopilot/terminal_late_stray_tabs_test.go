@@ -101,6 +101,28 @@ func TestRun_RecordRecentTabTTY(t *testing.T) {
 	}
 }
 
+// A tty is kept past RecentTabTTYAge while a look still to be made could
+// take it, and the looks still to be made leave their own launch's tab out
+// (DFLT-00379 round 2).
+func TestRun_RecentTabTTYsOutliveTheirAgeForPendingLooks(t *testing.T) {
+	run := &Run{TerminalTTY: "/dev/ttys000"}
+	run.AddStrayTabCheck(StrayTabCheck{TicketID: "A", From: lateT0, Until: lateT0.Add(20 * time.Second), TTY: "/dev/ttys009"})
+	run.RecordRecentTabTTY("/dev/ttys001", lateT0.Add(-2*time.Minute)) // before the look's span
+	run.RecordRecentTabTTY("/dev/ttys002", lateT0.Add(30*time.Second)) // a tab counted in it
+	run.RecordRecentTabTTY("/dev/ttys003", lateT0.Add(RecentTabTTYAge+time.Hour))
+	want := []string{"/dev/ttys000", "/dev/ttys002", "/dev/ttys003", "/dev/ttys009"}
+	if got := run.StrayTabExclusions(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("exclusions = %q, want %q", got, want)
+	}
+	// Once the look is made, the age applies again.
+	run.TakeDueStrayTabChecks(lateT0.Add(RecentTabTTYAge + time.Hour))
+	run.RecordRecentTabTTY("/dev/ttys004", lateT0.Add(RecentTabTTYAge+time.Hour))
+	want = []string{"/dev/ttys000", "/dev/ttys003", "/dev/ttys004"}
+	if got := run.StrayTabExclusions(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("exclusions = %q, want %q", got, want)
+	}
+}
+
 func TestRun_LateStrayTabFieldsStayLocalAndFollowTheOrchestrator(t *testing.T) {
 	run := &Run{TerminalTTY: "/dev/ttys003"}
 	run.RecordLateStrayTab("A", lateT0)

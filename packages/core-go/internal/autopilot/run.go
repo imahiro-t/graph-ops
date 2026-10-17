@@ -205,11 +205,12 @@ type Run struct {
 	// RecordTabOpenMethod). Cleared by the same starts that set
 	// TerminalTTY.
 	TerminalTabOpenMethods map[string]LaunchTally `json:"terminal_tab_open_methods,omitempty"`
-	// TerminalLateStrayTabs counts the stray tabs found only after the tab
-	// script's 1-second look (DFLT-00379): a launch whose tab opened at the
-	// retry with no stray tab seen then is checked again later with ps
-	// (TerminalStrayTabChecks), and each empty tab found is counted here and
-	// in TerminalStrayTabs as well -- that one stays the total of launches
+	// TerminalLateStrayTabs counts the launches whose stray tab was found
+	// only after the tab script's 1-second look (DFLT-00379): a launch whose
+	// tab opened at the retry with no stray tab seen then is checked again
+	// later with ps (TerminalStrayTabChecks), and a look that finds one or
+	// more empty tabs counts its launch once here and once in
+	// TerminalStrayTabs as well -- that one stays the total of launches
 	// that may have left an empty tab. Cleared by the same starts that set
 	// TerminalTTY.
 	TerminalLateStrayTabs *LaunchTally `json:"terminal_late_stray_tabs,omitempty"`
@@ -219,11 +220,12 @@ type Run struct {
 	// come, by the next wait poll or launch. Cleared by the same starts
 	// that set TerminalTTY.
 	TerminalStrayTabChecks []StrayTabCheck `json:"terminal_stray_tab_checks,omitempty"`
-	// TerminalRecentTabTTYs are the ttys of the tabs the run's sessions
-	// opened in lately (DFLT-00379; RecordRecentTabTTY keeps
-	// MaxRecentTabTTYs of them, none older than RecentTabTTYAge): the later
-	// looks for a stray tab never take them. Cleared by the same starts
-	// that set TerminalTTY.
+	// TerminalRecentTabTTYs are the ttys the later looks for a stray tab
+	// never take (DFLT-00379): those of the tabs the run's sessions opened
+	// in lately, and of the stray tabs already counted, so that a look made
+	// at another poll does not count the same tab again
+	// (RecordRecentTabTTY keeps at most MaxRecentTabTTYs of them, see there
+	// for how long). Cleared by the same starts that set TerminalTTY.
 	TerminalRecentTabTTYs []RecentTabTTY `json:"terminal_recent_tab_ttys,omitempty"`
 	// StartedBy is who started the run, or last took it over or adopted it
 	// (DFLT-00326): the name other members see, and the machine that alone
@@ -385,8 +387,9 @@ func (r *Run) RecordStrayTab(ticketID string, now time.Time) {
 	r.TerminalStrayTabs.Add(ticketID, now)
 }
 
-// RecordLateStrayTab counts a stray tab found only by a later look
-// (DFLT-00379). The caller counts it with RecordStrayTab as well.
+// RecordLateStrayTab counts a launch whose stray tab was found only by a
+// later look (DFLT-00379), once however many tabs the look found. The
+// caller counts it with RecordStrayTab as well.
 func (r *Run) RecordLateStrayTab(ticketID string, now time.Time) {
 	if r.TerminalLateStrayTabs == nil {
 		r.TerminalLateStrayTabs = &LaunchTally{}
@@ -397,11 +400,14 @@ func (r *Run) RecordLateStrayTab(ticketID string, now time.Time) {
 // StrayTabCheck is a later look for a stray tab of one launch (DFLT-00379):
 // an empty Terminal.app tab whose first process started between From (the
 // launch's start) and Until (its end plus the grace a late tab is given).
+// TTY is the tab the launch's session opened in ("" when the tab script did
+// not tell): the look never takes it, however long it waits to be made.
 type StrayTabCheck struct {
 	TicketID string    `json:"ticket_id"`
 	Role     string    `json:"role"`
 	From     time.Time `json:"from"`
 	Until    time.Time `json:"until"`
+	TTY      string    `json:"tty,omitempty"`
 }
 
 // MaxStrayTabChecks bounds Run.TerminalStrayTabChecks.
@@ -447,21 +453,30 @@ type RecentTabTTY struct {
 	At  time.Time `json:"at"`
 }
 
-// MaxRecentTabTTYs and RecentTabTTYAge bound Run.TerminalRecentTabTTYs:
-// far longer than a check waits to be made (a launch, its grace and
-// StraySettle).
+// MaxRecentTabTTYs and RecentTabTTYAge bound Run.TerminalRecentTabTTYs.
 const (
 	MaxRecentTabTTYs = 20
 	RecentTabTTYAge  = 10 * time.Minute
 )
 
-// RecordRecentTabTTY keeps tty as the tab a session opened in at now,
-// dropping those older than RecentTabTTYAge and the oldest beyond
-// MaxRecentTabTTYs. An empty tty is not kept.
+// RecordRecentTabTTY keeps tty as one the later looks never take, recorded
+// at now: the tab a session opened in, or a stray tab just counted. It
+// drops the ttys older than RecentTabTTYAge -- unless a look still to be
+// made has a span starting no later than them, which they may fall in
+// however long that look waits -- and the oldest beyond MaxRecentTabTTYs.
+// An empty tty is not kept.
 func (r *Run) RecordRecentTabTTY(tty string, now time.Time) {
+	var oldestFrom time.Time
+	for i, c := range r.TerminalStrayTabChecks {
+		if i == 0 || c.From.Before(oldestFrom) {
+			oldestFrom = c.From
+		}
+	}
 	var kept []RecentTabTTY
 	for _, t := range r.TerminalRecentTabTTYs {
-		if now.Sub(t.At) <= RecentTabTTYAge {
+		// A minute of room: a tty is recorded a little after its tab opened.
+		pending := len(r.TerminalStrayTabChecks) > 0 && !t.At.Before(oldestFrom.Add(-time.Minute))
+		if now.Sub(t.At) <= RecentTabTTYAge || pending {
 			kept = append(kept, t)
 		}
 	}
@@ -475,8 +490,8 @@ func (r *Run) RecordRecentTabTTY(tty string, now time.Time) {
 }
 
 // StrayTabExclusions are the ttys a later look for a stray tab must never
-// take (DFLT-00379): the orchestrator's and those of the tabs the run's
-// sessions opened in lately.
+// take (DFLT-00379): the orchestrator's, those in TerminalRecentTabTTYs,
+// and the tabs of the launches whose looks are still to be made.
 func (r *Run) StrayTabExclusions() []string {
 	var out []string
 	if r.TerminalTTY != "" {
@@ -484,6 +499,11 @@ func (r *Run) StrayTabExclusions() []string {
 	}
 	for _, t := range r.TerminalRecentTabTTYs {
 		out = append(out, t.TTY)
+	}
+	for _, c := range r.TerminalStrayTabChecks {
+		if c.TTY != "" {
+			out = append(out, c.TTY)
+		}
 	}
 	return out
 }

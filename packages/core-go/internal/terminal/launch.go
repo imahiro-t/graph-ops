@@ -171,7 +171,7 @@ type LaunchOutcome struct {
 	// the tab script logged it right before `do script` (DFLT-00379); ""
 	// for a launch that used no tab, or when the logged value was not a
 	// /dev/ttysN. The runner keeps it so that its later look for a stray
-	// tab (FindLateStrayTTYs) never takes its own sessions' tabs for one.
+	// tab (StraySnapshot.LateStrayTTYs) never takes its own sessions' tabs for one.
 	NewTTY string
 }
 
