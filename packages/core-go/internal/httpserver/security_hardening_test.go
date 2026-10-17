@@ -74,11 +74,20 @@ func TestUnknownAPIRoute_Is404JSON(t *testing.T) {
 // to the SPA catch-all with a 200 (the tombstone in Routes()).
 //
 // "/artifacts-static" with no trailing slash is a redirect to the subtree
-// pattern (307 since Go 1.26, 301 before), which is ServeMux's own behaviour
-// and still ends at the 404; it is listed so that a redirect to something
-// else would be noticed.
+// pattern, which is ServeMux's own behaviour and still ends at the 404; it is
+// listed so that a redirect to something else would be noticed. Its status
+// differs by Go version (301 up to Go 1.25, 307 from Go 1.26), and go.mod
+// allows both, so the expected status is whatever this binary's own ServeMux
+// answers (serveMuxSubtreeRedirectStatus) rather than a fixed constant. The
+// server is deliberately not changed to pin one status: that would rewrite
+// ServeMux's redirect by hand for one route only, so /artifacts-static would
+// behave differently from every other subtree pattern (/api/ and the rest),
+// purely to suit a test. Asking the real ServeMux is also stricter than
+// accepting "301 or 307": a redirect our own code produced with any other
+// status still fails.
 func TestRemovedRoute_ArtifactsStaticServesNothing(t *testing.T) {
 	s, _, _ := newTestServer(t)
+	redirectStatus := serveMuxSubtreeRedirectStatus(t)
 
 	const secret = "SECRET-ARTIFACT-FILE-CONTENT"
 	const name = "leaked-report.html"
@@ -92,7 +101,7 @@ func TestRemovedRoute_ArtifactsStaticServesNothing(t *testing.T) {
 	}{
 		{"/artifacts-static/" + name, http.StatusNotFound},
 		{"/artifacts-static/", http.StatusNotFound},
-		{"/artifacts-static", http.StatusTemporaryRedirect},
+		{"/artifacts-static", redirectStatus},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			rec := doJSON(t, s, http.MethodGet, tc.path, nil)
@@ -115,6 +124,25 @@ func TestRemovedRoute_ArtifactsStaticServesNothing(t *testing.T) {
 			}
 		})
 	}
+}
+
+// serveMuxSubtreeRedirectStatus returns the status a plain http.ServeMux, in
+// the Go this test binary was built with, answers for a subtree pattern's
+// path without its trailing slash. It stops the test if that answer is not a
+// redirect, since every check built on it would then be meaningless.
+func serveMuxSubtreeRedirectStatus(t *testing.T) int {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/probe/", func(http.ResponseWriter, *http.Request) {})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/probe", nil))
+	if rec.Code < 300 || rec.Code > 399 {
+		t.Fatalf("plain ServeMux answered GET /probe with %d, want a redirect to /probe/", rec.Code)
+	}
+	if got := rec.Header().Get("Location"); got != "/probe/" {
+		t.Fatalf("plain ServeMux redirected GET /probe to %q, want %q", got, "/probe/")
+	}
+	return rec.Code
 }
 
 // Every response carries the security headers -- successful API calls, the
