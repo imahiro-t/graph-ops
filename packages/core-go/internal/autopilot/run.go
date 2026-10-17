@@ -225,7 +225,8 @@ type Run struct {
 	// in lately, and of the stray tabs already counted, so that a look made
 	// at another poll does not count the same tab again
 	// (RecordRecentTabTTY keeps at most MaxRecentTabTTYs of them, see there
-	// for how long). Cleared by the same starts that set TerminalTTY.
+	// for how long and which go first beyond that). Cleared by the same
+	// starts that set TerminalTTY.
 	TerminalRecentTabTTYs []RecentTabTTY `json:"terminal_recent_tab_ttys,omitempty"`
 	// StartedBy is who started the run, or last took it over or adopted it
 	// (DFLT-00326): the name other members see, and the machine that alone
@@ -453,18 +454,45 @@ type RecentTabTTY struct {
 	At  time.Time `json:"at"`
 }
 
-// MaxRecentTabTTYs and RecentTabTTYAge bound Run.TerminalRecentTabTTYs.
+// MaxRecentTabTTYs and RecentTabTTYAge bound Run.TerminalRecentTabTTYs:
+// a tty no pending look needs is dropped once it is older than
+// RecentTabTTYAge, and beyond MaxRecentTabTTYs the ones no pending look
+// needs go first. Only when the needed ones alone are more than
+// MaxRecentTabTTYs do the first recorded of them go as well
+// (RecordRecentTabTTY, DFLT-00381), so that the run file stays bounded.
 const (
 	MaxRecentTabTTYs = 20
 	RecentTabTTYAge  = 10 * time.Minute
 )
 
 // RecordRecentTabTTY keeps tty as one the later looks never take, recorded
-// at now: the tab a session opened in, or a stray tab just counted. It
-// drops the ttys older than RecentTabTTYAge -- unless a look still to be
-// made has a span starting no later than them, which they may fall in
-// however long that look waits -- and the oldest beyond MaxRecentTabTTYs.
-// An empty tty is not kept.
+// at now: the tab a session opened in, or a stray tab just counted. An empty
+// tty is not kept. A tty is needed while a look still to be made has a span
+// it may fall in (see needed below); the others are dropped once older than
+// RecentTabTTYAge.
+//
+// Beyond MaxRecentTabTTYs, the ones not needed go first, the first recorded
+// first; only when the needed ones alone are still too many do the first
+// recorded of them go, so that the cap always holds (DFLT-00381). With the
+// wall clock steady the ttys are in the order of their At and the needed
+// ones are always the last, so this is what dropping from the front gave
+// already; choosing by need rather than by position keeps it so when the
+// clock is set back (an NTP step, say: the run file keeps only wall-clock
+// times) and a tty recorded after that, not needed, stands behind needed
+// ones. Whether a tty is needed is then still decided on wall-clock times,
+// which may take one recorded after the step for not needed when its tab
+// does fall in a span; that is left as it is.
+//
+// A needed tty that goes this way is one of another launch of the run whose
+// tab falls in a pending look's span, or of a stray tab already counted: if
+// that tab is still empty when the look is made, the look counts it (again)
+// as a stray tab. It takes more than MaxRecentTabTTYs tabs opened by
+// launches and stray tabs counted while a look is pending -- from a minute
+// before the oldest pending look's From until that look is made, which is
+// some 10 seconds after its Until (StraySettle) at the next wait poll or
+// launch. A launch's own tab is never lost to the cap: its look keeps it as
+// StrayTabCheck.TTY, which StrayTabExclusions leaves out for as long as the
+// look is pending.
 func (r *Run) RecordRecentTabTTY(tty string, now time.Time) {
 	var oldestFrom time.Time
 	for i, c := range r.TerminalStrayTabChecks {
@@ -472,19 +500,38 @@ func (r *Run) RecordRecentTabTTY(tty string, now time.Time) {
 			oldestFrom = c.From
 		}
 	}
+	// needed: a look still to be made has a span starting no later than t
+	// (with a minute of room, as a tty is recorded a little after its tab
+	// opened), which t may fall in however long that look waits. Only the
+	// lower bound tells: a tty is recorded after its tab opened -- a
+	// launch's at its end, a counted stray tab's when the look is made --
+	// so At says nothing of how late in a span the tab opened. This takes
+	// some ttys no span holds for needed, on the safe side.
+	needed := func(t RecentTabTTY) bool {
+		return len(r.TerminalStrayTabChecks) > 0 && !t.At.Before(oldestFrom.Add(-time.Minute))
+	}
 	var kept []RecentTabTTY
 	for _, t := range r.TerminalRecentTabTTYs {
-		// A minute of room: a tty is recorded a little after its tab opened.
-		pending := len(r.TerminalStrayTabChecks) > 0 && !t.At.Before(oldestFrom.Add(-time.Minute))
-		if now.Sub(t.At) <= RecentTabTTYAge || pending {
+		if now.Sub(t.At) <= RecentTabTTYAge || needed(t) {
 			kept = append(kept, t)
 		}
 	}
 	if tty != "" {
 		kept = append(kept, RecentTabTTY{TTY: tty, At: now})
 	}
-	if n := len(kept); n > MaxRecentTabTTYs {
-		kept = append([]RecentTabTTY(nil), kept[n-MaxRecentTabTTYs:]...)
+	if excess := len(kept) - MaxRecentTabTTYs; excess > 0 {
+		trimmed := make([]RecentTabTTY, 0, len(kept))
+		for _, t := range kept {
+			if excess > 0 && !needed(t) {
+				excess--
+				continue
+			}
+			trimmed = append(trimmed, t)
+		}
+		if n := len(trimmed); n > MaxRecentTabTTYs {
+			trimmed = trimmed[n-MaxRecentTabTTYs:]
+		}
+		kept = trimmed
 	}
 	r.TerminalRecentTabTTYs = kept
 }

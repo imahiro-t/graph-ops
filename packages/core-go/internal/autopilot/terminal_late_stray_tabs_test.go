@@ -123,6 +123,63 @@ func TestRun_RecentTabTTYsOutliveTheirAgeForPendingLooks(t *testing.T) {
 	}
 }
 
+// Beyond MaxRecentTabTTYs, the ttys no pending look needs go first, by
+// which they are rather than where they stand (DFLT-00381). With the wall
+// clock steady the ones a look needs are always at the end, so dropping by
+// position gives the same result; this sets the clock back (an NTP step, say)
+// so that the ones recorded after it, which no look needs, stand behind the
+// ones a look needs. Dropping the front would then drop the needed ones.
+func TestRun_RecentTabTTYsBeyondTheCapDropTheUnneededFirst(t *testing.T) {
+	run := &Run{}
+	run.AddStrayTabCheck(StrayTabCheck{TicketID: "A", From: lateT0, Until: lateT0.Add(20 * time.Second)})
+	var needed []string
+	for i := 0; i < 15; i++ {
+		tty := fmt.Sprintf("/dev/ttys1%02d", i)
+		needed = append(needed, tty)
+		run.RecordRecentTabTTY(tty, lateT0.Add(time.Duration(i+1)*time.Second))
+	}
+	// The clock is set back five minutes. The ttys recorded now are before
+	// the look's span (more than a minute before its From), so no look needs
+	// them, and within RecentTabTTYAge of now, so their age keeps them. The
+	// needed ones are "in the future" seen from now (now.Sub(At) < 0), so
+	// their age keeps them as well: only the cap drops anything.
+	var unneeded []string
+	for i := 0; i < 8; i++ {
+		tty := fmt.Sprintf("/dev/ttys2%02d", i)
+		unneeded = append(unneeded, tty)
+		run.RecordRecentTabTTY(tty, lateT0.Add(-5*time.Minute+time.Duration(i)*time.Second))
+	}
+	if n := len(run.TerminalRecentTabTTYs); n != MaxRecentTabTTYs {
+		t.Fatalf("recent = %d, want %d", n, MaxRecentTabTTYs)
+	}
+	// All the needed ones stay; the unneeded ones go, the first recorded
+	// first; the order the rest were recorded in is kept.
+	want := append(append([]string(nil), needed...), unneeded[3:]...)
+	if got := run.StrayTabExclusions(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("exclusions = %q, want %q", got, want)
+	}
+}
+
+// When the ttys a pending look needs are more than MaxRecentTabTTYs on their
+// own, the cap still holds and the first recorded of them go (DFLT-00381).
+// The look then counts their tabs again if they fall in its span and are
+// still empty by then (docs/autopilot.md). This pins down that the cap is
+// always kept; it is not a regression check -- dropping by position gives
+// the same result here.
+func TestRun_RecentTabTTYsKeepTheCapWhenTheNeededOnesAloneExceedIt(t *testing.T) {
+	run := &Run{}
+	run.AddStrayTabCheck(StrayTabCheck{TicketID: "A", From: lateT0, Until: lateT0.Add(20 * time.Second)})
+	var ttys []string
+	for i := 0; i < MaxRecentTabTTYs+3; i++ {
+		tty := fmt.Sprintf("/dev/ttys1%02d", i)
+		ttys = append(ttys, tty)
+		run.RecordRecentTabTTY(tty, lateT0.Add(time.Duration(i)*time.Second))
+	}
+	if got := run.StrayTabExclusions(); !reflect.DeepEqual(got, ttys[3:]) {
+		t.Fatalf("exclusions = %q, want %q", got, ttys[3:])
+	}
+}
+
 func TestRun_LateStrayTabFieldsStayLocalAndFollowTheOrchestrator(t *testing.T) {
 	run := &Run{TerminalTTY: "/dev/ttys003"}
 	run.RecordLateStrayTab("A", lateT0)
