@@ -92,13 +92,11 @@ func TestAppleTerminalTabScript_OpensAfterCheckingTheFrontAgain(t *testing.T) {
 		}
 	}
 	// The press: only at the first attempt, and only the item the lookup
-	// found; a failed press falls back to Cmd+T in the same attempt.
+	// found.
 	for _, want := range []string{
-		"if menuItem is not missing value and attempt is 1 then",
+		"if attempt is 1 and menuItem is not missing value then",
 		`perform action "AXPress" of menu item itemIndex of menu 1 of menu bar item barIndex of menu bar 1`,
 		`perform action "AXPress" of menu item subIndex of menu 1 of menu item itemIndex of menu 1 of menu bar item barIndex of menu bar 1`,
-		"set pressed to true",
-		"if not pressed then",
 	} {
 		if !strings.Contains(attempt, want) {
 			t.Errorf("the opening lacks %q", want)
@@ -117,9 +115,9 @@ func TestAppleTerminalTabScript_OpensAfterCheckingTheFrontAgain(t *testing.T) {
 
 func TestAppleTerminalTabScript_RetryOnce(t *testing.T) {
 	loop := scriptSection(t, "repeat with attempt from 1 to 2", "if newTTY is missing value then\n\t\tdelay 2")
-	retry := scriptSection(t, "if newTTY is not missing value then exit repeat", "end repeat")
+	retry := scriptSection(t, "repeat with attempt from 1 to 2", "set refocus to 0")
 	for _, want := range []string{
-		"if attempt is 1 then",
+		"if attempt is 2 then",
 		`log "graph-ops-diag: retry_frontmost_app=" & my frontmostAppName()`,
 		`log "graph-ops-diag: retried=true"`,
 		"if frontPolls < 10 then set frontPolls to 10",
@@ -413,5 +411,207 @@ func TestReadInputState_OnThisMac(t *testing.T) {
 	}
 	if d := time.Since(start); d > 2*inputStateTimeout {
 		t.Fatalf("the reads took %s", d)
+	}
+}
+
+// Each menu's four lists are read afresh: all four are reset at every
+// menu, read into temporaries and taken together only when all of them
+// were read, and used only when they are as long as each other -- so a read
+// failing part-way never pairs this menu's keys with the previous menu's
+// modifiers or submenus.
+func TestAppleTerminalTabScript_NewTabMenuItemReadsEachMenuAfresh(t *testing.T) {
+	menu := scriptSection(t, "repeat with i from 2 to barCount", "if hasNewWindow then")
+	reset := menu[:strings.Index(menu, "try")]
+	for _, v := range []string{"c1", "m1", "c2", "m2"} {
+		if !strings.Contains(reset, "set "+v+" to missing value") {
+			t.Errorf("%s must be reset before each menu is read", v)
+		}
+	}
+	read := scriptSection(t, `tell application "System Events" to tell process "Terminal"`+"\n\t\t\t\t\t\tset readC1", "end try")
+	for _, v := range []string{"readC1", "readM1", "readC2", "readM2"} {
+		if !strings.Contains(read, "set "+v+" to value of attribute") {
+			t.Errorf("the menu must be read into %s", v)
+		}
+	}
+	for _, v := range []string{"set c1 to value", "set m1 to value", "set c2 to value", "set m2 to value"} {
+		if strings.Contains(read, v) {
+			t.Errorf("%q: a read must not go straight into the variables used", v)
+		}
+	}
+	if !strings.HasSuffix(strings.TrimSpace(read), "set {c1, m1, c2, m2} to {readC1, readM1, readC2, readM2}") {
+		t.Errorf("the four reads must be taken together, as the try's last statement: %q", read)
+	}
+	if !strings.Contains(menu, "if c1 is not missing value and (count of c1) is (count of m1) and (count of c1) is (count of c2) and (count of c1) is (count of m2) then") {
+		t.Error("the lists must be used only when all four were read and line up")
+	}
+}
+
+// A press that returns an error sends nothing else in that attempt (the
+// press may have been carried out): Cmd+T is only sent where no menu item
+// is pressed, and the retry is what opens the tab when the press did not.
+func TestAppleTerminalTabScript_FailedPressSendsNoKeystroke(t *testing.T) {
+	press := scriptSection(t, "if attempt is 1 and menuItem is not missing value then", "\n\t\telse\n")
+	if strings.Contains(press, `keystroke "t"`) {
+		t.Errorf("the menu branch must not send Cmd+T: %q", press)
+	}
+	for _, want := range []string{
+		`log "graph-ops-diag: open_method=menu"`,
+		"on error\n\t\t\t\tlog \"graph-ops-diag: open_method=menu-failed\"",
+		// After the try: the press may have been carried out either way.
+		"end try\n\t\t\tlog \"graph-ops-phase: menu-pressed\"",
+	} {
+		if !strings.Contains(press, want) {
+			t.Errorf("the press lacks %q", want)
+		}
+	}
+	if strings.Count(appleTerminalTabScript, `keystroke "t" using command down`) != 1 {
+		t.Error("Cmd+T must be sent from one place only")
+	}
+	if strings.Contains(appleTerminalTabScript, "keystroke-menu-failed") {
+		t.Error("a failed press no longer falls back to Cmd+T in the same attempt")
+	}
+}
+
+// Before the retry, the ttys are read again: a first attempt's tab that
+// appeared late is taken instead of opening a second one.
+func TestAppleTerminalTabScript_LateFirstTabIsTakenBeforeTheRetry(t *testing.T) {
+	late := scriptSection(t, "on lateFirstTab(knownTTYs, targetTTY)", "end lateFirstTab")
+	for _, want := range []string{
+		"set nowTTYs to my terminalTTYs()",
+		"if nowTTYs is missing value then return missing value",
+		"if (count of freshTTYs) > 1 then error",
+		"number 9104",
+		`log "graph-ops-diag: late_tab=true"`,
+		"return item 1 of freshTTYs",
+	} {
+		if !strings.Contains(late, want) {
+			t.Errorf("lateFirstTab lacks %q", want)
+		}
+	}
+	// Once before anything is logged for the retry...
+	pre := scriptSection(t, "repeat with attempt from 1 to 2", "set refocus to 0")
+	i, j := strings.Index(pre, "my lateFirstTab(knownTTYs, targetTTY)"), strings.Index(pre, `log "graph-ops-diag: retried=true"`)
+	if i < 0 || j < i || !strings.Contains(pre[i:j], "if newTTY is not missing value then exit repeat") {
+		t.Errorf("the ttys must be read, and a late tab taken, before the retry is logged: %q", pre)
+	}
+	// ...and after the wait before each check, right before the check.
+	check := scriptSection(t, "set refocus to 0", "if my targetInFront(targetID) then exit repeat")
+	if !strings.Contains(check, "delay 0.2\n\t\t\tif attempt is 2 then\n\t\t\t\tset newTTY to my lateFirstTab(knownTTYs, targetTTY)\n\t\t\t\tif newTTY is not missing value then exit repeat") {
+		t.Errorf("the ttys must be read again right before the retry's check: %q", check)
+	}
+	after := scriptSection(t, "my bringToFront(targetID)\n\t\t\tset w to", `log "graph-ops-diag: frontmost_app_before="`)
+	if !strings.Contains(after, "if newTTY is not missing value then\n\t\t\tlog \"graph-ops-diag: retried=false\"\n\t\t\texit repeat") {
+		t.Errorf("a late tab found at the check must undo retried and skip the opening: %q", after)
+	}
+	if strings.Count(appleTerminalTabScript, "my lateFirstTab(") != 2 {
+		t.Error("lateFirstTab must be called twice, both for the retry")
+	}
+}
+
+// After a retry, a second new tab appearing next to the one taken is
+// logged (stray_tab), and the command still goes to the tab taken.
+func TestAppleTerminalTabScript_StrayTabAfterTheRetry(t *testing.T) {
+	if !strings.Contains(appleTerminalTabScript, "\t\t\tlog \"graph-ops-phase: keystroke-sent\"\n\t\t\tif attempt is 2 then set retrySent to true") {
+		t.Error("retrySent must be set right after the retry's Cmd+T")
+	}
+	if strings.Count(appleTerminalTabScript, "set retrySent to") != 2 {
+		t.Error("retrySent must be set to false once and to true once")
+	}
+	stray := scriptSection(t, "if not sameWindow then", "do script shellCommand in newTab")
+	for _, want := range []string{
+		"if retrySent then",
+		"repeat 5 times",
+		"if (count of my freshTTYsOf(my terminalTTYs(), knownTTYs)) > 1 then set strayTab to true",
+		"delay 0.2",
+		`if strayTab then log "graph-ops-diag: stray_tab=true"`,
+	} {
+		if !strings.Contains(stray, want) {
+			t.Errorf("the stray tab check lacks %q", want)
+		}
+	}
+	if strings.Contains(stray[strings.Index(stray, "if retrySent then"):], "error ") {
+		t.Error("a stray tab must not fail the launch")
+	}
+	// do script stays the last statement.
+	if !strings.HasSuffix(appleTerminalTabScript, "\tlog \"graph-ops-phase: command-sending\"\n\ttell application \"Terminal\" to do script shellCommand in newTab\nend run") {
+		t.Error("do script must stay the last statement")
+	}
+}
+
+// What the launch makes of the late and stray tabs.
+func TestLaunchWithOptions_LateFirstTabAndStrayTab(t *testing.T) {
+	success := func(tail string) func(ctx context.Context, name string, args []string) ([]byte, error) {
+		return func(ctx context.Context, name string, args []string) ([]byte, error) {
+			return []byte(menuOutput(true, tail+tabPhasePrefix+TabPhaseTabFound+"\n"+tabPhasePrefix+TabPhaseCommandSending+"\n")), nil
+		}
+	}
+	cases := []struct {
+		name string
+		tail string
+		want LaunchOutcome
+	}{
+		{
+			// Seen before anything was logged for the retry.
+			name: "first attempt's tab seen before the retry",
+			tail: tabDiagPrefix + "late_tab=true\n",
+			want: LaunchOutcome{UsedTab: true, LateTab: true},
+		},
+		{
+			// Seen at the retry's check: retried is undone.
+			name: "first attempt's tab seen at the retry's check",
+			tail: tabDiagPrefix + "retry_frontmost_app=Terminal\n" + tabDiagPrefix + "retried=true\n" + tabDiagPrefix + "late_tab=true\n" + tabDiagPrefix + "retried=false\n",
+			want: LaunchOutcome{UsedTab: true, LateTab: true},
+		},
+		{
+			name: "a stray tab after the retry",
+			tail: tabDiagPrefix + "retried=true\n" + tabDiagPrefix + "open_method=keystroke-retry\n" +
+				tabPhasePrefix + TabPhaseKeystrokeSending + "\n" + tabPhasePrefix + TabPhaseKeystrokeSent + "\n" + tabDiagPrefix + "stray_tab=true\n",
+			want: LaunchOutcome{UsedTab: true, RetriedTab: true, StrayTab: true},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			onDarwin(t)
+			fakeCommands(t, success(tc.tail))
+			out, err := launchTab(t, Config{}, LaunchOptions{AppleTerminalTTY: testTTY})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out != tc.want {
+				t.Fatalf("outcome = %+v, want %+v", out, tc.want)
+			}
+		})
+	}
+	if d := parseTabDiagnostics(tabDiagPrefix + "stray_tab=true"); !d.StrayTab {
+		t.Fatal("stray_tab=true must be parsed")
+	}
+	if d := parseTabDiagnostics(tabDiagPrefix + "stray_tab=1"); d.StrayTab {
+		t.Fatal("only stray_tab=true counts")
+	}
+}
+
+// A press that returned an error (open_method=menu-failed) and then no tab
+// even after the retry: 9102 with the press counted as sent.
+func TestLaunchWithOptions_FailedPressThenRetry(t *testing.T) {
+	onDarwin(t)
+	secureInputOwner = func() string { return "" }
+	hidIdleMS = func() string { return "" }
+	out := phaseOutput(TabPhaseFrontmost, "") + tabPhasePrefix + TabPhaseMenuPressing + "\n" + tabDiagPrefix + "open_method=menu-failed\n" +
+		tabPhasePrefix + TabPhaseMenuPressed + "\n" + tabDiagPrefix + "retried=true\n" + tabDiagPrefix + "open_method=keystroke-retry\n" +
+		tabPhasePrefix + TabPhaseKeystrokeSending + "\n" + tabPhasePrefix + TabPhaseKeystrokeSent + "\n" +
+		"54:97: execution error: graph-ops: no new tab appeared in the Terminal window of /dev/ttys003 (9102)"
+	fakeCommands(t, func(ctx context.Context, name string, args []string) ([]byte, error) {
+		if name == "osascript" {
+			return exitFailure(out)(ctx, name, args)
+		}
+		return nil, nil
+	})
+	got, err := launchTab(t, Config{}, LaunchOptions{AppleTerminalTTY: testTTY})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := got.TabFailure
+	if f == nil || f.ErrorNumber != 9102 || !f.KeystrokeSent || !f.EmptyTabPossible() || f.Diagnostics.OpenMethod != "keystroke-retry" || !f.Diagnostics.Retried || got.DisableTab {
+		t.Fatalf("outcome = %+v, failure = %+v", got, f)
 	}
 }

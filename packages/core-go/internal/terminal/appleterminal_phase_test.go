@@ -168,15 +168,24 @@ func TestAppleTerminalTabScript_Phases(t *testing.T) {
 	if lineOf(logLine(TabPhaseWindowFound)) != lineOf("number 9101")+1 || lineOf(logLine(TabPhaseWindowFound)) > lineOf("set knownTTYs to") {
 		t.Error("window-found must follow the lookup of the orchestrator's window directly")
 	}
-	// system-events-ok: right after the first Apple event to System Events,
-	// with none before it.
-	se := lineOf(`tell application "System Events" to set frontmost of process "Terminal" to true`)
+	// system-events-ok: right after the first Apple event to System Events
+	// -- the frontmost statement, the last of bringToFront (DFLT-00377: the
+	// run handler brings Terminal to the front through it, as every
+	// refocusing does) -- with none before it.
+	se := lineOf("my bringToFront(targetID)")
 	if lineOf(logLine(TabPhaseSystemEventsOK)) != se+1 {
 		t.Error("system-events-ok must directly follow the first Apple event to System Events")
 	}
+	bring := strings.Split(strings.TrimSpace(scriptSection(t, "on bringToFront(targetID)", "end bringToFront")), "\n")
+	if lastLine := strings.TrimSpace(bring[len(bring)-1]); lastLine != `tell application "System Events" to set frontmost of process "Terminal" to true` {
+		t.Errorf("bringToFront must end with the frontmost statement, ends with %q", lastLine)
+	}
+	if strings.Count(strings.Join(bring, "\n"), `application "System Events"`) != 1 {
+		t.Error("bringToFront must send System Events the frontmost statement only")
+	}
 	firstSE := -1
 	for i := runStart; i < len(lines); i++ {
-		if strings.Contains(lines[i], `application "System Events"`) {
+		if strings.Contains(lines[i], `application "System Events"`) || strings.Contains(lines[i], "my bringToFront(") || strings.Contains(lines[i], "my newTabMenuItem(") || strings.Contains(lines[i], "my waitForFront(") || strings.Contains(lines[i], "my frontmostAppName(") || strings.Contains(lines[i], "my targetInFront(") {
 			firstSE = i
 			break
 		}

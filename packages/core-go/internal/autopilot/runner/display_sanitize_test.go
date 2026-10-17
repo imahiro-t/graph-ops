@@ -90,6 +90,7 @@ func putCraftedRecord(t *testing.T, repo store.GraphRepository, projectID, id, r
 		TerminalWindowLaunches: map[string]autopilot.LaunchTally{evil: {Count: 1, LastTicketID: evil}},
 		TerminalLateTabs:       &autopilot.LaunchTally{Count: 1, LastTicketID: evil},
 		TerminalRetriedTabs:    &autopilot.LaunchTally{Count: 1, LastTicketID: evil},
+		TerminalStrayTabs:      &autopilot.LaunchTally{Count: 1, LastTicketID: evil},
 		StartedBy:              &autopilot.StartedBy{Name: evil, MachineID: "machine-crafted"},
 		BegunAt:                began,
 	}

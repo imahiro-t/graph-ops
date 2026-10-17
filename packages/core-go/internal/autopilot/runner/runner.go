@@ -966,7 +966,10 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		s.logf("the %s session of %s opened in a new Terminal tab that appeared only after the usual wait", role, ticketID)
 	}
 	if outcome.UsedTab && outcome.RetriedTab {
-		s.logf("the %s session of %s opened in a new Terminal tab at the second attempt (nothing appeared after the first)", role, ticketID)
+		s.logf("the %s session of %s opened in a new Terminal tab after a second attempt (no tab had appeared for about 2 seconds after the first)", role, ticketID)
+	}
+	if outcome.UsedTab && outcome.StrayTab {
+		s.logf("the %s session of %s opened in a new Terminal tab, but a second new tab appeared after the second attempt and may have been left empty (the first attempt's tab opening late, most likely)", role, ticketID)
 	}
 	return out, err
 }
@@ -996,6 +999,9 @@ func recordTabOutcome(run *autopilot.Run, outcome terminal.LaunchOutcome, ticket
 		if outcome.RetriedTab {
 			run.RecordRetriedTab(ticketID, now)
 		}
+		if outcome.StrayTab {
+			run.RecordStrayTab(ticketID, now)
+		}
 		return false
 	}
 	if outcome.TabError == "" {
@@ -1024,7 +1030,7 @@ func recordTabOutcome(run *autopilot.Run, outcome terminal.LaunchOutcome, ticket
 				TabsBefore: d.TabsBefore, LateTab: d.LateTab,
 				FrontWindowIDBefore: d.FrontWindowIDBefore, OpenMethod: d.OpenMethod,
 				Retried: d.Retried, RetryFrontmostApp: d.RetryFrontmostApp, Refocused: d.Refocused,
-				SecureInput: d.SecureInput, HIDIdleMS: d.HIDIdleMS,
+				SecureInput: d.SecureInput, HIDIdleMS: d.HIDIdleMS, StrayTab: d.StrayTab,
 			}
 		}
 	}

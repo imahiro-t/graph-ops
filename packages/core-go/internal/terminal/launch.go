@@ -155,6 +155,11 @@ type LaunchOutcome struct {
 	// first (DFLT-00377). Before, such a launch fell back to a new window
 	// (9102).
 	RetriedTab bool
+	// StrayTab: the tab opened at the retry, and a second new tab appeared
+	// in the next second as well -- the first attempt's, appearing late,
+	// most likely -- which is left empty (DFLT-00377). The session runs in
+	// the tab taken; only the extra tab is left over.
+	StrayTab bool
 }
 
 // Kinds of tab failure (TabFailure.Kind).
@@ -229,13 +234,16 @@ type TabDiagnostics struct {
 	// (DFLT-00377); FrontmostAppBefore is read just before that check.
 	FrontWindowIDBefore string
 	// OpenMethod is how the (last) attempt opened the tab (DFLT-00377):
-	// "menu" (the New Tab menu item pressed), "keystroke-no-menu" (Cmd+T,
-	// no single New Tab menu item found), "keystroke-menu-failed" (Cmd+T,
-	// pressing the item failed) or "keystroke-retry" (Cmd+T at the retry
-	// after the item was pressed). "" when no attempt was made.
+	// "menu" (the New Tab menu item pressed), "menu-failed" (pressing the
+	// item returned an error; nothing else was sent in that attempt, since
+	// the press may still have been carried out), "keystroke-no-menu"
+	// (Cmd+T, no single New Tab menu item found) or "keystroke-retry"
+	// (Cmd+T at the retry). "" when no attempt was made.
 	OpenMethod string
 	// Retried: no new tab appeared for about 2 seconds after the first
-	// attempt, so the script tried once more (DFLT-00377).
+	// attempt, nor in the reads right before the retry, so the script tried
+	// once more (DFLT-00377). A first attempt's tab seen in those reads is
+	// taken instead (LateTab) and Retried stays false.
 	// RetryFrontmostApp is the frontmost app at that moment: when it is not
 	// Terminal and the first attempt sent Cmd+T, the keystroke may have
 	// reached that app.
@@ -254,6 +262,11 @@ type TabDiagnostics struct {
 	// keyboard or mouse input when the failure was read (DFLT-00377), to
 	// tell whether the user was working at the time.
 	HIDIdleMS string
+	// StrayTab: after the retry, a second new tab appeared next to the one
+	// taken (the first attempt's tab appearing late, most likely), so one
+	// of them may be left empty (DFLT-00377). The script logs it right
+	// before `do script`, so a failure only carries it from a timeout there.
+	StrayTab bool
 }
 
 // SlowTimeout reports whether f is a timeout after Terminal and System

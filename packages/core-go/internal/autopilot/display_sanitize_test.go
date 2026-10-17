@@ -88,6 +88,7 @@ func craftedRecord(t *testing.T, id, root, mode, state string, heartbeat time.Ti
 		TerminalWindowLaunches: map[string]LaunchTally{evil: {Count: 1, FirstAt: heartbeat, LastAt: heartbeat, LastTicketID: evil}},
 		TerminalLateTabs:       &LaunchTally{Count: 1, FirstAt: heartbeat, LastAt: heartbeat, LastTicketID: evil},
 		TerminalRetriedTabs:    &LaunchTally{Count: 1, FirstAt: heartbeat, LastAt: heartbeat, LastTicketID: evil},
+		TerminalStrayTabs:      &LaunchTally{Count: 1, FirstAt: heartbeat, LastAt: heartbeat, LastTicketID: evil},
 		StartedBy:              &StartedBy{Name: evil, MachineID: "machine-b"},
 	}
 	data, err := json.Marshal(snap)

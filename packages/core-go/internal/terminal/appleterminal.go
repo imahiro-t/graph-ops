@@ -201,8 +201,9 @@ const (
 	// frontmost statements before the wait, with its own number anyway).
 	tabErrNotFrontmost = 9103
 	// tabErrNewTabAmbiguous: more than one new tab appeared in the window
-	// (another process opened one at the same time), so which one is ours
-	// cannot be told and the command is run in none of them. The tab this
+	// (another process opened one at the same time, or the first attempt's
+	// tab appeared late in the very read that saw the retry's), so which one
+	// is ours cannot be told and the command is run in none of them. The tab this
 	// launch opened is left empty among them, not closed (docs/autopilot.md).
 	tabErrNewTabAmbiguous = 9104
 )
@@ -237,16 +238,26 @@ const (
 //     sits in the same menu as a Cmd+N item (Shell > New Tab > the default
 //     profile, next to New Window), so an item the user has given Cmd+T
 //     elsewhere is never pressed; and the lookup gives up after about 2
-//     seconds (each read bounded to 1 second). It runs while Terminal comes
-//     to the front, in about 0.3 seconds.
+//     seconds (each read bounded to 1 second). Each menu's four lists (the
+//     shortcut keys and modifiers of its items and of their submenus' items)
+//     are read afresh into temporaries and used only when all four were read
+//     and are as long as each other, so a failed read never pairs one
+//     menu's keys with another's modifiers; a menu that cannot be read (the
+//     Help menu, which has no items until it is opened) is skipped. It runs
+//     while Terminal comes to the front, in about 0.3 seconds.
 //   - Presses that item (AXPress) instead of sending Cmd+T. A press goes to
 //     Terminal's own menu, never to another app, and does not depend on
 //     keyboard events being delivered. While Terminal is not the active app
 //     the press opens a new window instead of a tab (DFLT-00362, and tried
 //     again for DFLT-00377), so it is pressed only once Terminal is seen in
-//     front, exactly as Cmd+T was sent. When no item is found or the press
-//     fails, Cmd+T is sent as before ("graph-ops-diag: open_method=" says
-//     which: menu, keystroke-no-menu, keystroke-menu-failed, keystroke-retry).
+//     front, exactly as Cmd+T was sent. When no item is found, Cmd+T is sent
+//     as before. When the press returns an error, nothing else is sent in
+//     that attempt: an AXPress can report an error (an Apple event timing
+//     out, say) for a press Terminal still carries out, and Cmd+T right
+//     after it would open a second tab (9104). The script waits for the tab
+//     as after any press, and the retry's Cmd+T opens it when the press did
+//     not ("graph-ops-diag: open_method=" says which: menu, menu-failed,
+//     keystroke-no-menu, keystroke-retry).
 //
 // Two things keep the tab and the command from landing anywhere else:
 //
@@ -274,18 +285,38 @@ const (
 //     tab is opened, and the command goes to the one tab whose tty is new.
 //     When no new tab appears within about 2 seconds (polled every 0.2
 //     seconds; a tab normally appears within a few tenths of a second), the
-//     script logs "graph-ops-diag: retried=true" and the frontmost app at
-//     that moment (retry_frontmost_app: when it is not Terminal and Cmd+T was
-//     sent, the keystroke may have reached that app), checks the front again
-//     and opens the tab once more -- by Cmd+T when the first attempt pressed
-//     the menu item, the other way of opening it. Once only: no second
-//     retry. It then waits about 4 seconds more, and looks once more 2
-//     seconds later (DFLT-00362: a tab that opened late used to be left
-//     empty while the session opened in a new window as well) and takes the
-//     tab it finds then, logging "graph-ops-diag: late_tab=true"; none even
-//     then is 9102. More than one (someone else opened a tab at the same
-//     time, or the first attempt's tab appeared late next to the retry's) is
-//     9104, and the command is run in none of them. A poll whose read of the
+//     script tries once more -- by Cmd+T, the other way of opening it when
+//     the first attempt pressed the menu item. Once only: no second retry.
+//     Before DFLT-00377 the only attempt was waited for about 6 seconds, so
+//     a first tab that is merely slow (Terminal busy) must not end up next
+//     to a second one. So the ttys are read again before the retry: once
+//     before anything is logged for it, and again after the 0.2 seconds
+//     before each check of the front, so the last read comes right before
+//     the check and Cmd+T right after the check, as at the first attempt.
+//     A new tab seen there is the first attempt's, appearing late:
+//     it is taken ("graph-ops-diag: late_tab=true", and retried=false when
+//     the retry had already been logged) and nothing more is sent. Only
+//     when there is none still does the script log "graph-ops-diag:
+//     retried=true" and the frontmost app at that moment
+//     (retry_frontmost_app: when it is not Terminal and Cmd+T was sent, the
+//     keystroke may have reached that app), and send Cmd+T. It then waits
+//     about 4 seconds more, and looks once more 2 seconds later (DFLT-00362:
+//     a tab that opened late used to be left empty while the session opened
+//     in a new window as well) and takes the tab it finds then, logging
+//     late_tab=true; none even then is 9102. More than one new tab in one
+//     read (someone else opened a tab at the same time, or the first
+//     attempt's late tab and the retry's both appeared before that read) is
+//     9104, and the command is run in none of them. The first attempt's tab
+//     can still appear after the retry's Cmd+T was sent, and after one of
+//     the two was taken: the polling stops at the first new tab it sees. So
+//     after a retry, once the tab is known to be in the target window, the
+//     ttys are read for up to 1 second more (every 0.2 seconds) before `do
+//     script`; a second new tab seen then is logged as "graph-ops-diag:
+//     stray_tab=true" (LaunchOutcome.StrayTab: it may be left empty) while
+//     the command still goes to the tab taken. Running it in that tab is as
+//     safe as without the retry -- it is a new tab in the target window --
+//     whereas a 9104 there would leave both tabs empty and open a new window
+//     as well. A stray tab appearing after that second is not seen. A poll whose read of the
 //     ttys fails is skipped rather than taken for "no tabs" (which could
 //     never show the new one), and the last such error is named in the 9102.
 //     A retry whose first Cmd+T did reach another app sends a second one
@@ -486,15 +517,19 @@ on newTabMenuItem()
 			repeat with i from 2 to barCount
 				if ((current date) - startedAt) > 2 then return missing value
 				set c1 to missing value
+				set m1 to missing value
+				set c2 to missing value
+				set m2 to missing value
 				try
 					tell application "System Events" to tell process "Terminal"
-						set c1 to value of attribute "AXMenuItemCmdChar" of menu items of menu 1 of menu bar item i of menu bar 1
-						set m1 to value of attribute "AXMenuItemCmdModifiers" of menu items of menu 1 of menu bar item i of menu bar 1
-						set c2 to value of attribute "AXMenuItemCmdChar" of menu items of menu 1 of menu items of menu 1 of menu bar item i of menu bar 1
-						set m2 to value of attribute "AXMenuItemCmdModifiers" of menu items of menu 1 of menu items of menu 1 of menu bar item i of menu bar 1
+						set readC1 to value of attribute "AXMenuItemCmdChar" of menu items of menu 1 of menu bar item i of menu bar 1
+						set readM1 to value of attribute "AXMenuItemCmdModifiers" of menu items of menu 1 of menu bar item i of menu bar 1
+						set readC2 to value of attribute "AXMenuItemCmdChar" of menu items of menu 1 of menu items of menu 1 of menu bar item i of menu bar 1
+						set readM2 to value of attribute "AXMenuItemCmdModifiers" of menu items of menu 1 of menu items of menu 1 of menu bar item i of menu bar 1
 					end tell
+					set {c1, m1, c2, m2} to {readC1, readM1, readC2, readM2}
 				end try
-				if c1 is not missing value then
+				if c1 is not missing value and (count of c1) is (count of m1) and (count of c1) is (count of c2) and (count of c1) is (count of m2) then
 					set hasNewWindow to false
 					set here to {}
 					repeat with j from 1 to count of c1
@@ -565,6 +600,19 @@ on targetInFront(targetID)
 	return false
 end targetInFront
 
+on lateFirstTab(knownTTYs, targetTTY)
+	set nowTTYs to missing value
+	try
+		set nowTTYs to my terminalTTYs()
+	end try
+	if nowTTYs is missing value then return missing value
+	set freshTTYs to my freshTTYsOf(nowTTYs, knownTTYs)
+	if (count of freshTTYs) > 1 then error "graph-ops: more than one new tab appeared in Terminal while opening a tab in the window of " & targetTTY number 9104
+	if (count of freshTTYs) is 0 then return missing value
+	log "graph-ops-diag: late_tab=true"
+	return item 1 of freshTTYs
+end lateFirstTab
+
 on run argv
 	set targetTTY to item 1 of argv
 	set shellCommand to item 2 of argv
@@ -572,30 +620,37 @@ on run argv
 	if targetID is missing value then error "graph-ops: no Terminal window has a tab on " & targetTTY number 9101
 	log "graph-ops-phase: window-found"
 	set knownTTYs to my terminalTTYs()
-	tell application "Terminal"
-		set index of window id targetID to 1
-		activate
-	end tell
-	tell application "System Events" to set frontmost of process "Terminal" to true
+	my bringToFront(targetID)
 	log "graph-ops-phase: system-events-ok"
 	set menuItem to my newTabMenuItem()
-	set menuFailed to false
 	set frontPolls to 20
 	set w to my waitForFront(targetID, frontPolls)
 	set frontPolls to frontPolls - (item 2 of w)
 	if not (item 1 of w) then
 		if not (item 3 of w) and (item 5 of w) is not missing value then error "graph-ops: Terminal's state could not be read while waiting for it to come to the front: " & (item 4 of w) number (item 5 of w)
 		my diagnose(targetID)
-		error "graph-ops: Terminal did not come to the front with the window of " & targetTTY & ", so no key was sent" number 9103
+		error "graph-ops: Terminal did not come to the front with the window of " & targetTTY & ", so no tab was opened" number 9103
 	end if
 	log "graph-ops-phase: frontmost"
 	log "graph-ops-diag: tabs_before=" & ((count of knownTTYs) as text)
 	set newTTY to missing value
 	set lastReadErr to ""
+	set retrySent to false
 	repeat with attempt from 1 to 2
+		if attempt is 2 then
+			set newTTY to my lateFirstTab(knownTTYs, targetTTY)
+			if newTTY is not missing value then exit repeat
+			log "graph-ops-diag: retry_frontmost_app=" & my frontmostAppName()
+			log "graph-ops-diag: retried=true"
+			if frontPolls < 10 then set frontPolls to 10
+		end if
 		set refocus to 0
 		repeat
 			delay 0.2
+			if attempt is 2 then
+				set newTTY to my lateFirstTab(knownTTYs, targetTTY)
+				if newTTY is not missing value then exit repeat
+			end if
 			set appBefore to my frontmostAppName()
 			if my targetInFront(targetID) then exit repeat
 			set refocus to refocus + 1
@@ -612,9 +667,12 @@ on run argv
 				error "graph-ops: Terminal did not come back to the front with the window of " & targetTTY & ", so it was not opened" number 9103
 			end if
 		end repeat
+		if newTTY is not missing value then
+			log "graph-ops-diag: retried=false"
+			exit repeat
+		end if
 		log "graph-ops-diag: frontmost_app_before=" & appBefore
-		set pressed to false
-		if menuItem is not missing value and attempt is 1 then
+		if attempt is 1 and menuItem is not missing value then
 			set {barIndex, itemIndex, subIndex} to menuItem
 			log "graph-ops-phase: menu-pressing"
 			try
@@ -625,25 +683,21 @@ on run argv
 						perform action "AXPress" of menu item subIndex of menu 1 of menu item itemIndex of menu 1 of menu bar item barIndex of menu bar 1
 					end if
 				end tell
-				set pressed to true
 				log "graph-ops-diag: open_method=menu"
-				log "graph-ops-phase: menu-pressed"
 			on error
-				set menuItem to missing value
-				set menuFailed to true
-				log "graph-ops-diag: open_method=keystroke-menu-failed"
+				log "graph-ops-diag: open_method=menu-failed"
 			end try
-		else if menuItem is not missing value then
-			log "graph-ops-diag: open_method=keystroke-retry"
-		else if menuFailed then
-			log "graph-ops-diag: open_method=keystroke-menu-failed"
+			log "graph-ops-phase: menu-pressed"
 		else
-			log "graph-ops-diag: open_method=keystroke-no-menu"
-		end if
-		if not pressed then
+			if attempt is 1 then
+				log "graph-ops-diag: open_method=keystroke-no-menu"
+			else
+				log "graph-ops-diag: open_method=keystroke-retry"
+			end if
 			log "graph-ops-phase: keystroke-sending"
 			tell application "System Events" to tell process "Terminal" to keystroke "t" using command down
 			log "graph-ops-phase: keystroke-sent"
+			if attempt is 2 then set retrySent to true
 		end if
 		if attempt is 1 then
 			set polls to 10
@@ -673,11 +727,6 @@ on run argv
 			delay 0.2
 		end repeat
 		if newTTY is not missing value then exit repeat
-		if attempt is 1 then
-			log "graph-ops-diag: retry_frontmost_app=" & my frontmostAppName()
-			log "graph-ops-diag: retried=true"
-			if frontPolls < 10 then set frontPolls to 10
-		end if
 	end repeat
 	if newTTY is missing value then
 		delay 2
@@ -732,6 +781,17 @@ on run argv
 		my diagnose(targetID)
 		error "graph-ops: the new tab did not open in the Terminal window of " & targetTTY & " (bounds " & boundsNote & ")" number 9102
 	end if
+	if retrySent then
+		set strayTab to false
+		repeat 5 times
+			try
+				if (count of my freshTTYsOf(my terminalTTYs(), knownTTYs)) > 1 then set strayTab to true
+			end try
+			if strayTab then exit repeat
+			delay 0.2
+		end repeat
+		if strayTab then log "graph-ops-diag: stray_tab=true"
+	end if
 	log "graph-ops-phase: command-sending"
 	tell application "Terminal" to do script shellCommand in newTab
 end run`
@@ -741,23 +801,36 @@ end run`
 // moves both.
 const defaultTabScriptTimeout = 30 * time.Second
 
-// tabScriptTimeout bounds the osascript run. The script's own waits add
-// up to about 14.2 seconds at worst (DFLT-00377): about 3 seconds of
-// waiting for Terminal to come to the front (2 seconds shared by the first
-// attempt and its refocusing, 1 more for the retry's), 0.2 seconds before
-// each check of the front (at most three checks per attempt, two attempts:
-// 1.2 seconds), about 2 seconds of waiting for the first attempt's tab and
-// 4 for the retry's, one more look 2 seconds later, and about 2 seconds of
-// checking that it opened in the target window. On top of that come the
-// reads bounded to 1 second each: the New Tab menu item lookup (it gives up
-// after about 2 seconds, so 3 at most), the frontmost app and the front
-// window just before each attempt (2 per check), the frontmost app before
-// the retry, and up to four more on a 9103 or 9102 (see diagnose). With
-// one check per attempt that is about 12 seconds, so the script ends within
-// about 26 seconds (14.2 + 3 + 4 + 1 + 4) plus the time its other reads
-// take -- starting osascript, finding the windows, and the reads in the
-// waiting loops, which have no bound of their own; every refocusing adds
-// 2.2 seconds more at the bounds.
+// tabScriptTimeout bounds the osascript run. Counted with one check of the
+// front per attempt (no refocusing), which is how a launch goes unless the
+// user switches away at that very moment (DFLT-00377):
+//
+//   - the script's own waits add up to about 14.4 seconds at worst: about 3
+//     seconds of waiting for Terminal to come to the front (2 seconds shared
+//     by the first attempt and its refocusing, 1 more for the retry's), 0.2
+//     seconds before each attempt's check of the front (0.4), about 2
+//     seconds of waiting for the first attempt's tab and 4 for the retry's,
+//     one more look 2 seconds later, about 2 seconds of checking that it
+//     opened in the target window, and, after a retry, 1 second of looking
+//     for a stray tab;
+//   - the reads bounded to 1 second each add up to about 14 seconds: the New
+//     Tab menu item lookup (it gives up after about 2 seconds, so 3 at
+//     most), three per check of the front (the frontmost app, then
+//     Terminal's frontmost and its front window in targetInFront, each
+//     Apple event under its own 1-second timeout: 6 for two attempts), the
+//     frontmost app before the retry (1), and four more on a 9103 or 9102
+//     (diagnose: the frontmost app and three Apple events to Terminal).
+//
+// So the script ends within about 28.4 seconds (14.4 + 3 + 6 + 1 + 4) plus
+// the time its other reads take -- starting osascript, finding the windows,
+// reading the ttys, and the reads in the waiting loops, which have no bound
+// of their own. Every refocusing adds one more check: 0.2 seconds of waiting
+// and 3 seconds of reads at their bounds (its waiting for the front shares
+// the 3 seconds above), so at most four of them would add 12.8 seconds and
+// could pass the 30 seconds -- but only when the checks' reads all ran into
+// their bounds, that is, with Terminal or System Events all but not
+// answering, which is what a timeout after system-events-ok stands for
+// anyway (see below).
 //
 // The 30 seconds (20 before DFLT-00377, 15 before DFLT-00362) are kept
 // with that in mind. The bounded reads only reach their bounds when
@@ -767,7 +840,7 @@ const defaultTabScriptTimeout = 30 * time.Second
 // tens of milliseconds, the menu lookup about 0.3 seconds, and the
 // diagnostics well under a second in all; a launch whose tab opens at the
 // first attempt takes about a second. Measured against how slowly Terminal
-// answers, the room is about what it was: the waits grew by about 2
+// answers, the room is about what it was: the waits grew by a few
 // seconds and the reads by a handful, against 10 seconds more. A timeout
 // there counts toward runner.MaxSlowTabTimeouts like any other after
 // system-events-ok: Terminal answering that slowly is what that count is
@@ -790,7 +863,8 @@ func launchAppleTerminalTab(workDir, claudeBin string, extraArgs []string, promp
 		return LaunchOutcome{}, fmt.Errorf("preparing terminal launch script: %w", err)
 	}
 	var tabErr string
-	var disable, lateTab, retriedTab bool
+	var disable bool
+	var opened TabDiagnostics
 	var failure *TabFailure
 	if unlock, busy := lockTabLaunch(); busy != "" {
 		// Other graph-ops processes kept the tab lock busy: a quick,
@@ -809,8 +883,7 @@ func launchAppleTerminalTab(workDir, claudeBin string, extraArgs []string, promp
 			failure = &TabFailure{Kind: TabFailureScreenLocked, Diagnostics: TabDiagnostics{ScreenLock: lock}}
 			unlock()
 		} else {
-			var retried bool
-			tabErr, disable, failure, lateTab, retried = openAppleTerminalTab(tty, shellQuote(scriptPath))
+			tabErr, disable, failure, opened = openAppleTerminalTab(tty, shellQuote(scriptPath))
 			unlock()
 			if failure != nil {
 				// Read after the failure only (DFLT-00377), so a tab that
@@ -819,13 +892,11 @@ func launchAppleTerminalTab(workDir, claudeBin string, extraArgs []string, promp
 				failure.Diagnostics.ScreenLockAfter = screenLockState()
 				failure.Diagnostics.SecureInput = secureInputOwner()
 				failure.Diagnostics.HIDIdleMS = hidIdleMS()
-			} else if tabErr == "" {
-				retriedTab = retried
 			}
 		}
 	}
 	if tabErr == "" {
-		return LaunchOutcome{UsedTab: true, LateTab: lateTab, RetriedTab: retriedTab}, nil
+		return LaunchOutcome{UsedTab: true, LateTab: opened.LateTab, RetriedTab: opened.Retried, StrayTab: opened.StrayTab}, nil
 	}
 	out := LaunchOutcome{TabError: tabErr, DisableTab: disable, TabFailure: failure}
 	if err := runLauncher("open", []string{"-a", "Terminal", scriptPath}); err != nil {
@@ -956,9 +1027,10 @@ const (
 	TabPhaseFrontmost = "frontmost"
 	// TabPhaseMenuPressing: the New Tab menu item is about to be pressed
 	// (DFLT-00377). It ranks with TabPhaseKeystrokeSending (tabPhaseRank),
-	// and means the same for a failure: a script error here is the press
-	// failing (the script then sends Cmd+T instead), a timeout may have
-	// pressed it.
+	// and means the same for a failure: a timeout here may have pressed it.
+	// The press's own error is caught by the script, which then logs
+	// TabPhaseMenuPressed all the same (the press may have been carried out
+	// anyway) and sends nothing else until the retry.
 	TabPhaseMenuPressing = "menu-pressing"
 	// TabPhaseMenuPressed: the New Tab menu item was pressed (DFLT-00377).
 	// It ranks with TabPhaseKeystrokeSent: a failure from here on may leave
@@ -1085,6 +1157,8 @@ func parseTabDiagnostics(output string) TabDiagnostics {
 			d.RetryFrontmostApp = value
 		case "refocused":
 			d.Refocused = value == "true"
+		case "stray_tab":
+			d.StrayTab = value == "true"
 		}
 	}
 	return d
@@ -1109,22 +1183,22 @@ func parseTabErrorNumber(msg string) int {
 
 // openAppleTerminalTab runs appleTerminalTabScript and returns "" when the
 // tab opened, or why it did not, whether that should disable the tab for
-// the rest of the run, and the failure's details; lateTab says a tab that
-// opened was found only in the script's last look (TabDiagnostics.LateTab),
-// retried that it opened only at the script's second attempt
-// (TabDiagnostics.Retried, DFLT-00377).
+// the rest of the run, and the failure's details. For a tab that opened,
+// opened is the script's diagnostics: LateTab (found only after the usual
+// wait), Retried (opened only at the script's second attempt, DFLT-00377)
+// and StrayTab (a second new tab appeared after the retry, DFLT-00377).
 //
 // A failure after the retry has had its first attempt sent whatever phase
 // the second one reached (a timeout while the second is on its way leaves
 // its "sending" phase last), so Retried counts as KeystrokeSent.
-func openAppleTerminalTab(tty, command string) (tabErr string, disable bool, failure *TabFailure, lateTab, retried bool) {
+func openAppleTerminalTab(tty, command string) (tabErr string, disable bool, failure *TabFailure, opened TabDiagnostics) {
 	ctx, cancel := context.WithTimeout(context.Background(), tabScriptTimeout)
 	defer cancel()
 
 	output, err := runCommand(ctx, "osascript", "-e", appleTerminalTabScript, tty, command)
 	diag := parseTabDiagnostics(string(output))
 	if err == nil {
-		return "", false, nil, diag.LateTab, diag.Retried
+		return "", false, nil, diag
 	}
 	timedOut := ctx.Err() != nil
 	phase, msg := splitTabScriptOutput(string(output))
@@ -1139,7 +1213,7 @@ func openAppleTerminalTab(tty, command string) (tabErr string, disable bool, fai
 		}
 		failure.ErrorNumber = parseTabErrorNumber(msg)
 	}
-	return truncateRunes("osascript: "+msg, maxTabErrorLen), classifyTabFailure(timedOut, phase, msg), failure, false, false
+	return truncateRunes("osascript: "+msg, maxTabErrorLen), classifyTabFailure(timedOut, phase, msg), failure, TabDiagnostics{}
 }
 
 // tabTimeoutMessage says what a timeout after reaching phase most likely

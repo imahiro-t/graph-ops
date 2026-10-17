@@ -232,7 +232,55 @@ func TestLaunch_RetriedTabIsCountedAndLogged(t *testing.T) {
 	}
 	n := 0
 	for _, l := range *logs {
-		if strings.Contains(l, "at the second attempt") {
+		if strings.Contains(l, "after a second attempt") {
+			n++
+		}
+	}
+	if n != len(h.launches) || n == 0 {
+		t.Fatalf("logs = %q", *logs)
+	}
+}
+
+// DFLT-00377: a tab that opened at the retry with a second new tab next to
+// it is counted as stray (as well as retried), logged, and a failure's
+// stray_tab reaches the record.
+func TestRecordTabOutcome_StrayTab(t *testing.T) {
+	run := &autopilot.Run{}
+	now := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+	recordTabOutcome(run, terminal.LaunchOutcome{UsedTab: true, RetriedTab: true, StrayTab: true}, "A", autopilot.RoleWork, now)
+	if run.TerminalStrayTabs == nil || run.TerminalStrayTabs.Count != 1 || run.TerminalStrayTabs.LastTicketID != "A" ||
+		run.TerminalRetriedTabs == nil || run.TerminalRetriedTabs.Count != 1 || run.TerminalTabFailures != nil {
+		t.Fatalf("run = %+v", run)
+	}
+	timedOut := terminal.LaunchOutcome{
+		TabError:   "osascript did not finish",
+		TabFailure: &terminal.TabFailure{Kind: terminal.TabFailureTimeout, Phase: terminal.TabPhaseCommandSending, Diagnostics: terminal.TabDiagnostics{Retried: true, StrayTab: true}},
+	}
+	recordTabOutcome(run, timedOut, "B", autopilot.RoleWork, now)
+	if d := run.TerminalTabFailures[0].Diagnostics; d == nil || !d.StrayTab || !d.Retried {
+		t.Fatalf("diagnostics = %+v", d)
+	}
+}
+
+func TestLaunch_StrayTabIsCountedAndLogged(t *testing.T) {
+	h := newHarness(t)
+	h.ttyOf("/dev/ttys003")
+	logs := h.captureLogs()
+	r := h.ticket("R", "")
+	h.launchOutcome = func(c launchCall) terminal.LaunchOutcome {
+		return terminal.LaunchOutcome{UsedTab: true, RetriedTab: true, StrayTab: true}
+	}
+	run := h.start(r, autopilot.ModeTicket)
+	if res := h.drive(run.RunID, nil); res.Action.Action != autopilot.ActionDone {
+		t.Fatalf("res = %+v", res)
+	}
+	got := h.run(run.RunID)
+	if got.TerminalStrayTabs == nil || got.TerminalStrayTabs.Count != len(h.launches) {
+		t.Fatalf("stray %+v after %d launches", got.TerminalStrayTabs, len(h.launches))
+	}
+	n := 0
+	for _, l := range *logs {
+		if strings.Contains(l, "may have been left empty") {
 			n++
 		}
 	}

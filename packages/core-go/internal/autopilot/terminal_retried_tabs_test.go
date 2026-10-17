@@ -79,3 +79,49 @@ func TestTabDiagnosticsRecord_DFLT00377Fields(t *testing.T) {
 		t.Fatalf("old record = %+v / %+v", back, d)
 	}
 }
+
+// A launch whose tab opened at the retry with a second new tab next to it
+// is counted on its own (terminal_stray_tabs), follows the orchestrator and
+// stays on this machine; a failure's stray_tab is kept under its JSON name.
+func TestRun_RecordStrayTab(t *testing.T) {
+	run := &Run{TerminalTTY: "/dev/ttys003"}
+	t0 := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+	t1 := t0.Add(time.Minute)
+	run.RecordStrayTab("A", t0)
+	run.RecordStrayTab("B", t1)
+	if st := run.TerminalStrayTabs; st == nil || *st != (LaunchTally{Count: 2, FirstAt: t0, LastAt: t1, LastTicketID: "B"}) {
+		t.Fatalf("stray tabs = %+v", run.TerminalStrayTabs)
+	}
+	if run.TerminalRetriedTabs != nil || run.TerminalLateTabs != nil || run.TerminalTabFailures != nil {
+		t.Fatal("a stray tab is counted on its own")
+	}
+	data, err := json.Marshal(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["terminal_stray_tabs"]; !ok {
+		t.Fatalf("no terminal_stray_tabs in %s", data)
+	}
+	v, err := run.SharedView()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.TerminalStrayTabs != nil {
+		t.Fatal("the shared view must not carry the stray tabs")
+	}
+	run.resetTerminal("/dev/ttys004", "")
+	if run.TerminalStrayTabs != nil {
+		t.Fatal("a new orchestrator starts the count over")
+	}
+	rec, err := json.Marshal(TabDiagnosticsRecord{StrayTab: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(rec) != `{"stray_tab":true}` {
+		t.Fatalf("diagnostics = %s", rec)
+	}
+}

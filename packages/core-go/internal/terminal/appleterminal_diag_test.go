@@ -271,7 +271,7 @@ func TestAppleTerminalTabScript_Diagnostics(t *testing.T) {
 	if check := scriptSection(t, "on targetInFront(targetID)", "end targetInFront"); !strings.Contains(check, `log "`+tabDiagPrefix+`front_window_id_before=" & (frontID as text)`) || !strings.Contains(check, "with timeout of 1 second") {
 		t.Errorf("targetInFront must log the front window it read, bounded to 1 second: %q", check)
 	}
-	for _, key := range []string{"open_method=menu", "open_method=keystroke-menu-failed", "open_method=keystroke-retry", "open_method=keystroke-no-menu", "retried=true", "retry_frontmost_app="} {
+	for _, key := range []string{"open_method=menu", "open_method=menu-failed", "open_method=keystroke-retry", "open_method=keystroke-no-menu", "retried=true", "retry_frontmost_app="} {
 		if !strings.Contains(script, `log "`+tabDiagPrefix+key) {
 			t.Errorf("the script does not log %s", key)
 		}

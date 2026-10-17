@@ -187,6 +187,12 @@ type Run struct {
 	// script's second attempt (DFLT-00377): each would have been a 9102
 	// before. Cleared by the same starts that set TerminalTTY.
 	TerminalRetriedTabs *LaunchTally `json:"terminal_retried_tabs,omitempty"`
+	// TerminalStrayTabs counts the launches whose tab opened at the retry
+	// with a second new tab appearing next to it (DFLT-00377): the session
+	// runs in a tab, but an empty one may be left over -- the first
+	// attempt's, appearing late, most likely. Cleared by the same starts
+	// that set TerminalTTY.
+	TerminalStrayTabs *LaunchTally `json:"terminal_stray_tabs,omitempty"`
 	// StartedBy is who started the run, or last took it over or adopted it
 	// (DFLT-00326): the name other members see, and the machine that alone
 	// may take the run over. nil in a run file written before DFLT-00326,
@@ -269,8 +275,9 @@ type TabDiagnosticsRecord struct {
 	// before the (last) attempt to open the tab (DFLT-00377).
 	FrontWindowIDBefore string `json:"front_window_id_before,omitempty"`
 	// OpenMethod is how the (last) attempt opened the tab: menu,
-	// keystroke-no-menu, keystroke-menu-failed or keystroke-retry
-	// (DFLT-00377).
+	// menu-failed, keystroke-no-menu or keystroke-retry (DFLT-00377).
+	// keystroke-menu-failed appears in records of the first DFLT-00377
+	// build only, which sent Cmd+T right after a failed press.
 	OpenMethod string `json:"open_method,omitempty"`
 	// Retried: the script tried once more after no tab appeared;
 	// RetryFrontmostApp is the frontmost app at that moment (DFLT-00377).
@@ -284,6 +291,8 @@ type TabDiagnosticsRecord struct {
 	// (DFLT-00377).
 	SecureInput string `json:"secure_input,omitempty"`
 	HIDIdleMS   string `json:"hid_idle_ms,omitempty"`
+	// StrayTab: a second new tab appeared after the retry (DFLT-00377).
+	StrayTab bool `json:"stray_tab,omitempty"`
 }
 
 // LaunchTally counts launches of one kind (Run.TerminalWindowLaunches,
@@ -335,14 +344,23 @@ func (r *Run) RecordRetriedTab(ticketID string, now time.Time) {
 	r.TerminalRetriedTabs.Add(ticketID, now)
 }
 
+// RecordStrayTab counts a launch whose tab opened at the retry with a
+// second new tab appearing next to it (DFLT-00377).
+func (r *Run) RecordStrayTab(ticketID string, now time.Time) {
+	if r.TerminalStrayTabs == nil {
+		r.TerminalStrayTabs = &LaunchTally{}
+	}
+	r.TerminalStrayTabs.Add(ticketID, now)
+}
+
 // resetTerminal gives the run a new orchestrator's terminal state: its tty
 // (or why it has none), the tab enabled again with no slow timeouts, and
-// no counts of window launches, late tabs or retried tabs. The history of
+// no counts of window launches, late, retried or stray tabs. The history of
 // tab failures is kept.
 func (r *Run) resetTerminal(tty, ttyReason string) {
 	r.TerminalTTY, r.TerminalTTYReason, r.TerminalTabDisabled = tty, ttyReason, ""
 	r.TerminalTabSlowTimeouts = 0
-	r.TerminalWindowLaunches, r.TerminalLateTabs, r.TerminalRetriedTabs = nil, nil, nil
+	r.TerminalWindowLaunches, r.TerminalLateTabs, r.TerminalRetriedTabs, r.TerminalStrayTabs = nil, nil, nil, nil
 }
 
 // MaxTabFailureRecords bounds Run.TerminalTabFailures.

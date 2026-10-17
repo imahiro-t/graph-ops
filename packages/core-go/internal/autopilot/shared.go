@@ -160,7 +160,7 @@ func ResetSharedErrorLog() {
 // this machine: the terminal tab it drives (TerminalTTY,
 // TerminalTTYReason, TerminalTabDisabled, TerminalTabSlowTimeouts,
 // TerminalTabFailures, TerminalWindowLaunches, TerminalLateTabs,
-// TerminalRetriedTabs), the
+// TerminalRetriedTabs, TerminalStrayTabs), the
 // JSON a reservation keeps to undo itself (Reservation.Previous), and each
 // ticket's worktree, branch names and fingerprints.
 func (r *Run) SharedView() (*Run, error) {
@@ -186,7 +186,7 @@ func (r *Run) SharedView() (*Run, error) {
 func (r *Run) dropLocalOnly() {
 	r.TerminalTTY, r.TerminalTTYReason, r.TerminalTabDisabled = "", "", ""
 	r.TerminalTabSlowTimeouts, r.TerminalTabFailures = 0, nil
-	r.TerminalWindowLaunches, r.TerminalLateTabs, r.TerminalRetriedTabs = nil, nil, nil
+	r.TerminalWindowLaunches, r.TerminalLateTabs, r.TerminalRetriedTabs, r.TerminalStrayTabs = nil, nil, nil, nil
 	if r.Reservation != nil {
 		r.Reservation.Previous = nil
 	}
