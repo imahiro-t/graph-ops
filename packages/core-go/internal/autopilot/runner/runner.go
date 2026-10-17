@@ -985,7 +985,8 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 const MaxSlowTabTimeouts = 2
 
 // recordTabOutcome records a launch's Terminal.app tab outcome on run:
-// a tab that opened resets the count of slow timeouts; a tab that could not
+// a tab that opened resets the count of slow timeouts and is counted by how
+// it opened (Run.RecordTabOpenMethod, DFLT-00378); a tab that could not
 // be opened updates that count, disables the tab when the failure will
 // repeat (outcome.DisableTab) or is the MaxSlowTabTimeouts-th slow timeout
 // in a row, and is added to run.TerminalTabFailures. It returns whether
@@ -1002,6 +1003,7 @@ func recordTabOutcome(run *autopilot.Run, outcome terminal.LaunchOutcome, ticket
 		if outcome.StrayTab {
 			run.RecordStrayTab(ticketID, now)
 		}
+		run.RecordTabOpenMethod(outcome.OpenMethod, ticketID, now)
 		return false
 	}
 	if outcome.TabError == "" {

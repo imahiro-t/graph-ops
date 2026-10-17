@@ -288,3 +288,53 @@ func TestLaunch_StrayTabIsCountedAndLogged(t *testing.T) {
 		t.Fatalf("logs = %q", *logs)
 	}
 }
+
+// DFLT-00378: a tab that opened is counted by how it opened, those not
+// opened by the New Tab menu item once more as non-menu, alongside the
+// late, retried and stray counts; a tab that could not be opened is counted
+// in neither and keeps its raw open_method in its record, as before.
+func TestRecordTabOutcome_OpenMethod(t *testing.T) {
+	now := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+
+	run := &autopilot.Run{}
+	recordTabOutcome(run, terminal.LaunchOutcome{UsedTab: true, OpenMethod: "menu"}, "A", autopilot.RoleWork, now)
+	if run.TerminalTabOpenMethods["menu"].Count != 1 || len(run.TerminalTabOpenMethods) != 1 || run.TerminalNonMenuTabs != nil {
+		t.Fatalf("menu: open methods %+v, non-menu %+v", run.TerminalTabOpenMethods, run.TerminalNonMenuTabs)
+	}
+
+	run = &autopilot.Run{}
+	recordTabOutcome(run, terminal.LaunchOutcome{UsedTab: true, RetriedTab: true, OpenMethod: "keystroke-retry"}, "B", autopilot.RoleWork, now)
+	if run.TerminalRetriedTabs == nil || run.TerminalRetriedTabs.Count != 1 ||
+		run.TerminalNonMenuTabs == nil || run.TerminalNonMenuTabs.Count != 1 || run.TerminalNonMenuTabs.LastTicketID != "B" ||
+		run.TerminalTabOpenMethods["keystroke-retry"].Count != 1 || len(run.TerminalTabOpenMethods) != 1 {
+		t.Fatalf("retry: retried %+v, open methods %+v, non-menu %+v", run.TerminalRetriedTabs, run.TerminalTabOpenMethods, run.TerminalNonMenuTabs)
+	}
+
+	run = &autopilot.Run{}
+	recordTabOutcome(run, tabOpened, "C", autopilot.RoleWork, now)
+	if run.TerminalTabOpenMethods[autopilot.TabOpenMethodUnknown].Count != 1 || len(run.TerminalTabOpenMethods) != 1 ||
+		run.TerminalNonMenuTabs == nil || run.TerminalNonMenuTabs.Count != 1 {
+		t.Fatalf("none logged: open methods %+v, non-menu %+v", run.TerminalTabOpenMethods, run.TerminalNonMenuTabs)
+	}
+
+	run = &autopilot.Run{}
+	failed := terminal.LaunchOutcome{
+		TabError: "osascript: 54:97: execution error: graph-ops: no new tab appeared in the Terminal window of /dev/ttys003 (9102)",
+		TabFailure: &terminal.TabFailure{Kind: terminal.TabFailureScriptError, Phase: terminal.TabPhaseMenuPressed, ErrorNumber: 9102,
+			Diagnostics: terminal.TabDiagnostics{OpenMethod: "menu"}},
+	}
+	recordTabOutcome(run, failed, "D", autopilot.RoleWork, now)
+	if run.TerminalTabOpenMethods != nil || run.TerminalNonMenuTabs != nil {
+		t.Fatalf("failure: open methods %+v, non-menu %+v", run.TerminalTabOpenMethods, run.TerminalNonMenuTabs)
+	}
+	if len(run.TerminalTabFailures) != 1 || run.TerminalTabFailures[0].Diagnostics == nil || run.TerminalTabFailures[0].Diagnostics.OpenMethod != "menu" {
+		t.Fatalf("failure record = %+v", run.TerminalTabFailures)
+	}
+
+	// No tab tried at all: neither count.
+	run = &autopilot.Run{}
+	recordTabOutcome(run, terminal.LaunchOutcome{NoTabReason: terminal.NoTabTmux}, "E", autopilot.RoleWork, now)
+	if run.TerminalTabOpenMethods != nil || run.TerminalNonMenuTabs != nil {
+		t.Fatalf("no tab: open methods %+v, non-menu %+v", run.TerminalTabOpenMethods, run.TerminalNonMenuTabs)
+	}
+}

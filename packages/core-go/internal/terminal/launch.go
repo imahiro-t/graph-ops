@@ -160,6 +160,13 @@ type LaunchOutcome struct {
 	// most likely -- which is left empty (DFLT-00377). The session runs in
 	// the tab taken; only the extra tab is left over.
 	StrayTab bool
+	// OpenMethod is how the tab script's last attempt opened the tab that
+	// opened (DFLT-00378): TabDiagnostics.OpenMethod's raw value -- menu,
+	// menu-failed, keystroke-no-menu or keystroke-retry. "" for a launch
+	// that used no tab or whose tab could not be opened (a failure keeps it
+	// in TabFailure.Diagnostics instead). The run's tally normalizes it
+	// (autopilot.Run.RecordTabOpenMethod); it is passed on unchanged here.
+	OpenMethod string
 }
 
 // Kinds of tab failure (TabFailure.Kind).
@@ -238,7 +245,9 @@ type TabDiagnostics struct {
 	// item returned an error; nothing else was sent in that attempt, since
 	// the press may still have been carried out), "keystroke-no-menu"
 	// (Cmd+T, no single New Tab menu item found) or "keystroke-retry"
-	// (Cmd+T at the retry). "" when no attempt was made.
+	// (Cmd+T at the retry). "" when no attempt was made. Keep the
+	// autopilot package's TabOpenMethod* constants in step with these
+	// values (DFLT-00378).
 	OpenMethod string
 	// Retried: no new tab appeared for about 2 seconds after the first
 	// attempt, nor in the reads right before the retry, so the script tried

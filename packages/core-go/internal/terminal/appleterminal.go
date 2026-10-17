@@ -257,7 +257,9 @@ const (
 //     after it would open a second tab (9104). The script waits for the tab
 //     as after any press, and the retry's Cmd+T opens it when the press did
 //     not ("graph-ops-diag: open_method=" says which: menu, menu-failed,
-//     keystroke-no-menu, keystroke-retry).
+//     keystroke-no-menu, keystroke-retry -- the values the autopilot
+//     package's TabOpenMethod* constants mirror; a new one needs a constant
+//     there too, or the run's tally counts it as unknown, DFLT-00378).
 //
 // Two things keep the tab and the command from landing anywhere else:
 //
@@ -896,7 +898,7 @@ func launchAppleTerminalTab(workDir, claudeBin string, extraArgs []string, promp
 		}
 	}
 	if tabErr == "" {
-		return LaunchOutcome{UsedTab: true, LateTab: opened.LateTab, RetriedTab: opened.Retried, StrayTab: opened.StrayTab}, nil
+		return LaunchOutcome{UsedTab: true, LateTab: opened.LateTab, RetriedTab: opened.Retried, StrayTab: opened.StrayTab, OpenMethod: opened.OpenMethod}, nil
 	}
 	out := LaunchOutcome{TabError: tabErr, DisableTab: disable, TabFailure: failure}
 	if err := runLauncher("open", []string{"-a", "Terminal", scriptPath}); err != nil {
@@ -1185,8 +1187,9 @@ func parseTabErrorNumber(msg string) int {
 // tab opened, or why it did not, whether that should disable the tab for
 // the rest of the run, and the failure's details. For a tab that opened,
 // opened is the script's diagnostics: LateTab (found only after the usual
-// wait), Retried (opened only at the script's second attempt, DFLT-00377)
-// and StrayTab (a second new tab appeared after the retry, DFLT-00377).
+// wait), Retried (opened only at the script's second attempt, DFLT-00377),
+// StrayTab (a second new tab appeared after the retry, DFLT-00377) and
+// OpenMethod (how the last attempt opened it, DFLT-00378).
 //
 // A failure after the retry has had its first attempt sent whatever phase
 // the second one reached (a timeout while the second is on its way leaves

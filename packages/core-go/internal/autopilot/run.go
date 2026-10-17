@@ -193,6 +193,18 @@ type Run struct {
 	// attempt's, appearing late, most likely. Cleared by the same starts
 	// that set TerminalTTY.
 	TerminalStrayTabs *LaunchTally `json:"terminal_stray_tabs,omitempty"`
+	// TerminalNonMenuTabs counts the launches whose tab opened some other
+	// way than by pressing Terminal's New Tab menu item (DFLT-00378): the
+	// normalized open method (see RecordTabOpenMethod) is menu-failed,
+	// keystroke-no-menu, keystroke-retry or unknown. Cleared by the same
+	// starts that set TerminalTTY.
+	TerminalNonMenuTabs *LaunchTally `json:"terminal_non_menu_tabs,omitempty"`
+	// TerminalTabOpenMethods counts the launches whose tab opened, by the
+	// normalized open method (DFLT-00378): its keys are only ever menu,
+	// menu-failed, keystroke-no-menu, keystroke-retry and unknown (see
+	// RecordTabOpenMethod). Cleared by the same starts that set
+	// TerminalTTY.
+	TerminalTabOpenMethods map[string]LaunchTally `json:"terminal_tab_open_methods,omitempty"`
 	// StartedBy is who started the run, or last took it over or adopted it
 	// (DFLT-00326): the name other members see, and the machine that alone
 	// may take the run over. nil in a run file written before DFLT-00326,
@@ -296,7 +308,7 @@ type TabDiagnosticsRecord struct {
 }
 
 // LaunchTally counts launches of one kind (Run.TerminalWindowLaunches,
-// Run.TerminalLateTabs).
+// Run.TerminalLateTabs, Run.TerminalTabOpenMethods, ...).
 type LaunchTally struct {
 	Count        int       `json:"count"`
 	FirstAt      time.Time `json:"first_at"`
@@ -353,14 +365,62 @@ func (r *Run) RecordStrayTab(ticketID string, now time.Time) {
 	r.TerminalStrayTabs.Add(ticketID, now)
 }
 
+// The ways the tab script's last attempt can open a tab that opened
+// (DFLT-00378): the values appleterminal.go's tab script logs as
+// "graph-ops-diag: open_method=" (terminal.TabDiagnostics.OpenMethod),
+// which this package cannot import. Keep them in step with that script.
+// TabOpenMethodUnknown is what RecordTabOpenMethod counts any other value
+// as, "" included.
+const (
+	TabOpenMethodMenu            = "menu"
+	TabOpenMethodMenuFailed      = "menu-failed"
+	TabOpenMethodKeystrokeNoMenu = "keystroke-no-menu"
+	TabOpenMethodKeystrokeRetry  = "keystroke-retry"
+	TabOpenMethodUnknown         = "unknown"
+)
+
+// normalizeTabOpenMethod returns method when it is one of the known open
+// methods, and TabOpenMethodUnknown for anything else ("", a value no
+// constant names, a different case): Run.TerminalTabOpenMethods then has
+// at most five keys, and no text out of the script's output becomes one.
+func normalizeTabOpenMethod(method string) string {
+	switch method {
+	case TabOpenMethodMenu, TabOpenMethodMenuFailed, TabOpenMethodKeystrokeNoMenu, TabOpenMethodKeystrokeRetry:
+		return method
+	}
+	return TabOpenMethodUnknown
+}
+
+// RecordTabOpenMethod counts a launch whose tab opened, by how the tab
+// script's last attempt opened it (DFLT-00378): method is normalized
+// (normalizeTabOpenMethod) and counted in TerminalTabOpenMethods, and in
+// TerminalNonMenuTabs as well unless it is TabOpenMethodMenu.
+func (r *Run) RecordTabOpenMethod(method, ticketID string, now time.Time) {
+	method = normalizeTabOpenMethod(method)
+	if r.TerminalTabOpenMethods == nil {
+		r.TerminalTabOpenMethods = map[string]LaunchTally{}
+	}
+	t := r.TerminalTabOpenMethods[method]
+	t.Add(ticketID, now)
+	r.TerminalTabOpenMethods[method] = t
+	if method == TabOpenMethodMenu {
+		return
+	}
+	if r.TerminalNonMenuTabs == nil {
+		r.TerminalNonMenuTabs = &LaunchTally{}
+	}
+	r.TerminalNonMenuTabs.Add(ticketID, now)
+}
+
 // resetTerminal gives the run a new orchestrator's terminal state: its tty
 // (or why it has none), the tab enabled again with no slow timeouts, and
-// no counts of window launches, late, retried or stray tabs. The history of
-// tab failures is kept.
+// no counts of window launches, late, retried, stray or non-menu tabs, nor
+// of the tabs' open methods. The history of tab failures is kept.
 func (r *Run) resetTerminal(tty, ttyReason string) {
 	r.TerminalTTY, r.TerminalTTYReason, r.TerminalTabDisabled = tty, ttyReason, ""
 	r.TerminalTabSlowTimeouts = 0
 	r.TerminalWindowLaunches, r.TerminalLateTabs, r.TerminalRetriedTabs, r.TerminalStrayTabs = nil, nil, nil, nil
+	r.TerminalNonMenuTabs, r.TerminalTabOpenMethods = nil, nil
 }
 
 // MaxTabFailureRecords bounds Run.TerminalTabFailures.

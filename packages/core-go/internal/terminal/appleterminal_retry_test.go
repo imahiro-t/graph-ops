@@ -287,7 +287,7 @@ func TestLaunchWithOptions_RetriedTabIsUsed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != (LaunchOutcome{UsedTab: true, RetriedTab: true}) {
+	if out != (LaunchOutcome{UsedTab: true, RetriedTab: true, OpenMethod: "keystroke-retry"}) {
 		t.Fatalf("outcome = %+v", out)
 	}
 	if len(*calls) != 1 || reads != 0 {
@@ -554,19 +554,19 @@ func TestLaunchWithOptions_LateFirstTabAndStrayTab(t *testing.T) {
 			// Seen before anything was logged for the retry.
 			name: "first attempt's tab seen before the retry",
 			tail: tabDiagPrefix + "late_tab=true\n",
-			want: LaunchOutcome{UsedTab: true, LateTab: true},
+			want: LaunchOutcome{UsedTab: true, LateTab: true, OpenMethod: "menu"},
 		},
 		{
 			// Seen at the retry's check: retried is undone.
 			name: "first attempt's tab seen at the retry's check",
 			tail: tabDiagPrefix + "retry_frontmost_app=Terminal\n" + tabDiagPrefix + "retried=true\n" + tabDiagPrefix + "late_tab=true\n" + tabDiagPrefix + "retried=false\n",
-			want: LaunchOutcome{UsedTab: true, LateTab: true},
+			want: LaunchOutcome{UsedTab: true, LateTab: true, OpenMethod: "menu"},
 		},
 		{
 			name: "a stray tab after the retry",
 			tail: tabDiagPrefix + "retried=true\n" + tabDiagPrefix + "open_method=keystroke-retry\n" +
 				tabPhasePrefix + TabPhaseKeystrokeSending + "\n" + tabPhasePrefix + TabPhaseKeystrokeSent + "\n" + tabDiagPrefix + "stray_tab=true\n",
-			want: LaunchOutcome{UsedTab: true, RetriedTab: true, StrayTab: true},
+			want: LaunchOutcome{UsedTab: true, RetriedTab: true, StrayTab: true, OpenMethod: "keystroke-retry"},
 		},
 	}
 	for _, tc := range cases {
@@ -613,5 +613,60 @@ func TestLaunchWithOptions_FailedPressThenRetry(t *testing.T) {
 	f := got.TabFailure
 	if f == nil || f.ErrorNumber != 9102 || !f.KeystrokeSent || !f.EmptyTabPossible() || f.Diagnostics.OpenMethod != "keystroke-retry" || !f.Diagnostics.Retried || got.DisableTab {
 		t.Fatalf("outcome = %+v, failure = %+v", got, f)
+	}
+}
+
+// DFLT-00378: a tab that opened carries how the script's last attempt
+// opened it, exactly as the script logged it (the run's tally normalizes
+// it, not the launch).
+func TestLaunchWithOptions_OpenedTabCarriesItsOpenMethod(t *testing.T) {
+	cases := []struct {
+		name   string
+		output string
+		want   string
+	}{
+		{name: "menu item pressed", output: menuOutput(true, ""), want: "menu"},
+		{name: "no menu item, Cmd+T", output: phaseOutput(TabPhaseFrontmost, "") + tabDiagPrefix + "open_method=keystroke-no-menu\n" +
+			tabPhasePrefix + TabPhaseKeystrokeSending + "\n" + tabPhasePrefix + TabPhaseKeystrokeSent + "\n", want: "keystroke-no-menu"},
+		{name: "press returned an error", output: phaseOutput(TabPhaseFrontmost, "") + tabPhasePrefix + TabPhaseMenuPressing + "\n" +
+			tabDiagPrefix + "open_method=menu-failed\n" + tabPhasePrefix + TabPhaseMenuPressed + "\n", want: "menu-failed"},
+		{name: "an unknown value is passed on as it is", output: phaseOutput(TabPhaseFrontmost, "") + tabDiagPrefix + "open_method=Menu\n", want: "Menu"},
+		{name: "nothing logged", output: phaseOutput(TabPhaseFrontmost, ""), want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			onDarwin(t)
+			output := tc.output + tabPhasePrefix + TabPhaseTabFound + "\n" + tabPhasePrefix + TabPhaseCommandSending + "\n"
+			fakeCommands(t, func(ctx context.Context, name string, args []string) ([]byte, error) {
+				return []byte(output), nil
+			})
+			out, err := launchTab(t, Config{}, LaunchOptions{AppleTerminalTTY: testTTY})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !out.UsedTab || out.TabFailure != nil || out.OpenMethod != tc.want {
+				t.Fatalf("outcome = %+v, want OpenMethod %q", out, tc.want)
+			}
+		})
+	}
+}
+
+// The tab script logs exactly these open methods (DFLT-00378): the autopilot
+// package's TabOpenMethod* constants mirror them, and a value missing there
+// is counted as unknown in the run's tally. A change here needs a change
+// there.
+func TestAppleTerminalTabScript_OpenMethodValues(t *testing.T) {
+	got := map[string]bool{}
+	for _, m := range regexp.MustCompile(`log "graph-ops-diag: open_method=([^"]*)"`).FindAllStringSubmatch(appleTerminalTabScript, -1) {
+		got[m[1]] = true
+	}
+	want := map[string]bool{"menu": true, "menu-failed": true, "keystroke-no-menu": true, "keystroke-retry": true}
+	if len(got) != len(want) {
+		t.Fatalf("open methods logged = %v, want %v", got, want)
+	}
+	for m := range want {
+		if !got[m] {
+			t.Errorf("the tab script logs no open_method=%s", m)
+		}
 	}
 }
