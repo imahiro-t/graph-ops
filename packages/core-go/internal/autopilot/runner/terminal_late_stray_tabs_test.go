@@ -1,0 +1,389 @@
+package runner
+
+import (
+	"errors"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/graph-ops/core-go/internal/autopilot"
+	"github.com/graph-ops/core-go/internal/terminal"
+)
+
+// DFLT-00379: a launch whose tab opened at the retry with no stray tab seen
+// in the tab script's 1 second is looked at again later, with ps, by the
+// next wait poll or launch after its span (StrayTabGrace) and
+// autopilot.StraySettle have passed. What the look finds is counted in
+// terminal_stray_tabs and terminal_late_stray_tabs and warned about; the
+// run's own tabs are never taken for stray ones.
+
+// strayFindCall is one call to the fake FindStrayTTYs.
+type strayFindCall struct {
+	From, Until, Now time.Time
+	Exclude          []string
+}
+
+// fakeStrayFinder replaces the look for stray tabs: answer decides each
+// call's result, and every call is recorded.
+func (h *harness) fakeStrayFinder(answer func(c strayFindCall) ([]string, error)) *[]strayFindCall {
+	var calls []strayFindCall
+	h.svc.FindStrayTTYs = func(from, until time.Time, exclude []string, now time.Time) ([]string, error) {
+		c := strayFindCall{From: from, Until: until, Now: now, Exclude: append([]string(nil), exclude...)}
+		calls = append(calls, c)
+		return answer(c)
+	}
+	return &calls
+}
+
+// finding returns an answer that finds ttys, minus what the call excludes
+// (as the real look does).
+func finding(ttys ...string) func(c strayFindCall) ([]string, error) {
+	return func(c strayFindCall) ([]string, error) {
+		var out []string
+		for _, tty := range ttys {
+			if !slices.Contains(c.Exclude, tty) {
+				out = append(out, tty)
+			}
+		}
+		return out, nil
+	}
+}
+
+// retriedTab is the outcome of a launch whose tab opened at the retry, in
+// tty, with no stray tab seen.
+func retriedTab(tty string) terminal.LaunchOutcome {
+	return terminal.LaunchOutcome{UsedTab: true, RetriedTab: true, OpenMethod: "keystroke-retry", NewTTY: tty}
+}
+
+// launchSilentWith starts a ticket-mode run of a new ticket whose worker
+// never reports, launched with outcome, from an orchestrator in
+// /dev/ttys003.
+func launchSilentWith(t *testing.T, h *harness, outcome terminal.LaunchOutcome) (runID, ticket string) {
+	t.Helper()
+	h.ttyOf("/dev/ttys003")
+	h.launchOutcome = func(launchCall) terminal.LaunchOutcome { return outcome }
+	return launchSilent(t, h)
+}
+
+// lateStrayLogs returns the warnings about stray tabs found later.
+func lateStrayLogs(logs []string) []string {
+	var out []string
+	for _, l := range logs {
+		if strings.Contains(l, "appeared later and is left empty") {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// waitOnce polls once.
+func (h *harness) waitOnce(runID, ticketID string) WaitResult {
+	h.t.Helper()
+	res, err := h.svc.Wait(runID, ticketID, 0)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return res
+}
+
+func TestStrayTab_LaterLookFindsALateTab(t *testing.T) {
+	h := newHarness(t)
+	logs := h.captureLogs()
+	calls := h.fakeStrayFinder(finding("/dev/ttys015"))
+	launchedAt := h.clock.Now()
+	runID, c := launchSilentWith(t, h, retriedTab("/dev/ttys011"))
+
+	run := h.run(runID)
+	want := []autopilot.StrayTabCheck{{TicketID: c, Role: autopilot.RoleWork, From: launchedAt, Until: launchedAt.Add(StrayTabGrace)}}
+	if !reflect.DeepEqual(run.TerminalStrayTabChecks, want) {
+		t.Fatalf("checks = %+v", run.TerminalStrayTabChecks)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("the launch looked already: %+v", *calls)
+	}
+
+	// Before Until + StraySettle: no look.
+	h.clock.Advance(StrayTabGrace + autopilot.StraySettle - time.Second)
+	h.waitOnce(runID, c)
+	if len(*calls) != 0 || len(h.run(runID).TerminalStrayTabChecks) != 1 {
+		t.Fatalf("looked too early: %+v", *calls)
+	}
+
+	// Due: one look, with the span and the run's own ttys left out.
+	h.clock.Advance(time.Second)
+	h.waitOnce(runID, c)
+	if len(*calls) != 1 {
+		t.Fatalf("calls = %+v", *calls)
+	}
+	call := (*calls)[0]
+	if !call.From.Equal(launchedAt) || !call.Until.Equal(launchedAt.Add(StrayTabGrace)) || !call.Now.Equal(h.clock.Now()) {
+		t.Fatalf("call = %+v", call)
+	}
+	if !slices.Contains(call.Exclude, "/dev/ttys003") || !slices.Contains(call.Exclude, "/dev/ttys011") {
+		t.Fatalf("exclude = %q", call.Exclude)
+	}
+	run = h.run(runID)
+	if run.TerminalStrayTabs == nil || run.TerminalStrayTabs.Count != 1 || run.TerminalStrayTabs.LastTicketID != c {
+		t.Fatalf("stray tabs = %+v", run.TerminalStrayTabs)
+	}
+	if run.TerminalLateStrayTabs == nil || run.TerminalLateStrayTabs.Count != 1 || run.TerminalLateStrayTabs.LastTicketID != c {
+		t.Fatalf("late stray tabs = %+v", run.TerminalLateStrayTabs)
+	}
+	if run.TerminalStrayTabChecks != nil {
+		t.Fatalf("the check must be gone: %+v", run.TerminalStrayTabChecks)
+	}
+	warn := lateStrayLogs(*logs)
+	if len(warn) != 1 || !strings.Contains(warn[0], "(/dev/ttys015)") || !strings.Contains(warn[0], "close it by hand") ||
+		!strings.Contains(warn[0], "the work session of "+c) {
+		t.Fatalf("warnings = %q", warn)
+	}
+
+	// Made once only.
+	h.clock.Advance(time.Minute)
+	h.waitOnce(runID, c)
+	if len(*calls) != 1 || h.run(runID).TerminalStrayTabs.Count != 1 {
+		t.Fatalf("looked again: %+v", *calls)
+	}
+}
+
+func TestStrayTab_NoLaterLookUnlessRetriedWithoutAStrayTab(t *testing.T) {
+	cases := []struct {
+		name    string
+		tty     string
+		outcome terminal.LaunchOutcome
+		recent  []string
+	}{
+		{name: "no retry", tty: "/dev/ttys003", outcome: terminal.LaunchOutcome{UsedTab: true, OpenMethod: "menu", NewTTY: "/dev/ttys011"}, recent: []string{"/dev/ttys011"}},
+		{name: "stray tab seen at once", tty: "/dev/ttys003", outcome: terminal.LaunchOutcome{UsedTab: true, RetriedTab: true, StrayTab: true, OpenMethod: "keystroke-retry", NewTTY: "/dev/ttys011"}, recent: []string{"/dev/ttys011"}},
+		{name: "no tab", tty: "/dev/ttys003", outcome: terminal.LaunchOutcome{TabError: "osascript: no tab (9102)"}},
+		{name: "no orchestrator tty", tty: "", outcome: retriedTab("/dev/ttys011"), recent: []string{"/dev/ttys011"}},
+		{name: "no tty logged", tty: "/dev/ttys003", outcome: terminal.LaunchOutcome{UsedTab: true, OpenMethod: "menu"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			calls := h.fakeStrayFinder(finding("/dev/ttys015"))
+			h.ttyOf(tc.tty)
+			h.launchOutcome = func(launchCall) terminal.LaunchOutcome { return tc.outcome }
+			runID, c := launchSilent(t, h)
+			run := h.run(runID)
+			if run.TerminalStrayTabChecks != nil {
+				t.Fatalf("checks = %+v", run.TerminalStrayTabChecks)
+			}
+			var recent []string
+			for _, r := range run.TerminalRecentTabTTYs {
+				recent = append(recent, r.TTY)
+			}
+			if !reflect.DeepEqual(recent, tc.recent) {
+				t.Fatalf("recent = %q, want %q", recent, tc.recent)
+			}
+			h.clock.Advance(time.Hour)
+			h.waitOnce(runID, c)
+			if len(*calls) != 0 || h.run(runID).TerminalLateStrayTabs != nil {
+				t.Fatalf("calls = %+v", *calls)
+			}
+		})
+	}
+}
+
+func TestStrayTab_FailedOrEmptyLookCountsNothing(t *testing.T) {
+	for name, answer := range map[string]func(strayFindCall) ([]string, error){
+		"ps failed":   func(strayFindCall) ([]string, error) { return nil, errors.New("ps: operation not permitted") },
+		"nothing new": finding(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			logs := h.captureLogs()
+			calls := h.fakeStrayFinder(answer)
+			runID, c := launchSilentWith(t, h, retriedTab("/dev/ttys011"))
+			h.clock.Advance(StrayTabGrace + autopilot.StraySettle)
+			h.waitOnce(runID, c)
+			run := h.run(runID)
+			if len(*calls) != 1 || run.TerminalStrayTabs != nil || run.TerminalLateStrayTabs != nil || run.TerminalStrayTabChecks != nil {
+				t.Fatalf("calls %d, stray %+v, late %+v, checks %+v", len(*calls), run.TerminalStrayTabs, run.TerminalLateStrayTabs, run.TerminalStrayTabChecks)
+			}
+			if w := lateStrayLogs(*logs); w != nil {
+				t.Fatalf("warnings = %q", w)
+			}
+			// Dropped, not tried again.
+			h.waitOnce(runID, c)
+			if len(*calls) != 1 {
+				t.Fatalf("looked again: %d", len(*calls))
+			}
+		})
+	}
+}
+
+// The poll that returns -- the session reported -- still makes the look it
+// took out of the run (a look taken out and not made would be lost).
+func TestStrayTab_ThePollThatReturnsStillLooks(t *testing.T) {
+	h := newHarness(t)
+	calls := h.fakeStrayFinder(finding("/dev/ttys015"))
+	runID, c := launchSilentWith(t, h, retriedTab("/dev/ttys011"))
+	if _, err := h.svc.Report(runID, c, autopilot.TicketDone, "", "done"); err != nil {
+		t.Fatal(err)
+	}
+	h.clock.Advance(StrayTabGrace + autopilot.StraySettle)
+	if res := h.waitOnce(runID, c); !res.Reported() {
+		t.Fatalf("res = %+v", res)
+	}
+	if len(*calls) != 1 || h.run(runID).TerminalLateStrayTabs == nil {
+		t.Fatalf("calls = %+v, late = %+v", *calls, h.run(runID).TerminalLateStrayTabs)
+	}
+}
+
+// The next launch makes a look that is due, too, and never takes its own
+// tab -- which opened inside the earlier launch's span -- for a stray one.
+func TestStrayTab_NextLaunchLooksAndLeavesItsOwnTabOut(t *testing.T) {
+	h := newHarness(t)
+	h.ttyOf("/dev/ttys003")
+	logs := h.captureLogs()
+	r := h.ticket("R", "")
+	a := h.ticket("A", r)
+	// A's tab and a real stray tab (ttys015) are both empty-looking and in
+	// R's span to the fake look; only the stray one may be counted.
+	calls := h.fakeStrayFinder(finding("/dev/ttys012", "/dev/ttys015"))
+	h.launchOutcome = func(c launchCall) terminal.LaunchOutcome {
+		if c.Ticket == r {
+			return retriedTab("/dev/ttys011")
+		}
+		return terminal.LaunchOutcome{UsedTab: true, OpenMethod: "menu", NewTTY: "/dev/ttys012"}
+	}
+	run := h.start(r, autopilot.ModeTree)
+	launched := 0
+	for i := 0; i < 20 && launched < 2; i++ {
+		res, err := h.svc.Next(run.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Action.Action != autopilot.ActionLaunch {
+			t.Fatalf("action = %+v", res.Action)
+		}
+		if launched == 1 {
+			if res.Ticket != a {
+				t.Fatalf("second launch = %+v", res)
+			}
+			// R's look is due when A launches.
+			h.clock.Advance(StrayTabGrace + autopilot.StraySettle)
+		}
+		if _, err := h.svc.Launch(run.RunID, res.Ticket, res.Role); err != nil {
+			t.Fatal(err)
+		}
+		launched++
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("calls = %+v", *calls)
+	}
+	for _, tty := range []string{"/dev/ttys003", "/dev/ttys011", "/dev/ttys012"} {
+		if !slices.Contains((*calls)[0].Exclude, tty) {
+			t.Fatalf("exclude %q lacks %s", (*calls)[0].Exclude, tty)
+		}
+	}
+	got := h.run(run.RunID)
+	if got.TerminalLateStrayTabs == nil || got.TerminalLateStrayTabs.Count != 1 || got.TerminalLateStrayTabs.LastTicketID != r ||
+		got.TerminalStrayTabs == nil || got.TerminalStrayTabs.Count != 1 {
+		t.Fatalf("late %+v, stray %+v", got.TerminalLateStrayTabs, got.TerminalStrayTabs)
+	}
+	warn := lateStrayLogs(*logs)
+	if len(warn) != 1 || !strings.Contains(warn[0], "(/dev/ttys015)") || strings.Contains(warn[0], "ttys012") {
+		t.Fatalf("warnings = %q", warn)
+	}
+}
+
+// The same, made by the wait for the next session: its tab is left out.
+func TestStrayTab_WaitForTheNextSessionLeavesItsTabOut(t *testing.T) {
+	h := newHarness(t)
+	h.ttyOf("/dev/ttys003")
+	r := h.ticket("R", "")
+	a := h.ticket("A", r)
+	h.behave[a] = silentWorker
+	calls := h.fakeStrayFinder(finding("/dev/ttys012"))
+	h.launchOutcome = func(c launchCall) terminal.LaunchOutcome {
+		if c.Ticket == r {
+			return retriedTab("/dev/ttys011")
+		}
+		return terminal.LaunchOutcome{UsedTab: true, OpenMethod: "menu", NewTTY: "/dev/ttys012"}
+	}
+	run := h.start(r, autopilot.ModeTree)
+	for _, want := range []string{r, a} {
+		res, err := h.svc.Next(run.RunID)
+		if err != nil || res.Action.Action != autopilot.ActionLaunch || res.Ticket != want {
+			t.Fatalf("next = %+v, %v", res, err)
+		}
+		if want == a {
+			h.clock.Advance(5 * time.Second) // inside R's span, not yet due
+		}
+		if _, err := h.svc.Launch(run.RunID, res.Ticket, res.Role); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("looked before due: %+v", *calls)
+	}
+	h.clock.Advance(StrayTabGrace + autopilot.StraySettle)
+	h.waitOnce(run.RunID, a)
+	if len(*calls) != 1 || !slices.Contains((*calls)[0].Exclude, "/dev/ttys012") {
+		t.Fatalf("calls = %+v", *calls)
+	}
+	if got := h.run(run.RunID); got.TerminalLateStrayTabs != nil || got.TerminalStrayTabs != nil {
+		t.Fatalf("the next session's own tab was counted: %+v / %+v", got.TerminalLateStrayTabs, got.TerminalStrayTabs)
+	}
+}
+
+// A poll with no look due writes the run once, as before; a look that finds
+// nothing adds no write either, and only one that finds a tab adds one.
+func TestStrayTab_PollsAddNoWriteUnlessATabIsFound(t *testing.T) {
+	revisionAfterPoll := func(t *testing.T, h *harness, runID, c string) int64 {
+		t.Helper()
+		before := h.run(runID).Revision
+		h.waitOnce(runID, c)
+		return h.run(runID).Revision - before
+	}
+	t.Run("no look due", func(t *testing.T) {
+		h := newHarness(t)
+		calls := h.fakeStrayFinder(finding("/dev/ttys015"))
+		runID, c := launchSilentWith(t, h, retriedTab("/dev/ttys011"))
+		if d := revisionAfterPoll(t, h, runID, c); d != 1 || len(*calls) != 0 {
+			t.Fatalf("writes %d, calls %d", d, len(*calls))
+		}
+	})
+	t.Run("look finds nothing", func(t *testing.T) {
+		h := newHarness(t)
+		calls := h.fakeStrayFinder(finding())
+		runID, c := launchSilentWith(t, h, retriedTab("/dev/ttys011"))
+		h.clock.Advance(time.Minute)
+		if d := revisionAfterPoll(t, h, runID, c); d != 1 || len(*calls) != 1 {
+			t.Fatalf("writes %d, calls %d", d, len(*calls))
+		}
+	})
+	t.Run("look finds a tab", func(t *testing.T) {
+		h := newHarness(t)
+		calls := h.fakeStrayFinder(finding("/dev/ttys015"))
+		runID, c := launchSilentWith(t, h, retriedTab("/dev/ttys011"))
+		h.clock.Advance(time.Minute)
+		if d := revisionAfterPoll(t, h, runID, c); d != 2 || len(*calls) != 1 {
+			t.Fatalf("writes %d, calls %d", d, len(*calls))
+		}
+	})
+}
+
+// Two looks whose spans overlap count a tab once.
+func TestStrayTab_OverlappingLooksCountATabOnce(t *testing.T) {
+	h := newHarness(t)
+	h.fakeStrayFinder(finding("/dev/ttys015"))
+	runID, c := launchSilentWith(t, h, retriedTab("/dev/ttys011"))
+	if err := h.svc.withRun(runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+		now := h.clock.Now()
+		run.AddStrayTabCheck(autopilot.StrayTabCheck{TicketID: c, Role: autopilot.RoleWork, From: now, Until: now.Add(StrayTabGrace)})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.clock.Advance(time.Minute)
+	h.waitOnce(runID, c)
+	if got := h.run(runID); got.TerminalLateStrayTabs == nil || got.TerminalLateStrayTabs.Count != 1 {
+		t.Fatalf("late = %+v", got.TerminalLateStrayTabs)
+	}
+}

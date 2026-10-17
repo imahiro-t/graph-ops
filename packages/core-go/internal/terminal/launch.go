@@ -167,6 +167,12 @@ type LaunchOutcome struct {
 	// in TabFailure.Diagnostics instead). The run's tally normalizes it
 	// (autopilot.Run.RecordTabOpenMethod); it is passed on unchanged here.
 	OpenMethod string
+	// NewTTY is the tty (/dev/ttysN) of the tab the session runs in, as
+	// the tab script logged it right before `do script` (DFLT-00379); ""
+	// for a launch that used no tab, or when the logged value was not a
+	// /dev/ttysN. The runner keeps it so that its later look for a stray
+	// tab (FindLateStrayTTYs) never takes its own sessions' tabs for one.
+	NewTTY string
 }
 
 // Kinds of tab failure (TabFailure.Kind).
@@ -276,6 +282,11 @@ type TabDiagnostics struct {
 	// of them may be left empty (DFLT-00377). The script logs it right
 	// before `do script`, so a failure only carries it from a timeout there.
 	StrayTab bool
+	// NewTTY is the tty of the tab taken, logged right before `do script`
+	// (DFLT-00379): "" unless it is a /dev/ttysN (validAppleTerminalTTY).
+	// Only a tab that opened passes it on (LaunchOutcome.NewTTY); a
+	// failure's record does not keep it.
+	NewTTY string
 }
 
 // SlowTimeout reports whether f is a timeout after Terminal and System

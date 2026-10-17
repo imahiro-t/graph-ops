@@ -116,6 +116,10 @@ type Service struct {
 	// means nobody in particular: runs are not stamped, and every local run
 	// counts as this machine's.
 	ResolveActor func() (*autopilot.StartedBy, error)
+	// FindStrayTTYs looks for the empty Terminal.app tabs that opened
+	// between from and until, leaving out exclude (DFLT-00379); nil means
+	// terminal.FindLateStrayTTYs. Tests replace it.
+	FindStrayTTYs func(from, until time.Time, exclude []string, now time.Time) ([]string, error)
 
 	actorOnce sync.Once
 	actorVal  *autopilot.StartedBy
@@ -891,6 +895,7 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 	var outcome terminal.LaunchOutcome
 	var disabledRun bool
 	var disabledNote string
+	var launchStart time.Time
 	launchErr := func() error {
 		if repoErr != nil {
 			return repoErr
@@ -906,6 +911,7 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		if s.Launcher == nil {
 			return errors.New("no terminal launcher configured")
 		}
+		launchStart = s.now()
 		outcome, err = s.Launcher.Launch(LaunchRequest{
 			WorkDir: workDir, ExtraArgs: SessionArgs(permissionMode, modelCap), Prompt: WorkerPrompt(runID, ticketID, role),
 			TerminalTTY: terminalTTY, SkipTab: skipTab,
@@ -923,7 +929,9 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 	// outside the lock.
 	sample := s.sampleSession(projectID, runID, ticketID)
 	var out LaunchResult
+	var due dueStrayChecks
 	err = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+		due = dueStrayChecks{}
 		st, err := ticketState(run, ticketID)
 		if err != nil {
 			return err
@@ -936,6 +944,7 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 		// repeat disables the tab path for the rest of the run, and every
 		// tab failure is kept with its details (DFLT-00361).
 		disabledRun = recordTabOutcome(run, outcome, ticketID, role, s.now())
+		due = scheduleStrayTabCheck(run, outcome, ticketID, role, launchStart, s.now())
 		disabledNote = ""
 		if recordNoTabLaunch(run, outcome, ticketID, s.now()) == 1 && outcome.NoTabReason == terminal.NoTabDisabled {
 			// Once per run (per orchestrator): later launches of a run
@@ -971,7 +980,96 @@ func (s *Service) Launch(runID, ticketID, role string) (LaunchResult, error) {
 	if outcome.UsedTab && outcome.StrayTab {
 		s.logf("the %s session of %s opened in a new Terminal tab, but a second new tab appeared after the second attempt and may have been left empty (the first attempt's tab opening late, most likely)", role, ticketID)
 	}
+	if err == nil {
+		s.runStrayTabChecks(projectID, runID, due)
+	}
 	return out, err
+}
+
+// StrayTabGrace is how long after a retried launch ended its first
+// attempt's tab is still looked for (DFLT-00379): a later look for a stray
+// tab takes the empty Terminal.app tabs that opened from the launch's start
+// to its end plus StrayTabGrace. The look is made autopilot.StraySettle
+// after that.
+const StrayTabGrace = 20 * time.Second
+
+// dueStrayChecks are the later looks for a stray tab taken out of a run
+// (autopilot.Run.TakeDueStrayTabChecks), with the ttys they must leave out
+// (autopilot.Run.StrayTabExclusions) copied while the run was locked.
+type dueStrayChecks struct {
+	checks  []autopilot.StrayTabCheck
+	exclude []string
+}
+
+// takeDueStrayChecks takes the run's due looks for a stray tab out of it.
+func takeDueStrayChecks(run *autopilot.Run, now time.Time) dueStrayChecks {
+	checks := run.TakeDueStrayTabChecks(now)
+	if len(checks) == 0 {
+		return dueStrayChecks{}
+	}
+	return dueStrayChecks{checks: checks, exclude: run.StrayTabExclusions()}
+}
+
+// scheduleStrayTabCheck keeps, on run, the tty of the tab the launch opened
+// in, and adds a later look for a stray tab when the tab opened at the
+// retry and the tab script saw no stray tab in its 1 second (DFLT-00379): a
+// launch with no retry leaves none, and one whose stray tab was seen is
+// counted already. It returns the looks whose time has come, taken out of
+// run, to be made outside the lock (Service.runStrayTabChecks).
+func scheduleStrayTabCheck(run *autopilot.Run, outcome terminal.LaunchOutcome, ticketID, role string, launchStart, now time.Time) dueStrayChecks {
+	if outcome.UsedTab && outcome.NewTTY != "" {
+		run.RecordRecentTabTTY(outcome.NewTTY, now)
+	}
+	if outcome.UsedTab && outcome.RetriedTab && !outcome.StrayTab && run.TerminalTTY != "" {
+		run.AddStrayTabCheck(autopilot.StrayTabCheck{TicketID: ticketID, Role: role, From: launchStart, Until: now.Add(StrayTabGrace)})
+	}
+	return takeDueStrayChecks(run, now)
+}
+
+// runStrayTabChecks makes the later looks for a stray tab in due, outside
+// the run's lock (ps may take up to 2 seconds), and records what they find
+// -- in one more locked write, only when they find something -- warning
+// about each tab found. A look that fails is dropped: it was taken out of
+// the run already, so it is not made again.
+func (s *Service) runStrayTabChecks(projectID, runID string, due dueStrayChecks) {
+	if len(due.checks) == 0 {
+		return
+	}
+	find := s.FindStrayTTYs
+	if find == nil {
+		find = terminal.FindLateStrayTTYs
+	}
+	type found struct {
+		check autopilot.StrayTabCheck
+		tty   string
+	}
+	var hits []found
+	exclude := append([]string(nil), due.exclude...)
+	now := s.now()
+	for _, c := range due.checks {
+		ttys, err := find(c.From, c.Until, exclude, now)
+		if err != nil {
+			continue
+		}
+		for _, tty := range ttys {
+			hits = append(hits, found{check: c, tty: tty})
+			// Counted once, even when two looks' spans overlap.
+			exclude = append(exclude, tty)
+		}
+	}
+	if len(hits) == 0 {
+		return
+	}
+	_ = s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+		for _, h := range hits {
+			run.RecordStrayTab(h.check.TicketID, now)
+			run.RecordLateStrayTab(h.check.TicketID, now)
+		}
+		return nil
+	})
+	for _, h := range hits {
+		s.logf("the %s session of %s opened in a new Terminal tab after a second attempt, and a second new tab (%s) appeared later and is left empty (the first attempt's tab opening late, most likely); close it by hand", h.check.Role, h.check.TicketID, h.tty)
+	}
 }
 
 // MaxSlowTabTimeouts is how many tab launches in a row may time out after
@@ -1174,8 +1272,10 @@ func (s *Service) Wait(runID, ticketID string, timeout time.Duration) (WaitResul
 	started := time.Now()
 	for {
 		var res WaitResult
+		var due dueStrayChecks
 		sample := s.sampleSession(projectID, runID, ticketID)
 		err := s.withRunIn(projectID, runID, func(tx *autopilot.Tx, run *autopilot.Run) error {
+			due = dueStrayChecks{}
 			st, err := ticketState(run, ticketID)
 			if err != nil {
 				return err
@@ -1184,6 +1284,9 @@ func (s *Service) Wait(runID, ticketID string, timeout time.Duration) (WaitResul
 				return invalidState("ticket %s has no session in run %s; launch it first", ticketID, run.ID)
 			}
 			now := s.now()
+			// In the poll's own write: a poll with no look due adds
+			// nothing, not even a lock (DFLT-00379).
+			due = takeDueStrayChecks(run, now)
 			if st.Role != "" {
 				if !run.IsFinal() {
 					run.Heartbeat = now
@@ -1207,6 +1310,9 @@ func (s *Service) Wait(runID, ticketID string, timeout time.Duration) (WaitResul
 		if err != nil {
 			return WaitResult{}, err
 		}
+		// Made even by the poll that returns: the looks were taken out of
+		// the run, so one left unmade would be lost.
+		s.runStrayTabChecks(projectID, runID, due)
 		if res.Reported() || time.Since(started) >= timeout {
 			return res, nil
 		}

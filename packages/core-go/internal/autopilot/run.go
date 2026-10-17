@@ -205,6 +205,26 @@ type Run struct {
 	// RecordTabOpenMethod). Cleared by the same starts that set
 	// TerminalTTY.
 	TerminalTabOpenMethods map[string]LaunchTally `json:"terminal_tab_open_methods,omitempty"`
+	// TerminalLateStrayTabs counts the stray tabs found only after the tab
+	// script's 1-second look (DFLT-00379): a launch whose tab opened at the
+	// retry with no stray tab seen then is checked again later with ps
+	// (TerminalStrayTabChecks), and each empty tab found is counted here and
+	// in TerminalStrayTabs as well -- that one stays the total of launches
+	// that may have left an empty tab. Cleared by the same starts that set
+	// TerminalTTY.
+	TerminalLateStrayTabs *LaunchTally `json:"terminal_late_stray_tabs,omitempty"`
+	// TerminalStrayTabChecks are the later looks for a stray tab still to
+	// be made (DFLT-00379), oldest first, at most MaxStrayTabChecks of
+	// them. Each is taken out (TakeDueStrayTabChecks) once its time has
+	// come, by the next wait poll or launch. Cleared by the same starts
+	// that set TerminalTTY.
+	TerminalStrayTabChecks []StrayTabCheck `json:"terminal_stray_tab_checks,omitempty"`
+	// TerminalRecentTabTTYs are the ttys of the tabs the run's sessions
+	// opened in lately (DFLT-00379; RecordRecentTabTTY keeps
+	// MaxRecentTabTTYs of them, none older than RecentTabTTYAge): the later
+	// looks for a stray tab never take them. Cleared by the same starts
+	// that set TerminalTTY.
+	TerminalRecentTabTTYs []RecentTabTTY `json:"terminal_recent_tab_ttys,omitempty"`
 	// StartedBy is who started the run, or last took it over or adopted it
 	// (DFLT-00326): the name other members see, and the machine that alone
 	// may take the run over. nil in a run file written before DFLT-00326,
@@ -365,6 +385,109 @@ func (r *Run) RecordStrayTab(ticketID string, now time.Time) {
 	r.TerminalStrayTabs.Add(ticketID, now)
 }
 
+// RecordLateStrayTab counts a stray tab found only by a later look
+// (DFLT-00379). The caller counts it with RecordStrayTab as well.
+func (r *Run) RecordLateStrayTab(ticketID string, now time.Time) {
+	if r.TerminalLateStrayTabs == nil {
+		r.TerminalLateStrayTabs = &LaunchTally{}
+	}
+	r.TerminalLateStrayTabs.Add(ticketID, now)
+}
+
+// StrayTabCheck is a later look for a stray tab of one launch (DFLT-00379):
+// an empty Terminal.app tab whose first process started between From (the
+// launch's start) and Until (its end plus the grace a late tab is given).
+type StrayTabCheck struct {
+	TicketID string    `json:"ticket_id"`
+	Role     string    `json:"role"`
+	From     time.Time `json:"from"`
+	Until    time.Time `json:"until"`
+}
+
+// MaxStrayTabChecks bounds Run.TerminalStrayTabChecks.
+const MaxStrayTabChecks = 10
+
+// StraySettle is how long after a check's Until it is made (DFLT-00379):
+// the tab of any other launch that opened within the span is running its
+// command by then, so it is no longer empty and is not taken for a stray
+// one.
+const StraySettle = 10 * time.Second
+
+// AddStrayTabCheck adds a later look for a stray tab, dropping the oldest
+// beyond MaxStrayTabChecks.
+func (r *Run) AddStrayTabCheck(c StrayTabCheck) {
+	r.TerminalStrayTabChecks = append(r.TerminalStrayTabChecks, c)
+	if n := len(r.TerminalStrayTabChecks); n > MaxStrayTabChecks {
+		r.TerminalStrayTabChecks = append([]StrayTabCheck(nil), r.TerminalStrayTabChecks[n-MaxStrayTabChecks:]...)
+	}
+}
+
+// TakeDueStrayTabChecks removes and returns the checks whose time has come
+// (now at or past Until plus StraySettle), oldest first; the others stay.
+// Taken out, a check is never made twice -- nor again when making it fails.
+func (r *Run) TakeDueStrayTabChecks(now time.Time) []StrayTabCheck {
+	var due, rest []StrayTabCheck
+	for _, c := range r.TerminalStrayTabChecks {
+		if !now.Before(c.Until.Add(StraySettle)) {
+			due = append(due, c)
+		} else {
+			rest = append(rest, c)
+		}
+	}
+	if due != nil {
+		r.TerminalStrayTabChecks = rest
+	}
+	return due
+}
+
+// RecentTabTTY is the tty of a tab one of the run's sessions opened in, and
+// when (DFLT-00379).
+type RecentTabTTY struct {
+	TTY string    `json:"tty"`
+	At  time.Time `json:"at"`
+}
+
+// MaxRecentTabTTYs and RecentTabTTYAge bound Run.TerminalRecentTabTTYs:
+// far longer than a check waits to be made (a launch, its grace and
+// StraySettle).
+const (
+	MaxRecentTabTTYs = 20
+	RecentTabTTYAge  = 10 * time.Minute
+)
+
+// RecordRecentTabTTY keeps tty as the tab a session opened in at now,
+// dropping those older than RecentTabTTYAge and the oldest beyond
+// MaxRecentTabTTYs. An empty tty is not kept.
+func (r *Run) RecordRecentTabTTY(tty string, now time.Time) {
+	var kept []RecentTabTTY
+	for _, t := range r.TerminalRecentTabTTYs {
+		if now.Sub(t.At) <= RecentTabTTYAge {
+			kept = append(kept, t)
+		}
+	}
+	if tty != "" {
+		kept = append(kept, RecentTabTTY{TTY: tty, At: now})
+	}
+	if n := len(kept); n > MaxRecentTabTTYs {
+		kept = append([]RecentTabTTY(nil), kept[n-MaxRecentTabTTYs:]...)
+	}
+	r.TerminalRecentTabTTYs = kept
+}
+
+// StrayTabExclusions are the ttys a later look for a stray tab must never
+// take (DFLT-00379): the orchestrator's and those of the tabs the run's
+// sessions opened in lately.
+func (r *Run) StrayTabExclusions() []string {
+	var out []string
+	if r.TerminalTTY != "" {
+		out = append(out, r.TerminalTTY)
+	}
+	for _, t := range r.TerminalRecentTabTTYs {
+		out = append(out, t.TTY)
+	}
+	return out
+}
+
 // The ways the tab script's last attempt can open a tab that opened
 // (DFLT-00378): the values appleterminal.go's tab script logs as
 // "graph-ops-diag: open_method=" (terminal.TabDiagnostics.OpenMethod),
@@ -415,12 +538,14 @@ func (r *Run) RecordTabOpenMethod(method, ticketID string, now time.Time) {
 // resetTerminal gives the run a new orchestrator's terminal state: its tty
 // (or why it has none), the tab enabled again with no slow timeouts, and
 // no counts of window launches, late, retried, stray or non-menu tabs, nor
-// of the tabs' open methods. The history of tab failures is kept.
+// of the tabs' open methods, and no later looks for stray tabs nor recent
+// tab ttys. The history of tab failures is kept.
 func (r *Run) resetTerminal(tty, ttyReason string) {
 	r.TerminalTTY, r.TerminalTTYReason, r.TerminalTabDisabled = tty, ttyReason, ""
 	r.TerminalTabSlowTimeouts = 0
 	r.TerminalWindowLaunches, r.TerminalLateTabs, r.TerminalRetriedTabs, r.TerminalStrayTabs = nil, nil, nil, nil
 	r.TerminalNonMenuTabs, r.TerminalTabOpenMethods = nil, nil
+	r.TerminalLateStrayTabs, r.TerminalStrayTabChecks, r.TerminalRecentTabTTYs = nil, nil, nil
 }
 
 // MaxTabFailureRecords bounds Run.TerminalTabFailures.

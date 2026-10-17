@@ -318,7 +318,11 @@ const (
 //     the command still goes to the tab taken. Running it in that tab is as
 //     safe as without the retry -- it is a new tab in the target window --
 //     whereas a 9104 there would leave both tabs empty and open a new window
-//     as well. A stray tab appearing after that second is not seen. A poll whose read of the
+//     as well. A stray tab appearing after that second is not seen here:
+//     the script logs the tty of the tab it took ("graph-ops-diag:
+//     new_tty=", LaunchOutcome.NewTTY) right before `do script`, and the
+//     runner looks for such a tab later with ps (FindLateStrayTTYs,
+//     DFLT-00379), without making the launch wait. A poll whose read of the
 //     ttys fails is skipped rather than taken for "no tabs" (which could
 //     never show the new one), and the last such error is named in the 9102.
 //     A retry whose first Cmd+T did reach another app sends a second one
@@ -794,6 +798,7 @@ on run argv
 		end repeat
 		if strayTab then log "graph-ops-diag: stray_tab=true"
 	end if
+	log "graph-ops-diag: new_tty=" & newTTY
 	log "graph-ops-phase: command-sending"
 	tell application "Terminal" to do script shellCommand in newTab
 end run`
@@ -898,7 +903,7 @@ func launchAppleTerminalTab(workDir, claudeBin string, extraArgs []string, promp
 		}
 	}
 	if tabErr == "" {
-		return LaunchOutcome{UsedTab: true, LateTab: opened.LateTab, RetriedTab: opened.Retried, StrayTab: opened.StrayTab, OpenMethod: opened.OpenMethod}, nil
+		return LaunchOutcome{UsedTab: true, LateTab: opened.LateTab, RetriedTab: opened.Retried, StrayTab: opened.StrayTab, OpenMethod: opened.OpenMethod, NewTTY: opened.NewTTY}, nil
 	}
 	out := LaunchOutcome{TabError: tabErr, DisableTab: disable, TabFailure: failure}
 	if err := runLauncher("open", []string{"-a", "Terminal", scriptPath}); err != nil {
@@ -1161,6 +1166,12 @@ func parseTabDiagnostics(output string) TabDiagnostics {
 			d.Refocused = value == "true"
 		case "stray_tab":
 			d.StrayTab = value == "true"
+		case "new_tty":
+			if validAppleTerminalTTY(value) {
+				d.NewTTY = value
+			} else {
+				d.NewTTY = ""
+			}
 		}
 	}
 	return d

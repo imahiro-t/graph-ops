@@ -91,6 +91,9 @@ func craftedRecord(t *testing.T, id, root, mode, state string, heartbeat time.Ti
 		TerminalStrayTabs:      &LaunchTally{Count: 1, FirstAt: heartbeat, LastAt: heartbeat, LastTicketID: evil},
 		TerminalNonMenuTabs:    &LaunchTally{Count: 1, FirstAt: heartbeat, LastAt: heartbeat, LastTicketID: evil},
 		TerminalTabOpenMethods: map[string]LaunchTally{evil: {Count: 1, FirstAt: heartbeat, LastAt: heartbeat, LastTicketID: evil}},
+		TerminalLateStrayTabs:  &LaunchTally{Count: 1, FirstAt: heartbeat, LastAt: heartbeat, LastTicketID: evil},
+		TerminalStrayTabChecks: []StrayTabCheck{{TicketID: evil, Role: evil, From: heartbeat, Until: heartbeat}},
+		TerminalRecentTabTTYs:  []RecentTabTTY{{TTY: evil, At: heartbeat}},
 		StartedBy:              &StartedBy{Name: evil, MachineID: "machine-b"},
 	}
 	data, err := json.Marshal(snap)
@@ -251,7 +254,8 @@ func TestDisplaySanitize_RunFromRecordKeepsTheMatchedValues(t *testing.T) {
 	}
 	if r.TerminalTTY != "" || r.TerminalTabDisabled != "" || r.TerminalTabSlowTimeouts != 0 || r.TerminalTabFailures != nil || r.Reservation == nil || r.Reservation.Previous != nil ||
 		r.TerminalTTYReason != "" || r.TerminalWindowLaunches != nil || r.TerminalLateTabs != nil ||
-		r.TerminalNonMenuTabs != nil || r.TerminalTabOpenMethods != nil {
+		r.TerminalNonMenuTabs != nil || r.TerminalTabOpenMethods != nil ||
+		r.TerminalLateStrayTabs != nil || r.TerminalStrayTabChecks != nil || r.TerminalRecentTabTTYs != nil {
 		t.Fatalf("local-only run fields kept: %q %q %+v", r.TerminalTTY, r.TerminalTabDisabled, r.Reservation)
 	}
 	for _, st := range r.Tickets {
