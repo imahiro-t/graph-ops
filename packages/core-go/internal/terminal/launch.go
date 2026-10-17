@@ -150,6 +150,29 @@ type LaunchOutcome struct {
 	// a tab was left empty and the session opened in a new window as well
 	// (9102).
 	LateTab bool
+	// RetriedTab: the tab opened, but only at the tab script's second
+	// attempt, after nothing had appeared for about 2 seconds after the
+	// first (DFLT-00377). Before, such a launch fell back to a new window
+	// (9102).
+	RetriedTab bool
+	// StrayTab: the tab opened at the retry, and a second new tab appeared
+	// in the next second as well -- the first attempt's, appearing late,
+	// most likely -- which is left empty (DFLT-00377). The session runs in
+	// the tab taken; only the extra tab is left over.
+	StrayTab bool
+	// OpenMethod is how the tab script's last attempt opened the tab that
+	// opened (DFLT-00378): TabDiagnostics.OpenMethod's raw value -- menu,
+	// menu-failed, keystroke-no-menu or keystroke-retry. "" for a launch
+	// that used no tab or whose tab could not be opened (a failure keeps it
+	// in TabFailure.Diagnostics instead). The run's tally normalizes it
+	// (autopilot.Run.RecordTabOpenMethod); it is passed on unchanged here.
+	OpenMethod string
+	// NewTTY is the tty (/dev/ttysN) of the tab the session runs in, as
+	// the tab script logged it right before `do script` (DFLT-00379); ""
+	// for a launch that used no tab, or when the logged value was not a
+	// /dev/ttysN. The runner keeps it so that its later look for a stray
+	// tab (StraySnapshot.LateStrayTTYs) never takes its own sessions' tabs for one.
+	NewTTY string
 }
 
 // Kinds of tab failure (TabFailure.Kind).
@@ -175,10 +198,13 @@ type TabFailure struct {
 	// Phase is the last phase the script logged (the TabPhase* constants),
 	// "" when it logged none or never ran.
 	Phase string
-	// KeystrokeSent: Cmd+T had definitely been sent, so a new tab may have
-	// been left empty (Phase is TabPhaseKeystrokeSent or later). A timeout
-	// at TabPhaseKeystrokeSending may have sent it too without this being
-	// set; EmptyTabPossible covers both.
+	// KeystrokeSent: Cmd+T had definitely been sent or the New Tab menu
+	// item pressed, so a new tab may have been left empty (Phase is
+	// TabPhaseKeystrokeSent, TabPhaseMenuPressed or later, or the script
+	// had retried: Diagnostics.Retried). A timeout at TabPhaseKeystrokeSending
+	// or TabPhaseMenuPressing may have sent it too without this being set;
+	// EmptyTabPossible covers both. The name predates the menu item
+	// (DFLT-00377) and is kept for the run record's keystroke_sent.
 	KeystrokeSent bool
 	// ErrorNumber is the number osascript reported with its error, 0 when
 	// there was none (a timeout, lock-busy, osascript not runnable).
@@ -216,6 +242,51 @@ type TabDiagnostics struct {
 	// LateTab: the new tab was found only in the last look after the wait
 	// (the failure came after that, from the window checks).
 	LateTab bool
+	// FrontWindowIDBefore is Terminal's front window as the check of the
+	// front right before the (last) attempt to open the tab read it
+	// (DFLT-00377); FrontmostAppBefore is read just before that check.
+	FrontWindowIDBefore string
+	// OpenMethod is how the (last) attempt opened the tab (DFLT-00377):
+	// "menu" (the New Tab menu item pressed), "menu-failed" (pressing the
+	// item returned an error; nothing else was sent in that attempt, since
+	// the press may still have been carried out), "keystroke-no-menu"
+	// (Cmd+T, no single New Tab menu item found) or "keystroke-retry"
+	// (Cmd+T at the retry). "" when no attempt was made. Keep the
+	// autopilot package's TabOpenMethod* constants in step with these
+	// values (DFLT-00378).
+	OpenMethod string
+	// Retried: no new tab appeared for about 2 seconds after the first
+	// attempt, nor in the reads right before the retry, so the script tried
+	// once more (DFLT-00377). A first attempt's tab seen in those reads is
+	// taken instead (LateTab) and Retried stays false.
+	// RetryFrontmostApp is the frontmost app at that moment: when it is not
+	// Terminal and the first attempt sent Cmd+T, the keystroke may have
+	// reached that app.
+	Retried           bool
+	RetryFrontmostApp string
+	// Refocused: Terminal or its target window was no longer in front at
+	// the check right before an attempt, so it was brought to the front
+	// again (DFLT-00377).
+	Refocused bool
+	// SecureInput is the process holding secure keyboard entry
+	// ("<pid> <name>", or just the pid) when the failure was read, ""
+	// when none (DFLT-00377). While one holds it, macOS may not deliver
+	// synthesized keystrokes such as Cmd+T.
+	SecureInput string
+	// HIDIdleMS is how many milliseconds had passed since the user's last
+	// keyboard or mouse input when the failure was read (DFLT-00377), to
+	// tell whether the user was working at the time.
+	HIDIdleMS string
+	// StrayTab: after the retry, a second new tab appeared next to the one
+	// taken (the first attempt's tab appearing late, most likely), so one
+	// of them may be left empty (DFLT-00377). The script logs it right
+	// before `do script`, so a failure only carries it from a timeout there.
+	StrayTab bool
+	// NewTTY is the tty of the tab taken, logged right before `do script`
+	// (DFLT-00379): "" unless it is a /dev/ttysN (validAppleTerminalTTY).
+	// Only a tab that opened passes it on (LaunchOutcome.NewTTY); a
+	// failure's record does not keep it.
+	NewTTY string
 }
 
 // SlowTimeout reports whether f is a timeout after Terminal and System
@@ -226,11 +297,11 @@ func (f *TabFailure) SlowTimeout() bool {
 }
 
 // EmptyTabPossible reports whether f may have left an empty tab behind:
-// Cmd+T had been sent (KeystrokeSent), or osascript timed out while the
-// keystroke was on its way (TabPhaseKeystrokeSending), when System Events
-// may still carry it out.
+// Cmd+T had been sent or the New Tab menu item pressed (KeystrokeSent), or
+// osascript timed out while either was on its way (TabPhaseKeystrokeSending,
+// TabPhaseMenuPressing), when System Events may still carry it out.
 func (f *TabFailure) EmptyTabPossible() bool {
-	return f != nil && (f.KeystrokeSent || (f.Kind == TabFailureTimeout && f.Phase == TabPhaseKeystrokeSending))
+	return f != nil && (f.KeystrokeSent || (f.Kind == TabFailureTimeout && tabPhaseRank(f.Phase) == tabPhaseRank(TabPhaseKeystrokeSending)))
 }
 
 // LaunchWithOptions is LaunchWithArgs with the autopilot's options. The
