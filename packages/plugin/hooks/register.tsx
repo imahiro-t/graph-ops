@@ -81,12 +81,23 @@ export const register: Register = on => {
   })
 
   // graph-engine writes the status from Bash; look again as soon as a Bash
-  // call ends rather than up to a poll later. Not awaited: the call's result
-  // goes back at once, whatever the look costs (view.busy keeps looks from
-  // overlapping).
+  // call ends rather than up to a poll later. The look outlives this hook, so
+  // it runs on a timer, as the poll's looks do (work that outlives a dispatch
+  // is kept going with $.clock.after and $.clock.every, plugin-authoring
+  // reference): this hook only asks for the timer, and its result goes back
+  // at once, whatever the look costs. `$` is the same object at every
+  // invocation (claude-code.d.ts, Events), the one session.start was handed;
+  // the loader refuses a module that keeps it in a variable. view.busy keeps
+  // looks from overlapping.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const result = await next(e)
-    void refresh($).catch(() => undefined)
+    try {
+      $.clock.after(0, () => {
+        refresh($).catch(() => undefined)
+      })
+    } catch {
+      // The poll catches up.
+    }
     return result
   })
 

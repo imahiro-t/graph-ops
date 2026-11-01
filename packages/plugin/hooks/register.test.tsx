@@ -80,12 +80,31 @@ const controller = (sid: string) =>
 
 /**
  * The world beneath the mod: HOME, the session's ID (changeable through
- * `session.id`), the files, and an engine that draws "engine" wherever the
- * mod passes.
+ * `session.id`), the files, an engine that draws "engine" wherever the
+ * mod passes, tools that run `ran` (graph-engine writing its status from
+ * Bash, say) and answer an empty result, and, given `waits`, a record of the
+ * `$.clock.after` waits.
  */
-const world = (on: On, files: Files, session: { id: string }) => {
+const world = (
+  on: On,
+  files: Files,
+  session: { id: string },
+  { ran = () => undefined, waits }: { ran?: (tool: string) => void; waits?: number[] } = {},
+) => {
   mock.env(on, { HOME })
+  if (waits !== undefined) {
+    // The zero waits `$.clock.after` asks for, on their way to the clock
+    // (a matcher: mock.clock hooks the event too).
+    on('clock.after', { ms: 0 }, (_, e, next) => {
+      waits.push(e.ms)
+      return next(e)
+    })
+  }
   const clock = mock.clock(on)
+  on('tool.call', (_, e) => {
+    ran(e.tool)
+    return { result: {} }
+  })
   on('session.id', () => ({ value: session.id }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('fs.exists', (_, e) => ({ value: files[e.path] !== undefined }))
@@ -252,5 +271,57 @@ test('a survey keeps the band', async ($, on) => {
   await $.session.start(START)
   const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, hasSurvey: true }, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /DFLT/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a Bash call shows the new status at once, before the next poll', async ($, on) => {
+  const files: Files = { [pathOf(SID)]: { text: worker(SID), mtimeMs: 1 } }
+  const waits: number[] = []
+  const clock = world(on, files, { id: SID }, {
+    waits,
+    // graph-engine, run from Bash, rewrites the status.
+    ran: tool => {
+      if (tool === 'Bash') {
+        files[pathOf(SID)] = { text: worker(SID, { phase: 'releasing', nodes: [] }), mtimeMs: 3 }
+      }
+    },
+  })
+  await $.session.start(START)
+  let ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /実行中/ }))?.text).toBe('実行中: 実装 (implementation)')
+  await ui.unmount()
+
+  // Another tool: the file changed, but nothing looks before the poll.
+  files[pathOf(SID)] = { text: worker(SID, { phase: 'awaiting_approval', nodes: [] }), mtimeMs: 2 }
+  const read = await $.tool.call({ tool: 'Read', file_path: '/work/a.txt' })
+  expect(read.result).toEqual({})
+  await clock.settle()
+  ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /実行中/ }))?.text).toBe('実行中: 実装 (implementation)')
+  expect(await ui.find({ type: 'Text', text: /承認待ち/ })).toBeUndefined()
+  await ui.unmount()
+  expect(waits).toEqual([])
+
+  // Bash: its result comes back, and the band shows the new status with
+  // the clock where it was, from a timer the hook asked for.
+  const before = clock.now()
+  const bash = await $.tool.call({ tool: 'Bash', command: 'graph-engine complete-node DFLT-00383-04 true' })
+  expect(bash.result).toEqual({})
+  await clock.settle()
+  expect(clock.now()).toBe(before)
+  ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /リリース中/ }))?.text).toBe('リリース中')
+  await ui.unmount()
+  expect(waits).toEqual([0])
+})
+
+test('a Bash call before session.start keeps its result, and the band still comes', async ($, on) => {
+  const clock = world(on, { [pathOf(SID)]: { text: worker(SID), mtimeMs: 1 } }, { id: SID })
+  const bash = await $.tool.call({ tool: 'Bash', command: 'ls' })
+  expect(bash.result).toEqual({})
+  await clock.settle()
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /実行中/ }))?.text).toBe('実行中: 実装 (implementation)')
   await ui.unmount()
 })
