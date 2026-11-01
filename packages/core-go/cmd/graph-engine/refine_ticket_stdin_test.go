@@ -54,7 +54,7 @@ func (f refineStdinFixture) run(t *testing.T, args ...string) (error, string) {
 	t.Helper()
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = cmdRefineTicket(f.eng, append([]string{f.before.ID}, args...))
+		runErr = cmdRefineTicket(f.eng, runtimeConfig{}, append([]string{f.before.ID}, args...))
 	})
 	return runErr, out
 }

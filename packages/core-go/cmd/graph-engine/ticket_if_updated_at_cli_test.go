@@ -123,7 +123,7 @@ func TestCmdRefineTicket_IfUpdatedAt(t *testing.T) {
 		t.Run("a matching value refines", func(t *testing.T) {
 			tk := newCLITicket(t, repo, projectID)
 			captureStdout(t, func() {
-				if err := cmdRefineTicket(eng, []string{tk.ID, "新しい説明", "--if-updated-at", tk.UpdatedAt}); err != nil {
+				if err := cmdRefineTicket(eng, runtimeConfig{}, []string{tk.ID, "新しい説明", "--if-updated-at", tk.UpdatedAt}); err != nil {
 					t.Fatalf("refine-ticket: %v", err)
 				}
 			})
@@ -140,7 +140,7 @@ func TestCmdRefineTicket_IfUpdatedAt(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := mustTicket(t, repo, tk.ID)
-			err := cmdRefineTicket(eng, []string{tk.ID, "新しい説明", "--priority", "HIGH", "--label", "改善", "--if-updated-at", tk.UpdatedAt})
+			err := cmdRefineTicket(eng, runtimeConfig{}, []string{tk.ID, "新しい説明", "--priority", "HIGH", "--label", "改善", "--if-updated-at", tk.UpdatedAt})
 			expectTicketChanged(t, err)
 			after := mustTicket(t, repo, tk.ID)
 			if after.Description != other || after.Status != domain.TicketTODO || after.RefinedAt != nil ||
@@ -156,7 +156,7 @@ func TestCmdRefineTicket_IfUpdatedAt(t *testing.T) {
 				t.Fatal(err)
 			}
 			captureStdout(t, func() {
-				if err := cmdRefineTicket(eng, []string{tk.ID, "新しい説明"}); err != nil {
+				if err := cmdRefineTicket(eng, runtimeConfig{}, []string{tk.ID, "新しい説明"}); err != nil {
 					t.Fatalf("refine-ticket: %v", err)
 				}
 			})
@@ -171,7 +171,7 @@ func TestCmdRefineTicket_IfUpdatedAt(t *testing.T) {
 			if _, err := repo.UpdateTicket(tk.ID, store.TicketPatch{Status: &closed}); err != nil {
 				t.Fatal(err)
 			}
-			err := cmdRefineTicket(eng, []string{tk.ID, "新しい説明", "--if-updated-at", "2000-01-01T00:00:00Z"})
+			err := cmdRefineTicket(eng, runtimeConfig{}, []string{tk.ID, "新しい説明", "--if-updated-at", "2000-01-01T00:00:00Z"})
 			if err == nil || !strings.Contains(err.Error(), "CLOSED") {
 				t.Fatalf("err = %v, want the CLOSED error", err)
 			}
@@ -192,7 +192,7 @@ func TestCmdRefineTicket_IfUpdatedAtUsage(t *testing.T) {
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
-			err := cmdRefineTicket(eng, args)
+			err := cmdRefineTicket(eng, runtimeConfig{}, args)
 			if err == nil || !strings.HasPrefix(err.Error(), "usage: graph-engine refine-ticket") || !strings.Contains(err.Error(), "--if-updated-at") {
 				t.Fatalf("err = %v, want an --if-updated-at usage error", err)
 			}

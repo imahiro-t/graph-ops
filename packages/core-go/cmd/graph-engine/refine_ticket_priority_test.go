@@ -28,7 +28,7 @@ func TestCmdRefineTicket_PrioritySetAndChanged(t *testing.T) {
 	// Set, with no description positional -- the description must stay
 	// unchanged while priority is set.
 	out := captureStdout(t, func() {
-		if err := cmdRefineTicket(eng, []string{ticket.ID, "--priority", "HIGH"}); err != nil {
+		if err := cmdRefineTicket(eng, runtimeConfig{}, []string{ticket.ID, "--priority", "HIGH"}); err != nil {
 			t.Fatalf("cmdRefineTicket: %v", err)
 		}
 	})
@@ -42,7 +42,7 @@ func TestCmdRefineTicket_PrioritySetAndChanged(t *testing.T) {
 
 	// Change, together with a new description in the same call.
 	out = captureStdout(t, func() {
-		if err := cmdRefineTicket(eng, []string{ticket.ID, "new description", "--priority", "LOW"}); err != nil {
+		if err := cmdRefineTicket(eng, runtimeConfig{}, []string{ticket.ID, "new description", "--priority", "LOW"}); err != nil {
 			t.Fatalf("cmdRefineTicket: %v", err)
 		}
 	})
@@ -72,7 +72,7 @@ func TestCmdRefineTicket_PriorityNoneIsErrorAndLeavesTicketUnchanged(t *testing.
 		{ticket.ID, "--priority", "none"},
 		{ticket.ID, "新しい説明", "--priority", "none"},
 	} {
-		err = cmdRefineTicket(eng, args)
+		err = cmdRefineTicket(eng, runtimeConfig{}, args)
 		if err == nil || !strings.Contains(err.Error(), refineTicketUsage) {
 			t.Fatalf("args %v: expected the refine-ticket usage error, got %v", args, err)
 		}
@@ -102,7 +102,7 @@ func TestCmdRefineTicket_NoPriorityFlagLeavesPriorityUnchanged(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := cmdRefineTicket(eng, []string{ticket.ID, "updated description"}); err != nil {
+		if err := cmdRefineTicket(eng, runtimeConfig{}, []string{ticket.ID, "updated description"}); err != nil {
 			t.Fatalf("cmdRefineTicket: %v", err)
 		}
 	})
@@ -123,7 +123,7 @@ func TestCmdRefineTicket_InvalidPriorityIsUsageErrorAndLeavesTicketUnchanged(t *
 		t.Fatalf("CreateTicket: %v", err)
 	}
 
-	err = cmdRefineTicket(eng, []string{ticket.ID, "--priority", "URGENT"})
+	err = cmdRefineTicket(eng, runtimeConfig{}, []string{ticket.ID, "--priority", "URGENT"})
 	if err == nil || !strings.Contains(err.Error(), refineTicketUsage) {
 		t.Fatalf("expected the refine-ticket usage error, got %v", err)
 	}
@@ -145,7 +145,7 @@ func TestCmdRefineTicket_PriorityFlagMissingValueIsUsageError(t *testing.T) {
 		t.Fatalf("CreateTicket: %v", err)
 	}
 
-	err = cmdRefineTicket(eng, []string{ticket.ID, "--priority"})
+	err = cmdRefineTicket(eng, runtimeConfig{}, []string{ticket.ID, "--priority"})
 	if err == nil || !strings.Contains(err.Error(), "--priority requires a value") {
 		t.Fatalf("expected a --priority-requires-a-value error, got %v", err)
 	}

@@ -71,28 +71,43 @@ func cmdAutopilot(repo store.GraphRepository, rc runtimeConfig, args []string) e
 		return cmdAutopilotSettings(repo, rc, rest)
 	}
 	svc := newAutopilotService(repo, rc)
+	// The controller's commands (start, next, launch, wait, merge-up,
+	// summary) write the run's progress to the status band once they are
+	// done, whether or not they succeeded (a wait's timeout included);
+	// the worker's write its own ticket's state (DFLT-00383).
+	controller := func(runID string) { noteController(rc, repo, svc, runID) }
 	switch sub {
 	case "start":
-		return cmdAutopilotStart(svc, rest)
+		runID, err := cmdAutopilotStart(svc, rest)
+		controller(runID)
+		return err
 	case "next":
 		pos, err := autopilotPositional(rest, 1, autopilotNextUsage)
 		if err != nil {
 			return err
 		}
+		defer controller(pos[0])
 		res, err := svc.Next(pos[0])
 		if err != nil {
 			return err
 		}
 		return printCompactJSON(res)
 	case "launch":
+		if len(rest) > 0 && !strings.HasPrefix(rest[0], "--") {
+			defer controller(rest[0])
+		}
 		return cmdAutopilotLaunch(svc, rest)
 	case "wait":
+		if len(rest) > 0 && !strings.HasPrefix(rest[0], "--") {
+			defer controller(rest[0])
+		}
 		return cmdAutopilotWait(svc, rest)
 	case "merge-up":
 		pos, err := autopilotPositional(rest, 2, autopilotMergeUpUsage)
 		if err != nil {
 			return err
 		}
+		defer controller(pos[0])
 		res, err := svc.MergeUp(pos[0], pos[1])
 		if err != nil {
 			return err
@@ -107,6 +122,7 @@ func cmdAutopilot(repo store.GraphRepository, rc runtimeConfig, args []string) e
 		if err != nil {
 			return err
 		}
+		noteWorkerContext(rc, repo, pos[1], res.Role)
 		return printCompactJSON(res)
 	case "record-decision":
 		pos, err := autopilotPositional(rest, 4, autopilotRecordUsage)
@@ -132,9 +148,14 @@ func cmdAutopilot(repo store.GraphRepository, rc runtimeConfig, args []string) e
 		}
 		return printCompactJSON(res)
 	case "touch":
-		return cmdAutopilotTouch(svc, rest)
+		return cmdAutopilotTouch(svc, rc, rest)
 	case "report":
-		return cmdAutopilotReport(svc, rest)
+		if err := cmdAutopilotReport(svc, rest); err != nil {
+			return err
+		}
+		// The report is a worker session's last command.
+		clearSessionStatus(rc)
+		return nil
 	case "merge-into-parent":
 		pos, err := autopilotPositional(rest, 2, autopilotMergeParentUsage)
 		if err != nil {
@@ -150,6 +171,7 @@ func cmdAutopilot(repo store.GraphRepository, rc runtimeConfig, args []string) e
 		if err != nil {
 			return err
 		}
+		defer controller(pos[0])
 		res, err := svc.Summary(pos[0])
 		if err != nil {
 			return err
@@ -232,20 +254,22 @@ func autopilotTextArg(arg string) (string, error) {
 	return string(data), nil
 }
 
-func cmdAutopilotStart(svc *runner.Service, args []string) error {
+// cmdAutopilotStart starts or resumes a run, returning its ID ("" when no
+// run was started) for the status band.
+func cmdAutopilotStart(svc *runner.Service, args []string) (string, error) {
 	pos, vals, err := autopilotFlags(args, autopilotStartUsage, "--mode", "--run", "--model")
 	if err != nil {
-		return err
+		return "", err
 	}
 	if len(pos) != 1 || pos[0] == "" {
-		return fmt.Errorf("%s", autopilotStartUsage)
+		return "", fmt.Errorf("%s", autopilotStartUsage)
 	}
 	mode, ok := vals["--mode"]
 	if !ok {
-		return fmt.Errorf("%s: --mode is required", autopilotStartUsage)
+		return "", fmt.Errorf("%s: --mode is required", autopilotStartUsage)
 	}
 	if mode != autopilot.ModeTicket && mode != autopilot.ModeTree {
-		return fmt.Errorf("%s: --mode must be ticket or tree, got %q", autopilotStartUsage, mode)
+		return "", fmt.Errorf("%s: --mode must be ticket or tree, got %q", autopilotStartUsage, mode)
 	}
 	var model *string
 	if v, ok := vals["--model"]; ok {
@@ -253,13 +277,13 @@ func cmdAutopilotStart(svc *runner.Service, args []string) error {
 	}
 	modelCap, err := runner.ParseModelCap(model)
 	if err != nil {
-		return err
+		return "", err
 	}
 	res, err := svc.StartWithModel(pos[0], mode, vals["--run"], false, modelCap)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return printCompactJSON(res)
+	return res.RunID, printCompactJSON(res)
 }
 
 func cmdAutopilotLaunch(svc *runner.Service, args []string) error {
@@ -308,7 +332,7 @@ func cmdAutopilotWait(svc *runner.Service, args []string) error {
 	return nil
 }
 
-func cmdAutopilotTouch(svc *runner.Service, args []string) error {
+func cmdAutopilotTouch(svc *runner.Service, rc runtimeConfig, args []string) error {
 	pos, vals, err := autopilotFlags(args, autopilotTouchUsage, "--awaiting-human")
 	if err != nil {
 		return err
@@ -323,6 +347,7 @@ func cmdAutopilotTouch(svc *runner.Service, args []string) error {
 	if err := svc.Touch(pos[0], pos[1], awaiting); err != nil {
 		return err
 	}
+	noteWorkerTouch(rc, strings.TrimSpace(awaiting), has)
 	out := map[string]any{"touched": pos[1]}
 	if has {
 		out["awaiting_human"] = strings.TrimSpace(awaiting)

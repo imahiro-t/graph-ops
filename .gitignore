@@ -32,3 +32,6 @@ packages/plugin/libexec/
 # repository doubles as such a user project during development, so its own
 # CLAUDE.md stays local rather than shipping as part of the plugin.
 CLAUDE.md
+# Claude Code lays the mod API types here when it loads packages/plugin as a
+# plugin folder (claude --plugin-dir); generated, not part of the plugin.
+packages/plugin/.claude-plugin/types/

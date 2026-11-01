@@ -44,6 +44,18 @@ It prints `{"session_id", "lease_minutes", "sessions_supported", "others", "same
 - `others` non-empty (a warning on stderr names them too): somebody else is processing this ticket right now -- each entry names who (`name`, with `name_is_fallback` for an unset name), the nodes they hold (`node_ids`), their last heartbeat, and `same_machine` when it is a session on this machine. Tell the user who it is before going on. It does not stop you, but never unstick or redo the nodes they hold.
 - `sessions_supported: false`: the data source cannot keep sessions (an HTTP data source older than protocol 1.2). Carry on without `--session` anywhere: claims are then not protected, and `unstick-node` releases them with a warning.
 
+### Status band above the prompt
+
+The plugin's mod shows, above Claude Code's prompt and over every AskUserQuestion dialog, which ticket this session works on and what it is doing, so a person running several terminals can tell them apart. `begin-session`, `get-executable` and `wait-node` keep it up to date by themselves (running nodes, approval waits, the release, the end of the graph); only two moments need a call of your own. Both are best effort: if the call fails, or graph-engine does not know `session-status` (an older binary), ignore it and carry on.
+
+- Right before you ask the person anything outside the approval-gate wait of step 3 -- an AskUserQuestion, or a question in plain text such as confirming a release or whether an earlier conversation has ended -- mark the session as waiting for them, and mark it running again once the answer is in:
+  ```bash
+  graph-engine session-status set --ticket "<ticketId>" --phase awaiting_human --detail '<what you ask, in a few words>'
+  graph-engine session-status set --ticket "<ticketId>" --phase running
+  ```
+  The detail goes in single quotes so the shell expands nothing in it; leave any `'` out of those few words.
+- When this skill ends, whatever the reason -- the ticket is finished, it is left blocked or rejected for a person to resolve, or an error stops you -- run `graph-engine session-status clear` as its last command. Ending a turn to wait for an approval (step 3) is not the end. When the `autopilot-worker` skill drives this session, leave it out: that skill's `autopilot report` clears the band.
+
 ## 1. Check/run the seed
 
 Calling `get-executable` for the first time auto-generates the 2 seed nodes: "Plan Creation" (`plan`) and "Plan Review" (`plan_review`). Like any other node, drive these 2 nodes through the steps in "3. Execution loop" below (launching subagents). Per step 0 above, include `--language <code>` here if (and only if) `get-language-settings` reported `source: "none"`.
