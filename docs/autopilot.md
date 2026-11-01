@@ -3,6 +3,7 @@
 The autopilot takes a ticket from refinement to release without a person in the loop: `/graph-ops:autopilot-ticket` does it for one ticket, and `/graph-ops:autopilot-tree` does it for a ticket and then every ticket derived from it (its descendants, including the ones created along the way). This page is the reference: how a run works, the settings, the branch strategy, the `graph-engine autopilot` CLI, the HTTP API, the error codes, and the things to be careful about. The [README](../README.md#autopilot) has the short version.
 
 - [How a run works](#how-a-run-works)
+- [Status band in the orchestrator's terminal](#status-band-in-the-orchestrators-terminal)
 - [Terminal.app: child sessions as tabs](#terminalapp-child-sessions-as-tabs)
   - [Tracing each fallback](#tracing-each-fallback)
   - [Checking tabs on a real Mac](#checking-tabs-on-a-real-mac)
@@ -34,6 +35,21 @@ A run has two kinds of Claude Code sessions:
   When a child session ends, it reports its result (`done`, `failed` or `blocked`, a reason code, and a summary of at most three lines) with `graph-engine autopilot report`, tells you its terminal can be closed, and stops. Child terminals are not closed automatically.
 
 Tickets are processed strictly one at a time within a run. Processing several tickets of one tree in parallel is not supported.
+
+## Status band in the orchestrator's terminal
+
+The plugin's mod draws a status band above each Claude Code session's prompt (see [Status band above the prompt](../README.md#status-band-above-the-prompt) in the README for how it works, where the status is kept, what has not been verified yet, and how to check it with `graph-engine session-status show`). In an autopilot run, the orchestrator and every child session each have their own band, since each is a separate Claude Code session with its own session ID:
+
+- **The orchestrator** shows, after each `graph-engine autopilot start`, `next`, `launch`, `wait`, `merge-up` and `summary`, a band read back from the run file:
+  - the run's mode and its root ticket (ID and title);
+  - the tree's progress: `done`, `in progress` (a child session launched and not reported yet) and `remaining` (queued, plus failed or blocked tickets that the run will retry), followed by `blocked` and `failed` when there are any; skipped tickets are not counted in the band;
+  - the ticket whose child session is working now, with what it waits for when it waits for a person (`touch --awaiting-human`), or "none running";
+  - the latest result: the finished ticket with the most recent activity, and its outcome (`done`, `blocked` or `failed`).
+
+  `autopilot-ticket` / `autopilot-tree` clear it after the summary.
+- **A child session** shows the band of a worker: `autopilot worker-context` sets the ticket and its first phase (refining, or running when the ticket is already refined; finishing for a `merge-up` or `finalize` session), `begin-session`, `get-executable` and `wait-node` keep it up to date during the graph as in a manual `process-ticket`, `autopilot touch --awaiting-human` turns it into "Waiting for your answer" with what is awaited (the next plain `touch` turns it back into running), and `autopilot report` clears it. A child session's commands never touch the orchestrator's band, and `autopilot report` is not counted as an orchestrator command for that reason.
+
+Every write is best effort and never changes a command's output or exit code; a failed write prints one warning line on stderr. When the run file named by an orchestrator command does not exist, the command's own error is the only message.
 
 ## Terminal.app: child sessions as tabs
 
