@@ -67,15 +67,12 @@ type waitNodeResult struct {
 // exitCodeError so the process exits 2. process-ticket runs it in the
 // background at an approval_gate so a decision made in the Web UI resumes the
 // waiting session.
-func cmdWaitNode(eng *engine.GraphEngine, repo store.GraphRepository, args []string) error {
-	return waitNode(eng, repo, runtimeConfig{}, args)
-}
-
-// waitNode is cmdWaitNode with the runtime configuration the status band is
-// written with (DFLT-00383); a zero one writes no status. While it waits,
-// the band shows the session as awaiting approval of the watched nodes; when
-// it ends, waitNodeStatus.end puts the band back.
-func waitNode(eng *engine.GraphEngine, repo store.GraphRepository, rc runtimeConfig, args []string) (err error) {
+//
+// rc is the runtime configuration the status band is written with
+// (DFLT-00383); a zero one writes no status. While it waits, the band shows
+// the session as awaiting approval of the watched nodes; when it ends,
+// waitNodeStatus.end puts the band back.
+func cmdWaitNode(eng *engine.GraphEngine, repo store.GraphRepository, rc runtimeConfig, args []string) (err error) {
 	const usage = `usage: graph-engine wait-node <nodeId> [<nodeId> ...] [--timeout <duration>] [--session <sessionId>]`
 	session, args, err := takeSessionFlag(args, usage)
 	if err != nil {

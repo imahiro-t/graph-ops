@@ -340,7 +340,7 @@ func whileWaiting(t *testing.T, repo store.GraphRepository, rc runtimeConfig, ac
 		seen <- nil
 	}()
 	var err error
-	captureStdout(t, func() { err = waitNode(engine.New(repo), repo, rc, args) })
+	captureStdout(t, func() { err = cmdWaitNode(engine.New(repo), repo, rc, args) })
 	return <-seen, err
 }
 

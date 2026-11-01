@@ -81,10 +81,12 @@ export const register: Register = on => {
   })
 
   // graph-engine writes the status from Bash; look again as soon as a Bash
-  // call ends rather than up to a poll later.
+  // call ends rather than up to a poll later. Not awaited: the call's result
+  // goes back at once, whatever the look costs (view.busy keeps looks from
+  // overlapping).
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const result = await next(e)
-    await refresh($).catch(() => undefined)
+    void refresh($).catch(() => undefined)
     return result
   })
 

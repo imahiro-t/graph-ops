@@ -136,7 +136,7 @@ func run(cmd string, args []string) error {
 	case "get-review-criteria":
 		return cmdGetReviewCriteria(repo, args)
 	case "wait-node":
-		return waitNode(eng, repo, rc, args)
+		return cmdWaitNode(eng, repo, rc, args)
 	case "get-language-settings":
 		return cmdGetLanguageSettings(rc, args)
 	case "ui":
@@ -548,7 +548,7 @@ Commands:
                                            Titles, names and the detail are stripped of control characters and
                                            escape sequences and shortened. A write that fails only warns on
                                            stderr. Files nobody has written for 7 days are removed.)
-  ui                              (opens the local Web UI, in the default browser, on the project
+  ui                                      (opens the local Web UI, in the default browser, on the project
                                            whose local path (projectPaths in the home config) is the current
                                            directory or contains it (deepest wins) -- auto-starting the UI
                                            server first if it isn't already running. If no project matches,
@@ -1523,9 +1523,11 @@ func cmdGetExecutable(eng *engine.GraphEngine, repo store.GraphRepository, rc ru
 	for i := range views {
 		views[i].Model = string(modelcap.Resolve(catalog.ModelFor(string(views[i].Type)), modelCap, sessionModel))
 	}
-	// The status band follows the ticket's nodes (DFLT-00383).
+	// The status band follows the ticket's nodes (DFLT-00383), written once
+	// the answer is out: nothing about the band can change what is printed.
+	err = printJSON(views)
 	noteExecutable(rc, repo, ticketID)
-	return printJSON(views)
+	return err
 }
 
 // cmdExpandGraph builds the rest of a ticket's graph once the seed

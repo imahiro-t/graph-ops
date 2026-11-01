@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -202,7 +203,7 @@ func cmdSessionStatusSet(rc runtimeConfig, args []string) error {
 		return fmt.Errorf("%s: --role must be worker or controller, got %q", sessionStatusSetUsage, truncateForError(role))
 	}
 	ticketID, hasTicket := vals["--ticket"]
-	if hasTicket && (ticketID == "" || cleanStatusID(ticketID) == "") {
+	if hasTicket && (ticketID == "" || sessionstatus.CleanID(ticketID) == "") {
 		return fmt.Errorf("%s: --ticket takes a ticket ID, got %q", sessionStatusSetUsage, truncateForError(ticketID))
 	}
 	if _, _, ok := sessionStatusTarget(rc); !ok {
@@ -231,15 +232,6 @@ func cmdSessionStatusSet(rc runtimeConfig, args []string) error {
 		st.Phase, st.Detail = phase, vals["--detail"]
 	})
 	return printJSON(st)
-}
-
-// cleanStatusID is id when it is ID-shaped, "" otherwise.
-func cleanStatusID(id string) string {
-	st := sessionstatus.Normalize(sessionstatus.Status{Ticket: &sessionstatus.Ticket{ID: id}})
-	if st.Ticket == nil {
-		return ""
-	}
-	return st.Ticket.ID
 }
 
 // ---------------------------------------------------------------------------
@@ -278,16 +270,26 @@ func noteExecutable(rc runtimeConfig, repo store.GraphRepository, ticketID strin
 	if _, _, ok := sessionStatusTarget(rc); !ok {
 		return
 	}
-	detail, err := repo.GetTicketDetail(ticketID)
-	if err != nil || detail == nil {
+	// The ticket, its nodes and its edges -- not GetTicketDetail, which also
+	// reads every artifact's content, and the band needs none of it.
+	ticket, err := repo.GetTicket(ticketID)
+	if err != nil || ticket == nil {
 		return
 	}
-	phase, nodes, note := executablePhase(detail)
+	graphNodes, err := repo.ListNodesByTicket(ticketID)
+	if err != nil {
+		return
+	}
+	edges, err := repo.ListEdgesByTicket(ticketID)
+	if err != nil {
+		return
+	}
+	phase, nodes, note := executablePhase(graphNodes, edges)
 	updateSessionStatus(rc, func(st *sessionstatus.Status) {
 		if st.Role == "" || st.Role == sessionstatus.RoleController {
 			st.Role, st.Autopilot = sessionstatus.RoleWorker, nil
 		}
-		setStatusTicket(st, detail.ID, detail.Title)
+		setStatusTicket(st, ticket.ID, ticket.Title)
 		st.Nodes = nodes
 		if phase != "" {
 			st.Phase, st.Detail = phase, note
@@ -300,13 +302,13 @@ func noteExecutable(rc runtimeConfig, repo store.GraphRepository, ticketID strin
 // executablePhase is noteExecutable's decision, from the ticket's nodes:
 // the phase ("" to keep the current one), the nodes being worked, and the
 // detail.
-func executablePhase(detail *domain.TicketDetail) (phase string, nodes []sessionstatus.Node, note string) {
-	byID := make(map[string]domain.GraphNode, len(detail.Nodes))
-	for _, n := range detail.Nodes {
+func executablePhase(graphNodes []domain.GraphNode, edges []domain.GraphEdge) (phase string, nodes []sessionstatus.Node, note string) {
+	byID := make(map[string]domain.GraphNode, len(graphNodes))
+	for _, n := range graphNodes {
 		byID[n.ID] = n
 	}
 	prereqsDone := func(id string) bool {
-		for _, e := range detail.Edges {
+		for _, e := range edges {
 			if e.ToNodeID != id || e.Condition == domain.EdgeLoop {
 				continue
 			}
@@ -316,11 +318,11 @@ func executablePhase(detail *domain.TicketDetail) (phase string, nodes []session
 		}
 		return true
 	}
-	allDone := len(detail.Nodes) > 0
+	allDone := len(graphNodes) > 0
 	releasing := false
 	var waiting []string
 	waitingRelease := true
-	for _, n := range detail.Nodes {
+	for _, n := range graphNodes {
 		if n.Status != domain.NodeDone {
 			allDone = false
 		}
@@ -397,6 +399,9 @@ func beginWaitNodeStatus(rc runtimeConfig, repo store.GraphRepository, nodes []d
 // end puts the status back once wait-node is done: running when a node
 // changed (the decision came), unchanged on a timeout (the skill waits
 // again), and what it was before the wait on an error or interruption.
+// After a timeout, the next wait-node starts from awaiting_approval, so an
+// error in that one leaves awaiting_approval in place: still true, since the
+// gate is still waiting, and the next get-executable sets the band anew.
 func (w *waitNodeStatus) end(result string, failed bool) {
 	if w == nil {
 		return
@@ -431,7 +436,12 @@ func noteController(rc runtimeConfig, repo store.GraphRepository, svc *runner.Se
 	}
 	run, err := svc.Snapshot(runID)
 	if err != nil {
-		warnSessionStatus(err)
+		// An unknown run ID already failed the command itself, with its own
+		// message; a second line about the band would only repeat it.
+		var apiErr *domain.APIError
+		if !errors.As(err, &apiErr) || apiErr.Code != autopilot.ErrCodeRunNotFound {
+			warnSessionStatus(err)
+		}
 		return
 	}
 	p := autopilot.RunProgress(run)

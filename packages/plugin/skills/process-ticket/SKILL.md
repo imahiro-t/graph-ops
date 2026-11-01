@@ -50,9 +50,10 @@ The plugin's mod shows, above Claude Code's prompt and over every AskUserQuestio
 
 - Right before you ask the person anything outside the approval-gate wait of step 3 -- an AskUserQuestion, or a question in plain text such as confirming a release or whether an earlier conversation has ended -- mark the session as waiting for them, and mark it running again once the answer is in:
   ```bash
-  graph-engine session-status set --ticket "<ticketId>" --phase awaiting_human --detail "<what you ask, in a few words>"
+  graph-engine session-status set --ticket "<ticketId>" --phase awaiting_human --detail '<what you ask, in a few words>'
   graph-engine session-status set --ticket "<ticketId>" --phase running
   ```
+  The detail goes in single quotes so the shell expands nothing in it; leave any `'` out of those few words.
 - When this skill ends, whatever the reason -- the ticket is finished, it is left blocked or rejected for a person to resolve, or an error stops you -- run `graph-engine session-status clear` as its last command. Ending a turn to wait for an approval (step 3) is not the end. When the `autopilot-worker` skill drives this session, leave it out: that skill's `autopilot report` clears the band.
 
 ## 1. Check/run the seed

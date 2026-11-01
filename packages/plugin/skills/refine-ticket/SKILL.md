@@ -21,6 +21,11 @@ First show the ticket in the status band above Claude Code's prompt (the plugin'
 
 ```bash
 graph-engine session-status set --ticket "<ticketId>" --phase refining
+```
+
+Then read the ticket:
+
+```bash
 graph-engine get-ticket "<ticketId>"
 ```
 

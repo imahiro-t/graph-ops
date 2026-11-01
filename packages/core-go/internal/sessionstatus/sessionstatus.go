@@ -162,11 +162,17 @@ type RunTicket struct {
 // MaxSessionIDLen ASCII letters, digits, '-' and '_'. Claude Code's session
 // IDs are UUIDs; anything else (a path separator, "..") is never written.
 func ValidSessionID(id string) bool {
-	if id == "" || len(id) > MaxSessionIDLen {
+	return asciiToken(id, MaxSessionIDLen)
+}
+
+// asciiToken reports whether s is 1 to max bytes of ASCII letters, digits,
+// '-' and '_'.
+func asciiToken(s string, max int) bool {
+	if s == "" || len(s) > max {
 		return false
 	}
-	for i := 0; i < len(id); i++ {
-		c := id[i]
+	for i := 0; i < len(s); i++ {
+		c := s[i]
 		switch {
 		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
 		default:
@@ -371,7 +377,7 @@ func Normalize(st Status) Status {
 		out.Phase = st.Phase
 	}
 	if st.Ticket != nil {
-		if id := cleanID(st.Ticket.ID); id != "" {
+		if id := CleanID(st.Ticket.ID); id != "" {
 			out.Ticket = &Ticket{ID: id, Title: displayname.Sanitize(st.Ticket.Title)}
 		}
 	}
@@ -379,18 +385,18 @@ func Normalize(st Status) Status {
 		if len(out.Nodes) >= MaxNodes {
 			break
 		}
-		id := cleanID(n.ID)
+		id := CleanID(n.ID)
 		if id == "" {
 			continue
 		}
 		out.Nodes = append(out.Nodes, Node{ID: id, Name: displayname.Sanitize(n.Name), Type: truncate(displayname.Sanitize(n.Type), maxTypeRunes)})
 	}
 	if a := st.Autopilot; a != nil {
-		if runID := cleanID(a.RunID); runID != "" {
+		if runID := CleanID(a.RunID); runID != "" {
 			out.Autopilot = &Autopilot{
 				RunID:         runID,
 				Mode:          truncate(displayname.Sanitize(a.Mode), maxTypeRunes),
-				RootTicketID:  cleanID(a.RootTicketID),
+				RootTicketID:  CleanID(a.RootTicketID),
 				State:         truncate(displayname.Sanitize(a.State), maxTypeRunes),
 				Counts:        nonNegative(a.Counts),
 				Current:       runTicket(a.Current),
@@ -406,7 +412,7 @@ func runTicket(t *RunTicket) *RunTicket {
 	if t == nil {
 		return nil
 	}
-	id := cleanID(t.TicketID)
+	id := CleanID(t.TicketID)
 	if id == "" {
 		return nil
 	}
@@ -426,8 +432,9 @@ func nonNegative(c Counts) Counts {
 	return c
 }
 
-// cleanID is id when displayname.ID accepts it, "" otherwise.
-func cleanID(id string) string {
+// CleanID is id when displayname.ID accepts it (the shape every ID drawn in
+// the band must have), "" otherwise.
+func CleanID(id string) string {
 	if id == "" || displayname.ID(id) != id {
 		return ""
 	}
@@ -437,16 +444,8 @@ func cleanID(id string) string {
 // language keeps a language code made of letters, digits, '-' and '_'
 // (ja, en, pt-BR), "" otherwise.
 func language(code string) string {
-	if code == "" || len(code) > maxTypeRunes {
+	if !asciiToken(code, maxTypeRunes) {
 		return ""
-	}
-	for i := 0; i < len(code); i++ {
-		c := code[i]
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
-		default:
-			return ""
-		}
 	}
 	return code
 }
