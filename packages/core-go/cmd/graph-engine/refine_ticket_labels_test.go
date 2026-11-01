@@ -20,7 +20,7 @@ func TestCmdRefineTicket_LabelsReplaced(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	out := captureStdout(t, func() {
-		if err := cmdRefineTicket(eng, []string{tk.ID, "新しい説明", "--label", "機能追加", "--label", "UI"}); err != nil {
+		if err := cmdRefineTicket(eng, runtimeConfig{}, []string{tk.ID, "新しい説明", "--label", "機能追加", "--label", "UI"}); err != nil {
 			t.Fatalf("cmdRefineTicket: %v", err)
 		}
 	})
@@ -42,7 +42,7 @@ func TestCmdRefineTicket_NoLabelFlagLeavesLabels(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	out := captureStdout(t, func() {
-		if err := cmdRefineTicket(eng, []string{tk.ID, "新しい説明"}); err != nil {
+		if err := cmdRefineTicket(eng, runtimeConfig{}, []string{tk.ID, "新しい説明"}); err != nil {
 			t.Fatalf("cmdRefineTicket: %v", err)
 		}
 	})
@@ -60,7 +60,7 @@ func TestCmdRefineTicket_PriorityAndLabels(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	out := captureStdout(t, func() {
-		if err := cmdRefineTicket(eng, []string{tk.ID, "説明", "--priority", "HIGH", "--label", "UI"}); err != nil {
+		if err := cmdRefineTicket(eng, runtimeConfig{}, []string{tk.ID, "説明", "--priority", "HIGH", "--label", "UI"}); err != nil {
 			t.Fatalf("cmdRefineTicket: %v", err)
 		}
 	})
@@ -80,7 +80,7 @@ func TestCmdRefineTicket_UnregisteredLabelChangesNothing(t *testing.T) {
 	}
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = cmdRefineTicket(eng, []string{tk.ID, "新しい説明", "--priority", "HIGH", "--label", "UI", "--label", "未登録"})
+		runErr = cmdRefineTicket(eng, runtimeConfig{}, []string{tk.ID, "新しい説明", "--priority", "HIGH", "--label", "UI", "--label", "未登録"})
 	})
 	var apiErr *domain.APIError
 	if runErr == nil || !errors.As(runErr, &apiErr) || apiErr.Code != domain.ErrCodeLabelNotFound {
@@ -106,7 +106,7 @@ func TestCmdRefineTicket_ClosedTicketWithLabels(t *testing.T) {
 	if _, err := eng.CloseTicket(tk.ID, ""); err != nil {
 		t.Fatalf("CloseTicket: %v", err)
 	}
-	err = cmdRefineTicket(eng, []string{tk.ID, "説明", "--label", "UI", "--label", "未登録"})
+	err = cmdRefineTicket(eng, runtimeConfig{}, []string{tk.ID, "説明", "--label", "UI", "--label", "未登録"})
 	if err == nil || !strings.Contains(err.Error(), "ticket "+tk.ID+" is CLOSED; reopen it first with reopen-ticket") {
 		t.Fatalf("expected the CLOSED error, got %v", err)
 	}

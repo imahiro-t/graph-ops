@@ -17,7 +17,10 @@ If the returned `content` is non-empty, follow it as additional rules on top of 
 
 ## 1. Check the target ticket's current content
 
+First show the ticket in the status band above Claude Code's prompt (the plugin's mod draws it; `refine-ticket` in step 4 updates it again). It is best effort: if the call fails, ignore it and carry on.
+
 ```bash
+graph-engine session-status set --ticket "<ticketId>" --phase refining
 graph-engine get-ticket "<ticketId>"
 ```
 
@@ -114,3 +117,5 @@ graph-engine refine-ticket "<ticketId>" "<full updated description>" --label "<k
 ## 5. Report the result and suggest the next step
 
 Report that the ticket's status is now `REFINED`, and suggest running `/graph-ops:process-ticket <ticketId>` next.
+
+When this skill was run on its own -- not as a step of `process-ticket` or the `autopilot-worker` skill, which carry on with the ticket -- finish with `graph-engine session-status clear`, so the status band does not keep showing the ticket (ignore a failure). Do the same when you stop early without refining.

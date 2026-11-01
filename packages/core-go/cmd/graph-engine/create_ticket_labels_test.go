@@ -202,7 +202,7 @@ func TestCmdLabelFlagWithoutValueIsUsageError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "usage: graph-engine create-ticket") || !strings.Contains(err.Error(), "--label requires a value") {
 		t.Errorf("create-ticket: expected a usage error, got %v", err)
 	}
-	err = cmdRefineTicket(eng, []string{tk.ID, "D", "--label"})
+	err = cmdRefineTicket(eng, runtimeConfig{}, []string{tk.ID, "D", "--label"})
 	if err == nil || !strings.Contains(err.Error(), "usage: graph-engine refine-ticket") || !strings.Contains(err.Error(), "--label requires a value") {
 		t.Errorf("refine-ticket: expected a usage error, got %v", err)
 	}

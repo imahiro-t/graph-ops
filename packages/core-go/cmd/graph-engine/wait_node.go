@@ -68,6 +68,14 @@ type waitNodeResult struct {
 // background at an approval_gate so a decision made in the Web UI resumes the
 // waiting session.
 func cmdWaitNode(eng *engine.GraphEngine, repo store.GraphRepository, args []string) error {
+	return waitNode(eng, repo, runtimeConfig{}, args)
+}
+
+// waitNode is cmdWaitNode with the runtime configuration the status band is
+// written with (DFLT-00383); a zero one writes no status. While it waits,
+// the band shows the session as awaiting approval of the watched nodes; when
+// it ends, waitNodeStatus.end puts the band back.
+func waitNode(eng *engine.GraphEngine, repo store.GraphRepository, rc runtimeConfig, args []string) (err error) {
 	const usage = `usage: graph-engine wait-node <nodeId> [<nodeId> ...] [--timeout <duration>] [--session <sessionId>]`
 	session, args, err := takeSessionFlag(args, usage)
 	if err != nil {
@@ -104,6 +112,7 @@ func cmdWaitNode(eng *engine.GraphEngine, repo store.GraphRepository, args []str
 
 	// Validate every id before waiting, so a typo fails immediately instead
 	// of hanging until the timeout (or forever).
+	watched := make([]domain.GraphNode, 0, len(ids))
 	for _, id := range ids {
 		node, err := repo.GetNode(id)
 		if err != nil {
@@ -112,7 +121,19 @@ func cmdWaitNode(eng *engine.GraphEngine, repo store.GraphRepository, args []str
 		if node == nil {
 			return fmt.Errorf("node %s not found", id)
 		}
+		watched = append(watched, *node)
 	}
+
+	status := beginWaitNodeStatus(rc, repo, watched)
+	result := ""
+	// A timeout's exitCodeError is not a failure: the band keeps showing
+	// the wait, since the skill starts the next one.
+	defer func() {
+		var ec exitCodeError
+		status.end(result, err != nil && !errors.As(err, &ec))
+	}()
+	stopSignals := restoreStatusOnSignal(status)
+	defer stopSignals()
 
 	// The session's heartbeat is kept moving while this waits (a person
 	// may take hours over an approval), but at most once a minute rather
@@ -127,14 +148,15 @@ func cmdWaitNode(eng *engine.GraphEngine, repo store.GraphRepository, args []str
 			}
 		}
 	}
-	result, err := waitForNodes(repo, ids, waitNodePollInterval, timeout, heartbeat)
+	res, err := waitForNodes(repo, ids, waitNodePollInterval, timeout, heartbeat)
 	if err != nil {
 		return err
 	}
-	if err := printJSON(result); err != nil {
+	result = res.Result
+	if err := printJSON(res); err != nil {
 		return err
 	}
-	if result.Result == "timeout" {
+	if res.Result == "timeout" {
 		return exitCodeError{code: waitNodeTimeoutExitCode}
 	}
 	return nil

@@ -25,7 +25,7 @@ graph-engine autopilot start "<ticketId>" --mode tree [--run "<runId>"] [--model
 
 `--model` is the run's **model cap** (`haiku`, `sonnet` or `opus`; `inherit` removes a cap the run recorded). The engine records it on the run and starts every child session with `--model <cap>`, so the cap reaches each child's process-ticket and the subagents it starts, where every node runs on `min(its node type's assignment, the cap)`. Without `--model`, a new run has no cap -- the child sessions start on claude's default model, as before -- and a run that is taken over or adopted keeps the cap it recorded; to remove that cap, pass `--model inherit` explicitly. The start's line shows the cap in effect as `model_cap` (`""` for none).
 
-It prints one JSON line; keep its `run_id`. `resumed: true` means an interrupted or stopped run of the same tree was taken over, which is how an interrupted autopilot continues. If the command fails (`AUTOPILOT_ALREADY_RUNNING`, `AUTOPILOT_ROOT_FINISHED`, `PROJECT_LOCAL_PATH_NOT_SET`, ...), show the error to the person as-is and stop.
+It prints one JSON line; keep its `run_id`. From here on `start`, `next`, `launch`, `wait`, `merge-up` and `summary` also keep the status band above this session's prompt up to date (the run's progress, the running child and the latest result); nothing needs calling for it until step 3. `resumed: true` means an interrupted or stopped run of the same tree was taken over, which is how an interrupted autopilot continues. If the command fails (`AUTOPILOT_ALREADY_RUNNING`, `AUTOPILOT_ROOT_FINISHED`, `PROJECT_LOCAL_PATH_NOT_SET`, ...), show the error to the person as-is and stop.
 
 When the line has `untrusted_folder` (with or without `--run`), Claude Code has not trusted that folder yet, so the sessions the run opens there stop at the workspace trust dialog. Tell the person in one line to open that folder in Claude Code once and accept the trust prompt (or accept it in a terminal already waiting at the prompt), then carry on without stopping or asking. The field is a best-effort notice; its absence does not prove the folder is trusted.
 
@@ -54,7 +54,7 @@ Tickets are processed one at a time, so expect many `launch` / `wait` rounds; th
 graph-engine autopilot summary "<runId>"
 ```
 
-Show its output -- every ticket's result, branch and open items -- to the person as the result of this command. On `stopped`, add the stop reason and that running the same command again resumes the run once the cause is removed.
+Show its output -- every ticket's result, branch and open items -- to the person as the result of this command. On `stopped`, add the stop reason and that running the same command again resumes the run once the cause is removed. Then run `graph-engine session-status clear` as the last command, so the band does not keep showing the finished run (ignore a failure).
 
 ## 4. Rules for this session
 

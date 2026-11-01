@@ -356,6 +356,24 @@ func (s *Service) findRun(runID string) (string, error) {
 	return projectID, nil
 }
 
+// Snapshot reads runID as it stands, without the lock (run files are
+// written by atomic renames): for display only, such as the controller's
+// status band (DFLT-00383). Nothing it returns is written back.
+func (s *Service) Snapshot(runID string) (*autopilot.Run, error) {
+	projectID, err := s.findRun(runID)
+	if err != nil {
+		return nil, err
+	}
+	run, err := s.registry().Load(projectID, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run == nil {
+		return nil, domain.NewAPIError(autopilot.ErrCodeRunNotFound, "AUTOPILOT_RUN_NOT_FOUND: run %s not found", runID)
+	}
+	return run, nil
+}
+
 // withRun loads runID under its project's lock, runs fn, and saves the run
 // when fn succeeds.
 //

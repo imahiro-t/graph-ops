@@ -117,7 +117,7 @@ func TestDescriptionErrors_SameWordingForCreateAndRefine(t *testing.T) {
 			})
 			withStdin(t, c.stdin)
 			captureStdout(t, func() {
-				refineErr = cmdRefineTicket(eng, []string{tk.ID, c.arg})
+				refineErr = cmdRefineTicket(eng, runtimeConfig{}, []string{tk.ID, c.arg})
 			})
 			if createErr == nil || refineErr == nil {
 				t.Fatalf("both commands must fail: create=%v refine=%v", createErr, refineErr)

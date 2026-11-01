@@ -27,6 +27,7 @@ import (
 	"github.com/graph-ops/core-go/internal/identity"
 	"github.com/graph-ops/core-go/internal/modelcap"
 	"github.com/graph-ops/core-go/internal/runtimeconfig"
+	"github.com/graph-ops/core-go/internal/sessionstatus"
 	"github.com/graph-ops/core-go/internal/store"
 )
 
@@ -79,6 +80,8 @@ func run(cmd string, args []string) error {
 		return cmdGetReviewTemplate(rc)
 	case "get-extension-roots":
 		return cmdGetExtensionRoots(rc)
+	case "session-status":
+		return cmdSessionStatus(rc, args)
 	}
 
 	repo, err := openStore(rc)
@@ -101,7 +104,7 @@ func run(cmd string, args []string) error {
 	case "create-label":
 		return cmdCreateLabel(eng, repo, rc, args)
 	case "refine-ticket":
-		return cmdRefineTicket(eng, args)
+		return cmdRefineTicket(eng, rc, args)
 	case "close-ticket":
 		return cmdCloseTicket(eng, args)
 	case "reopen-ticket":
@@ -113,7 +116,7 @@ func run(cmd string, args []string) error {
 	case "get-ticket":
 		return cmdGetTicket(eng, args)
 	case "begin-session":
-		return cmdBeginSession(eng, rc, args)
+		return cmdBeginSession(eng, repo, rc, args)
 	case "list-tickets":
 		return cmdListTickets(repo)
 	case "get-executable":
@@ -133,7 +136,7 @@ func run(cmd string, args []string) error {
 	case "get-review-criteria":
 		return cmdGetReviewCriteria(repo, args)
 	case "wait-node":
-		return cmdWaitNode(eng, repo, args)
+		return waitNode(eng, repo, rc, args)
 	case "get-language-settings":
 		return cmdGetLanguageSettings(rc, args)
 	case "ui":
@@ -529,7 +532,23 @@ Commands:
                                            and exits 2. An unknown node id is an error (exit 1) before any
                                            waiting starts. process-ticket runs this in the background at an
                                            approval_gate so a Web UI approve/reject resumes the session.)
-  ui                                      (opens the local Web UI, in the default browser, on the project
+  session-status set [--ticket <ticketId>] --phase <phase> [--detail <text>] [--role worker|controller]
+  session-status clear
+  session-status show
+                                          (the status band the plugin's mod draws above Claude Code's prompt:
+                                           which ticket this Claude Code session works on and what it is doing.
+                                           Kept in $HOME/.graph-ops/session-status/<session>.json, keyed by
+                                           CLAUDE_CODE_SESSION_ID; without that variable every subcommand does
+                                           nothing (set and show print null, clear {"cleared":false}) and exits
+                                           0. <phase> is refining, planning, running, awaiting_approval,
+                                           awaiting_human, releasing, finishing or idle. set replaces the phase
+                                           and the detail, and with --ticket also the ticket (its title read
+                                           from the DB); it prints the status. begin-session, get-executable,
+                                           wait-node, refine-ticket and the autopilot commands update it too.
+                                           Titles, names and the detail are stripped of control characters and
+                                           escape sequences and shortened. A write that fails only warns on
+                                           stderr. Files nobody has written for 7 days are removed.)
+  ui                              (opens the local Web UI, in the default browser, on the project
                                            whose local path (projectPaths in the home config) is the current
                                            directory or contains it (deepest wins) -- auto-starting the UI
                                            server first if it isn't already running. If no project matches,
@@ -1114,7 +1133,9 @@ func cmdUseProject(repo store.GraphRepository, rc runtimeConfig, args []string) 
 // stdin still marked the ticket REFINED and whitespace-only stdin replaced
 // the description with blanks. An explicit "" still leaves the description
 // unchanged, same as omitting it.
-func cmdRefineTicket(eng *engine.GraphEngine, args []string) error {
+// cmdRefineTicket's rc is what the status band is written with
+// (DFLT-00383); a zero one writes no status.
+func cmdRefineTicket(eng *engine.GraphEngine, rc runtimeConfig, args []string) error {
 	const usage = refineTicketUsageLine
 	if len(args) < 1 {
 		return fmt.Errorf(usage)
@@ -1192,6 +1213,9 @@ func cmdRefineTicket(eng *engine.GraphEngine, args []string) error {
 	if err != nil {
 		return withTicketChangedCode(err)
 	}
+	// Refined: the status band shows the ticket as waiting to be processed
+	// (DFLT-00383).
+	noteWorkerTicket(rc, ticket, ticketID, sessionstatus.PhasePlanning)
 	return printJSON(ticket)
 }
 
@@ -1499,6 +1523,8 @@ func cmdGetExecutable(eng *engine.GraphEngine, repo store.GraphRepository, rc ru
 	for i := range views {
 		views[i].Model = string(modelcap.Resolve(catalog.ModelFor(string(views[i].Type)), modelCap, sessionModel))
 	}
+	// The status band follows the ticket's nodes (DFLT-00383).
+	noteExecutable(rc, repo, ticketID)
 	return printJSON(views)
 }
 

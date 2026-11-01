@@ -12,6 +12,8 @@ import (
 	"github.com/graph-ops/core-go/internal/domain"
 	"github.com/graph-ops/core-go/internal/engine"
 	"github.com/graph-ops/core-go/internal/identity"
+	"github.com/graph-ops/core-go/internal/sessionstatus"
+	"github.com/graph-ops/core-go/internal/store"
 )
 
 // This file holds the CLI side of processing sessions and node claims
@@ -119,7 +121,7 @@ func claimedNodeViews(nodes []domain.GraphNode) []claimedNodeView {
 // {"session_id", "lease_minutes", "sessions_supported", "others", "same_run"}.
 // When somebody else is processing the ticket ("others"), it says so on
 // stderr -- and still exits 0: it warns, it never blocks.
-func cmdBeginSession(eng *engine.GraphEngine, rc runtimeConfig, args []string) error {
+func cmdBeginSession(eng *engine.GraphEngine, repo store.GraphRepository, rc runtimeConfig, args []string) error {
 	const usage = `usage: graph-engine begin-session <ticketId> [--run <runId>]`
 	runID, rest, err := takeFlagValue(args, "--run", usage)
 	if err != nil {
@@ -146,6 +148,11 @@ func cmdBeginSession(eng *engine.GraphEngine, rc runtimeConfig, args []string) e
 	emitSessionWarnings(res.Warnings)
 	if len(res.Others) > 0 {
 		emitSessionWarnings([]string{othersWarning(rest[0], res.Others, time.Now())})
+	}
+	// The status band shows this ticket as being processed (DFLT-00383).
+	if _, _, ok := sessionStatusTarget(rc); ok {
+		ticket, _ := repo.GetTicket(rest[0])
+		noteWorkerTicket(rc, ticket, rest[0], sessionstatus.PhaseRunning)
 	}
 	return printJSON(res)
 }
